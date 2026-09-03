@@ -1,526 +1,649 @@
-// server/reservations-api.js - Complete Table Reservation System
+// Table reservations: rules, availability, quotes, booking, cancellation, payment methods.
+//
+// Money movement is recorded in `transactions`; the actual charge (Stripe / Mercado Pago)
+// is wired in phase 3. Until then a booking is created as 'pending_payment' with a
+// 'pending' deposit transaction.
+'use strict';
 
 const express = require('express');
-const axios = require('axios');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'sk_test_dummy');
-const router = express.Router();
+const { pool } = require('../db/pool');
+const { ApiError, asyncHandler } = require('../middleware/errors');
+const { validate, z, uuid, pagination } = require('../middleware/validate');
+const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
+const pricing = require('../services/pricing');
+const events = require('../services/events');
 
-// ==================== PAYMENT PROCESSORS ====================
+const router = express.Router({ mergeParams: true });
 
-class PaymentProcessor {
-    async processDirectDeposit(reservation, paymentDetails) {
-        // Store bank transfer details
-        return {
-            status: 'pending_transfer',
-            bankAccount: {
-                accountHolder: paymentDetails.accountHolder,
-                accountNumber: '****' + paymentDetails.accountNumber.slice(-4),
-                routingNumber: '****' + paymentDetails.routingNumber.slice(-4),
-                bankName: paymentDetails.bankName
-            },
-            reference: `EV2-${reservation.id.substring(0, 8)}-${Date.now()}`,
-            instructions: 'Please transfer the deposit amount to the provided bank account within 24 hours'
-        };
-    }
+const DEFAULT_RULES = {
+  min_party_size: 2,
+  max_party_size: 20,
+  deposit_pct: 30,
+  base_price_per_hour: 0,
+  currency: 'MXN',
+  min_advance_hours: 2,
+  max_duration_minutes: 360,
+  cancellation_windows: [
+    { hours: 48, refund_pct: 100 },
+    { hours: 24, refund_pct: 50 },
+    { hours: 0, refund_pct: 0 },
+  ],
+};
 
-    async processZelle(reservation, paymentDetails) {
-        // Zelle integration (through Stripe)
-        const zelleTransfer = await stripe.transfers.create({
-            amount: Math.round(reservation.deposit_amount * 100),
-            currency: 'usd',
-            destination: paymentDetails.bankAccountId,
-            metadata: {
-                reservationId: reservation.id,
-                zelleHandle: paymentDetails.zelleHandle
-            }
-        });
-
-        return {
-            status: 'processing',
-            transactionId: zelleTransfer.id,
-            zelleHandle: paymentDetails.zelleHandle,
-            amount: reservation.deposit_amount,
-            reference: `ZELLE-${zelleTransfer.id}`
-        };
-    }
-
-    async processApplePay(reservation, paymentDetails) {
-        // Apple Pay through Stripe
-        const charge = await stripe.charges.create({
-            amount: Math.round(reservation.deposit_amount * 100),
-            currency: 'usd',
-            source: paymentDetails.tokenId, // Apple Pay token from client
-            metadata: {
-                reservationId: reservation.id,
-                paymentMethod: 'apple_pay'
-            }
-        });
-
-        return {
-            status: 'completed',
-            transactionId: charge.id,
-            last4: charge.payment_method_details.card.last4,
-            brand: charge.payment_method_details.card.brand
-        };
-    }
-
-    async processGooglePay(reservation, paymentDetails) {
-        // Google Pay through Stripe
-        const charge = await stripe.charges.create({
-            amount: Math.round(reservation.deposit_amount * 100),
-            currency: 'usd',
-            source: paymentDetails.tokenId, // Google Pay token from client
-            metadata: {
-                reservationId: reservation.id,
-                paymentMethod: 'google_pay'
-            }
-        });
-
-        return {
-            status: 'completed',
-            transactionId: charge.id,
-            last4: charge.payment_method_details.card.last4,
-            brand: charge.payment_method_details.card.brand
-        };
-    }
-
-    async processCashApp(reservation, paymentDetails) {
-        // Cash App integration
-        const cashAppPayment = {
-            status: 'pending_confirmation',
-            cashTag: paymentDetails.cashTag,
-            amount: reservation.deposit_amount,
-            reference: `CA-${reservation.id.substring(0, 8)}-${Date.now()}`,
-            instructions: `Send $${reservation.deposit_amount} to ${paymentDetails.cashTag} with memo: ${reservation.id.substring(0, 8)}`
-        };
-
-        return cashAppPayment;
-    }
-
-    async processPayPal(reservation, paymentDetails) {
-        // PayPal integration
-        const paypalResponse = await axios.post(
-            'https://api-m.sandbox.paypal.com/v2/checkout/orders',
-            {
-                intent: 'CAPTURE',
-                purchase_units: [{
-                    amount: {
-                        currency_code: 'USD',
-                        value: reservation.deposit_amount.toString()
-                    },
-                    description: `Table Reservation - ${reservation.guest_count} guests`
-                }],
-                payer: {
-                    email_address: paymentDetails.email
-                }
-            },
-            {
-                auth: {
-                    username: process.env.PAYPAL_CLIENT_ID,
-                    password: process.env.PAYPAL_CLIENT_SECRET
-                }
-            }
-        );
-
-        return {
-            status: 'pending_redirect',
-            orderId: paypalResponse.data.id,
-            approvalUrl: paypalResponse.data.links.find(l => l.rel === 'approve').href
-        };
-    }
-
-    async processCash(reservation) {
-        // Cash payment - requires in-person
-        return {
-            status: 'pending_cash_payment',
-            amount: reservation.deposit_amount,
-            reference: `CASH-${reservation.id.substring(0, 8)}`,
-            instructions: 'Please bring cash to the club on the day of reservation'
-        };
-    }
+async function getRules(nightclubId) {
+  const { rows } = await pool.query('SELECT * FROM reservation_rules WHERE nightclub_id = $1', [nightclubId]);
+  return rows[0] || { ...DEFAULT_RULES, nightclub_id: nightclubId };
 }
 
-const paymentProcessor = new PaymentProcessor();
+// Refund percentage for cancelling `startsAt` right now, per the club's windows.
+function refundPctFor(windows, startsAt, now = new Date()) {
+  const hoursLeft = (new Date(startsAt).getTime() - now.getTime()) / 3_600_000;
+  const sorted = [...windows].sort((a, b) => b.hours - a.hours);
+  for (const w of sorted) {
+    if (hoursLeft >= w.hours) return Number(w.refund_pct);
+  }
+  return 0;
+}
 
-// ==================== RESERVATION ENDPOINTS ====================
+async function priceReservation({ nightclubId, table, startsAt, durationMinutes, rules }) {
+  const hours = durationMinutes / 60;
+  const base = Number(rules.base_price_per_hour) * hours;
+  const q = await pricing.quote({
+    nightclubId,
+    appliesTo: 'table_type',
+    target: table.type,
+    basePrice: base,
+    when: new Date(startsAt),
+  });
+  return { hours, ...q };
+}
 
-// Get available tables for a specific date/time
-router.get('/nightclubs/:nightclubId/reservations/availability', async (req, res) => {
-    try {
-        const { nightclubId } = req.params;
-        const { date, startTime, endTime, guestCount } = req.query;
+const RESERVATION_SELECT = `
+  SELECT r.id, r.status, r.starts_at, r.ends_at, r.duration_minutes, r.guest_count,
+         r.currency, r.total_estimated, r.deposit_amount, r.special_requests,
+         r.cancelled_at, r.cancel_reason, r.refund_amount, r.created_at,
+         r.table_id, t.code AS table_code, t.section, t.type AS table_type,
+         r.user_id, u.display_name AS user_name,
+         COALESCE(a.addons, '[]'::json) AS addons
+    FROM reservations r
+    JOIN tables t ON t.id = r.table_id
+    JOIN users u ON u.id = r.user_id
+    LEFT JOIN LATERAL (
+      SELECT json_agg(json_build_object('id', ra.id, 'type', ra.addon_type, 'name', ra.name,
+                                        'price', ra.price, 'quantity', ra.quantity)) AS addons
+        FROM reservation_addons ra WHERE ra.reservation_id = r.id
+    ) a ON true`;
 
-        // Get all tables
-        const tables = await pool.query(
-            'SELECT * FROM vip_tables WHERE nightclub_id = $1',
-            [nightclubId]
-        );
+router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
 
-        // Get availability for this date/time
-        const availableSlots = await pool.query(
-            `SELECT DISTINCT t.id, t.table_number, t.section, t.capacity, t.price_tier
-             FROM vip_tables t
-             LEFT JOIN reservations r ON t.id = r.table_id 
-                AND r.reservation_date = $1
-                AND r.status != 'cancelled'
-                AND NOT (r.reservation_time + (r.duration_hours || ' hours')::interval <= $2::time
-                    OR r.reservation_time >= $3::time)
-             WHERE t.nightclub_id = $4
-             AND t.capacity >= $5
-             AND r.id IS NULL
-             ORDER BY t.capacity ASC`,
-            [date, startTime, endTime, nightclubId, guestCount]
-        );
+// ---------------------------------------------------------------- rules
+router.get('/nightclubs/:nightclubId/reservations/rules',
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    res.json({ rules: await getRules(req.params.nightclubId) });
+  }));
 
-        res.json(availableSlots.rows);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+router.put('/nightclubs/:nightclubId/reservations/rules',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      min_party_size: z.number().int().min(1).optional(),
+      max_party_size: z.number().int().min(1).optional(),
+      deposit_pct: z.number().min(0).max(100).optional(),
+      base_price_per_hour: z.number().min(0).optional(),
+      currency: z.enum(['MXN', 'USD']).optional(),
+      min_advance_hours: z.number().int().min(0).optional(),
+      max_duration_minutes: z.number().int().min(30).max(720).optional(),
+      cancellation_windows: z.array(z.object({
+        hours: z.number().min(0),
+        refund_pct: z.number().min(0).max(100),
+      })).min(1).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const current = await getRules(req.params.nightclubId);
+    const merged = { ...DEFAULT_RULES, ...current, ...req.body };
+    if (merged.max_party_size < merged.min_party_size) {
+      throw ApiError.unprocessable('max_party_size must be >= min_party_size');
     }
+    const { rows } = await pool.query(
+      `INSERT INTO reservation_rules (nightclub_id, min_party_size, max_party_size, deposit_pct,
+                                      base_price_per_hour, currency, min_advance_hours,
+                                      max_duration_minutes, cancellation_windows)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (nightclub_id) DO UPDATE SET
+         min_party_size = EXCLUDED.min_party_size, max_party_size = EXCLUDED.max_party_size,
+         deposit_pct = EXCLUDED.deposit_pct, base_price_per_hour = EXCLUDED.base_price_per_hour,
+         currency = EXCLUDED.currency, min_advance_hours = EXCLUDED.min_advance_hours,
+         max_duration_minutes = EXCLUDED.max_duration_minutes,
+         cancellation_windows = EXCLUDED.cancellation_windows, updated_at = now()
+       RETURNING *`,
+      [req.params.nightclubId, merged.min_party_size, merged.max_party_size, merged.deposit_pct,
+        merged.base_price_per_hour, merged.currency, merged.min_advance_hours,
+        merged.max_duration_minutes, JSON.stringify(merged.cancellation_windows)],
+    );
+    res.json({ rules: rows[0] });
+  }));
+
+// ------------------------------------------------------- availability & quote
+const availabilityQuery = z.object({
+  starts_at: z.coerce.date(),
+  duration_minutes: z.coerce.number().int().min(30).max(720).default(180),
+  guests: z.coerce.number().int().min(1).max(50).default(2),
+  section: z.string().trim().max(40).optional(),
 });
 
-// Get reservation rules for nightclub
-router.get('/nightclubs/:nightclubId/reservations/rules', async (req, res) => {
-    try {
-        const { nightclubId } = req.params;
+router.get('/nightclubs/:nightclubId/reservations/availability',
+  validate({ params: z.object({ nightclubId: uuid }), query: availabilityQuery }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const { starts_at: startsAt, duration_minutes: duration, guests, section } = req.query;
+    const rules = await getRules(nightclubId);
 
-        const rules = await pool.query(
-            'SELECT * FROM reservation_rules WHERE nightclub_id = $1',
-            [nightclubId]
-        );
-
-        res.json(rules.rows[0] || {
-            minPartySize: 4,
-            maxPartySize: 20,
-            minDepositPercentage: 30,
-            cancellationPolicyHours: 24,
-            basePricePerHour: 100
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+    if (guests < rules.min_party_size || guests > rules.max_party_size) {
+      throw ApiError.unprocessable(
+        `Party size must be between ${rules.min_party_size} and ${rules.max_party_size}`);
     }
+    if (duration > rules.max_duration_minutes) {
+      throw ApiError.unprocessable(`Maximum duration is ${rules.max_duration_minutes} minutes`);
+    }
+    const hoursAhead = (startsAt.getTime() - Date.now()) / 3_600_000;
+    if (hoursAhead < rules.min_advance_hours) {
+      throw ApiError.unprocessable(`Reservations require ${rules.min_advance_hours} hours notice`);
+    }
+
+    // Free tables = active, big enough, not blocked, and with no overlapping live reservation.
+    const { rows } = await pool.query(
+      `SELECT t.id, t.code, t.name, t.section, t.type, t.capacity, t.x, t.y, t.radius, t.bottle_service
+         FROM tables t
+        WHERE t.nightclub_id = $1
+          AND t.active
+          AND t.status <> 'blocked'
+          AND t.capacity >= $4
+          AND ($5::text IS NULL OR t.section = $5)
+          AND NOT EXISTS (
+            SELECT 1 FROM reservations r
+             WHERE r.table_id = t.id
+               AND r.status IN ('pending_payment','confirmed','seated')
+               AND tstzrange(r.starts_at, r.ends_at, '[)')
+                   && tstzrange($2::timestamptz, $2::timestamptz + make_interval(mins => $3), '[)')
+          )
+        ORDER BY t.section, t.code`,
+      [nightclubId, startsAt.toISOString(), duration, guests, section || null],
+    );
+
+    const available = [];
+    for (const table of rows) {
+      const price = await priceReservation({ nightclubId, table, startsAt, durationMinutes: duration, rules });
+      available.push({
+        ...table,
+        price: price.final,
+        currency: rules.currency,
+        deposit: Number((price.final * Number(rules.deposit_pct) / 100).toFixed(2)),
+      });
+    }
+    res.json({
+      starts_at: startsAt.toISOString(),
+      duration_minutes: duration,
+      guests,
+      currency: rules.currency,
+      deposit_pct: Number(rules.deposit_pct),
+      tables: available,
+    });
+  }));
+
+router.post('/nightclubs/:nightclubId/reservations/quote',
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      table_id: uuid,
+      starts_at: z.coerce.date(),
+      duration_minutes: z.number().int().min(30).max(720).default(180),
+      addons: z.array(z.object({
+        type: z.enum(['bottle_service', 'vip_upgrade', 'extra_hour', 'decorations', 'other']),
+        name: z.string().trim().min(1).max(120),
+        price: z.number().min(0),
+        quantity: z.number().int().min(1).max(50).default(1),
+      })).max(20).default([]),
+      discount_code: z.string().trim().max(40).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const quote = await buildQuote(req.params.nightclubId, req.body);
+    res.json({ quote });
+  }));
+
+// Shared by the quote endpoint and by booking, so the client can never invent a price.
+async function buildQuote(nightclubId, body, client = pool) {
+  const rules = await getRules(nightclubId);
+  const t = await client.query(
+    'SELECT id, code, type, capacity, status, active FROM tables WHERE id = $1 AND nightclub_id = $2',
+    [body.table_id, nightclubId],
+  );
+  if (t.rowCount === 0 || !t.rows[0].active) throw ApiError.notFound('Table not found');
+  const table = t.rows[0];
+
+  const tablePrice = await priceReservation({
+    nightclubId, table, startsAt: body.starts_at, durationMinutes: body.duration_minutes, rules,
+  });
+
+  const addonsTotal = (body.addons || []).reduce((sum, a) => sum + a.price * a.quantity, 0);
+  let subtotal = tablePrice.final + addonsTotal;
+
+  let discount = null;
+  if (body.discount_code) {
+    const d = await client.query(
+      `SELECT * FROM reservation_discounts
+        WHERE nightclub_id = $1 AND upper(code) = upper($2) AND active
+          AND (valid_from IS NULL OR valid_from <= current_date)
+          AND (valid_until IS NULL OR valid_until >= current_date)
+          AND (max_uses IS NULL OR used_count < max_uses)`,
+      [nightclubId, body.discount_code],
+    );
+    if (d.rowCount === 0) throw ApiError.unprocessable('Discount code is not valid');
+    const rule = d.rows[0];
+    const amount = rule.discount_type === 'percentage'
+      ? subtotal * Number(rule.discount_value) / 100
+      : Number(rule.discount_value);
+    discount = {
+      id: rule.id, code: rule.code, type: rule.discount_type,
+      value: Number(rule.discount_value), amount: Number(Math.min(amount, subtotal).toFixed(2)),
+    };
+    subtotal = Math.max(0, subtotal - discount.amount);
+  }
+
+  const total = Number(subtotal.toFixed(2));
+  const deposit = Number((total * Number(rules.deposit_pct) / 100).toFixed(2));
+  return {
+    table: { id: table.id, code: table.code, type: table.type, capacity: table.capacity },
+    hours: tablePrice.hours,
+    table_price: tablePrice.final,
+    price_rules_applied: tablePrice.applied,
+    addons_total: Number(addonsTotal.toFixed(2)),
+    discount,
+    total,
+    deposit,
+    currency: rules.currency,
+    deposit_pct: Number(rules.deposit_pct),
+    rules,
+  };
+}
+
+// ---------------------------------------------------------------- booking
+const bookSchema = z.object({
+  client_request_id: uuid,
+  table_id: uuid,
+  starts_at: z.coerce.date(),
+  duration_minutes: z.number().int().min(30).max(720).default(180),
+  guest_count: z.number().int().min(1).max(50),
+  special_requests: z.string().trim().max(500).optional(),
+  addons: z.array(z.object({
+    type: z.enum(['bottle_service', 'vip_upgrade', 'extra_hour', 'decorations', 'other']),
+    name: z.string().trim().min(1).max(120),
+    price: z.number().min(0),
+    quantity: z.number().int().min(1).max(50).default(1),
+  })).max(20).default([]),
+  discount_code: z.string().trim().max(40).optional(),
 });
 
-// Create a new reservation
-router.post('/nightclubs/:nightclubId/reservations', authenticateToken, async (req, res) => {
-    try {
-        const { nightclubId } = req.params;
-        const {
-            tableId,
-            reservationDate,
-            reservationTime,
-            guestCount,
-            durationHours,
-            specialRequests,
-            addons,
-            discountCode
-        } = req.body;
+router.post('/nightclubs/:nightclubId/reservations',
+  validate({ params: z.object({ nightclubId: uuid }), body: bookSchema }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const b = req.body;
 
-        const userId = req.user.id;
-
-        // Get table details
-        const tableResult = await pool.query(
-            'SELECT * FROM vip_tables WHERE id = $1 AND nightclub_id = $2',
-            [tableId, nightclubId]
-        );
-
-        if (!tableResult.rows[0]) {
-            return res.status(404).json({ error: 'Table not found' });
-        }
-
-        const table = tableResult.rows[0];
-
-        // Get pricing rules
-        const rulesResult = await pool.query(
-            'SELECT * FROM reservation_rules WHERE nightclub_id = $1',
-            [nightclubId]
-        );
-
-        const rules = rulesResult.rows[0] || {
-            base_price_per_hour: 100,
-            min_deposit_percentage: 30
-        };
-
-        // Calculate total
-        let totalEstimated = rules.base_price_per_hour * durationHours;
-
-        // Add-ons
-        if (addons && addons.length > 0) {
-            for (const addon of addons) {
-                totalEstimated += addon.price * (addon.quantity || 1);
-            }
-        }
-
-        // Apply discount
-        let depositAmount = totalEstimated * (rules.min_deposit_percentage / 100);
-
-        if (discountCode) {
-            const discountResult = await pool.query(
-                'SELECT * FROM reservation_discounts WHERE code = $1 AND active = true AND valid_from <= NOW()::date AND valid_until >= NOW()::date AND uses_remaining > 0',
-                [discountCode]
-            );
-
-            if (discountResult.rows[0]) {
-                const discount = discountResult.rows[0];
-                if (discount.discount_type === 'percentage') {
-                    totalEstimated *= (1 - discount.discount_value / 100);
-                    depositAmount = totalEstimated * (rules.min_deposit_percentage / 100);
-                } else {
-                    totalEstimated -= discount.discount_value;
-                    depositAmount = totalEstimated * (rules.min_deposit_percentage / 100);
-                }
-
-                // Update uses
-                await pool.query(
-                    'UPDATE reservation_discounts SET uses_remaining = uses_remaining - 1 WHERE id = $1',
-                    [discount.id]
-                );
-            }
-        }
-
-        // Create reservation
-        const reservationResult = await pool.query(
-            `INSERT INTO reservations 
-             (nightclub_id, user_id, table_id, reservation_date, reservation_time, guest_count, duration_hours, special_requests, total_estimated, deposit_amount)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-             RETURNING *`,
-            [nightclubId, userId, tableId, reservationDate, reservationTime, guestCount, durationHours, specialRequests, totalEstimated, depositAmount]
-        );
-
-        const reservation = reservationResult.rows[0];
-
-        // Add add-ons
-        if (addons && addons.length > 0) {
-            for (const addon of addons) {
-                await pool.query(
-                    'INSERT INTO reservation_addons (reservation_id, addon_type, addon_name, addon_price, quantity) VALUES ($1, $2, $3, $4, $5)',
-                    [reservation.id, addon.type, addon.name, addon.price, addon.quantity || 1]
-                );
-            }
-        }
-
-        res.status(201).json({
-            reservation,
-            pricing: {
-                basePrice: rules.base_price_per_hour * durationHours,
-                addonsTotal: addons ? addons.reduce((sum, a) => sum + (a.price * (a.quantity || 1)), 0) : 0,
-                total: totalEstimated,
-                depositRequired: depositAmount,
-                depositPercentage: rules.min_deposit_percentage
-            }
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+    // Idempotency is carried by the deposit transaction's client_request_id.
+    const dup = await pool.query(
+      `SELECT reference_id FROM transactions
+        WHERE client_request_id = $1 AND nightclub_id = $2 AND reference_type = 'reservation'`,
+      [b.client_request_id, nightclubId],
+    );
+    if (dup.rowCount > 0) {
+      const existing = await pool.query(`${RESERVATION_SELECT} WHERE r.id = $1`, [dup.rows[0].reference_id]);
+      res.set('Idempotent-Replay', 'true');
+      return res.status(200).json({ reservation: existing.rows[0] });
     }
-});
 
-// Get user's reservations
-router.get('/nightclubs/:nightclubId/reservations/user', authenticateToken, async (req, res) => {
+    const client = await pool.connect();
     try {
-        const { nightclubId } = req.params;
-        const userId = req.user.id;
+      await client.query('BEGIN');
+      const quote = await buildQuote(nightclubId, b, client);
+      const rules = quote.rules;
 
-        const reservations = await pool.query(
-            `SELECT r.*, t.table_number, t.section, u.name 
-             FROM reservations r
-             JOIN vip_tables t ON r.table_id = t.id
-             JOIN users u ON r.user_id = u.id
-             WHERE r.nightclub_id = $1 AND r.user_id = $2
-             ORDER BY r.reservation_date DESC`,
-            [nightclubId, userId]
+      if (b.guest_count < rules.min_party_size || b.guest_count > rules.max_party_size) {
+        throw ApiError.unprocessable(
+          `Party size must be between ${rules.min_party_size} and ${rules.max_party_size}`);
+      }
+      if (b.guest_count > quote.table.capacity) {
+        throw ApiError.unprocessable(`Table ${quote.table.code} seats ${quote.table.capacity} people`);
+      }
+      const hoursAhead = (b.starts_at.getTime() - Date.now()) / 3_600_000;
+      if (hoursAhead < rules.min_advance_hours) {
+        throw ApiError.unprocessable(`Reservations require ${rules.min_advance_hours} hours notice`);
+      }
+      if (b.duration_minutes > rules.max_duration_minutes) {
+        throw ApiError.unprocessable(`Maximum duration is ${rules.max_duration_minutes} minutes`);
+      }
+
+      let reservation;
+      try {
+        const created = await client.query(
+          `INSERT INTO reservations (nightclub_id, user_id, table_id, starts_at, duration_minutes,
+                                     guest_count, status, currency, total_estimated, deposit_amount,
+                                     discount_id, special_requests)
+           VALUES ($1,$2,$3,$4,$5,$6,'pending_payment',$7,$8,$9,$10,$11)
+           RETURNING id`,
+          [nightclubId, req.user.id, b.table_id, b.starts_at, b.duration_minutes, b.guest_count,
+            quote.currency, quote.total, quote.deposit, quote.discount ? quote.discount.id : null,
+            b.special_requests || null],
         );
+        reservation = created.rows[0];
+      } catch (err) {
+        // 23P01 = exclusion violation: the slot was taken while we were booking.
+        if (err.code === '23P01') {
+          throw ApiError.conflict('That table was just booked for an overlapping time');
+        }
+        throw err;
+      }
 
-        res.json(reservations.rows);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+      for (const a of b.addons) {
+        await client.query(
+          `INSERT INTO reservation_addons (reservation_id, addon_type, name, price, quantity)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [reservation.id, a.type, a.name, a.price, a.quantity],
+        );
+      }
+      if (quote.discount) {
+        await client.query('UPDATE reservation_discounts SET used_count = used_count + 1 WHERE id = $1',
+          [quote.discount.id]);
+      }
+
+      // Deposit is recorded as pending; the real charge lands in phase 3.
+      await client.query(
+        `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status,
+                                   payer_user_id, provider, reference_type, reference_id,
+                                   client_request_id, metadata)
+         VALUES ($1,'reservation_deposit','in',$2,$3,'pending',$4,'manual','reservation',$5,$6,$7)`,
+        [nightclubId, quote.deposit > 0 ? quote.deposit : 0.01, quote.currency, req.user.id,
+          reservation.id, b.client_request_id, JSON.stringify({ total: quote.total })],
+      );
+
+      await events.publish({
+        nightclubId, type: 'reservation_created', client,
+        audience: { roles: ['hostess', 'manager'], userIds: [req.user.id] },
+        payload: {
+          reservation_id: reservation.id, table_id: b.table_id,
+          starts_at: b.starts_at.toISOString(), deposit: quote.deposit, currency: quote.currency,
+        },
+      });
+
+      await client.query('COMMIT');
+      const full = await pool.query(`${RESERVATION_SELECT} WHERE r.id = $1`, [reservation.id]);
+      return res.status(201).json({
+        reservation: full.rows[0],
+        payment: {
+          status: 'pending',
+          deposit: quote.deposit,
+          currency: quote.currency,
+          note: 'Payment processing is enabled in phase 3 (Stripe / Mercado Pago).',
+        },
+      });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
     }
-});
+  }));
 
-// Get payment methods for user
-router.get('/users/:userId/payment-methods', authenticateToken, async (req, res) => {
+router.get('/nightclubs/:nightclubId/reservations/mine',
+  validate({ params: z.object({ nightclubId: uuid }), query: pagination }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `${RESERVATION_SELECT} WHERE r.nightclub_id = $1 AND r.user_id = $2
+        ORDER BY r.starts_at DESC LIMIT $3 OFFSET $4`,
+      [req.params.nightclubId, req.user.id, req.query.limit, req.query.offset],
+    );
+    res.json({ reservations: rows });
+  }));
+
+// Staff view of the book for a given day.
+router.get('/nightclubs/:nightclubId/reservations',
+  requireRole('hostess', 'waiter', 'manager'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: pagination.extend({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      status: z.enum(['pending_payment', 'confirmed', 'seated', 'completed', 'cancelled', 'no_show']).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `${RESERVATION_SELECT}
+        WHERE r.nightclub_id = $1
+          AND ($2::date IS NULL OR r.starts_at::date = $2::date)
+          AND ($3::text IS NULL OR r.status = $3)
+        ORDER BY r.starts_at ASC LIMIT $4 OFFSET $5`,
+      [req.params.nightclubId, req.query.date || null, req.query.status || null,
+        req.query.limit, req.query.offset],
+    );
+    res.json({ reservations: rows });
+  }));
+
+router.get('/nightclubs/:nightclubId/reservations/:reservationId',
+  validate({ params: z.object({ nightclubId: uuid, reservationId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(`${RESERVATION_SELECT} WHERE r.id = $1 AND r.nightclub_id = $2`,
+      [req.params.reservationId, req.params.nightclubId]);
+    if (rows.length === 0) throw ApiError.notFound('Reservation not found');
+    const isOwner = rows[0].user_id === req.user.id;
+    const isStaff = ['hostess', 'waiter', 'manager', 'admin'].includes(req.user.role);
+    if (!isOwner && !isStaff) throw ApiError.forbidden('Not your reservation');
+    res.json({ reservation: rows[0] });
+  }));
+
+// ------------------------------------------------------------- cancellation
+router.post('/nightclubs/:nightclubId/reservations/:reservationId/cancel',
+  validate({
+    params: z.object({ nightclubId: uuid, reservationId: uuid }),
+    body: z.object({ reason: z.string().trim().max(300).optional() }).default({}),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, reservationId } = req.params;
+    const client = await pool.connect();
     try {
-        const { userId } = req.params;
+      await client.query('BEGIN');
+      const cur = await client.query(
+        'SELECT * FROM reservations WHERE id = $1 AND nightclub_id = $2 FOR UPDATE',
+        [reservationId, nightclubId],
+      );
+      if (cur.rowCount === 0) throw ApiError.notFound('Reservation not found');
+      const r = cur.rows[0];
 
-        if (req.user.id !== userId) {
-            return res.status(403).json({ error: 'Unauthorized' });
-        }
+      const isOwner = r.user_id === req.user.id;
+      const isStaff = ['hostess', 'manager', 'admin'].includes(req.user.role);
+      if (!isOwner && !isStaff) throw ApiError.forbidden('Not your reservation');
+      if (!['pending_payment', 'confirmed'].includes(r.status)) {
+        throw ApiError.conflict(`Cannot cancel a reservation that is '${r.status}'`);
+      }
 
-        const methods = await pool.query(
-            'SELECT id, method_type, is_primary, created_at FROM payment_methods WHERE user_id = $1',
-            [userId]
+      const rules = await getRules(nightclubId);
+      const windows = Array.isArray(rules.cancellation_windows)
+        ? rules.cancellation_windows : DEFAULT_RULES.cancellation_windows;
+      const refundPct = refundPctFor(windows, r.starts_at);
+
+      // Refund only what was actually paid.
+      const paid = await client.query(
+        `SELECT COALESCE(sum(amount), 0) AS total FROM transactions
+          WHERE reference_type = 'reservation' AND reference_id = $1
+            AND direction = 'in' AND status = 'paid'`,
+        [reservationId],
+      );
+      const paidAmount = Number(paid.rows[0].total);
+      const refundAmount = Number((paidAmount * refundPct / 100).toFixed(2));
+
+      await client.query(
+        `UPDATE reservations SET status = 'cancelled', cancelled_at = now(),
+                cancel_reason = $3, refund_amount = $4
+          WHERE id = $1 AND nightclub_id = $2`,
+        [reservationId, nightclubId, req.body.reason || null, refundAmount],
+      );
+
+      // Pending (never charged) deposits are simply cancelled.
+      await client.query(
+        `UPDATE transactions SET status = 'cancelled'
+          WHERE reference_type = 'reservation' AND reference_id = $1 AND status IN ('pending','pending_manual')`,
+        [reservationId],
+      );
+
+      if (refundAmount > 0) {
+        await client.query(
+          `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status,
+                                     payee_user_id, provider, reference_type, reference_id, metadata)
+           VALUES ($1,'refund','out',$2,$3,'pending',$4,'manual','reservation',$5,$6)`,
+          [nightclubId, refundAmount, r.currency, r.user_id, reservationId,
+            JSON.stringify({ refund_pct: refundPct, paid: paidAmount })],
         );
+      }
 
-        res.json(methods.rows);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+      await events.publish({
+        nightclubId, type: 'reservation_cancelled', client,
+        audience: { roles: ['hostess', 'manager'], userIds: [r.user_id] },
+        payload: { reservation_id: reservationId, refund_amount: refundAmount, refund_pct: refundPct },
+      });
+      await client.query('COMMIT');
+      res.json({
+        cancelled: true,
+        refund_pct: refundPct,
+        refund_amount: refundAmount,
+        paid_amount: paidAmount,
+      });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
     }
-});
+  }));
 
-// Add payment method
-router.post('/users/:userId/payment-methods', authenticateToken, async (req, res) => {
+// Staff moves a booking through its lifecycle.
+const STATUS_FLOW = {
+  pending_payment: ['confirmed', 'cancelled'],
+  confirmed: ['seated', 'no_show', 'cancelled'],
+  seated: ['completed'],
+  completed: [],
+  cancelled: [],
+  no_show: [],
+};
+
+router.post('/nightclubs/:nightclubId/reservations/:reservationId/status',
+  requireRole('hostess', 'manager'),
+  validate({
+    params: z.object({ nightclubId: uuid, reservationId: uuid }),
+    body: z.object({ status: z.enum(['confirmed', 'seated', 'completed', 'no_show']) }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, reservationId } = req.params;
+    const next = req.body.status;
+    const client = await pool.connect();
     try {
-        const { userId } = req.params;
-        const { methodType, paymentDetails } = req.body;
+      await client.query('BEGIN');
+      const cur = await client.query(
+        'SELECT id, status, table_id, user_id FROM reservations WHERE id = $1 AND nightclub_id = $2 FOR UPDATE',
+        [reservationId, nightclubId],
+      );
+      if (cur.rowCount === 0) throw ApiError.notFound('Reservation not found');
+      const r = cur.rows[0];
+      if (!STATUS_FLOW[r.status].includes(next)) {
+        throw ApiError.conflict(`Cannot go from '${r.status}' to '${next}'`,
+          { allowed: STATUS_FLOW[r.status] });
+      }
 
-        if (req.user.id !== userId) {
-            return res.status(403).json({ error: 'Unauthorized' });
-        }
+      await client.query('UPDATE reservations SET status = $2 WHERE id = $1', [reservationId, next]);
+      if (next === 'confirmed') {
+        await client.query(`UPDATE tables SET status = 'reserved' WHERE id = $1 AND status = 'available'`,
+          [r.table_id]);
+      } else if (next === 'seated') {
+        await client.query(`UPDATE tables SET status = 'occupied' WHERE id = $1`, [r.table_id]);
+      } else if (['completed', 'no_show'].includes(next)) {
+        await client.query(
+          `UPDATE tables SET status = 'available' WHERE id = $1 AND status IN ('reserved','occupied')`,
+          [r.table_id]);
+      }
 
-        // Check if this is the first method (make it primary)
-        const existingMethods = await pool.query(
-            'SELECT COUNT(*) FROM payment_methods WHERE user_id = $1',
-            [userId]
-        );
-
-        const isPrimary = parseInt(existingMethods.rows[0].count) === 0;
-
-        const result = await pool.query(
-            `INSERT INTO payment_methods (user_id, method_type, is_primary, metadata)
-             VALUES ($1, $2, $3, $4)
-             RETURNING id, method_type, is_primary`,
-            [userId, methodType, isPrimary, JSON.stringify(paymentDetails)]
-        );
-
-        res.status(201).json(result.rows[0]);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+      await events.publish({
+        nightclubId, type: `reservation_${next}`, client,
+        audience: { roles: ['hostess', 'manager'], userIds: [r.user_id] },
+        payload: { reservation_id: reservationId, status: next },
+      });
+      await client.query('COMMIT');
+      res.json({ reservation: { id: reservationId, status: next } });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
     }
-});
+  }));
 
-// Process reservation payment
-router.post('/reservations/:reservationId/pay', authenticateToken, async (req, res) => {
+// ------------------------------------------------------------ payment methods
+router.get('/me/payment-methods', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, provider, type, last4, brand, label, is_default, created_at
+       FROM payment_methods WHERE user_id = $1 ORDER BY is_default DESC, created_at DESC`,
+    [req.user.id],
+  );
+  res.json({ payment_methods: rows });
+}));
+
+router.post('/me/payment-methods', authenticate,
+  validate({
+    body: z.object({
+      provider: z.enum(['stripe', 'mercadopago', 'manual']),
+      type: z.enum(['card', 'apple_pay', 'google_pay', 'zelle', 'cash_app', 'bank', 'oxxo', 'spei']),
+      provider_token: z.string().trim().min(1).max(500).optional(),
+      last4: z.string().regex(/^\d{4}$/).optional(),
+      brand: z.string().trim().max(30).optional(),
+      label: z.string().trim().max(60).optional(),
+      is_default: z.boolean().default(false),
+    }).refine((v) => v.provider === 'manual' || !!v.provider_token, {
+      message: 'provider_token is required for stripe and mercadopago',
+      path: ['provider_token'],
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const b = req.body;
+    const client = await pool.connect();
     try {
-        const { reservationId } = req.params;
-        const { paymentMethod, paymentDetails } = req.body;
-
-        // Get reservation
-        const reservationResult = await pool.query(
-            'SELECT * FROM reservations WHERE id = $1',
-            [reservationId]
-        );
-
-        if (!reservationResult.rows[0]) {
-            return res.status(404).json({ error: 'Reservation not found' });
-        }
-
-        const reservation = reservationResult.rows[0];
-
-        let paymentResult;
-
-        // Process based on payment method
-        switch (paymentMethod) {
-            case 'direct_deposit':
-                paymentResult = await paymentProcessor.processDirectDeposit(reservation, paymentDetails);
-                break;
-            case 'zelle':
-                paymentResult = await paymentProcessor.processZelle(reservation, paymentDetails);
-                break;
-            case 'apple_pay':
-                paymentResult = await paymentProcessor.processApplePay(reservation, paymentDetails);
-                break;
-            case 'google_pay':
-                paymentResult = await paymentProcessor.processGooglePay(reservation, paymentDetails);
-                break;
-            case 'cash_app':
-                paymentResult = await paymentProcessor.processCashApp(reservation, paymentDetails);
-                break;
-            case 'paypal':
-                paymentResult = await paymentProcessor.processPayPal(reservation, paymentDetails);
-                break;
-            case 'cash':
-                paymentResult = await paymentProcessor.processCash(reservation);
-                break;
-            default:
-                return res.status(400).json({ error: 'Invalid payment method' });
-        }
-
-        // Store payment record
-        const paymentStatus = paymentResult.status === 'completed' ? 'completed' : 'pending';
-
-        const paymentRecord = await pool.query(
-            `INSERT INTO reservation_payments 
-             (reservation_id, payment_method, amount, status, transaction_id, metadata)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING *`,
-            [reservationId, paymentMethod, reservation.deposit_amount, paymentStatus, paymentResult.transactionId, JSON.stringify(paymentResult)]
-        );
-
-        // Update reservation payment status
-        await pool.query(
-            'UPDATE reservations SET payment_status = $1 WHERE id = $2',
-            [paymentStatus === 'completed' ? 'deposit_received' : 'deposit_pending', reservationId]
-        );
-
-        res.json({
-            payment: paymentRecord.rows[0],
-            paymentDetails: paymentResult
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+      await client.query('BEGIN');
+      if (b.is_default) {
+        await client.query('UPDATE payment_methods SET is_default = false WHERE user_id = $1', [req.user.id]);
+      }
+      const { rows } = await client.query(
+        `INSERT INTO payment_methods (user_id, provider, type, provider_token, last4, brand, label, is_default)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         RETURNING id, provider, type, last4, brand, label, is_default, created_at`,
+        [req.user.id, b.provider, b.type, b.provider_token || null, b.last4 || null,
+          b.brand || null, b.label || null, b.is_default],
+      );
+      await client.query('COMMIT');
+      res.status(201).json({ payment_method: rows[0] });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
     }
-});
+  }));
 
-// Cancel reservation
-router.post('/reservations/:reservationId/cancel', authenticateToken, async (req, res) => {
-    try {
-        const { reservationId } = req.params;
-        const { reason } = req.body;
-
-        const result = await pool.query(
-            `UPDATE reservations 
-             SET status = 'cancelled', cancelled_at = NOW()
-             WHERE id = $1 AND user_id = $2
-             RETURNING *`,
-            [reservationId, req.user.id]
-        );
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Reservation not found or unauthorized' });
-        }
-
-        const reservation = result.rows[0];
-
-        // Process refund if applicable
-        if (reservation.payment_status === 'deposit_received') {
-            // Calculate refund based on cancellation policy
-            const rulesResult = await pool.query(
-                'SELECT cancellation_policy_hours FROM reservation_rules WHERE nightclub_id = $1',
-                [reservation.nightclub_id]
-            );
-
-            const rules = rulesResult.rows[0];
-            const hoursUntilReservation = (new Date(reservation.reservation_date) - new Date()) / (1000 * 60 * 60);
-
-            let refundPercentage = 0;
-            if (hoursUntilReservation > rules.cancellation_policy_hours) {
-                refundPercentage = 100; // Full refund
-            } else if (hoursUntilReservation > 0) {
-                refundPercentage = 50; // 50% refund
-            }
-            // else: no refund
-
-            if (refundPercentage > 0) {
-                const refundAmount = (reservation.deposit_amount * refundPercentage) / 100;
-                
-                await pool.query(
-                    `INSERT INTO reservation_payments 
-                     (reservation_id, payment_method, amount, status, metadata)
-                     VALUES ($1, 'refund', $2, 'completed', $3)`,
-                    [reservationId, refundAmount, JSON.stringify({ refundPercentage, reason })]
-                );
-            }
-        }
-
-        // Broadcast cancellation via WebSocket
-        broadcastToNightclub(reservation.nightclub_id, {
-            type: 'reservation_event',
-            event_type: 'reservation_cancelled',
-            data: reservation
-        });
-
-        res.json({ reservation, cancelled: true });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
+router.delete('/me/payment-methods/:id', authenticate,
+  validate({ params: z.object({ id: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { rowCount } = await pool.query('DELETE FROM payment_methods WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]);
+    if (rowCount === 0) throw ApiError.notFound('Payment method not found');
+    res.status(204).end();
+  }));
 
 module.exports = router;

@@ -18,6 +18,7 @@ const nightclubRoutes = require('./routes/nightclubs');
 const drinkRoutes = require('./routes/drinks');
 const orderRoutes = require('./routes/orders');
 const tableRoutes = require('./routes/tables');
+const reservationRoutes = require('./routes/reservations');
 
 function buildCors() {
   const origins = (process.env.ALLOWED_ORIGINS || '')
@@ -80,8 +81,9 @@ function createApp() {
   app.use('/api', drinkRoutes);
   app.use('/api', orderRoutes);
   app.use('/api', tableRoutes);
+  app.use('/api', reservationRoutes);
 
-  // Reservations are wired in step 1.4; POS webhooks in phase 4.
+  // POS webhooks are implemented in phase 4.
   app.post('/api/webhooks/pos', (req, res, next) => next(
     ApiError.notImplemented('POS webhook is implemented in phase 4 (see docs/POS_REAL.md)'),
   ));

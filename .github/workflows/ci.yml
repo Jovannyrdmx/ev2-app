@@ -29,11 +29,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # TEMPORARY (2026-09-03): legacy code in src/routes/reservations.js has 26 lint
-      # errors until it is wired in step 1.4. Remove continue-on-error after step 1.4.
       - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Tests
         run: npm test -- --passWithNoTests
