@@ -14,11 +14,14 @@
     "migrate": "node src/db/migrate.js",
     "seed": "node seeds/run.js",
     "test": "jest --runInBand",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "lint:api": "redocly lint openapi.yaml"
   },
   "jest": {
     "testEnvironment": "node",
-    "testMatch": ["**/tests/**/*.test.js"]
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ]
   },
   "dependencies": {
     "axios": "^1.7.9",
@@ -35,12 +38,15 @@
     "pino-http": "^10.4.0",
     "redis": "^4.7.0",
     "stripe": "^17.6.0",
+    "swagger-ui-express": "^5.0.1",
     "ws": "^8.18.0",
+    "yaml": "^2.9.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "eslint": "^9.18.0",
     "@eslint/js": "^9.18.0",
+    "@redocly/cli": "^2.51.1",
+    "eslint": "^9.18.0",
     "globals": "^15.14.0",
     "jest": "^29.7.0",
     "nodemon": "^3.1.9",

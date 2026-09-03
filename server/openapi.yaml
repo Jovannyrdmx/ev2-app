@@ -1,0 +1,1804 @@
+openapi: 3.1.0
+info:
+  title: EV2 Clandestinoz API
+  version: 0.1.0
+  description: |
+    API del sistema de gestión de nightclub EV2 Clandestinoz.
+
+    **Este archivo es el contrato entre backend, web y apps móviles.** Cualquier cambio
+    de ruta o de forma de respuesta se refleja aquí en el mismo commit que lo introduce.
+
+    ## Autenticación
+    Salvo las rutas marcadas como públicas, toda petición requiere
+    `Authorization: Bearer <access_token>`. El token de acceso dura 15 minutos; se renueva
+    con `POST /api/auth/refresh` usando el refresh token, que es de **un solo uso**
+    (al canjearlo se revoca y se emite uno nuevo).
+
+    ## Errores
+    Todos los errores tienen la misma forma (`ErrorResponse`). Los códigos usados son
+    400 validación, 401 sin autenticar, 403 sin permiso, 404 no existe, 409 conflicto de
+    estado, 422 regla de negocio, 429 límite de peticiones, 500 interno, 501 no implementado.
+
+    ## Dinero
+    Los importes son cadenas decimales con dos decimales (`"1500.00"`) para no perder
+    precisión, y siempre van acompañados de `currency` (`MXN` o `USD`). Los precios se
+    calculan **siempre en el servidor**.
+
+    ## Idempotencia
+    Crear un pedido o una reservación exige un `client_request_id` (UUID generado por el
+    cliente). Reenviar la misma petición devuelve el recurso original con la cabecera
+    `Idempotent-Replay: true` en lugar de duplicarlo.
+  contact:
+    name: EV2 Clandestinoz
+  license:
+    name: Propietario — EV2 Clandestinoz
+    url: https://github.com/Jovannyrdmx/ev2-app
+servers:
+  - url: http://localhost:3000
+    description: Desarrollo local
+  - url: https://staging-api.CAMBIAR-DOMINIO.mx
+    description: Staging (fase 7)
+  - url: https://api.CAMBIAR-DOMINIO.mx
+    description: Producción (fase 7)
+
+tags:
+  - name: Sistema
+    description: Salud del servicio y webhooks.
+  - name: Autenticación
+    description: Registro, inicio de sesión, renovación y cierre de sesión.
+  - name: Club
+    description: Perfil del club, personal, contactos de emergencia, eventos y tablero.
+  - name: Bebidas
+    description: Catálogo y existencias.
+  - name: Pedidos
+    description: Pedidos de bebidas y flujo de la barra.
+  - name: Mesas
+    description: Plano del local, ocupación y edición del layout.
+  - name: Reservaciones
+    description: Reglas, disponibilidad, cotización, reserva y cancelación.
+  - name: Pagos
+    description: Métodos de pago guardados por el usuario.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [Sistema]
+      summary: Estado del servicio
+      description: Público. Usado por los healthchecks de Docker y por el monitoreo.
+      security: []
+      responses:
+        '200':
+          description: Servicio arriba
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  service: { type: string, example: ev2-api }
+                  timestamp: { type: string, format: date-time }
+
+  /api/auth/register:
+    post:
+      operationId: postAuthRegister
+      tags: [Autenticación]
+      summary: Registrar un cliente
+      description: |
+        Público. Crea una cuenta con rol `guest`. Rechaza con 403 a menores de 18 años y
+        exige aceptación de términos. El consentimiento para recibir flirts es opt-in.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Cuenta creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: Menor de edad
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El correo ya está registrado en ese club
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/auth/login:
+    post:
+      operationId: postAuthLogin
+      tags: [Autenticación]
+      summary: Iniciar sesión
+      description: Público. Limitado a 10 intentos fallidos por minuto y por IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nightclub_slug, email, password]
+              properties:
+                nightclub_slug: { type: string, example: ev2 }
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        '200':
+          description: Sesión iniciada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '401':
+          description: Credenciales inválidas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Cuenta bloqueada o eliminada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/auth/refresh:
+    post:
+      operationId: postAuthRefresh
+      tags: [Autenticación]
+      summary: Renovar el token de acceso
+      description: |
+        Público (el refresh token es la credencial). El token entregado se **revoca** y se
+        emite uno nuevo; reutilizar el anterior devuelve 401.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: Token renovado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401':
+          description: Refresh token inválido, expirado o ya usado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/auth/logout:
+    post:
+      operationId: postAuthLogout
+      tags: [Autenticación]
+      summary: Cerrar sesión en todos los dispositivos
+      description: Revoca todos los refresh tokens del usuario.
+      responses:
+        '204': { description: Sesiones cerradas }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/auth/me:
+    get:
+      operationId: getAuthMe
+      tags: [Autenticación]
+      summary: Usuario autenticado y sus preferencias
+      responses:
+        '200':
+          description: Datos del usuario
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+                  preferences:
+                    type: [object, 'null']
+                    properties:
+                      accept_flirts: { type: boolean }
+                      show_on_map: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/nightclubs/by-slug/{slug}:
+    get:
+      operationId: getNightclubsBySlugBySlug
+      tags: [Club]
+      summary: Resolver un club por su identificador corto
+      description: Público. La app web lo usa antes de que nadie inicie sesión.
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string, example: ev2 }
+      responses:
+        '200':
+          description: Club encontrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nightclub: { $ref: '#/components/schemas/NightclubPublic' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}:
+    get:
+      operationId: getNightclubsByNightclubId
+      tags: [Club]
+      summary: Perfil del club
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Perfil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nightclub: { $ref: '#/components/schemas/Nightclub' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/staff:
+    get:
+      operationId: getNightclubsByNightclubIdStaff
+      tags: [Club]
+      summary: Directorio de personal
+      description: Usado por propinas, solicitudes de canción y asignación de mesas.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [waiter, bartender, dancer, dj, light_tech, valet, hostess, manager]
+        - name: on_shift
+          in: query
+          description: Solo quienes tienen turno abierto
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Personal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  staff:
+                    type: array
+                    items: { $ref: '#/components/schemas/StaffMember' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/emergency-contacts:
+    get:
+      operationId: getNightclubsByNightclubIdEmergencyContacts
+      tags: [Club]
+      summary: Contactos de emergencia del club
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Contactos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contacts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        name: { type: string }
+                        phone: { type: string }
+                        type:
+                          type: string
+                          enum: [police, ambulance, fire, taxi, club_security, other]
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/nightclubs/{nightclubId}/events:
+    get:
+      operationId: getNightclubsByNightclubIdEvents
+      tags: [Club]
+      summary: Recuperar eventos perdidos tras una reconexión
+      description: |
+        Devuelve solo los eventos dirigidos a este usuario (por rol o por id), de las
+        últimas 24 horas. El cliente guarda `last_id` y lo envía como `since_id` al
+        reconectar. El envío en vivo por WebSocket llega en la fase 3.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: since_id
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 200 }
+      responses:
+        '200':
+          description: Eventos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/Event' }
+                  last_id: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/nightclubs/{nightclubId}/dashboard:
+    get:
+      operationId: getNightclubsByNightclubIdDashboard
+      tags: [Club]
+      summary: Tablero del gerente
+      description: Requiere rol `manager` o `admin`. La jornada se corta a las 06:00.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Métricas de la jornada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dashboard' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/drinks:
+    get:
+      operationId: getNightclubsByNightclubIdDrinks
+      tags: [Bebidas]
+      summary: Menú del club
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: category
+          in: query
+          schema: { type: string, example: cocktail }
+        - name: available_only
+          in: query
+          description: Solo lo que está disponible y con existencias
+          schema: { type: boolean, default: false }
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Bebidas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drinks:
+                    type: array
+                    items: { $ref: '#/components/schemas/Drink' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: postNightclubsByNightclubIdDrinks
+      tags: [Bebidas]
+      summary: Alta de bebida
+      description: Requiere rol `manager`. En operación normal el catálogo llega del POS (fase 4).
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DrinkCreate' }
+      responses:
+        '201':
+          description: Bebida creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drink: { $ref: '#/components/schemas/Drink' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/drinks/categories:
+    get:
+      operationId: getNightclubsByNightclubIdDrinksCategories
+      tags: [Bebidas]
+      summary: Categorías con su conteo
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Categorías
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        category: { type: string }
+                        count: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/nightclubs/{nightclubId}/drinks/{drinkId}:
+    patch:
+      operationId: patchNightclubsByNightclubIdDrinksByDrinkId
+      tags: [Bebidas]
+      summary: Editar una bebida
+      description: Requiere rol `manager`.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/DrinkId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf: [{ $ref: '#/components/schemas/DrinkCreate' }]
+              description: Todos los campos son opcionales salvo que se indique lo contrario.
+      responses:
+        '200':
+          description: Bebida actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drink: { $ref: '#/components/schemas/Drink' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/inventory:
+    get:
+      operationId: getNightclubsByNightclubIdInventory
+      tags: [Bebidas]
+      summary: Existencias
+      description: Requiere rol `bartender` o `manager`. Ordena primero lo que está bajo mínimo.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Inventario
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  inventory:
+                    type: array
+                    items: { $ref: '#/components/schemas/InventoryItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/inventory/{drinkId}:
+    put:
+      operationId: putNightclubsByNightclubIdInventoryByDrinkId
+      tags: [Bebidas]
+      summary: Ajuste manual de existencias
+      description: |
+        Requiere rol `manager`. En operación normal el inventario se sincroniza desde el
+        POS (fase 4); este ajuste es para correcciones puntuales.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/DrinkId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quantity]
+              properties:
+                quantity: { type: number, minimum: 0 }
+                low_stock_threshold: { type: number, minimum: 0 }
+      responses:
+        '200':
+          description: Existencias actualizadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  inventory: { $ref: '#/components/schemas/InventoryItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/tables:
+    get:
+      operationId: getNightclubsByNightclubIdTables
+      tags: [Mesas]
+      summary: Mapa de mesas con sus ocupantes
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: section
+          in: query
+          schema: { type: string, example: vip }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [available, occupied, reserved, blocked, cleaning]
+      responses:
+        '200':
+          description: Mesas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tables:
+                    type: array
+                    items: { $ref: '#/components/schemas/Table' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/tables/layout:
+    put:
+      operationId: putNightclubsByNightclubIdTablesLayout
+      tags: [Mesas]
+      summary: Guardar el plano de mesas
+      description: |
+        Requiere rol `manager`. Actualiza en bloque coordenadas, radio, sección,
+        capacidad y estado. Se usa desde el editor visual del portal de gerencia.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tables]
+              properties:
+                tables:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [id]
+                    properties:
+                      id: { type: string, format: uuid }
+                      x: { type: number }
+                      y: { type: number }
+                      radius: { type: number, exclusiveMinimum: 0 }
+                      section: { type: string }
+                      capacity: { type: integer, minimum: 1 }
+                      status:
+                        type: string
+                        enum: [available, occupied, reserved, blocked, cleaning]
+                      bottle_service: { type: boolean }
+      responses:
+        '200':
+          description: Mesas actualizadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: integer }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/tables/{tableId}/seat:
+    post:
+      operationId: postNightclubsByNightclubIdTablesByTableIdSeat
+      tags: [Mesas]
+      summary: Sentarse en una mesa
+      description: |
+        El usuario deja automáticamente cualquier otra mesa. Rechaza con 409 si la mesa
+        está llena, bloqueada o en limpieza.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/TableId' }
+      responses:
+        '201':
+          description: Sentado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  seated: { type: boolean }
+                  table_id: { type: string, format: uuid }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/tables/{tableId}/release:
+    post:
+      operationId: postNightclubsByNightclubIdTablesByTableIdRelease
+      tags: [Mesas]
+      summary: Levantarse de una mesa
+      description: |
+        Sin cuerpo, libera al propio usuario. Con `user_id`, libera a otra persona: eso
+        requiere rol `waiter`, `hostess` o `manager`.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/TableId' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Liberado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  released: { type: boolean }
+                  table_id: { type: string, format: uuid }
+                  remaining: { type: integer, description: Personas que siguen en la mesa }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/orders:
+    post:
+      operationId: postNightclubsByNightclubIdOrders
+      tags: [Pedidos]
+      summary: Crear un pedido de bebidas
+      description: |
+        Idempotente por `client_request_id`. Verifica existencias con bloqueo de fila
+        (dos pedidos simultáneos no pueden agotar el mismo producto), congela el precio
+        de cada artículo y descuenta el inventario en la misma transacción.
+
+        Si `recipient_id` está presente, el pedido es una invitación a otra persona; se
+        rechaza si esa persona bloqueó al remitente.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderCreate' }
+      responses:
+        '201':
+          description: Pedido creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order: { $ref: '#/components/schemas/Order' }
+        '200':
+          description: |
+            Reenvío de una petición ya procesada. Devuelve el pedido original con la
+            cabecera `Idempotent-Replay: true`.
+          headers:
+            Idempotent-Replay:
+              schema: { type: string, enum: ['true'] }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order: { $ref: '#/components/schemas/Order' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Producto no disponible o sin existencias
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                error:
+                  code: conflict
+                  message: Some drinks are not available
+                  details:
+                    - drink_id: 0a1b2c3d-0000-4000-8000-000000000001
+                      name: Cerveza nacional
+                      reason: out_of_stock
+                      stock: 0
+        '422': { $ref: '#/components/responses/Unprocessable' }
+    get:
+      operationId: getNightclubsByNightclubIdOrders
+      tags: [Pedidos]
+      summary: Cola de pedidos
+      description: Requiere rol `bartender`, `waiter` o `manager`.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, confirmed, preparing, ready, delivered, cancelled, pos_error]
+        - name: active
+          in: query
+          description: Solo pedidos sin terminar
+          schema: { type: boolean, default: false }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Pedidos, del más antiguo al más reciente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items: { $ref: '#/components/schemas/Order' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/orders/mine:
+    get:
+      operationId: getNightclubsByNightclubIdOrdersMine
+      tags: [Pedidos]
+      summary: Mis pedidos (enviados y recibidos)
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Pedidos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items: { $ref: '#/components/schemas/Order' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/nightclubs/{nightclubId}/orders/{orderId}:
+    get:
+      operationId: getNightclubsByNightclubIdOrdersByOrderId
+      tags: [Pedidos]
+      summary: Detalle de un pedido
+      description: Accesible para quien lo envió, quien lo recibe y el personal.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/OrderId' }
+      responses:
+        '200':
+          description: Pedido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order: { $ref: '#/components/schemas/Order' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/orders/{orderId}/status:
+    post:
+      operationId: postNightclubsByNightclubIdOrdersByOrderIdStatus
+      tags: [Pedidos]
+      summary: Cambiar el estado de un pedido
+      description: |
+        Transiciones permitidas:
+
+        | Desde | Hacia |
+        |---|---|
+        | `pending` | `confirmed`, `cancelled` |
+        | `confirmed` | `preparing`, `cancelled` |
+        | `preparing` | `ready`, `cancelled` |
+        | `ready` | `delivered` |
+        | `pos_error` | `confirmed`, `cancelled` |
+
+        El personal (`bartender`, `waiter`, `manager`) puede hacer cualquiera de ellas.
+        Un cliente solo puede **cancelar su propio pedido mientras siga en `pending`**.
+        Cancelar devuelve las existencias al inventario.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/OrderId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [confirmed, preparing, ready, delivered, cancelled]
+                reason: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: Estado actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      status: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/reservations/rules:
+    get:
+      operationId: getNightclubsByNightclubIdReservationsRules
+      tags: [Reservaciones]
+      summary: Reglas de reservación del club
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Reglas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules: { $ref: '#/components/schemas/ReservationRules' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      operationId: putNightclubsByNightclubIdReservationsRules
+      tags: [Reservaciones]
+      summary: Editar las reglas
+      description: Requiere rol `manager`.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReservationRulesUpdate' }
+      responses:
+        '200':
+          description: Reglas actualizadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules: { $ref: '#/components/schemas/ReservationRules' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/reservations/availability:
+    get:
+      operationId: getNightclubsByNightclubIdReservationsAvailability
+      tags: [Reservaciones]
+      summary: Mesas disponibles con su precio
+      description: |
+        Calcula la disponibilidad cruzando las reservaciones vivas con las mesas activas.
+        Devuelve además el precio y el depósito ya calculados para ese horario.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: starts_at
+          in: query
+          required: true
+          description: Inicio en ISO 8601. Usar sufijo `Z`; un `+` sin codificar se pierde en la URL.
+          schema: { type: string, format: date-time, example: '2026-09-12T05:00:00Z' }
+        - name: duration_minutes
+          in: query
+          schema: { type: integer, minimum: 30, maximum: 720, default: 180 }
+        - name: guests
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 2 }
+        - name: section
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Disponibilidad
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Availability' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422':
+          description: Fuera de las reglas del club (grupo, duración o anticipación)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/reservations/quote:
+    post:
+      operationId: postNightclubsByNightclubIdReservationsQuote
+      tags: [Reservaciones]
+      summary: Cotizar una reservación
+      description: |
+        Devuelve el desglose completo (precio de mesa con las reglas aplicadas, extras,
+        descuento, total y depósito). El cliente **muestra** este resultado; no puede
+        proponer un precio propio.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [table_id, starts_at]
+              properties:
+                table_id: { type: string, format: uuid }
+                starts_at: { type: string, format: date-time }
+                duration_minutes: { type: integer, minimum: 30, maximum: 720, default: 180 }
+                addons:
+                  type: array
+                  maxItems: 20
+                  items: { $ref: '#/components/schemas/AddonInput' }
+                discount_code: { type: string, maxLength: 40 }
+      responses:
+        '200':
+          description: Cotización
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  quote: { $ref: '#/components/schemas/Quote' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/reservations:
+    post:
+      operationId: postNightclubsByNightclubIdReservations
+      tags: [Reservaciones]
+      summary: Reservar una mesa
+      description: |
+        Idempotente por `client_request_id`. El total y el depósito los calcula el
+        servidor. La reservación nace en `pending_payment` y genera una transacción de
+        depósito en estado `pending`; el cobro real se conecta en la fase 3.
+
+        Dos reservaciones que se solapen en la misma mesa son imposibles: lo impide una
+        restricción de exclusión en la base de datos, incluso ante peticiones simultáneas.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReservationCreate' }
+      responses:
+        '201':
+          description: Reservación creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reservation: { $ref: '#/components/schemas/Reservation' }
+                  payment:
+                    type: object
+                    properties:
+                      status: { type: string, example: pending }
+                      deposit: { type: number }
+                      currency: { type: string }
+                      note: { type: string }
+        '200':
+          description: Reenvío idempotente
+          headers:
+            Idempotent-Replay:
+              schema: { type: string, enum: ['true'] }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reservation: { $ref: '#/components/schemas/Reservation' }
+        '409':
+          description: La mesa quedó ocupada para ese horario
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+    get:
+      operationId: getNightclubsByNightclubIdReservations
+      tags: [Reservaciones]
+      summary: Agenda del club
+      description: Requiere rol `hostess`, `waiter` o `manager`.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: date
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending_payment, confirmed, seated, completed, cancelled, no_show]
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Reservaciones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reservations:
+                    type: array
+                    items: { $ref: '#/components/schemas/Reservation' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/reservations/mine:
+    get:
+      operationId: getNightclubsByNightclubIdReservationsMine
+      tags: [Reservaciones]
+      summary: Mis reservaciones
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Reservaciones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reservations:
+                    type: array
+                    items: { $ref: '#/components/schemas/Reservation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/nightclubs/{nightclubId}/reservations/{reservationId}:
+    get:
+      operationId: getNightclubsByNightclubIdReservationsByReservationId
+      tags: [Reservaciones]
+      summary: Detalle de una reservación
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/ReservationId' }
+      responses:
+        '200':
+          description: Reservación
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reservation: { $ref: '#/components/schemas/Reservation' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/reservations/{reservationId}/cancel:
+    post:
+      operationId: postNightclubsByNightclubIdReservationsByReservationIdCancel
+      tags: [Reservaciones]
+      summary: Cancelar una reservación
+      description: |
+        La puede cancelar su titular o el personal (`hostess`, `manager`). El porcentaje
+        de reembolso sale de las ventanas configuradas en las reglas del club, y solo se
+        reembolsa lo que efectivamente se haya cobrado.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/ReservationId' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 300 }
+      responses:
+        '200':
+          description: Cancelada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cancelled: { type: boolean }
+                  refund_pct: { type: number, example: 100 }
+                  refund_amount: { type: number, example: 891 }
+                  paid_amount: { type: number }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: La reservación ya no se puede cancelar
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/reservations/{reservationId}/status:
+    post:
+      operationId: postNightclubsByNightclubIdReservationsByReservationIdStatus
+      tags: [Reservaciones]
+      summary: Avanzar el estado de una reservación
+      description: |
+        Requiere rol `hostess` o `manager`. Transiciones:
+        `pending_payment` → `confirmed`; `confirmed` → `seated` | `no_show`;
+        `seated` → `completed`. Cambiar el estado también ocupa o libera la mesa.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/ReservationId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [confirmed, seated, completed, no_show]
+      responses:
+        '200':
+          description: Estado actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reservation:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      status: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/me/payment-methods:
+    get:
+      operationId: getMePaymentMethods
+      tags: [Pagos]
+      summary: Mis métodos de pago
+      description: Nunca devuelve el token del proveedor ni números de tarjeta.
+      responses:
+        '200':
+          description: Métodos guardados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment_methods:
+                    type: array
+                    items: { $ref: '#/components/schemas/PaymentMethod' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: postMePaymentMethods
+      tags: [Pagos]
+      summary: Guardar un método de pago
+      description: |
+        Solo se almacena el **token** que devuelve el proveedor (Stripe o Mercado Pago),
+        más los últimos cuatro dígitos y la marca para poder mostrarlo. El número de
+        tarjeta nunca pasa por esta API.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentMethodCreate' }
+      responses:
+        '201':
+          description: Método guardado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment_method: { $ref: '#/components/schemas/PaymentMethod' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/me/payment-methods/{id}:
+    delete:
+      operationId: deleteMePaymentMethodsById
+      tags: [Pagos]
+      summary: Eliminar un método de pago
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Eliminado }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/webhooks/pos:
+    post:
+      operationId: postWebhooksPos
+      tags: [Sistema]
+      summary: Webhook del punto de venta
+      description: |
+        Reservado para la fase 4. Hoy responde 501: el mecanismo real de integración con
+        SoftRestaurant 11 se define en `docs/POS_REAL.md` (decisión D16, agente local).
+      security: []
+      responses:
+        '501':
+          description: No implementado todavía
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '401':
+          description: Firma del webhook inválida (a partir de la fase 4)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token de acceso de 15 minutos obtenido en login o refresh.
+
+  parameters:
+    NightclubId:
+      name: nightclubId
+      in: path
+      required: true
+      description: Debe coincidir con el club del usuario autenticado; si no, 403.
+      schema: { type: string, format: uuid }
+    DrinkId:
+      name: drinkId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TableId:
+      name: tableId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ReservationId:
+      name: reservationId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+
+  responses:
+    BadRequest:
+      description: Validación fallida
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error:
+              code: bad_request
+              message: Validation failed
+              details:
+                - field: body.email
+                  message: must be a valid email
+    Unauthorized:
+      description: Falta el token o no es válido
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: Sin permiso (rol insuficiente u otro club)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: El recurso no existe
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Conflict:
+      description: Conflicto con el estado actual del recurso
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unprocessable:
+      description: Contraviene una regla de negocio
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    TooManyRequests:
+      description: Demasiadas peticiones
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [bad_request, unauthorized, forbidden, not_found, conflict,
+                     unprocessable, too_many_requests, internal_error, not_implemented]
+            message: { type: string }
+            details:
+              description: Presente en errores de validación y de disponibilidad.
+              type: array
+              items: { type: object, additionalProperties: true }
+            request_id:
+              type: string
+              description: Identificador de la petición, útil para buscar en los registros.
+
+    Money:
+      type: string
+      pattern: '^\d+\.\d{2}$'
+      description: Importe decimal con dos decimales, como cadena para no perder precisión.
+      example: '1500.00'
+
+    Currency:
+      type: string
+      enum: [MXN, USD]
+
+    Role:
+      type: string
+      enum: [guest, waiter, bartender, dancer, dj, light_tech, valet, hostess, manager, admin]
+
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        nightclub_id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        first_name: { type: string }
+        last_name: { type: string }
+        display_name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        locale: { type: string, example: es-MX }
+        preferred_currency: { $ref: '#/components/schemas/Currency' }
+
+    RegisterRequest:
+      type: object
+      required: [nightclub_slug, email, password, first_name, birth_date, accept_terms]
+      properties:
+        nightclub_slug: { type: string, example: ev2 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, maxLength: 200 }
+        first_name: { type: string, minLength: 1, maxLength: 100 }
+        last_name: { type: string, maxLength: 100, default: '' }
+        phone: { type: string, maxLength: 30 }
+        birth_date:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Debe corresponder a 18 años o más.
+        accept_terms:
+          type: boolean
+          enum: [true]
+          description: Obligatorio; se guarda la versión y la fecha de aceptación.
+        accept_flirts:
+          type: boolean
+          default: false
+          description: Consentimiento explícito para recibir mensajes de otras personas.
+
+    TokenPair:
+      type: object
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, example: Bearer }
+        expires_in: { type: string, example: 15m }
+        refresh_token: { type: string, description: De un solo uso. }
+
+    AuthResponse:
+      allOf:
+        - { $ref: '#/components/schemas/TokenPair' }
+        - type: object
+          properties:
+            user: { $ref: '#/components/schemas/User' }
+
+    NightclubPublic:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        city: { type: string }
+        country: { type: string }
+        timezone: { type: string, example: America/Hermosillo }
+        currency_default: { $ref: '#/components/schemas/Currency' }
+
+    Nightclub:
+      allOf:
+        - { $ref: '#/components/schemas/NightclubPublic' }
+        - type: object
+          properties:
+            address: { type: string }
+            phone: { type: string }
+            capacity: { type: integer }
+            settings: { type: object, additionalProperties: true }
+
+    StaffMember:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        display_name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        stage_name:
+          type: [string, 'null']
+          description: Nombre artístico, para bailarinas y DJ.
+        avatar_url: { type: [string, 'null'] }
+        on_shift: { type: boolean }
+        section: { type: [string, 'null'] }
+
+    Event:
+      type: object
+      properties:
+        id: { type: integer }
+        type:
+          type: string
+          example: order_created
+          description: |
+            `order_created`, `order_confirmed`, `order_preparing`, `order_ready`,
+            `order_delivered`, `order_cancelled`, `table_updated`,
+            `reservation_created`, `reservation_confirmed`, `reservation_seated`,
+            `reservation_completed`, `reservation_no_show`, `reservation_cancelled`.
+        audience:
+          type: object
+          properties:
+            roles: { type: array, items: { $ref: '#/components/schemas/Role' } }
+            userIds: { type: array, items: { type: string, format: uuid } }
+        payload: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+
+    Dashboard:
+      type: object
+      properties:
+        tables:
+          type: object
+          properties:
+            total: { type: integer }
+            occupied: { type: integer }
+            available: { type: integer }
+            reserved: { type: integer }
+        orders:
+          type: object
+          properties:
+            in_progress: { type: integer }
+            ready: { type: integer }
+            delivered_today: { type: integer }
+            pos_errors: { type: integer }
+        revenue_today:
+          type: array
+          items:
+            type: object
+            properties:
+              currency: { $ref: '#/components/schemas/Currency' }
+              total: { $ref: '#/components/schemas/Money' }
+              count: { type: integer }
+        staff:
+          type: object
+          properties:
+            on_shift: { type: integer }
+        generated_at: { type: string, format: date-time }
+
+    Drink:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        category: { type: string, example: cocktail }
+        price: { $ref: '#/components/schemas/Money' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        description: { type: [string, 'null'] }
+        image_url: { type: [string, 'null'] }
+        available: { type: boolean }
+        sort_order: { type: integer }
+        stock: { type: string, description: Existencias actuales. }
+        low_stock: { type: boolean }
+
+    DrinkCreate:
+      type: object
+      required: [name, category, price]
+      properties:
+        name: { type: string, maxLength: 255 }
+        category: { type: string, maxLength: 40 }
+        price: { type: number, minimum: 0 }
+        currency: { $ref: '#/components/schemas/Currency' }
+        description: { type: string, maxLength: 1000 }
+        image_url: { type: string, format: uri }
+        available: { type: boolean, default: true }
+        sort_order: { type: integer, default: 0 }
+        initial_stock: { type: number, minimum: 0, default: 0 }
+
+    InventoryItem:
+      type: object
+      properties:
+        drink_id: { type: string, format: uuid }
+        name: { type: string }
+        category: { type: string }
+        quantity: { type: string }
+        unit: { type: string, example: unit }
+        low_stock_threshold: { type: string }
+        synced_at: { type: [string, 'null'], format: date-time }
+
+    Table:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, example: VIP-1 }
+        name: { type: [string, 'null'] }
+        section: { type: string, example: vip }
+        type: { type: string, enum: [standard, vip, premium, bar_top, booth] }
+        capacity: { type: integer }
+        x: { type: string, description: Coordenada en el plano. }
+        y: { type: string }
+        radius: { type: string }
+        status: { type: string, enum: [available, occupied, reserved, blocked, cleaning] }
+        bottle_service: { type: boolean }
+        occupants:
+          type: array
+          items:
+            type: object
+            properties:
+              user_id: { type: string, format: uuid }
+              display_name: { type: string }
+              seated_at: { type: string, format: date-time }
+
+    OrderItemInput:
+      type: object
+      required: [drink_id]
+      properties:
+        drink_id: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1, maximum: 20, default: 1 }
+        notes: { type: string, maxLength: 120 }
+
+    OrderCreate:
+      type: object
+      required: [client_request_id, items]
+      properties:
+        client_request_id:
+          type: string
+          format: uuid
+          description: UUID generado por el cliente; garantiza que no se dupliquen pedidos.
+        table_id: { type: string, format: uuid }
+        recipient_id:
+          type: string
+          format: uuid
+          description: Para invitar una bebida a otra persona.
+        message: { type: string, maxLength: 280 }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { $ref: '#/components/schemas/OrderItemInput' }
+
+    Order:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [pending, confirmed, preparing, ready, delivered, cancelled, pos_error]
+        subtotal: { $ref: '#/components/schemas/Money' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        message: { type: [string, 'null'] }
+        table_id: { type: [string, 'null'], format: uuid }
+        table_code: { type: [string, 'null'] }
+        sender_id: { type: string, format: uuid }
+        sender_name: { type: [string, 'null'] }
+        recipient_id: { type: [string, 'null'], format: uuid }
+        recipient_name: { type: [string, 'null'] }
+        bartender_id: { type: [string, 'null'], format: uuid }
+        pos_order_id:
+          type: [string, 'null']
+          description: Identificador en el punto de venta (fase 4).
+        pos_error: { type: [string, 'null'] }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              drink_id: { type: string, format: uuid }
+              name: { type: string }
+              quantity: { type: integer }
+              unit_price: { $ref: '#/components/schemas/Money' }
+              notes: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+        confirmed_at: { type: [string, 'null'], format: date-time }
+        ready_at: { type: [string, 'null'], format: date-time }
+        delivered_at: { type: [string, 'null'], format: date-time }
+        cancelled_at: { type: [string, 'null'], format: date-time }
+
+    ReservationRules:
+      type: object
+      properties:
+        nightclub_id: { type: string, format: uuid }
+        min_party_size: { type: integer }
+        max_party_size: { type: integer }
+        deposit_pct: { type: string, example: '30.00' }
+        base_price_per_hour: { $ref: '#/components/schemas/Money' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        min_advance_hours: { type: integer }
+        max_duration_minutes: { type: integer }
+        cancellation_windows:
+          type: array
+          description: Ordenadas de mayor a menor antelación; se aplica la primera que se cumple.
+          items:
+            type: object
+            properties:
+              hours: { type: number, example: 48 }
+              refund_pct: { type: number, example: 100 }
+
+    ReservationRulesUpdate:
+      type: object
+      properties:
+        min_party_size: { type: integer, minimum: 1 }
+        max_party_size: { type: integer, minimum: 1 }
+        deposit_pct: { type: number, minimum: 0, maximum: 100 }
+        base_price_per_hour: { type: number, minimum: 0 }
+        currency: { $ref: '#/components/schemas/Currency' }
+        min_advance_hours: { type: integer, minimum: 0 }
+        max_duration_minutes: { type: integer, minimum: 30, maximum: 720 }
+        cancellation_windows:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [hours, refund_pct]
+            properties:
+              hours: { type: number, minimum: 0 }
+              refund_pct: { type: number, minimum: 0, maximum: 100 }
+
+    AddonInput:
+      type: object
+      required: [type, name, price]
+      properties:
+        type:
+          type: string
+          enum: [bottle_service, vip_upgrade, extra_hour, decorations, other]
+        name: { type: string, maxLength: 120 }
+        price: { type: number, minimum: 0 }
+        quantity: { type: integer, minimum: 1, maximum: 50, default: 1 }
+
+    Availability:
+      type: object
+      properties:
+        starts_at: { type: string, format: date-time }
+        duration_minutes: { type: integer }
+        guests: { type: integer }
+        currency: { $ref: '#/components/schemas/Currency' }
+        deposit_pct: { type: number }
+        tables:
+          type: array
+          items:
+            allOf:
+              - { $ref: '#/components/schemas/Table' }
+              - type: object
+                properties:
+                  price: { type: number, description: Precio ya calculado para ese horario. }
+                  deposit: { type: number }
+
+    Quote:
+      type: object
+      properties:
+        table:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            code: { type: string }
+            type: { type: string }
+            capacity: { type: integer }
+        hours: { type: number }
+        table_price: { type: number }
+        price_rules_applied:
+          type: array
+          description: Reglas de precio aplicadas, en orden, con el efecto de cada una.
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              type: { type: string, enum: [multiplier, fixed, override] }
+              value: { type: number }
+              before: { type: number }
+              after: { type: number }
+        addons_total: { type: number }
+        discount:
+          type: [object, 'null']
+          properties:
+            id: { type: string, format: uuid }
+            code: { type: string }
+            type: { type: string, enum: [percentage, fixed_amount] }
+            value: { type: number }
+            amount: { type: number }
+        total: { type: number }
+        deposit: { type: number }
+        currency: { $ref: '#/components/schemas/Currency' }
+        deposit_pct: { type: number }
+
+    ReservationCreate:
+      type: object
+      required: [client_request_id, table_id, starts_at, guest_count]
+      properties:
+        client_request_id: { type: string, format: uuid }
+        table_id: { type: string, format: uuid }
+        starts_at: { type: string, format: date-time }
+        duration_minutes: { type: integer, minimum: 30, maximum: 720, default: 180 }
+        guest_count: { type: integer, minimum: 1, maximum: 50 }
+        special_requests: { type: string, maxLength: 500 }
+        addons:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/AddonInput' }
+        discount_code: { type: string, maxLength: 40 }
+
+    Reservation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [pending_payment, confirmed, seated, completed, cancelled, no_show]
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time, description: Calculado por la base de datos. }
+        duration_minutes: { type: integer }
+        guest_count: { type: integer }
+        currency: { $ref: '#/components/schemas/Currency' }
+        total_estimated: { $ref: '#/components/schemas/Money' }
+        deposit_amount: { $ref: '#/components/schemas/Money' }
+        special_requests: { type: [string, 'null'] }
+        refund_amount: { type: [string, 'null'] }
+        cancelled_at: { type: [string, 'null'], format: date-time }
+        cancel_reason: { type: [string, 'null'] }
+        table_id: { type: string, format: uuid }
+        table_code: { type: string }
+        section: { type: string }
+        table_type: { type: string }
+        user_id: { type: string, format: uuid }
+        user_name: { type: string }
+        addons:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              type: { type: string }
+              name: { type: string }
+              price: { $ref: '#/components/schemas/Money' }
+              quantity: { type: integer }
+        created_at: { type: string, format: date-time }
+
+    PaymentMethod:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        provider: { type: string, enum: [stripe, mercadopago, manual] }
+        type:
+          type: string
+          enum: [card, apple_pay, google_pay, zelle, cash_app, bank, oxxo, spei]
+        last4: { type: [string, 'null'] }
+        brand: { type: [string, 'null'] }
+        label: { type: [string, 'null'] }
+        is_default: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    PaymentMethodCreate:
+      type: object
+      required: [provider, type]
+      properties:
+        provider: { type: string, enum: [stripe, mercadopago, manual] }
+        type:
+          type: string
+          enum: [card, apple_pay, google_pay, zelle, cash_app, bank, oxxo, spei]
+        provider_token:
+          type: string
+          description: Obligatorio para stripe y mercadopago. Nunca se devuelve al cliente.
+        last4: { type: string, pattern: '^\d{4}$' }
+        brand: { type: string, maxLength: 30 }
+        label: { type: string, maxLength: 60 }
+        is_default: { type: boolean, default: false }

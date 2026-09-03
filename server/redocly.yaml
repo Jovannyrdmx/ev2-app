@@ -1,0 +1,13 @@
+# Configuración del validador de OpenAPI (npm run lint:api).
+extends:
+  - recommended
+rules:
+  # /orders/mine y /orders/{orderId} conviven a propósito: Express declara las rutas
+  # literales antes que las paramétricas, así que no hay ambigüedad en ejecución.
+  no-ambiguous-paths: off
+  # /health y el webhook del POS no necesitan el par 2xx/4xx completo:
+  # el primero solo responde 200 y el segundo responde 501 hasta la fase 4.
+  operation-4xx-response: off
+  operation-2xx-response: off
+  # El servidor de desarrollo es localhost a propósito.
+  no-server-example.com: off

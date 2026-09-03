@@ -32,6 +32,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Validate OpenAPI contract
+        run: npm run lint:api
+
       - name: Tests
         run: npm test -- --passWithNoTests
 
