@@ -1,20 +1,18 @@
-FROM node:18-alpine AS deps
-
+# EV2 API (Express + WebSocket notifications)
+FROM node:20-alpine AS deps
 WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
-COPY package.json package-lock.json* ./
-RUN npm install --omit=dev || npm install
-
-FROM node:18-alpine
-
+FROM node:20-alpine
+ENV NODE_ENV=production
 WORKDIR /app
-
 COPY --from=deps /app/node_modules ./node_modules
-COPY package.json nightclub-api.js ./
-
+COPY package.json ./
+COPY src ./src
+COPY migrations ./migrations
+USER node
 EXPOSE 3000
-
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
     CMD wget --quiet --tries=1 --spider http://localhost:3000/health || exit 1
-
-CMD ["node", "nightclub-api.js"]
+CMD ["node", "src/index.js"]

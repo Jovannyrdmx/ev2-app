@@ -1,33 +1,31 @@
-version: '3.9'
+# EV2 Clandestinoz - local / staging stack
+# Usage (from repo root):  docker compose -f deploy/docker-compose.yml up -d
+# Required in .env: DB_PASSWORD, JWT_SECRET (no defaults on purpose).
+
+name: ev2
 
 services:
-  # ==================== DATABASE ====================
   postgres:
     image: postgres:15-alpine
-    container_name: easy-flirt-nightclub-db
+    container_name: ev2-postgres
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
-      POSTGRES_DB: ${DB_NAME:-easyflirt_nightclub}
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required in .env}
+      POSTGRES_DB: ${DB_NAME:-ev2}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./server/init-nightclub.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-ev2}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - easy-flirt-network
+    restart: unless-stopped
+    networks: [ev2]
 
-  # ==================== REDIS CACHE ====================
   redis:
     image: redis:7-alpine
-    container_name: easy-flirt-nightclub-cache
-    ports:
-      - "6379:6379"
+    container_name: ev2-redis
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
     healthcheck:
@@ -35,116 +33,91 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
-    networks:
-      - easy-flirt-network
+    restart: unless-stopped
+    networks: [ev2]
 
-  # ==================== NIGHTCLUB API + WEBSOCKET + SOFTRESTAURANT11 SYNC ====================
-  nightclub-api:
+  api:
     build:
-      context: ./server
-      dockerfile: Dockerfile.nightclub
-    container_name: easy-flirt-nightclub-api
+      context: ../server
+      dockerfile: ../deploy/Dockerfile.api
+    container_name: ev2-api
     environment:
-      NODE_ENV: ${ENVIRONMENT:-production}
+      NODE_ENV: ${ENVIRONMENT:-development}
       PORT: 3000
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-key-change-in-production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required in .env}
       DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required in .env}
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-easyflirt_nightclub}
+      DB_NAME: ${DB_NAME:-ev2}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080,http://localhost:8081}
-      SOFTRESTAURANT11_URL: ${SOFTRESTAURANT11_URL:-http://localhost:8888}
-      SOFTRESTAURANT11_API_KEY: ${SOFTRESTAURANT11_API_KEY:-test-api-key}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080}
+      SOFTRESTAURANT11_URL: ${SOFTRESTAURANT11_URL:-}
+      SOFTRESTAURANT11_API_KEY: ${SOFTRESTAURANT11_API_KEY:-}
+      SOFTRESTAURANT11_WEBHOOK_SECRET: ${SOFTRESTAURANT11_WEBHOOK_SECRET:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
-      - "3000:3000"
+      - "${API_PORT:-3000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-    networks:
-      - easy-flirt-network
+    networks: [ev2]
 
-  # ==================== EASY FLIRT WEB APP ====================
-  easy-flirt-web:
+  ws:
     build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: easy-flirt-nightclub-web
-    ports:
-      - "8080:8080"
+      context: ../server
+      dockerfile: ../deploy/Dockerfile.ws
+    container_name: ev2-ws
     environment:
-      NODE_ENV: ${ENVIRONMENT:-production}
-      WS_URL: ${WS_URL:-ws://localhost:4000}
-      API_URL: ${API_URL:-http://localhost:3000}
-      API_HOST: ${API_HOST:-localhost}
-      NIGHTCLUB_MODE: "true"
-    depends_on:
-      - nightclub-api
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
-    networks:
-      - easy-flirt-network
-
-  # ==================== WEBSOCKET SYNC SERVER ====================
-  connect-server:
-    build:
-      context: ./server
-      dockerfile: Dockerfile.connect
-    container_name: easy-flirt-nightclub-connect
-    ports:
-      - "4000:4000"
-    environment:
-      NODE_ENV: ${ENVIRONMENT:-production}
+      NODE_ENV: ${ENVIRONMENT:-development}
       PORT: 4000
-      NIGHTCLUB_API_URL: http://nightclub-api:3000
+      API_URL: http://api:3000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required in .env}
+    ports:
+      - "${WS_PORT:-4000}:4000"
     depends_on:
-      - nightclub-api
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4000/health"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
-    networks:
-      - easy-flirt-network
+    networks: [ev2]
 
-  # ==================== NGINX REVERSE PROXY ====================
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    container_name: ev2-web
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks: [ev2]
+
+  # Reverse proxy with TLS: only for servers (Phase 7). Enable with --profile proxy.
   nginx:
-    image: nginx:alpine
-    container_name: easy-flirt-nightclub-proxy
+    image: nginx:1.27-alpine
+    container_name: ev2-proxy
+    profiles: [proxy]
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./nginx-nightclub.conf:/etc/nginx/nginx.conf:ro
       - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - easy-flirt-web
-      - nightclub-api
-      - connect-server
+    depends_on: [web, api, ws]
     restart: unless-stopped
-    networks:
-      - easy-flirt-network
+    networks: [ev2]
 
 networks:
-  easy-flirt-network:
+  ev2:
     driver: bridge
 
 volumes:

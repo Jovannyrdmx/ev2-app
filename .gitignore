@@ -17,3 +17,6 @@ build/
 # OS files
 Thumbs.db
 .DS_Store
+
+# Developer overrides (see deploy/docker-compose.override.example.yml)
+deploy/docker-compose.override.yml
