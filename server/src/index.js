@@ -6,7 +6,6 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const { Pool } = require('pg');
 const redis = require('redis');
 const { WebSocketServer } = require('ws');
 const http = require('http');
@@ -22,21 +21,16 @@ app.use(cors({
     credentials: true
 }));
 
-// Database
-const pool = new Pool({
-    user: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD || 'postgres',
-    host: process.env.DB_HOST || 'localhost',
-    port: process.env.DB_PORT || 5432,
-    database: process.env.DB_NAME || 'easyflirt_nightclub'
-});
+// Database (shared pool, see src/db/pool.js)
+const { pool } = require('./db/pool');
 
 // Redis cache (node-redis v4: socket options + explicit connect())
 const redisClient = redis.createClient({
     socket: {
         host: process.env.REDIS_HOST || 'localhost',
         port: Number(process.env.REDIS_PORT || 6379),
-        reconnectStrategy: (retries) => Math.min(retries * 100, 3000)
+        // Give up after ~1 minute of failed retries so the process exits and Docker restarts it.
+        reconnectStrategy: (retries) => (retries > 20 ? new Error('Redis unreachable') : Math.min(retries * 100, 3000))
     }
 });
 
