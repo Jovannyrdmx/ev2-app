@@ -40,5 +40,5 @@ curl http://localhost:4000/health     # WebSocket
 
 ## Forma de trabajo
 
-Reglas en `CLAUDE.md`. Rama por paso (`faseN/descripcion`), PR hacia `main`, verificación obligatoria de
+Reglas en `CLAUDE.md`; decisiones de arquitectura en `docs/DECISIONES.md`. Rama por paso (`faseN/descripcion`), PR hacia `main`, verificación obligatoria de
 cada paso antes de avanzar. Nunca versionar `.env`; nunca probar contra la caja activa del club antes de la Fase 7.
