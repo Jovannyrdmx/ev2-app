@@ -1,0 +1,9 @@
+# Developer-only overrides. Copy to docker-compose.override.yml (git-ignored) to expose
+# Postgres/Redis on localhost for SQL clients. Never use on a server.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
