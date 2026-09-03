@@ -1,5 +1,7 @@
 # EV2 Clandestinoz — Sistema de gestión de nightclub
 
+[![CI](https://github.com/Jovannyrdmx/ev2-app/actions/workflows/ci.yml/badge.svg)](https://github.com/Jovannyrdmx/ev2-app/actions/workflows/ci.yml)
+
 Plataforma para operar un nightclub: pedidos de bebidas en tiempo real, mapa de mesas, reservaciones con
 pago, propinas al staff, portal de empleados (MXN/USD), salida segura con taxi, valet e integración con el
 POS SoftRestaurant11. Backend Node.js + PostgreSQL + Redis, web HTML/Tailwind (PWA), apps iOS y Android.
