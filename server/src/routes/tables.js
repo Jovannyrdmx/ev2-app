@@ -68,11 +68,25 @@ router.post('/nightclubs/:nightclubId/tables/:tableId/seat',
       );
       if (seated.rows[0].n >= table.rows[0].capacity) throw ApiError.conflict('Table is full');
 
-      // Leave any other table first (one open occupancy per user).
-      await client.query(
-        'UPDATE table_occupants SET left_at = now() WHERE user_id = $1 AND left_at IS NULL',
+      // Leave any other table first (one open occupancy per user), and release that
+      // table if nobody is left at it — otherwise the floor map shows ghost tables.
+      const left = await client.query(
+        `UPDATE table_occupants SET left_at = now()
+          WHERE user_id = $1 AND left_at IS NULL
+          RETURNING table_id`,
         [req.user.id],
       );
+      for (const row of left.rows) {
+        if (row.table_id === tableId) continue;
+        await client.query(
+          `UPDATE tables t SET status = 'available'
+            WHERE t.id = $1 AND t.status = 'occupied'
+              AND NOT EXISTS (
+                SELECT 1 FROM table_occupants o WHERE o.table_id = t.id AND o.left_at IS NULL
+              )`,
+          [row.table_id],
+        );
+      }
       await client.query('INSERT INTO table_occupants (table_id, user_id) VALUES ($1,$2)', [tableId, req.user.id]);
       await client.query(`UPDATE tables SET status = 'occupied' WHERE id = $1 AND status = 'available'`, [tableId]);
 

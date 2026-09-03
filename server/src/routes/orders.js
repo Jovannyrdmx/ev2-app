@@ -38,7 +38,9 @@ const ORDER_SELECT = `
     LEFT JOIN LATERAL (
       SELECT json_agg(json_build_object(
                'drink_id', oi.drink_id, 'name', d.name, 'quantity', oi.quantity,
-               'unit_price', oi.unit_price, 'notes', oi.notes) ORDER BY d.name) AS items
+               -- ::text keeps money as a two-decimal string, like every other amount
+               -- in the API (json_build_object would turn NUMERIC into a JSON number).
+               'unit_price', oi.unit_price::text, 'notes', oi.notes) ORDER BY d.name) AS items
         FROM drink_order_items oi JOIN drinks d ON d.id = oi.drink_id
        WHERE oi.order_id = o.id
     ) items ON true`;
