@@ -1,4 +1,6 @@
-// server/nightclub-api.js - Express API for nightclub/bartender sync with SoftRestaurant11
+// server/src/index.js - Express API for nightclub/bartender sync with SoftRestaurant11
+
+require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
@@ -29,13 +31,17 @@ const pool = new Pool({
     database: process.env.DB_NAME || 'easyflirt_nightclub'
 });
 
-// Redis cache
+// Redis cache (node-redis v4: socket options + explicit connect())
 const redisClient = redis.createClient({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: process.env.REDIS_PORT || 6379
+    socket: {
+        host: process.env.REDIS_HOST || 'localhost',
+        port: Number(process.env.REDIS_PORT || 6379),
+        reconnectStrategy: (retries) => Math.min(retries * 100, 3000)
+    }
 });
 
-redisClient.on('error', (err) => console.log('Redis error:', err));
+redisClient.on('error', (err) => console.error('Redis error:', err.message));
+redisClient.on('reconnecting', () => console.warn('Redis reconnecting...'));
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-key-change-in-production';
@@ -597,8 +603,39 @@ app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString(), service: 'Easy Flirt Nightclub' });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`Easy Flirt Nightclub API + WebSocket listening on port ${PORT}`);
-    console.log(`SoftRestaurant11 Integration: ${process.env.SOFTRESTAURANT11_URL || 'http://localhost:8888'}`);
-});
+const PORT = Number(process.env.PORT || 3000);
+
+async function start() {
+    try {
+        await redisClient.connect();
+        console.log(`Redis connected at ${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`);
+
+        await pool.query('SELECT 1');
+        console.log(`PostgreSQL connected at ${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 5432}`);
+    } catch (err) {
+        console.error('Startup failed (Redis/PostgreSQL unavailable):', err.message);
+        process.exit(1);
+    }
+
+    server.listen(PORT, () => {
+        console.log(`EV2 Nightclub API + WebSocket listening on port ${PORT}`);
+        console.log(`SoftRestaurant11 Integration: ${process.env.SOFTRESTAURANT11_URL || 'http://localhost:8888'}`);
+    });
+}
+
+async function shutdown(signal) {
+    console.log(`${signal} received, shutting down...`);
+    server.close();
+    try { await redisClient.quit(); } catch (_e) { /* already closed */ }
+    try { await pool.end(); } catch (_e) { /* already closed */ }
+    process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+if (require.main === module) {
+    start();
+}
+
+module.exports = { app, server, pool, redisClient, start };
