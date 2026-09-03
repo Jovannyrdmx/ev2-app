@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Easy Flirt • EV2 Clandestinoz</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='%23c026ff'/></svg>" type="image/svg+xml">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&amp;family=Poppins:wght@500;600&amp;display=swap');
+        
+        :root {
+            --primary: #c026ff;
+            --accent: #22f1c8;
+        }
+        
+        body {
+            font-family: 'Inter', system_ui, sans-serif;
+        }
+        
+        .font-display {
+            font-family: 'Poppins', 'Inter', sans-serif;
+            font-weight: 600;
+        }
+
+        .neon-purple {
+            box-shadow: 0 0 15px rgba(192, 38, 255, 0.5);
+        }
+
+        .neon-cyan {
+            box-shadow: 0 0 15px rgba(34, 241, 200, 0.5);
+        }
+
+        .club-dark {
+            background-color: #0f0a1f;
+        }
+
+        .section-dark {
+            background-color: #1a1530;
+        }
+
+        .neon-text {
+            color: #c026ff;
+            text-shadow: 0 0 10px rgba(192, 38, 255, 0.7);
+        }
+
+        .table-card {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .table-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+        }
+
+        .table-card.selected {
+            border-color: #c026ff;
+            box-shadow: 0 0 0 3px rgba(192, 38, 255, 0.2);
+        }
+
+        .user-avatar {
+            transition: transform 0.2s ease;
+        }
+
+        .user-avatar:hover {
+            transform: scale(1.1);
+        }
+
+        .flirt-emoji {
+            transition: all 0.1s ease;
+            font-size: 1.75rem;
+        }
+        
+        .flirt-emoji:hover {
+            transform: scale(1.3);
+            filter: brightness(1.2);
+        }
+
+        .drink-card {
+            transition: all 0.2s ease;
+        }
+        
+        .drink-card:hover {
+            transform: translateY(-2px);
+            border-color: #c026ff;
+        }
+
+        .modal {
+            animation: modalPopIn 0.2s ease forwards;
+        }
+
+        @keyframes modalPopIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95) translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .nav-active {
+            color: #c026ff;
+            border-bottom: 3px solid #c026ff;
+        }
+
+        .seat-dot {
+            animation: pulse 2s infinite;
+        }
+
+        .live-dot {
+            animation: pulse 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
+
+        .app-container {
+            max-width: 480px;
+            margin: 0 auto;
+            box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.4);
+        }
+
+        .club-bg {
+            background: linear-gradient(145deg, #0f0a1f 0%, #1a1530 100%);
+        }
+
+        .map-bg {
+            background-image: 
+                linear-gradient(rgba(192, 38, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(192, 38, 255, 0.03) 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+
+        .toast {
+            animation: toastSlideIn 0.3s ease forwards;
+        }
+
+        .section-header {
+            font-size: 0.75rem;
+            letter-spacing: 1px;
+        }
+    </style>
+</head>
+<body class="bg-zinc-950 text-white club-dark">
+    <div class="app-container min-h-screen bg-zinc-900 border-x border-zinc-800 mx-auto relative overflow-hidden">
+        
+        <!-- LOADING SCREEN -->
+        <div id="loading-screen" onclick="this.style.transition='opacity 0.2s ease'; this.style.opacity='0'; setTimeout(()=>this.style.display='none',200)" class="absolute inset-0 z-[100] bg-[#0f0a1f] flex flex-col items-center justify-center cursor-pointer">
+            <div class="relative text-center">
+                <div class="w-32 h-32 mx-auto mb-6 rounded-3xl bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center border border-purple-500/40 shadow-[0_0_40px_rgba(192,38,255,0.5)]">
+                    <span class="text-6xl">💋</span>
+                </div>
+                
+                <div class="text-center">
+                    <div class="font-display text-3xl tracking-[-1.5px] bg-gradient-to-r from-[#c026ff] via-[#22f1c8] to-[#c026ff] bg-clip-text text-transparent animate-pulse">
+                        EASY FLIRT
+                    </div>
+                    <div class="text-purple-300 text-sm mt-1 tracking-[3px]">EV2 CLANDESTINOZ</div>
+                    
+                    <div class="mt-8 flex justify-center">
+                        <div class="flex gap-x-1.5">
+                            <div class="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style="animation-delay: 0ms"></div>
+                            <div class="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style="animation-delay: 150ms"></div>
+                            <div class="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style="animation-delay: 300ms"></div>
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-purple-400/70 mt-3 tracking-widest">STEPPING INTO THE CLUB...</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- LOGIN SCREEN -->
+        <div id="screen-login" class="min-h-screen flex flex-col">
+            <div class="h-72 bg-gradient-to-br from-purple-900 via-violet-950 to-zinc-900 flex flex-col items-center justify-center relative overflow-hidden">
+                <div class="absolute inset-0 bg-[radial-gradient(#c026ff_0.5px,transparent_1px)] bg-[length:4px_4px] opacity-20"></div>
+                
+                <div class="relative z-10 text-center">
+                    <div class="mx-auto w-72 max-w-[90%] rounded-3xl shadow-2xl mb-3 border border-purple-500/30 bg-gradient-to-br from-purple-600 to-pink-600 p-8 text-6xl flex items-center justify-center">
+                        💃✨
+                    </div>
+                    <p class="text-purple-200 text-sm max-w-[220px] mx-auto -mt-1">See who's here • Send drinks • Flirt safely</p>
+                </div>
+                
+                <div class="absolute bottom-6 text-center">
+                    <div class="inline-flex items-center gap-x-2 bg-white/10 backdrop-blur-md px-4 py-1.5 rounded-3xl text-xs">
+                        <div class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+                        <span class="text-emerald-300 text-xs font-medium">142 people inside right now</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex-1 px-6 pt-8 pb-10">
+                <div class="max-w-sm mx-auto">
+                    <button onclick="loginWithInstagram()"
+                            class="w-full flex items-center justify-center gap-x-3 bg-gradient-to-r from-[#E1306C] to-[#C13584] hover:brightness-110 transition-all text-white font-semibold py-4 rounded-3xl mb-4 shadow-lg active:scale-[0.985]">
+                        <i class="fa-brands fa-instagram text-2xl"></i>
+                        <span>Continue with Instagram</span>
+                    </button>
+                    
+                    <div class="flex items-center gap-x-4 my-6">
+                        <div class="flex-1 h-px bg-zinc-700"></div>
+                        <span class="text-xs text-zinc-500 font-medium">OR</span>
+                        <div class="flex-1 h-px bg-zinc-700"></div>
+                    </div>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="text-xs text-zinc-400 block mb-1.5 px-1">Email address</label>
+                            <input id="email-input" type="email" value="maria.garcia@arizona.edu" 
+                                   class="w-full bg-zinc-800 border border-zinc-700 focus:border-purple-500 rounded-2xl px-5 py-3.5 text-sm placeholder:text-zinc-500 outline-none">
+                        </div>
+                        
+                        <div>
+                            <label class="text-xs text-zinc-400 block mb-1.5 px-1">Your name</label>
+                            <input id="name-input" type="text" value="María García" 
+                                   class="w-full bg-zinc-800 border border-zinc-700 focus:border-purple-500 rounded-2xl px-5 py-3.5 text-sm placeholder:text-zinc-500 outline-none">
+                        </div>
+                        
+                        <button onclick="loginWithEmail()"
+                                class="w-full bg-white hover:bg-zinc-100 active:bg-zinc-200 transition-all text-zinc-900 font-semibold py-4 rounded-3xl flex items-center justify-center gap-x-2 shadow-lg">
+                            <span>Sign in with Email</span>
+                        </button>
+                    </div>
+
+                    <div class="mt-8 text-center">
+                        <p class="text-[10px] text-zinc-500">By continuing you agree to our <span class="underline">Terms</span> &amp; <span class="underline">Privacy</span></p>
+                        <p class="text-[10px] text-zinc-600 mt-1">18+ only • Official app of EV2 Clandestinoz</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SEAT SELECTION SCREEN -->
+        <div id="screen-seat-select" class="hidden min-h-screen flex flex-col">
+            <div class="px-5 pt-6 pb-4 flex items-center justify-between border-b border-zinc-800">
+                <div>
+                    <h2 class="font-display text-2xl">Where are you sitting?</h2>
+                    <p class="text-xs text-zinc-400">This helps others find you</p>
+                </div>
+                <button onclick="skipSeatSelection()" 
+                        class="text-xs px-4 py-2 rounded-2xl bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 transition-colors">Skip</button>
+            </div>
+
+            <div class="flex-1 p-5 overflow-auto">
+                <div class="mb-4 flex items-center justify-between">
+                    <div class="text-xs uppercase tracking-widest text-purple-300 font-medium px-1">Choose your table</div>
+                    <div class="text-emerald-400 text-xs flex items-center gap-x-1.5">
+                        <i class="fa-solid fa-users"></i>
+                        <span>87 seated</span>
+                    </div>
+                </div>
+
+                <div id="seat-select-grid" class="grid grid-cols-2 gap-3"></div>
+            </div>
+
+            <div class="p-5 border-t border-zinc-800 bg-zinc-900">
+                <button onclick="confirmSeatSelection()" 
+                        id="confirm-seat-btn"
+                        class="w-full py-4 bg-[#c026ff] hover:bg-purple-600 active:bg-purple-700 transition-all rounded-3xl font-semibold flex items-center justify-center gap-x-2 disabled:opacity-50"
+                        disabled>
+                    <i class="fa-solid fa-check"></i>
+                    <span id="confirm-seat-text">Confirm my seat</span>
+                </button>
+                <p class="text-center text-[10px] text-zinc-500 mt-3">You can change this anytime from your profile</p>
+            </div>
+        </div>
+
+        <!-- MAIN APP -->
+        <div id="screen-main" class="hidden min-h-screen flex flex-col">
+            
+            <div class="sticky top-0 z-50 bg-zinc-900/95 backdrop-blur-xl border-b border-zinc-800 px-5 py-3.5 flex items-center justify-between">
+                <div class="flex items-center gap-x-3">
+                    <div class="flex items-center gap-x-2">
+                        <div class="w-9 h-9 rounded-2xl bg-purple-600 flex items-center justify-center border border-purple-500/40 shadow-[0_0_12px_rgba(192,38,255,0.4)] flex-shrink-0 text-sm">
+                            💋
+                        </div>
+                        <div>
+                            <span class="font-display text-xl tracking-tighter">Easy Flirt</span>
+                        </div>
+                    </div>
+                    <div class="px-2.5 py-1 bg-emerald-900/30 text-emerald-400 text-[10px] font-medium rounded-2xl flex items-center gap-x-1.5">
+                        <div class="w-1.5 h-1.5 bg-emerald-400 rounded-full live-dot"></div>
+                        <span>LIVE</span>
+                    </div>
+                    <div id="connect-status" class="px-2.5 py-1 bg-zinc-800 text-zinc-400 text-[10px] font-medium rounded-2xl flex items-center gap-x-1.5">
+                        <div id="connect-dot" class="w-1.5 h-1.5 bg-zinc-500 rounded-full"></div>
+                        <span id="connect-label">Connecting…</span>
+                    </div>
+                </div>
+                
+                <div class="flex items-center gap-x-2" onclick="showProfileModal()">
+                    <div class="text-right">
+                        <div id="topbar-username" class="text-sm font-semibold leading-none">María</div>
+                        <div id="topbar-seat" class="text-[10px] text-purple-300 leading-none mt-0.5">Table 7 • Main</div>
+                    </div>
+                    <div id="topbar-avatar" class="w-9 h-9 rounded-2xl ring-2 ring-purple-500/30 object-cover cursor-pointer bg-purple-600 flex items-center justify-center text-lg">👤</div>
+                </div>
+            </div>
+
+            <div class="px-5 py-3 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between text-xs">
+                <div class="flex items-center gap-x-4">
+                    <div>
+                        <span class="text-emerald-400 font-semibold">142</span>
+                        <span class="text-zinc-400"> inside</span>
+                    </div>
+                    <div class="text-zinc-500">•</div>
+                    <div>
+                        <span class="text-purple-300 font-semibold">68%</span>
+                        <span class="text-zinc-400"> capacity</span>
+                    </div>
+                </div>
+                <div onclick="simulateIncomingActivity()" class="flex items-center gap-x-1 text-purple-300 active:text-purple-400 cursor-pointer">
+                    <i class="fa-solid fa-sync text-xs"></i>
+                    <span class="text-xs">Live updates</span>
+                </div>
+            </div>
+
+            <div class="flex border-b border-zinc-800 bg-zinc-900 sticky top-[57px] z-40">
+                <button onclick="switchTab('map')" id="tab-map"
+                        class="flex-1 py-3.5 text-sm font-semibold flex items-center justify-center gap-x-2 nav-active">
+                    <i class="fa-solid fa-map-marked w-4"></i>
+                    <span>Map</span>
+                </button>
+                <button onclick="switchTab('activity')" id="tab-activity"
+                        class="flex-1 py-3.5 text-sm font-semibold flex items-center justify-center gap-x-2 text-zinc-400 hover:text-white">
+                    <i class="fa-solid fa-history w-4"></i>
+                    <span>Activity</span>
+                    <span id="activity-badge" class="hidden bg-purple-600 text-white text-[10px] px-1.5 rounded-full font-mono">3</span>
+                </button>
+                <button onclick="switchTab('profile')" id="tab-profile"
+                        class="flex-1 py-3.5 text-sm font-semibold flex items-center justify-center gap-x-2 text-zinc-400 hover:text-white">
+                    <i class="fa-solid fa-user w-4"></i>
+                    <span>Profile</span>
+                </button>
+            </div>
+
+            <!-- MAP TAB -->
+            <div id="tab-content-map" class="flex-1 flex flex-col">
+                <div class="p-4 pb-3 sticky top-[105px] z-30 bg-zinc-900">
+                    <div class="relative mb-3">
+                        <input id="search-input" type="text" placeholder="Search tables or people..." 
+                               onkeyup="filterTables()"
+                               class="w-full bg-zinc-800 border border-zinc-700 focus:border-purple-500 pl-10 pr-4 py-3 rounded-3xl text-sm placeholder:text-zinc-500 outline-none">
+                        <i class="fa-solid fa-search absolute left-4 top-3.5 text-zinc-500"></i>
+                    </div>
+                    
+                    <div class="flex gap-x-2 overflow-x-auto pb-1 scrollbar-hide">
+                        <button onclick="filterBySection('all')" id="filter-all"
+                                class="section-chip active px-4 py-1.5 text-xs whitespace-nowrap rounded-3xl bg-purple-600 text-white">All Areas</button>
+                        <button onclick="filterBySection('main')" id="filter-main"
+                                class="section-chip px-4 py-1.5 text-xs whitespace-nowrap rounded-3xl bg-zinc-800 hover:bg-zinc-700">Main Floor</button>
+                        <button onclick="filterBySection('vip')" id="filter-vip"
+                                class="section-chip px-4 py-1.5 text-xs whitespace-nowrap rounded-3xl bg-zinc-800 hover:bg-zinc-700">VIP Lounge</button>
+                        <button onclick="filterBySection('bar')" id="filter-bar"
+                                class="section-chip px-4 py-1.5 text-xs whitespace-nowrap rounded-3xl bg-zinc-800 hover:bg-zinc-700">Bar Area</button>
+                    </div>
+                </div>
+
+                <div class="flex-1 px-4 pb-6 overflow-auto">
+                    <div id="tables-grid" class="grid grid-cols-1 gap-3"></div>
+                    
+                    <div class="mt-6 text-center">
+                        <div class="inline-flex items-center text-xs text-zinc-500 bg-zinc-900 px-4 py-2 rounded-3xl border border-zinc-800">
+                            <i class="fa-solid fa-info-circle mr-2"></i>
+                            <span>Tap any table to start!</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ACTIVITY TAB -->
+            <div id="tab-content-activity" class="hidden flex-1 flex flex-col p-4 overflow-auto">
+                <div class="flex items-center justify-between mb-4 px-1">
+                    <div>
+                        <h3 class="font-semibold">Your Activity</h3>
+                        <p class="text-xs text-zinc-400">Tonight at EV2 Clandestinoz</p>
+                    </div>
+                    <button onclick="clearActivity()" 
+                            class="text-xs px-3 py-1.5 rounded-2xl bg-zinc-800 hover:bg-red-900/30 text-red-400 flex items-center gap-x-1">
+                        <i class="fa-solid fa-trash text-xs"></i>
+                        <span>Clear</span>
+                    </button>
+                </div>
+
+                <div id="activity-list" class="space-y-3 flex-1"></div>
+
+                <div class="pt-4 border-t border-zinc-800 mt-auto">
+                    <button onclick="simulateIncomingActivity()" 
+                            class="w-full py-3 text-sm flex items-center justify-center gap-x-2 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 rounded-3xl text-purple-300">
+                        <i class="fa-solid fa-magic"></i>
+                        <span>Simulate activity</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- PROFILE TAB -->
+            <div id="tab-content-profile" class="hidden flex-1 p-5 overflow-auto">
+                <div class="flex flex-col items-center text-center mb-8">
+                    <div id="profile-avatar" class="w-24 h-24 rounded-3xl ring-4 ring-purple-500/20 bg-purple-600 mb-4 cursor-pointer flex items-center justify-center text-5xl">👤</div>
+                    <div id="profile-name" class="text-2xl font-semibold">María García</div>
+                    <div id="profile-ig" class="text-purple-300 text-sm">@maria_garcia_ua</div>
+                    
+                    <div class="mt-2 flex items-center gap-x-2 text-xs">
+                        <div class="px-3 py-1 bg-emerald-900/30 text-emerald-300 rounded-2xl flex items-center gap-x-1">
+                            <i class="fa-solid fa-check-double text-xs"></i>
+                            <span>Verified 18+</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-5">
+                    <div class="bg-zinc-800 rounded-3xl p-5">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <div class="text-xs text-zinc-400">YOUR CURRENT SEAT</div>
+                                <div id="profile-seat-name" class="text-xl font-semibold mt-0.5">Table 7 • Main Floor</div>
+                                <div class="text-emerald-400 text-xs mt-1 flex items-center gap-x-1">
+                                    <i class="fa-solid fa-map-marker-alt"></i>
+                                    <span>Visible to everyone</span>
+                                </div>
+                            </div>
+                            <button onclick="changeSeat()" 
+                                    class="text-xs px-4 py-2 bg-purple-600 hover:bg-purple-500 active:bg-purple-700 transition rounded-2xl text-white">Change</button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="bg-zinc-800 rounded-3xl p-4 text-center">
+                            <div class="text-2xl font-semibold text-purple-300" id="stat-drinks-sent">7</div>
+                            <div class="text-xs text-zinc-400">Drinks sent</div>
+                        </div>
+                        <div class="bg-zinc-800 rounded-3xl p-4 text-center">
+                            <div class="text-2xl font-semibold text-pink-300" id="stat-flirts-sent">14</div>
+                            <div class="text-xs text-zinc-400">Flirts sent</div>
+                        </div>
+                        <div class="bg-zinc-800 rounded-3xl p-4 text-center">
+                            <div class="text-2xl font-semibold text-emerald-300" id="stat-received">3</div>
+                            <div class="text-xs text-zinc-400">Received</div>
+                        </div>
+                    </div>
+
+                    <div class="pt-2">
+                        <button onclick="logout()" 
+                                class="w-full py-3.5 text-sm font-medium flex items-center justify-center gap-x-2 text-red-400 hover:bg-red-950/40 active:bg-red-950/60 rounded-3xl border border-red-900/40">
+                            <i class="fa-solid fa-sign-out-alt"></i>
+                            <span>Sign out</span>
+                        </button>
+                    </div>
+                    
+                    <div class="text-center">
+                        <p class="text-[10px] text-zinc-500">Official Easy Flirt app for <span class="font-medium">EV2 Clandestinoz</span></p>
+                        <p class="text-[10px] text-zinc-600 mt-0.5">Nogales, Sonora • Powered by real connections</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TABLE MODAL -->
+    <div id="table-modal" onclick="if (event.target.id === 'table-modal') hideTableModal()" 
+         class="hidden fixed inset-0 bg-black/70 z-[100] flex items-end md:items-center justify-center">
+        <div onclick="event.stopImmediatePropagation()" 
+             class="bg-zinc-900 w-full md:w-[420px] rounded-t-3xl md:rounded-3xl p-0 modal border border-zinc-700 md:m-4 max-h-[85vh] flex flex-col">
+            
+            <div class="px-5 pt-5 pb-3 flex items-center justify-between border-b border-zinc-700">
+                <div>
+                    <div id="modal-table-name" class="font-display text-2xl"></div>
+                    <div id="modal-table-info" class="text-xs text-purple-300 flex items-center gap-x-2"></div>
+                </div>
+                <button onclick="hideTableModal()" class="w-9 h-9 flex items-center justify-center text-2xl text-zinc-400 hover:text-white">&times;</button>
+            </div>
+
+            <div class="p-5 flex-1 overflow-auto">
+                <div class="text-xs uppercase tracking-widest text-zinc-400 mb-3 px-1">PEOPLE AT THIS TABLE</div>
+                <div id="modal-occupants-list" class="space-y-3"></div>
+            </div>
+
+            <div class="p-5 border-t border-zinc-700 text-xs text-center text-zinc-400">
+                Only visible while you're both in the club tonight
+            </div>
+        </div>
+    </div>
+
+    <!-- DRINK MODAL -->
+    <div id="drink-modal" onclick="if (event.target.id === 'drink-modal') hideDrinkModal()" 
+         class="hidden fixed inset-0 bg-black/70 z-[110] flex items-end md:items-center justify-center">
+        <div onclick="event.stopImmediatePropagation()" 
+             class="bg-zinc-900 w-full md:w-[420px] rounded-t-3xl md:rounded-3xl modal border border-zinc-700 md:m-4">
+            
+            <div class="px-5 pt-5 pb-4 border-b border-zinc-700 flex items-center justify-between">
+                <div>
+                    <div class="font-semibold">Send a drink to</div>
+                    <div id="drink-target-name" class="text-purple-300 text-sm"></div>
+                </div>
+                <button onclick="hideDrinkModal()" class="text-3xl leading-none text-zinc-400 hover:text-white">&times;</button>
+            </div>
+
+            <div class="p-5 max-h-[60vh] overflow-auto">
+                <div class="grid grid-cols-1 gap-3" id="drink-options"></div>
+            </div>
+            
+            <div class="p-5 pt-2 text-[10px] text-center text-zinc-500 border-t border-zinc-700">
+                Drinks are added to your tab • Delivered by our staff
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST CONTAINER -->
+    <div id="toast-container" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-[200] pointer-events-none"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>
+    <script>
+        // Mock data and app logic
+        let users = {
+            "u1": { id: "u1", name: "Sofía Ramírez", age: 21, bio: "UA senior • Reggaeton lover", avatar: "47", ig: "@sofia_perreo", seat: "Table 7 • Main Floor" },
+            "u2": { id: "u2", name: "Diego Morales", age: 23, bio: "EDM enthusiast", avatar: "28", ig: "@diego_morales", seat: "Table 7 • Main Floor" },
+            "u3": { id: "u3", name: "Valeria Soto", age: 20, bio: "Business major", avatar: "32", ig: "@vale.soto", seat: "Table 7 • Main Floor" },
+            "u4": { id: "u4", name: "Mateo Rivera", age: 24, bio: "DJ & producer", avatar: "15", ig: "@mateo_rivera", seat: "VIP Booth A • VIP" },
+            "u5": { id: "u5", name: "Isabella Cruz", age: 22, bio: "Marketing @ UA", avatar: "40", ig: "@isa_cruz", seat: "VIP Booth A • VIP" },
+        };
+
+        let tables = [
+            { id: "t7", name: "Table 7", section: "main", fullName: "Table 7 • Main Floor", capacity: 4, occupants: ["u1", "u2", "u3"] },
+            { id: "t12", name: "Table 12", section: "main", fullName: "Table 12 • Main Floor", capacity: 4, occupants: ["u4"] },
+            { id: "vip-a", name: "VIP Booth A", section: "vip", fullName: "VIP Booth A • Lounge", capacity: 6, occupants: ["u5"] },
+            { id: "vip-b", name: "VIP Booth B", section: "vip", fullName: "VIP Booth B • Private", capacity: 5, occupants: [] },
+            { id: "bar-2", name: "Bar High Top 2", section: "bar", fullName: "Bar High Top 2 • Bar Area", capacity: 3, occupants: [] },
+        ];
+
+        let currentUser = null;
+        let myCurrentSeat = null;
+        let sentActivity = [];
+        let currentFilter = 'all';
+
+        // ==================== CONNECT (real-time sync) ====================
+        const CONNECT_WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':4000';
+        let ws = null;
+        let wsReconnectTimer = null;
+
+        function setConnectStatus(status) {
+            const dot = document.getElementById('connect-dot');
+            const label = document.getElementById('connect-label');
+            if (!dot || !label) return;
+            if (status === 'connected') {
+                dot.className = 'w-1.5 h-1.5 bg-emerald-400 rounded-full live-dot';
+                label.textContent = 'Connected';
+            } else if (status === 'connecting') {
+                dot.className = 'w-1.5 h-1.5 bg-amber-400 rounded-full live-dot';
+                label.textContent = 'Connecting…';
+            } else {
+                dot.className = 'w-1.5 h-1.5 bg-red-500 rounded-full';
+                label.textContent = 'Offline';
+            }
+        }
+
+        function connectWS() {
+            setConnectStatus('connecting');
+            try {
+                ws = new WebSocket(CONNECT_WS_URL);
+            } catch (e) {
+                setConnectStatus('offline');
+                scheduleReconnect();
+                return;
+            }
+
+            ws.onopen = () => {
+                setConnectStatus('connected');
+                if (currentUser) {
+                    ws.send(JSON.stringify({
+                        type: 'identify',
+                        userId: currentUser.id,
+                        userName: currentUser.name,
+                        seat: myCurrentSeat
+                    }));
+                }
+            };
+
+            ws.onmessage = (evt) => {
+                let msg;
+                try { msg = JSON.parse(evt.data); } catch (e) { return; }
+                handleWSMessage(msg);
+            };
+
+            ws.onclose = () => {
+                setConnectStatus('offline');
+                scheduleReconnect();
+            };
+
+            ws.onerror = () => {
+                setConnectStatus('offline');
+            };
+        }
+
+        function scheduleReconnect() {
+            if (wsReconnectTimer) return;
+            wsReconnectTimer = setTimeout(() => {
+                wsReconnectTimer = null;
+                connectWS();
+            }, 3000);
+        }
+
+        function wsSend(payload) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(payload));
+            }
+        }
+
+        function handleWSMessage(msg) {
+            if (msg.type === 'snapshot') {
+                mergeSharedTables(msg.state.tables);
+                sentActivity = msg.state.activity || sentActivity;
+                if (document.getElementById('screen-main') && !document.getElementById('screen-main').classList.contains('hidden')) {
+                    renderTables();
+                    renderActivity();
+                }
+            } else if (msg.type === 'state') {
+                mergeSharedTables(msg.state.tables);
+                if (document.getElementById('screen-main') && !document.getElementById('screen-main').classList.contains('hidden')) {
+                    renderTables();
+                }
+            } else if (msg.type === 'activity') {
+                if (currentUser && msg.item.to === currentUser.id && msg.item.from !== currentUser.id) {
+                    sentActivity.unshift(msg.item);
+                    showToast(`${msg.item.fromName} sent you ${msg.item.type === 'drink' ? msg.item.item : (msg.item.item + ' ' + (msg.item.message || ''))}!`, msg.item.type === 'drink' ? 'drink' : 'flirt');
+                    renderActivity();
+                }
+            } else if (msg.type === 'presence') {
+                // Reserved for future "who's online" UI
+            }
+        }
+
+        function mergeSharedTables(sharedTables) {
+            if (!sharedTables) return;
+            Object.values(sharedTables).forEach(shared => {
+                const local = tables.find(t => t.id === shared.id);
+                if (local) {
+                    local.occupants = (shared.occupants || []).map(o => o.id);
+                    shared.occupants.forEach(o => {
+                        if (!users[o.id]) {
+                            users[o.id] = { id: o.id, name: o.name, bio: 'Connected live', ig: '' };
+                        }
+                    });
+                }
+            });
+        }
+
+        // Utility
+        function showToast(msg, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const colors = {success: 'bg-emerald-600', flirt: 'bg-pink-600', drink: 'bg-purple-600'};
+            const icons = {success: 'fa-check-circle', flirt: 'fa-heart', drink: 'fa-glass-cheers'};
+            
+            toast.className = `toast pointer-events-auto flex items-center gap-x-3 ${colors[type]} text-white px-5 py-3.5 rounded-3xl shadow-2xl mb-2`;
+            toast.innerHTML = `<i class="fa-solid ${icons[type]} text-xl"></i><div class="text-sm font-medium">${msg}</div>`;
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.transition = 'opacity 0.3s';
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 2800);
+        }
+
+        // Login
+        function loginWithInstagram() {
+            currentUser = { id: "demo-ig", name: "Alex Rivera", age: 22, avatar: "64", ig: "@arivera_ua" };
+            localStorage.setItem('easyflirt_user', JSON.stringify(currentUser));
+            wsSend({ type: 'identify', userId: currentUser.id, userName: currentUser.name, seat: myCurrentSeat });
+            document.getElementById('screen-login').classList.add('hidden');
+            document.getElementById('screen-seat-select').classList.remove('hidden');
+            renderSeatSelection();
+        }
+
+        function loginWithEmail() {
+            const email = document.getElementById('email-input').value.trim();
+            const name = document.getElementById('name-input').value.trim();
+            if (!name) return alert("Enter your name");
+            
+            currentUser = {
+                id: "user-" + Date.now(),
+                name: name,
+                age: 21,
+                avatar: "47",
+                ig: "@" + name.toLowerCase().replace(/\s+/g, '_'),
+                email: email
+            };
+            
+            localStorage.setItem('easyflirt_user', JSON.stringify(currentUser));
+            wsSend({ type: 'identify', userId: currentUser.id, userName: currentUser.name, seat: myCurrentSeat });
+            document.getElementById('screen-login').classList.add('hidden');
+            document.getElementById('screen-seat-select').classList.remove('hidden');
+            renderSeatSelection();
+        }
+
+        // Seat selection
+        function renderSeatSelection() {
+            const grid = document.getElementById('seat-select-grid');
+            grid.innerHTML = tables.map(t => `
+                <div onclick="selectSeat('${t.id}')" class="table-card cursor-pointer border border-zinc-700 bg-zinc-800 rounded-3xl p-4 active:scale-[0.985] transition-all">
+                    <div class="font-semibold">${t.name}</div>
+                    <div class="text-xs text-emerald-400">${t.section.toUpperCase()}</div>
+                    <div class="text-xs text-zinc-400 mt-2">${t.occupants.length}/${t.capacity}</div>
+                </div>
+            `).join('');
+        }
+
+        function selectSeat(tableId) {
+            myCurrentSeat = tableId;
+            document.getElementById('confirm-seat-btn').disabled = false;
+        }
+
+        function confirmSeatSelection() {
+            if (!myCurrentSeat || !currentUser) return;
+            const table = tables.find(t => t.id === myCurrentSeat);
+            if (table && !table.occupants.includes(currentUser.id)) table.occupants.push(currentUser.id);
+            localStorage.setItem('easyflirt_my_seat', myCurrentSeat);
+            wsSend({ type: 'take_seat', tableId: myCurrentSeat });
+
+            document.getElementById('screen-seat-select').classList.add('hidden');
+            document.getElementById('screen-main').classList.remove('hidden');
+            initMainApp();
+        }
+
+        function skipSeatSelection() {
+            document.getElementById('screen-seat-select').classList.add('hidden');
+            document.getElementById('screen-main').classList.remove('hidden');
+            initMainApp();
+        }
+
+        // Main app
+        function initMainApp() {
+            document.getElementById('topbar-username').textContent = (currentUser.name || 'User').split(' ')[0];
+            document.getElementById('profile-name').textContent = currentUser.name;
+            document.getElementById('profile-ig').textContent = currentUser.ig;
+            renderTables();
+            renderActivity();
+        }
+
+        function renderTables(filtered = null) {
+            const grid = document.getElementById('tables-grid');
+            const toRender = filtered || tables;
+            grid.innerHTML = toRender.map(t => `
+                <div onclick="showTableModal('${t.id}')" class="table-card bg-zinc-800 border border-zinc-700 hover:border-purple-500/60 rounded-3xl p-4 cursor-pointer active:scale-[0.985]">
+                    <div class="flex justify-between items-start mb-3">
+                        <div>
+                            <div class="font-semibold text-lg">${t.name}</div>
+                            <div class="text-xs text-zinc-400">${t.fullName.split('•')[1]}</div>
+                        </div>
+                        <div class="text-right">
+                            <span class="px-2 py-1 text-xs rounded-2xl bg-zinc-700">${t.section.toUpperCase()}</span>
+                            <div class="mt-1 text-xs text-zinc-400">${t.occupants.length}/${t.capacity}</div>
+                        </div>
+                    </div>
+                    <button onclick="event.stopImmediatePropagation(); showTableModal('${t.id}');" class="text-xs px-4 py-2 bg-zinc-700 hover:bg-purple-600 rounded-2xl">View</button>
+                </div>
+            `).join('');
+        }
+
+        function filterBySection(section) {
+            currentFilter = section;
+            const filtered = section === 'all' ? tables : tables.filter(t => t.section === section);
+            renderTables(filtered);
+            document.querySelectorAll('.section-chip').forEach(c => c.classList.remove('active', 'bg-purple-600', 'text-white'));
+            document.getElementById('filter-' + section).classList.add('active', 'bg-purple-600', 'text-white');
+        }
+
+        function filterTables() {
+            const term = document.getElementById('search-input').value.toLowerCase();
+            const filtered = term ? tables.filter(t => t.name.toLowerCase().includes(term)) : tables;
+            renderTables(filtered);
+        }
+
+        // Table modal
+        function showTableModal(tableId) {
+            const table = tables.find(t => t.id === tableId);
+            if (!table) return;
+            
+            document.getElementById('modal-table-name').textContent = table.name;
+            document.getElementById('modal-table-info').innerHTML = `<span>${table.fullName}</span><span class="text-emerald-400">• ${table.occupants.length}/${table.capacity}</span>`;
+            
+            const list = document.getElementById('modal-occupants-list');
+            list.innerHTML = table.occupants.length ? table.occupants.map(uid => {
+                const u = users[uid];
+                return `
+                    <div class="bg-zinc-800 rounded-2xl p-3">
+                        <div class="flex justify-between"><span class="font-semibold">${u.name}</span></div>
+                        <div class="text-xs text-zinc-400">${u.bio}</div>
+                        <div class="text-xs text-purple-300">${u.ig}</div>
+                        <button onclick="startSendDrink('${uid}', '${u.name}', '${tableId}')" class="mt-2 text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-500 rounded-2xl">Send Drink</button>
+                    </div>
+                `;
+            }).join('') : '<div class="text-center text-zinc-400">Empty table</div>';
+            
+            document.getElementById('table-modal').classList.remove('hidden');
+        }
+
+        function hideTableModal() {
+            document.getElementById('table-modal').classList.add('hidden');
+        }
+
+        // Drinks
+        function startSendDrink(userId, userName, tableId) {
+            hideTableModal();
+            document.getElementById('drink-target-name').innerHTML = `<span>${userName}</span>`;
+            const drinks = [
+                {name: "Corona", price: 6, emoji: "🍺"},
+                {name: "Margarita", price: 11, emoji: "🍹"},
+                {name: "Tequila Shot", price: 8, emoji: "🥃"},
+            ];
+            
+            document.getElementById('drink-options').innerHTML = drinks.map(d => `
+                <div onclick="confirmDrink('${userId}', '${userName}', '${d.name}', ${d.price})" class="p-4 border border-zinc-700 hover:border-purple-500 rounded-3xl cursor-pointer">
+                    <div class="flex justify-between"><span>${d.emoji} ${d.name}</span><span class="text-emerald-400">$${d.price}</span></div>
+                </div>
+            `).join('');
+            
+            document.getElementById('drink-modal').classList.remove('hidden');
+        }
+
+        function confirmDrink(userId, userName, drinkName, price) {
+            hideDrinkModal();
+            const item = {type: 'drink', from: currentUser.id, to: userId, item: drinkName, price};
+            sentActivity.unshift(item);
+            showToast(`Sent ${drinkName} to ${userName}!`, 'drink');
+            wsSend({
+                type: 'send_drink',
+                toId: userId,
+                toName: userName,
+                drinkName: drinkName,
+                price: price,
+                tableName: myCurrentSeat ? (tables.find(t => t.id === myCurrentSeat) || {}).name : ''
+            });
+        }
+
+        function hideDrinkModal() {
+            document.getElementById('drink-modal').classList.add('hidden');
+        }
+
+        // Activity
+        function renderActivity() {
+            const container = document.getElementById('activity-list');
+            container.innerHTML = sentActivity.length ? sentActivity.map(a => `
+                <div class="bg-zinc-800 rounded-3xl p-4">
+                    <div class="font-semibold">${a.type === 'drink' ? `${a.item} - $${a.price}` : 'Flirt'}</div>
+                    <div class="text-xs text-zinc-400">From you</div>
+                </div>
+            `).join('') : '<div class="text-center text-zinc-400 py-10">No activity yet</div>';
+        }
+
+        function clearActivity() {
+            if (confirm('Clear activity?')) {
+                sentActivity = [];
+                renderActivity();
+            }
+        }
+
+        function simulateIncomingActivity() {
+            sentActivity.unshift({type: 'drink', item: 'Margarita', price: 11});
+            renderActivity();
+            showToast('Someone sent you a drink!', 'drink');
+        }
+
+        // Tabs
+        function switchTab(tab) {
+            ['map', 'activity', 'profile'].forEach(t => {
+                document.getElementById('tab-content-' + t).classList.add('hidden');
+                document.getElementById('tab-' + t).classList.remove('nav-active', 'text-white');
+                document.getElementById('tab-' + t).classList.add('text-zinc-400');
+            });
+            document.getElementById('tab-content-' + tab).classList.remove('hidden');
+            document.getElementById('tab-' + tab).classList.add('nav-active', 'text-white');
+            document.getElementById('tab-' + tab).classList.remove('text-zinc-400');
+        }
+
+        function showProfileModal() {
+            switchTab('profile');
+        }
+
+        function changeSeat() {
+            document.getElementById('screen-main').classList.add('hidden');
+            document.getElementById('screen-seat-select').classList.remove('hidden');
+            renderSeatSelection();
+        }
+
+        function logout() {
+            if (confirm('Sign out?')) {
+                localStorage.clear();
+                location.reload();
+            }
+        }
+
+        // Init
+        window.onload = function() {
+            setTimeout(() => document.getElementById('loading-screen').style.display = 'none', 1500);
+            connectWS();
+            const saved = localStorage.getItem('easyflirt_user');
+            if (saved) {
+                currentUser = JSON.parse(saved);
+                const savedSeat = localStorage.getItem('easyflirt_my_seat');
+                if (savedSeat) myCurrentSeat = savedSeat;
+                document.getElementById('screen-login').classList.add('hidden');
+                document.getElementById('screen-seat-select').classList.add('hidden');
+                document.getElementById('screen-main').classList.remove('hidden');
+                initMainApp();
+                wsSend({ type: 'identify', userId: currentUser.id, userName: currentUser.name, seat: myCurrentSeat });
+            }
+        };
+    </script>
+</body>
+</html>

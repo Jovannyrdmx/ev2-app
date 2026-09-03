@@ -1,0 +1,152 @@
+version: '3.9'
+
+services:
+  # ==================== DATABASE ====================
+  postgres:
+    image: postgres:15-alpine
+    container_name: easy-flirt-nightclub-db
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-easyflirt_nightclub}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/init-nightclub.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - easy-flirt-network
+
+  # ==================== REDIS CACHE ====================
+  redis:
+    image: redis:7-alpine
+    container_name: easy-flirt-nightclub-cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - easy-flirt-network
+
+  # ==================== NIGHTCLUB API + WEBSOCKET + SOFTRESTAURANT11 SYNC ====================
+  nightclub-api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.nightclub
+    container_name: easy-flirt-nightclub-api
+    environment:
+      NODE_ENV: ${ENVIRONMENT:-production}
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-key-change-in-production}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-easyflirt_nightclub}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080,http://localhost:8081}
+      SOFTRESTAURANT11_URL: ${SOFTRESTAURANT11_URL:-http://localhost:8888}
+      SOFTRESTAURANT11_API_KEY: ${SOFTRESTAURANT11_API_KEY:-test-api-key}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - easy-flirt-network
+
+  # ==================== EASY FLIRT WEB APP ====================
+  easy-flirt-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: easy-flirt-nightclub-web
+    ports:
+      - "8080:8080"
+    environment:
+      NODE_ENV: ${ENVIRONMENT:-production}
+      WS_URL: ${WS_URL:-ws://localhost:4000}
+      API_URL: ${API_URL:-http://localhost:3000}
+      API_HOST: ${API_HOST:-localhost}
+      NIGHTCLUB_MODE: "true"
+    depends_on:
+      - nightclub-api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - easy-flirt-network
+
+  # ==================== WEBSOCKET SYNC SERVER ====================
+  connect-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.connect
+    container_name: easy-flirt-nightclub-connect
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: ${ENVIRONMENT:-production}
+      PORT: 4000
+      NIGHTCLUB_API_URL: http://nightclub-api:3000
+    depends_on:
+      - nightclub-api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - easy-flirt-network
+
+  # ==================== NGINX REVERSE PROXY ====================
+  nginx:
+    image: nginx:alpine
+    container_name: easy-flirt-nightclub-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx-nightclub.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - easy-flirt-web
+      - nightclub-api
+      - connect-server
+    restart: unless-stopped
+    networks:
+      - easy-flirt-network
+
+networks:
+  easy-flirt-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

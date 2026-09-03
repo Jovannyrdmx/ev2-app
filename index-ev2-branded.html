@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EV2 Clandestinoz • Easy Flirt</title>
+    <link rel="icon" href="images/favicon-32x32.png" type="image/png" sizes="32x32">
+    <link rel="shortcut icon" href="images/favicon-32x32.png" type="image/png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
+        
+        :root {
+            --ev2-cyan: #00BFFF;
+            --ev2-pink: #FF1493;
+            --ev2-purple: #9D00FF;
+            --ev2-lime: #00FF00;
+            --ev2-gold: #FFD700;
+        }
+        
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a0033 50%, #001a33 100%);
+        }
+        
+        .font-display {
+            font-family: 'Poppins', sans-serif;
+            font-weight: 700;
+        }
+
+        .ev2-gradient {
+            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 25%, var(--ev2-purple) 50%, var(--ev2-lime) 75%, var(--ev2-gold) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .ev2-glow {
+            box-shadow: 0 0 30px rgba(0, 191, 255, 0.6), 0 0 60px rgba(255, 20, 147, 0.4);
+        }
+
+        .ev2-border {
+            border: 3px solid;
+            border-image: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink)) 1;
+        }
+
+        .neon-purple {
+            box-shadow: 0 0 15px rgba(192, 38, 255, 0.5);
+        }
+
+        .table-card {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .table-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+        }
+
+        .modal {
+            animation: modalPopIn 0.2s ease forwards;
+        }
+
+        @keyframes modalPopIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95) translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .nav-active {
+            color: var(--ev2-cyan);
+            border-bottom: 3px solid var(--ev2-cyan);
+        }
+
+        .app-container {
+            max-width: 480px;
+            margin: 0 auto;
+            box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.4);
+        }
+
+        .live-dot {
+            animation: pulse 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
+
+        .ev2-button {
+            background: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink));
+            color: white;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .ev2-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(0, 191, 255, 0.6);
+        }
+    </style>
+</head>
+<body class="text-white">
+    <div class="app-container min-h-screen bg-gradient-to-b from-slate-950 via-purple-950 to-slate-950 border-x border-cyan-500/30">
+        
+        <!-- LOADING SCREEN -->
+        <div id="loading-screen" class="absolute inset-0 z-[100] bg-gradient-to-b from-slate-950 to-purple-950 flex flex-col items-center justify-center cursor-pointer" onclick="this.style.opacity='0'; setTimeout(()=>this.style.display='none',200)">
+            <div class="relative text-center">
+                <!-- Easy Flirt Logo with Glow -->
+                <div class="w-40 h-40 mx-auto mb-8 relative">
+                    <div class="absolute inset-0 bg-gradient-to-r from-cyan-400 via-pink-500 to-purple-600 rounded-3xl blur-xl opacity-60 animate-pulse"></div>
+                    <div class="relative w-full h-full rounded-3xl overflow-hidden border-4 border-cyan-400 flex items-center justify-center bg-black/50 ev2-glow">
+                        <img src="images/EasyFlirt-logo.png" alt="Easy Flirt" class="w-full h-full object-contain p-3">
+                    </div>
+                </div>
+                
+                <!-- Loading Text -->
+                <div>
+                    <div class="font-display text-3xl tracking-[-1px] ev2-gradient">
+                        EASY FLIRT
+                    </div>
+                    <div class="text-cyan-300 text-lg mt-2 tracking-[3px] font-bold">CLANDESTINOZ</div>
+                    
+                    <!-- Loading Dots -->
+                    <div class="mt-8 flex justify-center">
+                        <div class="flex gap-x-2">
+                            <div class="w-3 h-3 bg-cyan-400 rounded-full animate-bounce" style="animation-delay: 0ms"></div>
+                            <div class="w-3 h-3 bg-pink-500 rounded-full animate-bounce" style="animation-delay: 150ms"></div>
+                            <div class="w-3 h-3 bg-purple-500 rounded-full animate-bounce" style="animation-delay: 300ms"></div>
+                        </div>
+                    </div>
+                    <p class="text-xs text-cyan-300/70 mt-4 tracking-widest font-semibold" data-i18n="loading">STEPPING INTO THE CLUB...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Language toggle (EN ↔ ES) -->
+        <button id="lang-toggle" type="button" onclick="toggleLanguage()"
+                class="fixed top-4 right-4 z-[110] flex items-center gap-x-2 bg-black/60 backdrop-blur-md border border-cyan-400/50 text-cyan-200 px-3 py-2 rounded-full shadow-lg hover:bg-cyan-500/20 hover:border-cyan-300 transition-all active:scale-95"
+                title="Change language / Cambiar idioma" aria-label="Change language">
+            <i class="fa-solid fa-globe text-sm"></i>
+            <span id="lang-toggle-label" class="text-xs font-bold tracking-wider">ES</span>
+        </button>
+
+        <!-- LOGIN SCREEN -->
+        <div id="screen-login" class="min-h-screen flex flex-col">
+            <!-- Hero Header with EV2 Branding -->
+            <div class="bg-gradient-to-br from-cyan-900/20 via-purple-900/20 to-pink-900/20 flex flex-col items-center relative overflow-hidden border-b-2 border-cyan-500/30 px-4 pt-10 pb-6">
+                <div class="absolute inset-0 bg-[radial-gradient(circle,rgba(0,191,255,0.1)_1px,transparent_1px)] bg-[length:40px_40px] pointer-events-none"></div>
+                
+                <!-- Easy Flirt Logo Card -->
+                <div class="relative z-10 text-center w-full">
+                    <div class="w-40 h-40 sm:w-48 sm:h-48 mx-auto rounded-3xl overflow-hidden mb-3 border-4 border-cyan-400 shadow-2xl ev2-glow bg-black/40 flex items-center justify-center">
+                        <img src="images/EasyFlirt-logo.png" alt="Easy Flirt" class="w-full h-full object-contain p-3">
+                    </div>
+                    <p class="text-cyan-200 text-[11px] sm:text-sm mx-auto leading-none px-1 whitespace-nowrap tracking-wide" data-i18n="tagline">Send drinks • Flirt safely • Have fun at EV2</p>
+                </div>
+                
+                <!-- Live Indicator (in flow — no overlap with logo/tagline) -->
+                <div class="relative z-10 text-center mt-5">
+                    <div class="inline-flex items-center gap-x-2 bg-cyan-500/20 backdrop-blur-md px-4 py-2 rounded-full text-xs border border-cyan-400/50">
+                        <div class="w-2 h-2 bg-cyan-400 rounded-full animate-pulse shrink-0"></div>
+                        <span class="text-cyan-300 font-semibold" data-i18n="peopleInside">200+ people inside</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Login Form -->
+            <div class="flex-1 px-6 pt-8 pb-10">
+                <div class="max-w-sm mx-auto space-y-4">
+                    <div class="text-center mb-6">
+                        <h1 class="font-display text-2xl ev2-gradient mb-2" data-i18n="welcome">Welcome to EV2</h1>
+                        <p class="text-cyan-300 text-sm" data-i18n="hottest">The hottest nightclub in Nogales</p>
+                    </div>
+
+                    <!-- Login Options -->
+                    <button onclick="loginWithInstagram()" class="w-full flex items-center justify-center gap-x-3 bg-gradient-to-r from-pink-600 to-purple-600 hover:brightness-110 transition-all text-white font-semibold py-4 rounded-2xl shadow-lg active:scale-[0.985] border border-pink-400/50">
+                        <i class="fa-brands fa-instagram text-2xl"></i>
+                        <span data-i18n="continueIg">Continue with Instagram</span>
+                    </button>
+                    
+                    <div class="flex items-center gap-x-4 my-6">
+                        <div class="flex-1 h-px bg-cyan-500/30"></div>
+                        <span class="text-xs text-cyan-400 font-medium" data-i18n="or">OR</span>
+                        <div class="flex-1 h-px bg-cyan-500/30"></div>
+                    </div>
+
+                    <!-- Email Login -->
+                    <div class="space-y-3">
+                        <input id="email-input" type="email" value="guest@ev2clandestinoz.com" placeholder="Email" data-i18n-placeholder="email"
+                               class="w-full bg-slate-800/50 border border-cyan-500/30 focus:border-cyan-400 rounded-2xl px-5 py-3.5 text-sm placeholder:text-slate-500 outline-none backdrop-blur-sm">
+                        
+                        <input id="name-input" type="text" value="Guest" placeholder="Your name" data-i18n-placeholder="yourName"
+                               class="w-full bg-slate-800/50 border border-cyan-500/30 focus:border-cyan-400 rounded-2xl px-5 py-3.5 text-sm placeholder:text-slate-500 outline-none backdrop-blur-sm">
+                        
+                        <button onclick="loginWithEmail()" class="w-full ev2-button py-4 rounded-2xl flex items-center justify-center gap-x-2 shadow-lg">
+                            <i class="fa-solid fa-sign-in-alt"></i>
+                            <span data-i18n="enterClub">Enter the Club</span>
+                        </button>
+                    </div>
+
+                    <div class="mt-8 text-center space-y-2">
+                        <p class="text-xs text-cyan-400/70" data-i18n="ageOnly">18+ only • EV2 Clandestinoz</p>
+                        <p class="text-xs text-purple-400/70"><span data-i18n="agreePrefix">By entering, you agree to our </span><span class="underline cursor-pointer" data-i18n="terms">Terms</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main App Structure (rest remains same with EV2 theming) -->
+        <div id="screen-main" class="hidden min-h-screen flex flex-col">
+            <!-- Navigation and content will use ev2-gradient, ev2-glow, ev2-button classes -->
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>
+    <script>
+        // Include your existing JavaScript but update color references to use CSS variables
+        const nightclubName = 'EV2 Clandestinoz';
+        const nightclubCity = 'Nogales, Sonora';
+
+        const i18n = {
+            en: {
+                loading: 'STEPPING INTO THE CLUB...',
+                tagline: 'Send drinks • Flirt safely • Have fun at EV2',
+                peopleInside: '200+ people inside',
+                welcome: 'Welcome to EV2',
+                hottest: 'The hottest nightclub in Nogales',
+                continueIg: 'Continue with Instagram',
+                or: 'OR',
+                email: 'Email',
+                yourName: 'Your name',
+                enterClub: 'Enter the Club',
+                ageOnly: '18+ only • EV2 Clandestinoz',
+                agreePrefix: 'By entering, you agree to our ',
+                terms: 'Terms',
+                toggleLabel: 'ES'
+            },
+            es: {
+                loading: 'ENTRANDO AL CLUB...',
+                tagline: 'Envía drinks • Liga seguro • Diviértete en EV2',
+                peopleInside: '200+ personas adentro',
+                welcome: 'Bienvenido a EV2',
+                hottest: 'El antro más caliente de Nogales',
+                continueIg: 'Continuar con Instagram',
+                or: 'O',
+                email: 'Correo',
+                yourName: 'Tu nombre',
+                enterClub: 'Entrar al Club',
+                ageOnly: 'Solo +18 • EV2 Clandestinoz',
+                agreePrefix: 'Al entrar, aceptas nuestros ',
+                terms: 'Términos',
+                toggleLabel: 'EN'
+            }
+        };
+
+        let currentLang = localStorage.getItem('ev2-lang') || 'en';
+
+        function applyLanguage(lang) {
+            currentLang = lang === 'es' ? 'es' : 'en';
+            localStorage.setItem('ev2-lang', currentLang);
+            document.documentElement.lang = currentLang;
+
+            const dict = i18n[currentLang];
+            document.querySelectorAll('[data-i18n]').forEach((el) => {
+                const key = el.getAttribute('data-i18n');
+                if (dict[key] != null) el.textContent = dict[key];
+            });
+            document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+                const key = el.getAttribute('data-i18n-placeholder');
+                if (dict[key] != null) el.setAttribute('placeholder', dict[key]);
+            });
+
+            const label = document.getElementById('lang-toggle-label');
+            if (label) label.textContent = dict.toggleLabel;
+        }
+
+        function toggleLanguage() {
+            applyLanguage(currentLang === 'en' ? 'es' : 'en');
+        }
+
+        applyLanguage(currentLang);
+        
+        // Rest of your app JavaScript...
+    </script>
+</body>
+</html>

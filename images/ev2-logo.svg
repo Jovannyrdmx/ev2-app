@@ -1,0 +1,36 @@
+<!-- Create a web-optimized SVG logo inline for fast loading -->
+<svg id="ev2-logo" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" style="display:none;">
+  <!-- Colorful axolotl mascot (Nacho) -->
+  <defs>
+    <linearGradient id="headGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF1493;stop-opacity:1" />
+      <stop offset="25%" style="stop-color:#00FF00;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#FFD700;stop-opacity:1" />
+      <stop offset="75%" style="stop-color:#FF8C00;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0099FF;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Head -->
+  <circle cx="100" cy="80" r="45" fill="url(#headGradient)" />
+  
+  <!-- Left eye -->
+  <circle cx="80" cy="75" r="8" fill="white" />
+  <circle cx="80" cy="75" r="4" fill="black" />
+  
+  <!-- Right eye -->
+  <circle cx="120" cy="75" r="8" fill="white" />
+  <circle cx="120" cy="75" r="4" fill="black" />
+  
+  <!-- Left gill (pink) -->
+  <path d="M 50 70 Q 40 60 45 45 Q 55 55 60 65" fill="#FF1493" />
+  
+  <!-- Right gill (purple/cyan) -->
+  <path d="M 150 70 Q 160 60 155 45 Q 145 55 140 65" fill="#00BFFF" />
+  
+  <!-- Front left gill (pink) -->
+  <path d="M 60 100 Q 45 100 40 115" stroke="#FF1493" stroke-width="4" fill="none" />
+  
+  <!-- Front right gill (cyan) -->
+  <path d="M 140 100 Q 155 100 160 115" stroke="#00BFFF" stroke-width="4" fill="none" />
+</svg>

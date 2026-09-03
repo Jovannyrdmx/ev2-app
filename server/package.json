@@ -1,0 +1,25 @@
+{
+  "name": "easy-flirt-nightclub",
+  "version": "2.0.0",
+  "description": "Real-time nightclub drink ordering & flirting with SoftRestaurant11 integration",
+  "main": "nightclub-api.js",
+  "scripts": {
+    "start": "node nightclub-api.js",
+    "dev": "nodemon nightclub-api.js",
+    "ws": "node server.js",
+    "connect": "node connect-server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "jsonwebtoken": "^9.1.2",
+    "bcryptjs": "^2.4.3",
+    "pg": "^8.11.0",
+    "redis": "^4.6.0",
+    "ws": "^8.16.0",
+    "axios": "^1.6.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

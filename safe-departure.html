@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EV2 Safe Departure - Taxi System</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%);
+            color: #fff;
+            padding: 20px;
+        }
+        
+        .container { max-width: 1200px; margin: 0 auto; }
+        
+        /* Exit Modal */
+        .exit-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .exit-modal.show {
+            display: flex;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .exit-content {
+            background: linear-gradient(135deg, rgba(0, 191, 255, 0.1) 0%, rgba(255, 20, 147, 0.1) 100%);
+            border: 3px solid #00BFFF;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            animation: slideUp 0.5s ease;
+            box-shadow: 0 20px 60px rgba(0, 191, 255, 0.4);
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .exit-header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #FF1493;
+            padding-bottom: 20px;
+        }
+        
+        .exit-header h1 {
+            font-size: 2.2em;
+            background: linear-gradient(135deg, #00BFFF 0%, #FF1493 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        .exit-header p {
+            color: #FFD700;
+            font-size: 1.1em;
+            font-weight: bold;
+        }
+        
+        .warning-box {
+            background: rgba(255, 68, 68, 0.15);
+            border: 2px solid #FF4444;
+            border-radius: 12px;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .warning-box strong {
+            color: #FF1493;
+            font-size: 1.1em;
+        }
+        
+        .warning-text {
+            color: #FFD700;
+            font-size: 0.95em;
+            line-height: 1.6;
+            margin-top: 10px;
+        }
+        
+        .taxi-services {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 25px 0;
+        }
+        
+        .taxi-card {
+            background: linear-gradient(135deg, rgba(0, 191, 255, 0.05) 0%, rgba(157, 0, 255, 0.05) 100%);
+            border: 2px solid #00BFFF;
+            border-radius: 12px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+        
+        .taxi-card:hover {
+            border-color: #FF1493;
+            background: linear-gradient(135deg, rgba(0, 191, 255, 0.1) 0%, rgba(255, 20, 147, 0.1) 100%);
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 191, 255, 0.3);
+        }
+        
+        .taxi-icon {
+            font-size: 2em;
+            margin-bottom: 8px;
+        }
+        
+        .taxi-name {
+            font-weight: bold;
+            color: #00BFFF;
+            margin-bottom: 5px;
+            font-size: 0.95em;
+        }
+        
+        .taxi-info {
+            font-size: 0.85em;
+            color: #ccc;
+        }
+        
+        .rating {
+            color: #FFD700;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+        
+        /* Conduct Code Display */
+        .conduct-code-section {
+            display: none;
+            background: linear-gradient(135deg, rgba(0, 255, 0, 0.05) 0%, rgba(0, 191, 255, 0.05) 100%);
+            border: 2px solid #00FF00;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 25px 0;
+            animation: slideDown 0.5s ease;
+        }
+        
+        .conduct-code-section.show {
+            display: block;
+        }
+        
+        @keyframes slideDown {
+            from { transform: translateY(-20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .code-title {
+            color: #00FF00;
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .code-box {
+            background: #000;
+            border: 2px dashed #00BFFF;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            margin: 15px 0;
+        }
+        
+        .code-label {
+            color: #00BFFF;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            letter-spacing: 1px;
+        }
+        
+        .code-display {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #00FF00;
+            font-family: 'Courier New', monospace;
+            letter-spacing: 3px;
+            margin: 15px 0;
+            word-break: break-all;
+        }
+        
+        .code-expiry {
+            color: #FFD700;
+            font-size: 0.95em;
+            font-weight: bold;
+        }
+        
+        .code-instructions {
+            background: rgba(0, 191, 255, 0.1);
+            border-left: 3px solid #00BFFF;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            font-size: 0.9em;
+            line-height: 1.8;
+        }
+        
+        .instruction-item {
+            margin: 8px 0;
+            color: #00BFFF;
+        }
+        
+        .instruction-item strong {
+            color: #FF1493;
+        }
+        
+        .code-conduct-note {
+            background: rgba(255, 215, 0, 0.1);
+            border: 1px solid #FFD700;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 15px 0;
+            font-size: 0.9em;
+            color: #FFD700;
+            line-height: 1.6;
+        }
+        
+        .copy-button {
+            background: linear-gradient(135deg, #00BFFF 0%, #00FF00 100%);
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+            transition: all 0.3s ease;
+        }
+        
+        .copy-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(0, 191, 255, 0.3);
+        }
+        
+        .close-button {
+            background: linear-gradient(135deg, #FF1493 0%, #9D00FF 100%);
+            color: #fff;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 20px;
+            width: 100%;
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+        
+        .close-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(255, 20, 147, 0.4);
+        }
+        
+        /* Exit Button in App */
+        .exit-button-bar {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 500;
+        }
+        
+        .exit-btn {
+            background: linear-gradient(135deg, #FF1493 0%, #9D00FF 100%);
+            color: #fff;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 1em;
+            box-shadow: 0 10px 30px rgba(255, 20, 147, 0.4);
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .exit-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 15px 40px rgba(255, 20, 147, 0.6);
+        }
+        
+        .exit-icon {
+            font-size: 1.3em;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .taxi-services {
+                grid-template-columns: 1fr;
+            }
+            
+            .exit-content {
+                padding: 25px;
+            }
+            
+            .exit-header h1 {
+                font-size: 1.8em;
+            }
+            
+            .code-display {
+                font-size: 1.2em;
+            }
+        }
+        
+        .success-message {
+            background: rgba(0, 255, 0, 0.1);
+            border: 2px solid #00FF00;
+            color: #00FF00;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            text-align: center;
+            font-weight: bold;
+            animation: pulse 1s ease-in-out;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Exit Button (always visible) -->
+    <div class="exit-button-bar">
+        <button class="exit-btn" onclick="showExitModal()">
+            <span class="exit-icon">🚪</span>
+            <span>Leaving?</span>
+        </button>
+    </div>
+
+    <!-- Exit Modal -->
+    <div id="exitModal" class="exit-modal">
+        <div class="exit-content">
+            <!-- Header -->
+            <div class="exit-header">
+                <h1>🚕 Safe Departure</h1>
+                <p>EV2 Clandestinoz</p>
+            </div>
+
+            <!-- Warning -->
+            <div class="warning-box">
+                <strong>⚠️ IMPORTANT NOTICE ⚠️</strong>
+                <div class="warning-text">
+                    IF YOU ARE NOT BEHAVING AND CAUSING TROUBLE YOU WILL BE ARRESTED.<br>
+                    <strong>RESPECT THE CODE AND BE RESPECTFUL</strong>
+                </div>
+            </div>
+
+            <!-- Conduct Code Section -->
+            <div class="conduct-code-section" id="conductCodeSection">
+                <div class="code-title">✅ Your Safe Conduct Code</div>
+                <p style="text-align: center; margin-bottom: 15px; color: #00BFFF;">
+                    Valid for 45 minutes - Show to officers if pulled over
+                </p>
+                
+                <div class="code-box">
+                    <div class="code-label">Código de Conducta Segura</div>
+                    <div class="code-display" id="codeDisplay">EV2-0130-2200-5847-MX</div>
+                    <div class="code-expiry" id="codeExpiry">Expires in: 45 min</div>
+                </div>
+
+                <button class="copy-button" onclick="copyCode()">📋 Copy Code</button>
+
+                <div class="code-instructions">
+                    <strong style="color: #00FF00; display: block; margin-bottom: 10px;">How to Use Your Code:</strong>
+                    <div class="instruction-item">1. Keep this code visible on your phone</div>
+                    <div class="instruction-item">2. If stopped by police, <strong>show this code</strong></div>
+                    <div class="instruction-item">3. Code proves you left EV2 in good standing</div>
+                    <div class="instruction-item">4. Valid only in Nogales, Sonora, Mexico</div>
+                    <div class="instruction-item">5. Only valid for <strong>45 minutes</strong> from generation</div>
+                </div>
+
+                <div class="code-conduct-note">
+                    <strong>📝 Conduct Agreement:</strong><br>
+                    This code is only valid if you are behaving respectfully and following all traffic laws. 
+                    Disrespectful behavior, aggressive actions, or causing trouble will invalidate this code. 
+                    Respect officers, follow rules, and arrive home safely.
+                </div>
+            </div>
+
+            <!-- Taxi Services -->
+            <div>
+                <h2 style="color: #FF1493; text-align: center; margin: 30px 0 20px 0; font-size: 1.3em;">
+                    🚕 Choose a Taxi Service
+                </h2>
+
+                <div class="taxi-services">
+                    <!-- Sitio 1 -->
+                    <div class="taxi-card" onclick="selectTaxi('sitio_1', 'Sitio Central')">
+                        <div class="taxi-icon">🚕</div>
+                        <div class="taxi-name">Sitio Central</div>
+                        <div class="taxi-info">+52-641-314-0000</div>
+                        <div class="rating">⭐ 4.8 • 5-10 min</div>
+                    </div>
+
+                    <!-- Sitio 2 -->
+                    <div class="taxi-card" onclick="selectTaxi('sitio_2', 'Radio Taxi')">
+                        <div class="taxi-icon">📻</div>
+                        <div class="taxi-name">Radio Taxi</div>
+                        <div class="taxi-info">+52-641-313-5555</div>
+                        <div class="rating">⭐ 4.6 • 8-12 min</div>
+                    </div>
+
+                    <!-- Sitio 3 -->
+                    <div class="taxi-card" onclick="selectTaxi('sitio_3', 'Taxis Seguros')">
+                        <div class="taxi-icon">🔒</div>
+                        <div class="taxi-name">Taxis Seguros</div>
+                        <div class="taxi-info">+52-641-312-1111</div>
+                        <div class="rating">⭐ 4.9 • 6-10 min</div>
+                    </div>
+
+                    <!-- Uber -->
+                    <div class="taxi-card" onclick="selectTaxi('uber', 'Uber México')">
+                        <div class="taxi-icon">📱</div>
+                        <div class="taxi-name">Uber</div>
+                        <div class="taxi-info">Open Uber App</div>
+                        <div class="rating">⭐ 4.7 • 5-15 min</div>
+                    </div>
+
+                    <!-- InDriver -->
+                    <div class="taxi-card" onclick="selectTaxi('indriver', 'InDriver')">
+                        <div class="taxi-icon">🔄</div>
+                        <div class="taxi-name">InDriver</div>
+                        <div class="taxi-info">Open InDriver App</div>
+                        <div class="rating">⭐ 4.6 • 5-15 min</div>
+                    </div>
+
+                    <!-- Beat -->
+                    <div class="taxi-card" onclick="selectTaxi('beat', 'Beat')">
+                        <div class="taxi-icon">🎵</div>
+                        <div class="taxi-name">Beat</div>
+                        <div class="taxi-info">Open Beat App</div>
+                        <div class="rating">⭐ 4.5 • 5-15 min</div>
+                    </div>
+                </div>
+
+                <div id="successMessage" class="success-message" style="display: none;"></div>
+            </div>
+
+            <!-- Close Button -->
+            <button class="close-button" onclick="closeExitModal()">✅ I'll Book My Ride Now</button>
+            <button class="close-button" style="background: linear-gradient(135deg, #888 0%, #555 100%); margin-top: 10px;" onclick="closeExitModal()">
+                ✋ Not Leaving Yet
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Generate Safe Conduct Code
+        function generateConductCode() {
+            const now = new Date();
+            const date = String(now.getDate()).padStart(2, '0');
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const hour = String(now.getHours()).padStart(2, '0');
+            const random = Math.floor(Math.random() * 9000 + 1000);
+            
+            return `EV2-${month}${date}-${hour}00-${random}-MX`;
+        }
+
+        function showExitModal() {
+            const modal = document.getElementById('exitModal');
+            modal.classList.add('show');
+            
+            // Generate and display conduct code
+            const code = generateConductCode();
+            document.getElementById('codeDisplay').textContent = code;
+            
+            // Show conduct code section
+            document.getElementById('conductCodeSection').classList.add('show');
+            
+            // Set expiry timer
+            startExpiryTimer();
+        }
+
+        function closeExitModal() {
+            const modal = document.getElementById('exitModal');
+            modal.classList.remove('show');
+        }
+
+        function selectTaxi(serviceId, serviceName) {
+            const successDiv = document.getElementById('successMessage');
+            successDiv.textContent = `✅ ${serviceName} selected! You'll receive a conduct code valid for 45 minutes. Drive safely!`;
+            successDiv.style.display = 'block';
+            
+            // Scroll to success message
+            setTimeout(() => {
+                successDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
+
+            // Keep showing for a moment then close
+            setTimeout(() => {
+                closeExitModal();
+            }, 3000);
+        }
+
+        function copyCode() {
+            const code = document.getElementById('codeDisplay').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                alert(`Code copied to clipboard: ${code}`);
+            }).catch(() => {
+                alert('Could not copy code');
+            });
+        }
+
+        function startExpiryTimer() {
+            const expiryDiv = document.getElementById('codeExpiry');
+            let minutesLeft = 45;
+            
+            const timer = setInterval(() => {
+                minutesLeft--;
+                expiryDiv.textContent = `Expires in: ${minutesLeft} min`;
+                
+                if (minutesLeft === 0) {
+                    clearInterval(timer);
+                    expiryDiv.textContent = 'Code expired';
+                    expiryDiv.style.color = '#FF4444';
+                }
+            }, 60000); // Update every minute
+        }
+
+        // Demo - you can remove this
+        console.log('Safe Departure System loaded. Click "Leaving?" button to test.');
+    </script>
+</body>
+</html>

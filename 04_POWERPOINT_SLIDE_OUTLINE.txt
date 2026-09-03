@@ -1,0 +1,371 @@
+# EV2 INVESTOR PRESENTATION
+## PowerPoint Slide Structure (Ready to Convert)
+
+---
+
+## SLIDE 1: TITLE SLIDE
+**Dark background, modern design**
+
+# EV2
+## The Operating System for Nightlife
+
+Transform Nightclubs. Maximize Revenue. Scale Operations.
+
+[Your Name]  
+[Your Title]  
+[Date]
+
+---
+
+## SLIDE 2: THE PROBLEM
+**Show nightclub pain points**
+
+### Nightclubs Are Inefficient
+- ❌ Fragmented systems (POS, staff, payments)
+- ❌ No real-time analytics
+- ❌ Lost revenue opportunities
+- ❌ Poor customer experience
+- ❌ Complicated operations
+
+**Market:** 100,000+ nightclubs globally  
+**Industry:** $180B annually  
+**Growth:** +12% per year
+
+---
+
+## SLIDE 3: THE SOLUTION
+**Highlight EV2 benefits**
+
+# EV2: Complete Operating System
+
+✅ Unified staff management  
+✅ Integrated POS connections  
+✅ Gamified drink ordering  
+✅ Real-time analytics  
+✅ Mobile apps (iOS & Android)  
+✅ VIP table management  
+✅ Loyalty programs  
+
+**Result:** +15-25% Revenue | -20-30% Costs
+
+---
+
+## SLIDE 4: KEY FEATURES
+**Visual feature showcase**
+
+| Feature | Benefit |
+|---------|---------|
+| 🎭 Flirt & Drinks | Viral growth, gamified |
+| 📊 Analytics | Data-driven decisions |
+| 💰 Pricing | Revenue optimization |
+| 👥 VIP Tables | Premium experience |
+| 💳 Loyalty | Customer retention |
+| 📱 Mobile | Staff engagement |
+| 🔌 POS Integration | Existing system sync |
+| 🌐 Multi-location | Scale easily |
+
+---
+
+## SLIDE 5: MARKET OPPORTUNITY
+**Large market graphic**
+
+# $180 Billion Market
+
+- **100,000+** nightclubs globally
+- **$500K-$5M** annual revenue per venue
+- **+12%** annual growth
+- **Post-COVID:** +40% in 2023
+- **Our Focus:** Premium nightclubs (80% revenue)
+
+**Target Addressable Market:** $500M+ by Year 5
+
+---
+
+## SLIDE 6: BUSINESS MODEL
+**Revenue streams table**
+
+# Revenue Per Venue (Monthly)
+
+| Stream | Amount |
+|--------|--------|
+| SaaS Subscription | $2,000 |
+| Transaction Fees (2-5%) | $3,000 |
+| Premium Features | $200 |
+| **TOTAL** | **$5,200** |
+
+**Annual per Venue:** $62,400  
+**Gross Margin:** 78%  
+**Payback Period:** 3-4 months
+
+---
+
+## SLIDE 7: FINANCIAL PROJECTIONS
+**5-year growth chart**
+
+# 5-Year Growth Plan
+
+```
+Year 1:  50 venues   →  $3.1M ARR
+Year 2:  200 venues  →  $12.5M ARR
+Year 3:  500 venues  →  $31.2M ARR
+Year 4:  1,000 venues → $62.4M ARR
+Year 5:  2,000 venues → $124.8M ARR
+```
+
+**Growth Rate:** 40% YoY  
+**Profitability:** Year 2  
+**EBITDA Margin Year 5:** 62%
+
+---
+
+## SLIDE 8: UNIT ECONOMICS
+**Strong metrics display**
+
+# Why We Win
+
+| Metric | Value |
+|--------|-------|
+| LTV:CAC Ratio | **78:1** ✅ |
+| CAC Payback | **3-4 months** ✅ |
+| Churn Rate | **<5%** ✅ |
+| Gross Margin | **78%** ✅ |
+| Net Revenue Retention | **115%** ✅ |
+
+*These metrics indicate a healthy, scalable business*
+
+---
+
+## SLIDE 9: COMPETITIVE ADVANTAGES
+**Why EV2 wins**
+
+# We're Different
+
+1. **Custom-Built** - For nightlife, not rebranded POS
+2. **Complete Solution** - Staff to customers to analytics
+3. **Network Effects** - More venues = more valuable
+4. **High Switching Costs** - Deep POS integration
+5. **Experienced Team** - 10+ years in industry
+6. **Multiple Revenue** - Diversified, resilient
+7. **Real-time Tech** - WebSocket, not polling
+
+---
+
+## SLIDE 10: GO-TO-MARKET
+**3-phase expansion**
+
+# Expansion Strategy
+
+**Phase 1 (6 months):** Foundation
+- Mexico validation
+- 50 venues
+- $2.6M ARR
+
+**Phase 2 (12 months):** US Expansion
+- 3-5 major cities
+- 150 venues
+- $12.5M ARR
+
+**Phase 3 (Year 2+):** Global Scale
+- 20+ cities
+- 500+ venues
+- $31M+ ARR
+
+---
+
+## SLIDE 11: THE ASK
+**Funding request**
+
+# Series A: $2M
+
+## Use of Funds
+
+| Area | Amount | % |
+|------|--------|-----|
+| Sales & Marketing | $800K | 40% |
+| Product Development | $600K | 30% |
+| Operations & Support | $400K | 20% |
+| Infrastructure | $200K | 10% |
+
+**Post-Money Valuation:** $5M  
+**Equity Offered:** 40%
+
+---
+
+## SLIDE 12: TRACTION
+**Proof of concept**
+
+# We Have Proof
+
+✅ **Live Product** - Revenue-generating system  
+✅ **Real Customers** - Paying venues  
+✅ **Strong Ratings** - 4.8/5 from early users  
+✅ **Case Studies** - 3 published success stories  
+✅ **Growth** - 10 → 50 venues in pipeline  
+✅ **Integration** - NationalSoft live  
+
+**We're not a concept. We're a business.**
+
+---
+
+## SLIDE 13: TEAM
+**Meet the founders**
+
+# The Team
+
+👨‍💼 **CEO/Founder**
+- 10+ years nightclub operations
+- Network of 50+ venues
+- Growth expertise
+
+💻 **CTO**
+- Full-stack engineer
+- SaaS experience
+- Scaled to 500K users
+
+🎯 **VP Operations**
+- Nightclub manager
+- Vendor relationships
+- Operational expertise
+
+*Hiring: Sales, Customer Success, Engineering*
+
+---
+
+## SLIDE 14: WHY INVEST NOW
+**Timing is perfect**
+
+# Perfect Timing
+
+✅ Post-COVID boom (nightlife +40% in 2023)  
+✅ Proven product generating revenue  
+✅ Clear market with 100,000+ customers  
+✅ Strong unit economics (78:1 LTV:CAC)  
+✅ Multiple revenue streams  
+✅ Experienced team with network  
+✅ Fragmented market (no dominant player)  
+✅ Clear path to profitability  
+
+**The opportunity is now.**
+
+---
+
+## SLIDE 15: 5-YEAR VISION
+**Our big picture**
+
+# Build the Operating System for Global Nightlife
+
+**Year 1-2:** Establish market presence  
+**Year 2-3:** Rapid scaling (500+ venues)  
+**Year 3-5:** Global dominance (1,000-2,000 venues)  
+**Year 5+:** Acquisition or IPO
+
+**Year 5 Target:** $100M+ ARR, $600M+ Valuation
+
+---
+
+## SLIDE 16: INVESTMENT THESIS
+**Why this is a great investment**
+
+# The Math
+
+| Scenario | Venues | ARR | Valuation | ROI |
+|----------|--------|-----|-----------|-----|
+| Conservative | 1,000 | $62.4M | $312M | **156x** |
+| Realistic | 2,000 | $124.8M | $624M | **312x** |
+| Optimistic | 5,000 | $312M | $1.56B | **780x** |
+
+**$2M investment at 2% market share = $624M exit**
+
+---
+
+## SLIDE 17: CALL TO ACTION
+**Next steps**
+
+# Let's Build Together
+
+1. **Schedule Demo** (30 min)
+   - See platform live
+
+2. **Deep Dive** (2 hours)
+   - Financials & strategy
+
+3. **Meet Team** (Ongoing)
+   - Weekly updates
+
+4. **Term Sheet** (7-14 days)
+   - Legal process
+
+**What's your next step?**
+
+---
+
+## SLIDE 18: FINAL SLIDE
+**Inspiring close**
+
+# EV2: Operating System for Nightlife
+
+*Together, we're building the future of the $180B nightlife industry*
+
+**Ready to transform nightclubs?**
+
+[Your Name]  
+[Your Email]  
+[Your Phone]  
+[Your LinkedIn]
+
+---
+
+## PRESENTATION TIPS
+
+### Before Presenting
+- Practice 20+ times
+- Time yourself (45 minutes target)
+- Test all links/demos
+- Have backup internet
+- Print one-pagers
+
+### During Presentation
+- Tell a story (problem → solution → traction)
+- Use visuals, not bullet points
+- Show passion & vision
+- Listen to investor concerns
+- Ask great questions
+
+### After Presentation
+- Send thank you email (24 hours)
+- Share supporting docs
+- Follow up weekly
+- Move toward term sheet
+
+---
+
+# HOW TO CREATE THIS IN POWERPOINT
+
+## Step 1: Open PowerPoint
+- Create new blank presentation
+- Set professional template
+
+## Step 2: Design
+- Use consistent color scheme (dark blue + light accent)
+- Font: Helvetica, Arial, or Inter (clean fonts)
+- One idea per slide
+- High-quality images/icons
+
+## Step 3: Add Content
+- Copy slide text from this outline
+- Add relevant charts/graphs
+- Include your company logo
+- Add team photos
+
+## Step 4: Polish
+- Ensure consistent formatting
+- Add transitions (subtle)
+- Test on projector
+- Save as PDF backup
+
+## Step 5: Present
+- Use clicker/presenter view
+- Make eye contact
+- Tell the story naturally
+- Be ready for questions
+
