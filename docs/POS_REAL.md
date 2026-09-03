@@ -1,6 +1,6 @@
 # SoftRestaurant 11 — Mecanismo real de integración (Paso 0.9)
 
-**Estado:** BORRADOR en investigación (3 de septiembre de 2026). Este documento reemplaza las suposiciones del código
+**Estado:** CERRADO para la Fase 0 (3 de septiembre de 2026); se completa en la Fase 4 con el mecanismo oficial de escritura. Este documento reemplaza las suposiciones del código
 heredado (`/api/tables`, `/api/menu/drinks`, `/api/orders` con header `X-API-Key`), que **no corresponden a ningún
 producto documentado de National Soft**.
 
@@ -27,7 +27,43 @@ producto documentado de National Soft**.
 El `pos-mock` (Paso 4.2) se construirá sobre el contrato que National Soft entregue; hasta entonces el cliente
 `SoftRestaurant11Client` del código heredado se considera **no válido**.
 
-## 3. Datos que faltan (los aporta el dueño/desarrollador)
+## 3. Instalación real del club (confirmado el 3-sep-2026)
+
+| Dato | Valor |
+|---|---|
+| Producto / versión | SoftRestaurant **11.0.98** |
+| Motor de base de datos | **Microsoft SQL Server** (instancia con nombre; el cliente resuelve el puerto dinámico 49767 vía SQL Server Browser). No es MySQL. |
+| Servidor de base de datos | **`192.168.2.108`** en la red local del club (servidor dedicado). En esa red también está la máquina del dueño. |
+| Acceso remoto actual | La PC del desarrollador llega a la red del club por **Radmin VPN** y tiene SoftRestaurant 11 instalado como **cliente** conectado a la base real. En la PC del desarrollador solo existe LocalDB (`MSSQLLocalDB`) con bases de sistema; no hay copia local de datos. |
+| Cadena de conexión | Cifrada en `conexionDB.dbl` dentro de la instalación. **No se abre, no se descifra, no se versiona.** |
+| Servicios observados | `SrvReportesSR` (servicio de reportes de SR) es el proceso que mantiene la conexión al servidor. |
+| Licenciamiento | `license.settings` apunta a `licensingapi.nationalsoft.com.mx`; es solo activación de licencia, **no** es una API de integración. No se documenta su contenido. |
+| Ambiente de pruebas | **No existe.** Todo lo visible desde la PC del desarrollador es producción. |
+
+### Reglas derivadas
+
+1. Ninguna consulta desde la PC del desarrollador contra `192.168.2.108` que no sea estrictamente de lectura, y ninguna prueba de la app contra esa conexión antes de la Fase 7.
+2. Para la Fase 4 se crea un **ambiente de pruebas**: respaldo (`.bak`) de la base del club restaurado en una instancia SQL Server Express aparte (en la PC del desarrollador o en una VM), con datos anonimizados de clientes si los hubiera.
+3. El acceso por Radmin VPN a la red del POS se audita en la Fase 8 (quién tiene acceso, contraseñas, bitácora).
+
+## 4. Mecanismo elegido: agente local (decisión D16)
+
+Un servicio de Windows ligero (`agent/`, Node.js, en este repositorio) instalado en el servidor `192.168.2.108`:
+
+- Se conecta a SQL Server **localmente** con un usuario de **solo lectura** creado para él (nunca el usuario de SoftRestaurant).
+- Lee catálogo, precios, inventario, mesas y cuentas abiertas/cerradas; los envía a la API de EV2 por HTTPS con una llave propia del agente (rotable), con reintentos y cola local.
+- No abre puertos de entrada en el club; no modifica nada del POS.
+- Las **comandas hacia el POS** solo se implementan cuando National Soft entregue el mecanismo oficial (programa de integración / SoftRestaurant Service). Hasta entonces, el bartender captura en el POS y la conciliación diaria detecta diferencias (plan B del manual).
+
+## 5. Pendientes (no bloquean la Fase 1)
+
+- [ ] Enviar formulario "Quiero integrar mi sistema" (softrestaurant.com/integraciones) y correo para llave `AuthorizedApp` — texto preparado en la bitácora del 3-sep.
+- [ ] Descargar y leer la guía ERP/PMS de SR11 (PDF 1.22 MB) — pendiente de autorización.
+- [ ] Add-ons licenciados en el club (e-Delivery, SR Móvil, Delivery Manager, e-Menu QR, ERP/PMS, Analytics, Payments).
+- [ ] Nombre de la instancia y de la base en `192.168.2.108` (se obtiene en el servidor con `Get-Service` / SSMS; solo nombres).
+- [ ] Quién administra el servidor del POS (distribuidor National Soft o interno) para pedir el usuario de solo lectura y el respaldo.
+
+## 6. Datos que faltaban al inicio (histórico)
 
 - [ ] Versión exacta instalada de SoftRestaurant (11.x.x) y edición (Standard / Professional / Enterprise).
 - [ ] Add-ons y licencias activas (e-Delivery, SR Móvil, Delivery Manager, ERP/PMS, Analytics).
@@ -37,7 +73,7 @@ El `pos-mock` (Paso 4.2) se construirá sobre el contrato que National Soft entr
 - [ ] ¿Hay una sucursal o base de pruebas separada de la caja activa?
 - [ ] Contacto del distribuidor o ejecutivo de National Soft que atiende al club.
 
-## 4. Acciones
+## 7. Acciones originales (histórico)
 
 1. Enviar hoy el formulario "Quiero integrar mi sistema" en softrestaurant.com/integraciones (plataforma: Móvil + Web;
    proyecto: app de pedidos en mesa/barra para nightclub con sincronización de menú, inventario y comandas).
@@ -47,7 +83,7 @@ El `pos-mock` (Paso 4.2) se construirá sobre el contrato que National Soft entr
    de la red del club y documentar tablas relevantes.
 5. Actualizar `docs/DECISIONES.md` D13 con el mecanismo definitivo y cerrar este paso.
 
-## 5. Referencias
+## 8. Referencias
 
 - https://api.softrestaurant.com.mx/
 - https://softrestaurant.com/integraciones
