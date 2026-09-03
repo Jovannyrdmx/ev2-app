@@ -5,6 +5,8 @@
 require('dotenv').config();
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -19,6 +21,18 @@ const drinkRoutes = require('./routes/drinks');
 const orderRoutes = require('./routes/orders');
 const tableRoutes = require('./routes/tables');
 const reservationRoutes = require('./routes/reservations');
+
+// The OpenAPI contract is the agreement between backend, web and mobile.
+// It is served at /api/docs; a missing file must not stop the API from starting.
+function loadOpenApi() {
+  try {
+    const YAML = require('yaml');
+    return YAML.parse(fs.readFileSync(path.resolve(__dirname, '../openapi.yaml'), 'utf8'));
+  } catch (err) {
+    console.warn('OpenAPI spec unavailable:', err.message);
+    return null;
+  }
+}
 
 function buildCors() {
   const origins = (process.env.ALLOWED_ORIGINS || '')
@@ -82,6 +96,21 @@ function createApp() {
   app.use('/api', orderRoutes);
   app.use('/api', tableRoutes);
   app.use('/api', reservationRoutes);
+
+  // Interactive API documentation (disable in production with SERVE_API_DOCS=false).
+  if (process.env.SERVE_API_DOCS !== 'false') {
+    const spec = loadOpenApi();
+    if (spec) {
+      const swaggerUi = require('swagger-ui-express');
+      app.get('/api/openapi.yaml', (req, res) => {
+        res.type('text/yaml').sendFile(path.resolve(__dirname, '../openapi.yaml'));
+      });
+      app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(spec, {
+        customSiteTitle: 'EV2 API',
+        swaggerOptions: { persistAuthorization: true },
+      }));
+    }
+  }
 
   // POS webhooks are implemented in phase 4.
   app.post('/api/webhooks/pos', (req, res, next) => next(

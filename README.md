@@ -37,6 +37,12 @@ curl http://localhost:3000/health     # API
 curl http://localhost:4000/health     # WebSocket
 ```
 
+Documentación interactiva de la API: <http://localhost:3000/api/docs>
+(contrato en `server/openapi.yaml`; se valida en CI con `npm run lint:api`).
+
+```
+```
+
 > Nota: hasta completar los pasos 0.4–0.7 del manual las rutas de Docker y los scripts de `server/package.json`
 > están en proceso de corrección tras la reorganización de carpetas.
 
