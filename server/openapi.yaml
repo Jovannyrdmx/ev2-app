@@ -341,7 +341,13 @@ paths:
                   events:
                     type: array
                     items: { $ref: '#/components/schemas/Event' }
-                  last_id: { type: integer }
+                  last_id:
+                    type: string
+                    description: |
+                      Identificador del último evento entregado. Es una cadena porque en la
+                      base de datos es un entero de 64 bits y JavaScript pierde precisión
+                      por encima de 2^53. Guárdalo tal cual y devuélvelo en `since_id`.
+                    example: '42'
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /api/nightclubs/{nightclubId}/dashboard:
@@ -1438,7 +1444,9 @@ components:
     Event:
       type: object
       properties:
-        id: { type: integer }
+        id:
+          type: string
+          description: Entero de 64 bits serializado como cadena (ver `last_id`).
         type:
           type: string
           example: order_created

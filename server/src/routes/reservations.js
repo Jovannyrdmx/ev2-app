@@ -70,7 +70,8 @@ const RESERVATION_SELECT = `
     JOIN users u ON u.id = r.user_id
     LEFT JOIN LATERAL (
       SELECT json_agg(json_build_object('id', ra.id, 'type', ra.addon_type, 'name', ra.name,
-                                        'price', ra.price, 'quantity', ra.quantity)) AS addons
+                                        -- ::text: money stays a two-decimal string.
+                                        'price', ra.price::text, 'quantity', ra.quantity)) AS addons
         FROM reservation_addons ra WHERE ra.reservation_id = r.id
     ) a ON true`;
 

@@ -20,3 +20,6 @@ Thumbs.db
 
 # Developer overrides (see deploy/docker-compose.override.example.yml)
 deploy/docker-compose.override.yml
+
+# Archivos que la app de Claude guarda automáticamente al enviarlos al chat
+Claude outputs/

@@ -17,6 +17,24 @@ jobs:
     defaults:
       run:
         working-directory: server
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: ci-password
+          POSTGRES_DB: ev2_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ci-password
+      DB_NAME: ev2_test
     steps:
       - uses: actions/checkout@v4
 
@@ -35,8 +53,8 @@ jobs:
       - name: Validate OpenAPI contract
         run: npm run lint:api
 
-      - name: Tests
-        run: npm test -- --passWithNoTests
+      - name: Tests with coverage
+        run: npm run test:coverage
 
   docker:
     name: Docker images build

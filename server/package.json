@@ -15,13 +15,38 @@
     "seed": "node seeds/run.js",
     "test": "jest --runInBand",
     "lint": "eslint src",
-    "lint:api": "redocly lint openapi.yaml"
+    "lint:api": "redocly lint openapi.yaml",
+    "test:coverage": "jest --runInBand --coverage"
   },
   "jest": {
     "testEnvironment": "node",
     "testMatch": [
       "**/tests/**/*.test.js"
-    ]
+    ],
+    "setupFiles": [
+      "<rootDir>/tests/setup.js"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/index.js",
+      "!src/ws.js",
+      "!src/services/*-system.js",
+      "!src/services/dance-floor-manager.js",
+      "!src/services/nightclub-tables.js",
+      "!src/services/pos/**"
+    ],
+    "coverageReporters": [
+      "text-summary",
+      "text"
+    ],
+    "coverageThreshold": {
+      "./src/routes/": {
+        "statements": 70,
+        "branches": 60,
+        "lines": 70
+      }
+    },
+    "testTimeout": 20000
   },
   "dependencies": {
     "axios": "^1.7.9",

@@ -288,7 +288,7 @@ CREATE TABLE transactions (
   type              VARCHAR(30) NOT NULL
                     CHECK (type IN ('drink_order','bottle_service','tip','song_request','reservation_deposit',
                                     'reservation_balance','refund','valet','withdrawal','adjustment')),
-  direction         CHAR(3) NOT NULL CHECK (direction IN ('in','out')),
+  direction         VARCHAR(3) NOT NULL CHECK (direction IN ('in','out')),
   amount            NUMERIC(12,2) NOT NULL CHECK (amount > 0),
   currency          CHAR(3) NOT NULL CHECK (currency IN ('MXN','USD')),
   status            VARCHAR(20) NOT NULL DEFAULT 'pending'
