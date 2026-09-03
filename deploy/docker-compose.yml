@@ -1,5 +1,6 @@
 # EV2 Clandestinoz - local / staging stack
-# Usage (from repo root):  docker compose -f deploy/docker-compose.yml up -d
+# Usage (from repo root):  docker compose --env-file .env -f deploy/docker-compose.yml up -d
+# NOTE: --env-file is required because Compose looks for .env next to this file (deploy/), not in the repo root.
 # Required in .env: DB_PASSWORD, JWT_SECRET (no defaults on purpose).
 
 name: ev2

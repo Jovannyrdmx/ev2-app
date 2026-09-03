@@ -29,8 +29,8 @@ docs/          Manual, plan, bitácora, decisiones y documentación histórica (
 Requisitos: Docker Desktop y Node.js 18+.
 
 ```
-cp .env.example .env
-docker compose -f deploy/docker-compose.yml up -d
+cp .env.example .env      # then set DB_PASSWORD and JWT_SECRET (required)
+docker compose --env-file .env -f deploy/docker-compose.yml up -d
 curl http://localhost:3000/health     # API
 curl http://localhost:4000/health     # WebSocket
 ```
