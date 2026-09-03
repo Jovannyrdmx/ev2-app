@@ -1,0 +1,37 @@
+{
+  "$comment": "Lista de precios oficial de EV2 Clandestinoz, vigente desde enero de 2026, tomada de la imagen 'VIP PRECIOS' entregada por el dueño el 2026-09-03. 'included_tickets' son las personas que cubre el precio base; 'max_extras' son las personas adicionales permitidas, cada una paga el boleto del evento. Las mesas GENERAL no aparecen en la lista de precios.",
+  "version": 1,
+  "effective_from": "2026-01-01",
+  "currency": "MXN",
+  "zones": [
+    { "section": "ZONA ROJA", "base_price": 5000, "included_tickets": 8, "max_extras": 0, "color": "#FF2D2D", "sort_order": 1, "includes": ["8 personas", "Sin extras"] },
+    { "section": "ZONA AZUL", "base_price": 4500, "included_tickets": 10, "max_extras": 2, "color": "#1E90FF", "sort_order": 2, "includes": ["10 personas", "2 extras"] },
+    { "section": "ZONA ROSA", "base_price": 4000, "included_tickets": 6, "max_extras": 2, "color": "#FF1493", "sort_order": 3, "includes": ["6 personas", "2 extras"] },
+    { "section": "CELEBRATION SUITE", "base_price": 8000, "included_tickets": 8, "max_extras": 2, "color": "#4FC3F7", "sort_order": 4, "includes": ["8 personas", "2 extras"] },
+    { "section": "VIP ELEVADO", "base_price": 6000, "included_tickets": 8, "max_extras": 2, "color": "#FF1493", "sort_order": 5, "includes": ["8 personas", "2 extras"] },
+    { "section": "ZONA DIAMANTE", "base_price": 5000, "included_tickets": 6, "max_extras": 2, "color": "#FFFFFF", "sort_order": 6, "includes": ["6 personas", "2 extras"] },
+    { "section": "ZONA DOBLE DIAMANTE", "base_price": 6000, "included_tickets": 6, "max_extras": 2, "color": "#29B6F6", "sort_order": 7, "includes": ["6 personas", "2 extras"] },
+    { "section": "GENERAL", "base_price": 0, "included_tickets": 4, "max_extras": 0, "color": "#9E9E9E", "sort_order": 99, "reservable": false, "includes": ["Mesas de entrada general, no reservables"] }
+  ],
+  "zone_overrides_by_table": [
+    { "code": "VIP46", "base_price": 8000, "included_tickets": 10, "max_extras": 2, "note": "VIP 46 de Zona Doble Diamante: 8,000 con 10 personas segun la lista oficial" }
+  ],
+  "bottles": [
+    { "code": "house_wine", "name": "Vino de la Casa", "price": 400, "servings": 4 },
+    { "code": "premium_wine", "name": "Vino Premium", "price": 700, "servings": 4 },
+    { "code": "champagne", "name": "Champagne", "price": 1200, "servings": 4 },
+    { "code": "vodka_bottle", "name": "Vodka Botella", "price": 1400, "servings": 8 },
+    { "code": "tequila_bottle", "name": "Tequila Botella", "price": 1100, "servings": 8 },
+    { "code": "rum_bottle", "name": "Ron Botella", "price": 1200, "servings": 8 }
+  ],
+  "addons": [
+    { "code": "sparklers", "name": "Sparklers (Bengalas)", "price": 300 },
+    { "code": "decor_upgrade", "name": "Upgrade Decoracion", "price": 500 },
+    { "code": "premium_bottle_service", "name": "Premium Bottle Service", "price": 800 },
+    { "code": "vip_wristband", "name": "Pulsera VIP", "price": 100 },
+    { "code": "photo_booth", "name": "Photo Booth", "price": 600 },
+    { "code": "dj_shoutout", "name": "DJ Shout-out", "price": 400 },
+    { "code": "vip_parking", "name": "Estacionamiento VIP", "price": 150 },
+    { "code": "coat_check", "name": "Coat Check VIP", "price": 50 }
+  ]
+}
