@@ -533,7 +533,11 @@ paths:
         - { $ref: '#/components/parameters/NightclubId' }
         - name: section
           in: query
-          schema: { type: string, example: vip }
+          schema: { type: string, example: ZONA DIAMANTE }
+        - name: floor
+          in: query
+          description: EV2 Clandestinoz tiene dos plantas.
+          schema: { type: string, enum: [baja, alta, ambas] }
         - name: status
           in: query
           schema:
@@ -551,6 +555,89 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/Table' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/floor-plan:
+    get:
+      operationId: getNightclubsByNightclubIdFloorPlan
+      tags: [Mesas]
+      summary: Plano completo del local
+      description: |
+        Todo lo necesario para dibujar el mapa: mesas con sus coordenadas y ocupación
+        actual, las áreas que no son mesas (barra, pista, cabina del DJ, entrada, baños)
+        y el tamaño del lienzo. EV2 Clandestinoz tiene dos plantas: sin filtro se
+        devuelven ambas.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: floor
+          in: query
+          schema: { type: string, enum: [baja, alta, ambas] }
+      responses:
+        '200':
+          description: Plano
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  canvas:
+                    type: [object, 'null']
+                    properties:
+                      width: { type: integer }
+                      height: { type: integer }
+                  floors: { type: array, items: { type: string } }
+                  tables:
+                    type: array
+                    items:
+                      allOf:
+                        - { $ref: '#/components/schemas/Table' }
+                        - type: object
+                          properties:
+                            seated: { type: integer, description: Personas sentadas ahora mismo. }
+                  landmarks:
+                    type: array
+                    items: { $ref: '#/components/schemas/Landmark' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/tables/stats:
+    get:
+      operationId: getNightclubsByNightclubIdTablesStats
+      tags: [Mesas]
+      summary: Ocupación del local
+      description: |
+        Requiere personal de piso (`waiter`, `hostess`, `bartender`, `manager`).
+        Devuelve el total del club y el desglose por piso y por zona, con el porcentaje
+        de mesas ocupadas y el de lugares usados sobre el aforo.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Ocupación
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { $ref: '#/components/schemas/OccupancyBucket' }
+                  floors:
+                    type: array
+                    items:
+                      allOf:
+                        - type: object
+                          properties:
+                            floor: { type: string }
+                        - { $ref: '#/components/schemas/OccupancyBucket' }
+                        - type: object
+                          properties:
+                            sections:
+                              type: array
+                              items:
+                                allOf:
+                                  - type: object
+                                    properties:
+                                      section: { type: string }
+                                  - { $ref: '#/components/schemas/OccupancyBucket' }
+                  generated_at: { type: string, format: date-time }
         '403': { $ref: '#/components/responses/Forbidden' }
 
   /api/nightclubs/{nightclubId}/tables/layout:
@@ -1538,9 +1625,21 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        code: { type: string, example: VIP-1 }
+        code:
+          type: string
+          description: |
+            Identificador único dentro del club. Normalmente es el número de la mesa;
+            lleva prefijo de zona donde el número se repite (V16 en VIP Elevado frente
+            a A16 en Zona Azul).
+          example: V16
+        table_number:
+          type: [integer, 'null']
+          description: El número con el que el personal se refiere a la mesa en voz alta.
+          example: 16
         name: { type: [string, 'null'] }
-        section: { type: string, example: vip }
+        floor: { type: string, enum: [baja, alta, ambas] }
+        color: { type: [string, 'null'], description: Color de la zona en el mapa., example: '#FF1493' }
+        section: { type: string, example: ZONA DIAMANTE }
         type: { type: string, enum: [standard, vip, premium, bar_top, booth] }
         capacity: { type: integer }
         x: { type: string, description: Coordenada en el plano. }
@@ -1556,6 +1655,35 @@ components:
               user_id: { type: string, format: uuid }
               display_name: { type: string }
               seated_at: { type: string, format: date-time }
+
+    Landmark:
+      description: Elemento del mapa que no es una mesa.
+      type: object
+      properties:
+        code: { type: string, example: dj_booth }
+        name: { type: string, example: DJ BOOTH }
+        type:
+          type: string
+          enum: [bar, dance_area, dj, vip, entrance, restroom, stage, other]
+        description: { type: [string, 'null'] }
+        floor: { type: string, enum: [baja, alta, ambas] }
+        x: { type: [string, 'null'] }
+        y: { type: [string, 'null'] }
+        width: { type: [string, 'null'] }
+        height: { type: [string, 'null'] }
+
+    OccupancyBucket:
+      type: object
+      properties:
+        tables: { type: integer }
+        occupied: { type: integer }
+        available: { type: integer }
+        reserved: { type: integer }
+        out_of_service: { type: integer, description: Bloqueadas o en limpieza. }
+        seats: { type: integer, description: Aforo sentado. }
+        guests: { type: integer, description: Personas sentadas ahora mismo. }
+        tables_occupied_pct: { type: integer }
+        seats_used_pct: { type: integer }
 
     OrderItemInput:
       type: object

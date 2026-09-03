@@ -18,13 +18,14 @@ router.get('/nightclubs/:nightclubId/tables',
     params: z.object({ nightclubId: uuid }),
     query: z.object({
       section: z.string().trim().max(40).optional(),
+      floor: z.enum(['baja', 'alta', 'ambas']).optional(),
       status: z.enum(['available', 'occupied', 'reserved', 'blocked', 'cleaning']).optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
     const { rows } = await pool.query(
-      `SELECT t.id, t.code, t.name, t.section, t.type, t.capacity, t.x, t.y, t.radius,
-              t.status, t.bottle_service,
+      `SELECT t.id, t.code, t.table_number, t.name, t.section, t.floor, t.type,
+              t.capacity, t.x, t.y, t.radius, t.color, t.status, t.bottle_service,
               COALESCE(o.occupants, '[]'::json) AS occupants
          FROM tables t
          LEFT JOIN LATERAL (
@@ -39,10 +40,114 @@ router.get('/nightclubs/:nightclubId/tables',
         WHERE t.nightclub_id = $1 AND t.active
           AND ($2::text IS NULL OR t.section = $2)
           AND ($3::text IS NULL OR t.status = $3)
-        ORDER BY t.section, t.code`,
-      [req.params.nightclubId, req.query.section || null, req.query.status || null],
+          AND ($4::text IS NULL OR t.floor = $4)
+        ORDER BY t.floor, t.section, t.table_number NULLS LAST, t.code`,
+      [req.params.nightclubId, req.query.section || null, req.query.status || null,
+        req.query.floor || null],
     );
     res.json({ tables: rows });
+  }));
+
+// Full floor plan: tables plus the landmarks that make the map readable
+// (bar, dance floor, DJ booth, entrance, restrooms) and the canvas size.
+router.get('/nightclubs/:nightclubId/floor-plan',
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: z.object({ floor: z.enum(['baja', 'alta', 'ambas']).optional() }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const floor = req.query.floor || null;
+
+    const [club, tables, landmarks] = await Promise.all([
+      pool.query('SELECT settings FROM nightclubs WHERE id = $1', [nightclubId]),
+      pool.query(
+        `SELECT t.id, t.code, t.table_number, t.name, t.section, t.floor, t.type, t.capacity,
+                t.x, t.y, t.radius, t.color, t.status, t.bottle_service,
+                COALESCE(o.seated, 0)::int AS seated
+           FROM tables t
+           LEFT JOIN LATERAL (
+             SELECT count(*) AS seated FROM table_occupants o
+              WHERE o.table_id = t.id AND o.left_at IS NULL
+           ) o ON true
+          WHERE t.nightclub_id = $1 AND t.active
+            AND ($2::text IS NULL OR t.floor = $2)
+          ORDER BY t.floor, t.section, t.table_number NULLS LAST, t.code`,
+        [nightclubId, floor],
+      ),
+      pool.query(
+        `SELECT code, name, type, description, floor, x, y, width, height
+           FROM venue_landmarks
+          WHERE nightclub_id = $1 AND active
+            AND ($2::text IS NULL OR floor = $2 OR floor = 'ambas')
+          ORDER BY sort_order, name`,
+        [nightclubId, floor],
+      ),
+    ]);
+
+    const settings = club.rows[0] ? club.rows[0].settings : {};
+    res.json({
+      canvas: (settings && settings.floor_plan && settings.floor_plan.canvas) || null,
+      floors: [...new Set(tables.rows.map((t) => t.floor))],
+      tables: tables.rows,
+      landmarks: landmarks.rows,
+    });
+  }));
+
+// Occupancy for the manager: how full the room is, by floor and by section.
+router.get('/nightclubs/:nightclubId/tables/stats',
+  requireRole('waiter', 'hostess', 'bartender', 'manager'),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `SELECT t.floor, t.section,
+              count(*)::int AS tables,
+              count(*) FILTER (WHERE t.status = 'occupied')::int AS occupied,
+              count(*) FILTER (WHERE t.status = 'available')::int AS available,
+              count(*) FILTER (WHERE t.status = 'reserved')::int AS reserved,
+              count(*) FILTER (WHERE t.status IN ('blocked','cleaning'))::int AS out_of_service,
+              sum(t.capacity)::int AS seats,
+              COALESCE(sum(o.seated), 0)::int AS guests
+         FROM tables t
+         LEFT JOIN LATERAL (
+           SELECT count(*) AS seated FROM table_occupants o
+            WHERE o.table_id = t.id AND o.left_at IS NULL
+         ) o ON true
+        WHERE t.nightclub_id = $1 AND t.active
+        GROUP BY ROLLUP (t.floor, t.section)
+        ORDER BY t.floor NULLS LAST, t.section NULLS LAST`,
+      [req.params.nightclubId],
+    );
+
+    const pct = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
+    const decorate = (r) => ({
+      tables: r.tables,
+      occupied: r.occupied,
+      available: r.available,
+      reserved: r.reserved,
+      out_of_service: r.out_of_service,
+      seats: r.seats,
+      guests: r.guests,
+      tables_occupied_pct: pct(r.occupied, r.tables),
+      seats_used_pct: pct(r.guests, r.seats),
+    });
+
+    // ROLLUP yields per-section rows, per-floor subtotals (section NULL) and one grand
+    // total (both NULL).
+    const total = rows.find((r) => r.floor === null);
+    const floors = rows.filter((r) => r.floor !== null && r.section === null)
+      .map((r) => ({
+        floor: r.floor,
+        ...decorate(r),
+        sections: rows.filter((s) => s.floor === r.floor && s.section !== null)
+          .map((s) => ({ section: s.section, ...decorate(s) })),
+      }));
+
+    res.json({
+      total: total ? decorate(total) : decorate({ tables: 0, occupied: 0, available: 0, reserved: 0, out_of_service: 0, seats: 0, guests: 0 }),
+      floors,
+      generated_at: new Date().toISOString(),
+    });
   }));
 
 router.post('/nightclubs/:nightclubId/tables/:tableId/seat',
