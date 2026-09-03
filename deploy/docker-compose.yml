@@ -1,6 +1,5 @@
 # EV2 Clandestinoz - local / staging stack
-# Usage (from repo root):  docker compose --env-file .env -f deploy/docker-compose.yml up -d
-# NOTE: --env-file is required because Compose looks for .env next to this file (deploy/), not in the repo root.
+# Usage (from repo root):  docker compose -f deploy/docker-compose.yml up -d
 # Required in .env: DB_PASSWORD, JWT_SECRET (no defaults on purpose).
 
 name: ev2
@@ -42,6 +41,8 @@ services:
       context: ../server
       dockerfile: ../deploy/Dockerfile.api
     container_name: ev2-api
+    # Apply pending migrations, then start the API.
+    command: ["sh", "-c", "node src/db/migrate.js && node src/index.js"]
     environment:
       NODE_ENV: ${ENVIRONMENT:-development}
       PORT: 3000

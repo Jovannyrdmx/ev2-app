@@ -3,9 +3,8 @@
 -- PostgreSQL 15+. Replaces legacy init.sql / init-nightclub.sql / init-reservations.sql.
 -- Conventions: UUID ids, TIMESTAMPTZ, NUMERIC(12,2) money + currency, CHECK'd states,
 --              nightclub_id on tenant-scoped tables, updated_at via trigger.
+-- Transaction is managed by src/db/migrate.js (do not add BEGIN/COMMIT here).
 -- ============================================================================
-
-BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS btree_gist;
@@ -678,5 +677,3 @@ BEGIN
     EXECUTE format('CREATE TRIGGER %I_set_updated_at BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION set_updated_at()', t, t);
   END LOOP;
 END $$;
-
-COMMIT;
