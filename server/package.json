@@ -16,7 +16,8 @@
     "test": "jest --runInBand",
     "lint": "eslint src",
     "lint:api": "redocly lint openapi.yaml",
-    "test:coverage": "jest --runInBand --coverage"
+    "test:coverage": "jest --runInBand --coverage",
+    "seed:floor": "node seeds/floor-plan.js"
   },
   "jest": {
     "testEnvironment": "node",
@@ -31,8 +32,6 @@
       "!src/index.js",
       "!src/ws.js",
       "!src/services/*-system.js",
-      "!src/services/dance-floor-manager.js",
-      "!src/services/nightclub-tables.js",
       "!src/services/pos/**"
     ],
     "coverageReporters": [
