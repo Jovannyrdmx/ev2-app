@@ -74,8 +74,9 @@ router.get('/nightclubs/:nightclubId/emergency-contacts',
     res.json({ contacts: rows });
   }));
 
-// Event catch-up after a reconnect (the WS server uses the same source in phase 3).
-router.get('/nightclubs/:nightclubId/events',
+// Domain-event catch-up after a reconnect (the WS server uses the same source in phase 3).
+// Namespaced under /sync so it never collides with the club's event calendar.
+router.get('/nightclubs/:nightclubId/sync/events',
   validate({
     params: z.object({ nightclubId: uuid }),
     query: z.object({

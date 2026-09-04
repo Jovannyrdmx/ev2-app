@@ -21,11 +21,11 @@ beforeEach(async () => {
 const url = (p) => `/api/nightclubs/${club.id}${p}`;
 
 describe('Carga del plano real', () => {
-  it('carga las 52 mesas y las 6 áreas del club', async () => {
+  it('carga las 55 mesas y las 8 áreas del club', async () => {
     const result = await loadFloorPlan({ slug: 'ev2' });
-    expect(result.tables).toBe(52);
-    expect(result.landmarks).toBe(6);
-    expect(result.seats).toBe(276);
+    expect(result.tables).toBe(55);
+    expect(result.landmarks).toBe(8);
+    expect(result.seats).toBe(308);
   });
 
   it('distingue con prefijo las mesas cuyo número se repetía', async () => {
@@ -34,10 +34,10 @@ describe('Carga del plano real', () => {
       `SELECT code, section, capacity FROM tables
         WHERE nightclub_id = $1 AND table_number IN (16,17,18) ORDER BY code`, [club.id]);
 
-    expect(rows.map((r) => r.code)).toEqual(['A16', 'A17', 'A18', 'V16', 'V17', 'V18']);
-    // Las V son las VIP de 10 lugares; las A son las estándar de 4.
-    expect(rows.filter((r) => r.code.startsWith('V')).every((r) => r.capacity === 10)).toBe(true);
-    expect(rows.filter((r) => r.code.startsWith('A')).every((r) => r.capacity === 4)).toBe(true);
+    expect(rows.map((r) => r.code)).toEqual(['G16', 'G17', 'G18', 'VE16', 'VE17', 'VE18']);
+    // Las VE son las del VIP ELEVADO, de 8 lugares; las G son las generales de 4.
+    expect(rows.filter((r) => r.code.startsWith('VE')).every((r) => r.capacity === 8)).toBe(true);
+    expect(rows.filter((r) => r.code.startsWith('G')).every((r) => r.capacity === 4)).toBe(true);
   });
 
   it('reparte las mesas en los dos pisos', async () => {
@@ -45,7 +45,7 @@ describe('Carga del plano real', () => {
     const { rows } = await pool.query(
       `SELECT floor, count(*)::int AS n FROM tables WHERE nightclub_id = $1 GROUP BY floor ORDER BY floor`,
       [club.id]);
-    expect(rows).toEqual([{ floor: 'alta', n: 12 }, { floor: 'baja', n: 40 }]);
+    expect(rows).toEqual([{ floor: 'alta', n: 12 }, { floor: 'baja', n: 43 }]);
   });
 
   it('es idempotente y no duplica al recargar', async () => {
@@ -53,13 +53,13 @@ describe('Carga del plano real', () => {
     await loadFloorPlan({ slug: 'ev2' });
     const { rows } = await pool.query(
       'SELECT count(*)::int AS n FROM tables WHERE nightclub_id = $1', [club.id]);
-    expect(rows[0].n).toBe(52);
+    expect(rows[0].n).toBe(55);
   });
 
   it('recargar el plano no borra la ocupación en curso', async () => {
     await loadFloorPlan({ slug: 'ev2' });
     const table = await pool.query(
-      `SELECT id FROM tables WHERE nightclub_id = $1 AND code = 'V16'`, [club.id]);
+      `SELECT id FROM tables WHERE nightclub_id = $1 AND code = 'VE16'`, [club.id]);
     await api().post(url(`/tables/${table.rows[0].id}/seat`)).set(auth(guest));
 
     await loadFloorPlan({ slug: 'ev2' });
@@ -95,10 +95,10 @@ describe('GET /floor-plan', () => {
   it('devuelve mesas, áreas y el tamaño del lienzo', async () => {
     const res = await api().get(url('/floor-plan')).set(auth(guest));
     expect(res.status).toBe(200);
-    expect(res.body.tables).toHaveLength(52);
+    expect(res.body.tables).toHaveLength(55);
     expect(res.body.landmarks.map((l) => l.name)).toEqual(
-      expect.arrayContaining(['BARRA', 'DANCE FLOOR', 'DJ BOOTH', 'ENTRADA', 'WC AREA']));
-    expect(res.body.canvas).toEqual({ width: 800, height: 560 });
+      expect.arrayContaining(['BARRA', 'DANCE FLOOR', 'DJ BOOTH', 'ENTRADA CLANDESTINOZ', 'W.C. AREA']));
+    expect(res.body.canvas).toEqual({ width: 800, height: 580 });
     expect(res.body.floors.sort()).toEqual(['alta', 'baja']);
   });
 
@@ -147,17 +147,17 @@ describe('GET /tables/stats', () => {
     const res = await api().get(url('/tables/stats')).set(auth(manager));
     expect(res.status).toBe(200);
     expect(res.body.total).toMatchObject({
-      tables: 52, seats: 276, occupied: 0, available: 52, guests: 0,
+      tables: 55, seats: 308, occupied: 0, available: 55, guests: 0,
     });
   });
 
   it('desglosa por piso y por zona', async () => {
     const res = await api().get(url('/tables/stats')).set(auth(manager));
     const baja = res.body.floors.find((f2) => f2.floor === 'baja');
-    expect(baja.tables).toBe(40);
-    expect(baja.seats).toBe(202);
+    expect(baja.tables).toBe(43);
+    expect(baja.seats).toBe(230);
     expect(baja.sections.map((s) => s.section)).toEqual(
-      ['VIP ELEVADO', 'ZONA AZUL', 'ZONA BAJA', 'ZONA DIAMANTE', 'ZONA ROJA']);
+      ['GENERAL', 'VIP ELEVADO', 'ZONA AZUL', 'ZONA DIAMANTE', 'ZONA ROJA']);
   });
 
   it('calcula porcentajes de mesas ocupadas y de lugares usados', async () => {
@@ -173,7 +173,7 @@ describe('GET /tables/stats', () => {
     expect(zona.occupied).toBe(1);
     expect(zona.guests).toBe(1);
     expect(zona.tables_occupied_pct).toBe(33); // 1 de 3 mesas
-    expect(zona.seats_used_pct).toBe(3); // 1 de 30 lugares
+    expect(zona.seats_used_pct).toBe(4); // 1 de 24 lugares
   });
 
   it('cuenta aparte las mesas fuera de servicio', async () => {
@@ -181,13 +181,13 @@ describe('GET /tables/stats', () => {
       `UPDATE tables SET status = 'blocked' WHERE nightclub_id = $1 AND code = '39'`, [club.id]);
     const res = await api().get(url('/tables/stats')).set(auth(manager));
     expect(res.body.total.out_of_service).toBe(1);
-    expect(res.body.total.available).toBe(51);
+    expect(res.body.total.available).toBe(54);
   });
 
   it('ignora las mesas retiradas', async () => {
     await pool.query(`UPDATE tables SET active = false WHERE nightclub_id = $1 AND code = '39'`, [club.id]);
     const res = await api().get(url('/tables/stats')).set(auth(manager));
-    expect(res.body.total.tables).toBe(51);
+    expect(res.body.total.tables).toBe(54);
   });
 
   it('el personal de piso puede consultarlas; un cliente no', async () => {

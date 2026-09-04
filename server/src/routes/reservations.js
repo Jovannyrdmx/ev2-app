@@ -1,4 +1,9 @@
-// Table reservations: rules, availability, quotes, booking, cancellation, payment methods.
+// Table reservations: availability, quotes, booking, cancellation, payment methods.
+//
+// A table is booked for a whole NIGHT (an event), never for a time range, and it is
+// priced as `zone base + extra guests x that night's ticket` (see docs/DECISIONES.md D17).
+// Guests have a limited time to arrive; after that the table is released as a no-show
+// with no refund.
 //
 // Money movement is recorded in `transactions`; the actual charge (Stripe / Mercado Pago)
 // is wired in phase 3. Until then a booking is created as 'pending_payment' with a
@@ -10,7 +15,7 @@ const { pool } = require('../db/pool');
 const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
-const pricing = require('../services/pricing');
+const eventPricing = require('../services/event-pricing');
 const events = require('../services/events');
 
 const router = express.Router({ mergeParams: true });
@@ -45,29 +50,35 @@ function refundPctFor(windows, startsAt, now = new Date()) {
   return 0;
 }
 
-async function priceReservation({ nightclubId, table, startsAt, durationMinutes, rules }) {
-  const hours = durationMinutes / 60;
-  const base = Number(rules.base_price_per_hour) * hours;
-  const q = await pricing.quote({
-    nightclubId,
-    appliesTo: 'table_type',
-    target: table.type,
-    basePrice: base,
-    when: new Date(startsAt),
-  });
-  return { hours, ...q };
+/** The event a booking is for, ensuring it belongs to this club and can still be booked. */
+async function getBookableEvent(nightclubId, eventId, runner = pool) {
+  const { rows } = await runner.query(
+    `SELECT * FROM events_calendar WHERE id = $1 AND nightclub_id = $2`,
+    [eventId, nightclubId],
+  );
+  if (rows.length === 0) throw ApiError.notFound('Event not found');
+  const event = rows[0];
+  if (event.status === 'cancelled') throw ApiError.unprocessable('Ese evento fue cancelado');
+  if (event.status === 'finished') throw ApiError.unprocessable('Ese evento ya terminó');
+  return event;
 }
 
 const RESERVATION_SELECT = `
-  SELECT r.id, r.status, r.starts_at, r.ends_at, r.duration_minutes, r.guest_count,
+  SELECT r.id, r.status, r.starts_at, r.ends_at, r.guest_count,
          r.currency, r.total_estimated, r.deposit_amount, r.special_requests,
          r.cancelled_at, r.cancel_reason, r.refund_amount, r.created_at,
-         r.table_id, t.code AS table_code, t.section, t.type AS table_type,
+         r.arrival_deadline, r.included_tickets, r.extra_guests,
+         r.zone_base_at_booking, r.ticket_at_booking,
+         r.event_id, ev.name AS event_name, ev.event_date, ev.doors_open_at,
+         ev.status AS event_status,
+         r.table_id, t.code AS table_code, t.table_number, t.section, t.floor,
+         t.type AS table_type,
          r.user_id, u.display_name AS user_name,
          COALESCE(a.addons, '[]'::json) AS addons
     FROM reservations r
     JOIN tables t ON t.id = r.table_id
     JOIN users u ON u.id = r.user_id
+    LEFT JOIN events_calendar ev ON ev.id = r.event_id
     LEFT JOIN LATERAL (
       SELECT json_agg(json_build_object('id', ra.id, 'type', ra.addon_type, 'name', ra.name,
                                         -- ::text: money stays a two-decimal string.
@@ -128,163 +139,222 @@ router.put('/nightclubs/:nightclubId/reservations/rules',
   }));
 
 // ------------------------------------------------------- availability & quote
+
+/** Free tables for an event = active, reservable zone, big enough, not already booked. */
+async function availableTables({ nightclubId, eventId, guests, section, floor, runner = pool }) {
+  const { rows } = await runner.query(
+    `SELECT t.id, t.code, t.table_number, t.name, t.section, t.floor, t.type, t.capacity,
+            t.x, t.y, t.radius, t.color, t.bottle_service
+       FROM tables t
+       JOIN zone_pricing z ON z.nightclub_id = t.nightclub_id AND z.section = t.section
+      WHERE t.nightclub_id = $1
+        AND t.active
+        AND t.status <> 'blocked'
+        AND z.active AND z.reservable
+        AND (z.included_tickets + z.max_extras) >= $3
+        AND ($4::text IS NULL OR t.section = $4)
+        AND ($5::text IS NULL OR t.floor = $5)
+        AND NOT EXISTS (
+          SELECT 1 FROM reservations r
+           WHERE r.table_id = t.id AND r.event_id = $2
+             AND r.status IN ('pending_payment','confirmed','seated')
+        )
+      ORDER BY t.floor, t.section, t.table_number NULLS LAST, t.code`,
+    [nightclubId, eventId, guests, section || null, floor || null],
+  );
+  return rows;
+}
+
 const availabilityQuery = z.object({
-  starts_at: z.coerce.date(),
-  duration_minutes: z.coerce.number().int().min(30).max(720).default(180),
+  event_id: uuid,
   guests: z.coerce.number().int().min(1).max(50).default(2),
   section: z.string().trim().max(40).optional(),
+  floor: z.enum(['baja', 'alta', 'ambas']).optional(),
 });
 
 router.get('/nightclubs/:nightclubId/reservations/availability',
   validate({ params: z.object({ nightclubId: uuid }), query: availabilityQuery }),
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
-    const { starts_at: startsAt, duration_minutes: duration, guests, section } = req.query;
+    const { event_id: eventId, guests, section, floor } = req.query;
+
+    const event = await getBookableEvent(nightclubId, eventId);
+    const isStaff = ['hostess', 'waiter', 'manager', 'admin'].includes(req.user.role);
+    if (!isStaff && event.status !== 'published') throw ApiError.notFound('Event not found');
+
     const rules = await getRules(nightclubId);
-
-    if (guests < rules.min_party_size || guests > rules.max_party_size) {
+    const hoursAhead = (new Date(event.doors_open_at).getTime() - Date.now()) / 3_600_000;
+    if (hoursAhead < Number(rules.min_advance_hours)) {
       throw ApiError.unprocessable(
-        `Party size must be between ${rules.min_party_size} and ${rules.max_party_size}`);
-    }
-    if (duration > rules.max_duration_minutes) {
-      throw ApiError.unprocessable(`Maximum duration is ${rules.max_duration_minutes} minutes`);
-    }
-    const hoursAhead = (startsAt.getTime() - Date.now()) / 3_600_000;
-    if (hoursAhead < rules.min_advance_hours) {
-      throw ApiError.unprocessable(`Reservations require ${rules.min_advance_hours} hours notice`);
+        `Las reservaciones cierran ${rules.min_advance_hours} horas antes de abrir`);
     }
 
-    // Free tables = active, big enough, not blocked, and with no overlapping live reservation.
-    const { rows } = await pool.query(
-      `SELECT t.id, t.code, t.name, t.section, t.type, t.capacity, t.x, t.y, t.radius, t.bottle_service
-         FROM tables t
-        WHERE t.nightclub_id = $1
-          AND t.active
-          AND t.status <> 'blocked'
-          AND t.capacity >= $4
-          AND ($5::text IS NULL OR t.section = $5)
-          AND NOT EXISTS (
-            SELECT 1 FROM reservations r
-             WHERE r.table_id = t.id
-               AND r.status IN ('pending_payment','confirmed','seated')
-               AND tstzrange(r.starts_at, r.ends_at, '[)')
-                   && tstzrange($2::timestamptz, $2::timestamptz + make_interval(mins => $3), '[)')
-          )
-        ORDER BY t.section, t.code`,
-      [nightclubId, startsAt.toISOString(), duration, guests, section || null],
-    );
+    const { zones } = await eventPricing.getEventPricing({ nightclubId, eventId });
+    const byZone = new Map(zones.map((z) => [z.section, z]));
+    const free = await availableTables({ nightclubId, eventId, guests, section, floor });
 
-    const available = [];
-    for (const table of rows) {
-      const price = await priceReservation({ nightclubId, table, startsAt, durationMinutes: duration, rules });
-      available.push({
+    const tables = [];
+    for (const table of free) {
+      const zone = byZone.get(table.section);
+      if (!zone) continue;
+      let quote;
+      try {
+        quote = eventPricing.quote({ zone, event, guests });
+      } catch {
+        continue; // la zona no admite ese número de personas
+      }
+      tables.push({
         ...table,
-        price: price.final,
-        currency: rules.currency,
-        deposit: Number((price.final * Number(rules.deposit_pct) / 100).toFixed(2)),
+        zone: quote.zone,
+        price: quote.subtotal,
+        extra_guests: quote.extra_guests,
+        extras_total: quote.extras_total,
+        deposit: eventPricing.round(quote.subtotal * Number(rules.deposit_pct) / 100),
+        currency: quote.currency,
       });
     }
+
     res.json({
-      starts_at: startsAt.toISOString(),
-      duration_minutes: duration,
+      event: {
+        id: event.id, name: event.name, event_date: event.event_date,
+        doors_open_at: event.doors_open_at, ticket_price: event.ticket_price,
+        currency: event.currency,
+        arrival_deadline: eventPricing.arrivalDeadline(event).toISOString(),
+      },
       guests,
-      currency: rules.currency,
       deposit_pct: Number(rules.deposit_pct),
-      tables: available,
+      tables,
     });
   }));
 
-router.post('/nightclubs/:nightclubId/reservations/quote',
-  validate({
-    params: z.object({ nightclubId: uuid }),
-    body: z.object({
-      table_id: uuid,
-      starts_at: z.coerce.date(),
-      duration_minutes: z.number().int().min(30).max(720).default(180),
-      addons: z.array(z.object({
-        type: z.enum(['bottle_service', 'vip_upgrade', 'extra_hour', 'decorations', 'other']),
-        name: z.string().trim().min(1).max(120),
-        price: z.number().min(0),
-        quantity: z.number().int().min(1).max(50).default(1),
-      })).max(20).default([]),
-      discount_code: z.string().trim().max(40).optional(),
-    }),
-  }),
-  asyncHandler(async (req, res) => {
-    const quote = await buildQuote(req.params.nightclubId, req.body);
-    res.json({ quote });
-  }));
+const addonInput = z.object({
+  code: z.string().trim().min(1).max(40).optional(),
+  type: z.enum(['bottle_service', 'vip_upgrade', 'extra_hour', 'decorations', 'other']).default('other'),
+  name: z.string().trim().min(1).max(120).optional(),
+  price: z.number().min(0).optional(),
+  quantity: z.number().int().min(1).max(50).default(1),
+});
 
-// Shared by the quote endpoint and by booking, so the client can never invent a price.
-async function buildQuote(nightclubId, body, client = pool) {
+/**
+ * Resolves add-ons against the club's catalogue. A client may reference a product by
+ * `code` (price comes from the database) or pass a custom line; either way the price
+ * that ends up on the reservation is decided here.
+ */
+async function resolveAddons(nightclubId, addons = [], runner = pool) {
+  if (addons.length === 0) return [];
+  const codes = addons.filter((a) => a.code).map((a) => a.code);
+  const catalogue = new Map();
+  if (codes.length > 0) {
+    const { rows } = await runner.query(
+      `SELECT code, kind, name, price FROM reservation_products
+        WHERE nightclub_id = $1 AND active AND code = ANY($2::text[])`,
+      [nightclubId, codes]);
+    rows.forEach((r) => catalogue.set(r.code, r));
+  }
+  return addons.map((a) => {
+    if (a.code) {
+      const product = catalogue.get(a.code);
+      if (!product) throw ApiError.notFound(`El producto '${a.code}' no existe o no está activo`);
+      return {
+        type: product.kind === 'bottle' ? 'bottle_service' : 'other',
+        name: product.name,
+        price: Number(product.price),
+        quantity: a.quantity,
+      };
+    }
+    if (a.name === undefined || a.price === undefined) {
+      throw ApiError.badRequest('Cada extra necesita `code`, o bien `name` y `price`');
+    }
+    return { type: a.type, name: a.name, price: a.price, quantity: a.quantity };
+  });
+}
+
+/** Shared by the quote endpoint and by booking, so a client can never set a price. */
+async function buildQuote(nightclubId, body, runner = pool) {
   const rules = await getRules(nightclubId);
-  const t = await client.query(
-    'SELECT id, code, type, capacity, status, active FROM tables WHERE id = $1 AND nightclub_id = $2',
-    [body.table_id, nightclubId],
-  );
+  const event = await getBookableEvent(nightclubId, body.event_id, runner);
+
+  const t = await runner.query(
+    `SELECT id, code, table_number, section, floor, capacity, active
+       FROM tables WHERE id = $1 AND nightclub_id = $2`,
+    [body.table_id, nightclubId]);
   if (t.rowCount === 0 || !t.rows[0].active) throw ApiError.notFound('Table not found');
   const table = t.rows[0];
 
-  const tablePrice = await priceReservation({
-    nightclubId, table, startsAt: body.starts_at, durationMinutes: body.duration_minutes, rules,
+  const { zone } = await eventPricing.zoneFor({
+    nightclubId, eventId: body.event_id, section: table.section, runner,
   });
+  if (!zone) throw ApiError.unprocessable(`La zona '${table.section}' no tiene precio configurado`);
 
-  const addonsTotal = (body.addons || []).reduce((sum, a) => sum + a.price * a.quantity, 0);
-  let subtotal = tablePrice.final + addonsTotal;
+  const addons = await resolveAddons(nightclubId, body.addons || [], runner);
+  const base = eventPricing.quote({ zone, event, guests: body.guest_count, addons });
 
   let discount = null;
+  let total = base.subtotal;
   if (body.discount_code) {
-    const d = await client.query(
+    const d = await runner.query(
       `SELECT * FROM reservation_discounts
         WHERE nightclub_id = $1 AND upper(code) = upper($2) AND active
           AND (valid_from IS NULL OR valid_from <= current_date)
           AND (valid_until IS NULL OR valid_until >= current_date)
           AND (max_uses IS NULL OR used_count < max_uses)`,
-      [nightclubId, body.discount_code],
-    );
+      [nightclubId, body.discount_code]);
     if (d.rowCount === 0) throw ApiError.unprocessable('Discount code is not valid');
     const rule = d.rows[0];
     const amount = rule.discount_type === 'percentage'
-      ? subtotal * Number(rule.discount_value) / 100
+      ? total * Number(rule.discount_value) / 100
       : Number(rule.discount_value);
     discount = {
       id: rule.id, code: rule.code, type: rule.discount_type,
-      value: Number(rule.discount_value), amount: Number(Math.min(amount, subtotal).toFixed(2)),
+      value: Number(rule.discount_value), amount: eventPricing.round(Math.min(amount, total)),
     };
-    subtotal = Math.max(0, subtotal - discount.amount);
+    total = Math.max(0, total - discount.amount);
   }
 
-  const total = Number(subtotal.toFixed(2));
-  const deposit = Number((total * Number(rules.deposit_pct) / 100).toFixed(2));
+  total = eventPricing.round(total);
   return {
-    table: { id: table.id, code: table.code, type: table.type, capacity: table.capacity },
-    hours: tablePrice.hours,
-    table_price: tablePrice.final,
-    price_rules_applied: tablePrice.applied,
-    addons_total: Number(addonsTotal.toFixed(2)),
+    ...base,
+    table: {
+      id: table.id, code: table.code, table_number: table.table_number,
+      section: table.section, floor: table.floor, capacity: table.capacity,
+    },
+    addons,
     discount,
     total,
-    deposit,
-    currency: rules.currency,
+    deposit: eventPricing.round(total * Number(rules.deposit_pct) / 100),
     deposit_pct: Number(rules.deposit_pct),
+    arrival_deadline: eventPricing.arrivalDeadline(event).toISOString(),
     rules,
+    _event: event,
+    _zone: zone,
   };
 }
+
+router.post('/nightclubs/:nightclubId/reservations/quote',
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      event_id: uuid,
+      table_id: uuid,
+      guest_count: z.number().int().min(1).max(50),
+      addons: z.array(addonInput).max(20).default([]),
+      discount_code: z.string().trim().max(40).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const q = await buildQuote(req.params.nightclubId, req.body);
+    delete q.rules; delete q._event; delete q._zone;
+    res.json({ quote: q });
+  }));
 
 // ---------------------------------------------------------------- booking
 const bookSchema = z.object({
   client_request_id: uuid,
+  event_id: uuid,
   table_id: uuid,
-  starts_at: z.coerce.date(),
-  duration_minutes: z.number().int().min(30).max(720).default(180),
   guest_count: z.number().int().min(1).max(50),
   special_requests: z.string().trim().max(500).optional(),
-  addons: z.array(z.object({
-    type: z.enum(['bottle_service', 'vip_upgrade', 'extra_hour', 'decorations', 'other']),
-    name: z.string().trim().min(1).max(120),
-    price: z.number().min(0),
-    quantity: z.number().int().min(1).max(50).default(1),
-  })).max(20).default([]),
+  addons: z.array(addonInput).max(20).default([]),
   discount_code: z.string().trim().max(40).optional(),
 });
 
@@ -311,44 +381,58 @@ router.post('/nightclubs/:nightclubId/reservations',
       await client.query('BEGIN');
       const quote = await buildQuote(nightclubId, b, client);
       const rules = quote.rules;
+      const event = quote._event;
 
-      if (b.guest_count < rules.min_party_size || b.guest_count > rules.max_party_size) {
+      if (event.status !== 'published'
+          && !['hostess', 'manager', 'admin'].includes(req.user.role)) {
+        throw ApiError.notFound('Event not found');
+      }
+      if (b.guest_count < rules.min_party_size) {
+        throw ApiError.unprocessable(`El mínimo son ${rules.min_party_size} personas`);
+      }
+      // The zone rule decides how many people fit, not the table's nominal capacity:
+      // the price list sets it ("Zona Azul: 10 personas, 2 extras" = up to 12) and
+      // eventPricing.quote() already enforced it above.
+
+      const hoursAhead = (new Date(event.doors_open_at).getTime() - Date.now()) / 3_600_000;
+      if (hoursAhead < Number(rules.min_advance_hours)) {
         throw ApiError.unprocessable(
-          `Party size must be between ${rules.min_party_size} and ${rules.max_party_size}`);
+          `Las reservaciones cierran ${rules.min_advance_hours} horas antes de abrir`);
       }
-      if (b.guest_count > quote.table.capacity) {
-        throw ApiError.unprocessable(`Table ${quote.table.code} seats ${quote.table.capacity} people`);
-      }
-      const hoursAhead = (b.starts_at.getTime() - Date.now()) / 3_600_000;
-      if (hoursAhead < rules.min_advance_hours) {
-        throw ApiError.unprocessable(`Reservations require ${rules.min_advance_hours} hours notice`);
-      }
-      if (b.duration_minutes > rules.max_duration_minutes) {
-        throw ApiError.unprocessable(`Maximum duration is ${rules.max_duration_minutes} minutes`);
-      }
+
+      // The night, not a time range: starts when doors open and ends when the club closes.
+      const startsAt = new Date(event.doors_open_at);
+      const endsAt = event.closes_at
+        ? new Date(event.closes_at)
+        : new Date(startsAt.getTime() + 8 * 3_600_000);
+      const durationMinutes = Math.max(30, Math.round((endsAt - startsAt) / 60_000));
 
       let reservation;
       try {
         const created = await client.query(
-          `INSERT INTO reservations (nightclub_id, user_id, table_id, starts_at, duration_minutes,
-                                     guest_count, status, currency, total_estimated, deposit_amount,
-                                     discount_id, special_requests)
-           VALUES ($1,$2,$3,$4,$5,$6,'pending_payment',$7,$8,$9,$10,$11)
+          `INSERT INTO reservations (nightclub_id, user_id, event_id, table_id, starts_at,
+                                     duration_minutes, guest_count, status, currency,
+                                     total_estimated, deposit_amount, discount_id, special_requests,
+                                     arrival_deadline, included_tickets, extra_guests,
+                                     zone_base_at_booking, ticket_at_booking)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'pending_payment',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
            RETURNING id`,
-          [nightclubId, req.user.id, b.table_id, b.starts_at, b.duration_minutes, b.guest_count,
-            quote.currency, quote.total, quote.deposit, quote.discount ? quote.discount.id : null,
-            b.special_requests || null],
+          [nightclubId, req.user.id, b.event_id, b.table_id, startsAt, durationMinutes,
+            b.guest_count, quote.currency, quote.total, quote.deposit,
+            quote.discount ? quote.discount.id : null, b.special_requests || null,
+            quote.arrival_deadline, quote.zone.included_tickets, quote.extra_guests,
+            quote.zone.base_price, quote.ticket_price],
         );
         reservation = created.rows[0];
       } catch (err) {
-        // 23P01 = exclusion violation: the slot was taken while we were booking.
-        if (err.code === '23P01') {
-          throw ApiError.conflict('That table was just booked for an overlapping time');
+        // 23505 = the unique index for one live reservation per table per event.
+        if (err.code === '23505' || err.code === '23P01') {
+          throw ApiError.conflict('Esa mesa ya está reservada para ese evento');
         }
         throw err;
       }
 
-      for (const a of b.addons) {
+      for (const a of quote.addons) {
         await client.query(
           `INSERT INTO reservation_addons (reservation_id, addon_type, name, price, quantity)
            VALUES ($1,$2,$3,$4,$5)`,
@@ -374,8 +458,8 @@ router.post('/nightclubs/:nightclubId/reservations',
         nightclubId, type: 'reservation_created', client,
         audience: { roles: ['hostess', 'manager'], userIds: [req.user.id] },
         payload: {
-          reservation_id: reservation.id, table_id: b.table_id,
-          starts_at: b.starts_at.toISOString(), deposit: quote.deposit, currency: quote.currency,
+          reservation_id: reservation.id, table_id: b.table_id, event_id: b.event_id,
+          starts_at: startsAt.toISOString(), deposit: quote.deposit, currency: quote.currency,
         },
       });
 
@@ -389,6 +473,7 @@ router.post('/nightclubs/:nightclubId/reservations',
           currency: quote.currency,
           note: 'Payment processing is enabled in phase 3 (Stripe / Mercado Pago).',
         },
+        arrival_deadline: quote.arrival_deadline,
       });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -416,6 +501,7 @@ router.get('/nightclubs/:nightclubId/reservations',
     params: z.object({ nightclubId: uuid }),
     query: pagination.extend({
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      event_id: uuid.optional(),
       status: z.enum(['pending_payment', 'confirmed', 'seated', 'completed', 'cancelled', 'no_show']).optional(),
     }),
   }),
@@ -423,11 +509,12 @@ router.get('/nightclubs/:nightclubId/reservations',
     const { rows } = await pool.query(
       `${RESERVATION_SELECT}
         WHERE r.nightclub_id = $1
-          AND ($2::date IS NULL OR r.starts_at::date = $2::date)
+          AND ($2::date IS NULL OR ev.event_date = $2::date)
           AND ($3::text IS NULL OR r.status = $3)
-        ORDER BY r.starts_at ASC LIMIT $4 OFFSET $5`,
+          AND ($4::uuid IS NULL OR r.event_id = $4)
+        ORDER BY r.starts_at ASC LIMIT $5 OFFSET $6`,
       [req.params.nightclubId, req.query.date || null, req.query.status || null,
-        req.query.limit, req.query.offset],
+        req.query.event_id || null, req.query.limit, req.query.offset],
     );
     res.json({ reservations: rows });
   }));
@@ -442,6 +529,65 @@ router.get('/nightclubs/:nightclubId/reservations/:reservationId',
     const isStaff = ['hostess', 'waiter', 'manager', 'admin'].includes(req.user.role);
     if (!isOwner && !isStaff) throw ApiError.forbidden('Not your reservation');
     res.json({ reservation: rows[0] });
+  }));
+
+// Releases tables whose guests never showed up. Idempotent, so it is safe to call from
+// a screen refresh, from the hostess tablet, or from a scheduled job later on.
+// No refund: the club's rule is that a missed arrival forfeits the deposit (D17).
+router.post('/nightclubs/:nightclubId/reservations/release-no-shows',
+  requireRole('hostess', 'manager'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({ event_id: uuid.optional() }).default({}),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        `UPDATE reservations r
+            SET status = 'no_show', refund_amount = 0
+          WHERE r.nightclub_id = $1
+            AND r.status IN ('pending_payment','confirmed')
+            AND r.arrival_deadline IS NOT NULL
+            AND r.arrival_deadline < now()
+            AND ($2::uuid IS NULL OR r.event_id = $2)
+          RETURNING r.id, r.table_id, r.user_id, r.event_id`,
+        [nightclubId, req.body.event_id || null],
+      );
+
+      for (const r of rows) {
+        await client.query(
+          `UPDATE tables SET status = 'available'
+            WHERE id = $1 AND status IN ('reserved','occupied')
+              AND NOT EXISTS (
+                SELECT 1 FROM table_occupants o WHERE o.table_id = $1 AND o.left_at IS NULL
+              )`,
+          [r.table_id],
+        );
+        // Deposits already charged are NOT refunded; pending ones are simply dropped.
+        await client.query(
+          `UPDATE transactions SET status = 'cancelled'
+            WHERE reference_type = 'reservation' AND reference_id = $1
+              AND status IN ('pending','pending_manual')`,
+          [r.id],
+        );
+        await events.publish({
+          nightclubId, type: 'reservation_no_show', client,
+          audience: { roles: ['hostess', 'manager'], userIds: [r.user_id] },
+          payload: { reservation_id: r.id, table_id: r.table_id, event_id: r.event_id, refunded: false },
+        });
+      }
+
+      await client.query('COMMIT');
+      res.json({ released: rows.length, reservation_ids: rows.map((r) => r.id) });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   }));
 
 // ------------------------------------------------------------- cancellation
@@ -472,7 +618,9 @@ router.post('/nightclubs/:nightclubId/reservations/:reservationId/cancel',
       const rules = await getRules(nightclubId);
       const windows = Array.isArray(rules.cancellation_windows)
         ? rules.cancellation_windows : DEFAULT_RULES.cancellation_windows;
-      const refundPct = refundPctFor(windows, r.starts_at);
+      // Past the arrival deadline the deposit is forfeited, whatever the window says (D17).
+      const missedArrival = r.arrival_deadline && new Date(r.arrival_deadline) < new Date();
+      const refundPct = missedArrival ? 0 : refundPctFor(windows, r.starts_at);
 
       // Refund only what was actually paid.
       const paid = await client.query(
@@ -519,6 +667,7 @@ router.post('/nightclubs/:nightclubId/reservations/:reservationId/cancel',
         refund_pct: refundPct,
         refund_amount: refundAmount,
         paid_amount: paidAmount,
+        missed_arrival: !!missedArrival,
       });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
