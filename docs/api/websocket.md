@@ -19,6 +19,9 @@ El token es el mismo `access_token` de la API. Dos formas, en este orden:
 // Preferida: subprotocolo. El navegador la soporta y el token no queda en la URL.
 new WebSocket('wss://api.ev2.mx/', ['bearer', accessToken]);
 
+// Reconectando: se añade el último id visto (no es un secreto, es un contador).
+new WebSocket(`wss://api.ev2.mx/?since_id=${lastEventId}`, ['bearer', accessToken]);
+
 // Alternativa (clientes que no puedan usar subprotocolos):
 new WebSocket('wss://api.ev2.mx/?access_token=' + encodeURIComponent(accessToken));
 ```
@@ -33,6 +36,9 @@ new WebSocket('wss://api.ev2.mx/?access_token=' + encodeURIComponent(accessToken
 | `welcome` | Al conectar | `user`, `last_event_id`, `heartbeat_ms`, `token_expires_at`, `server_time` |
 | `event` | Un evento dirigido a ti | `id` (cadena), `event_type`, `payload`, `created_at` |
 | `pong` | Respuesta a `ping` | `server_time` |
+| `resume_started` | Empieza la recuperación | `since_id`, `count` |
+| `resume_complete` | Terminó la recuperación | `last_event_id`, `delivered`, `complete` |
+| `resync_required` | El hueco no se pudo cerrar | `reason`, `message` |
 | `error` | Mensaje rechazado | `code`, `message`. No cierra la conexión |
 | `closing` | Justo antes de cerrar | `code`, `message` |
 
@@ -89,6 +95,33 @@ recuperan al reconectar (paso 3.3), no como una ráfaga de avisos sobre cosas ya
 viva. Un servidor de sockets con las conexiones sanas y la suscripción muerta se ve
 perfecto y no entrega nada, así que el monitoreo tiene que poder distinguirlo.
 
-## Lo que falta
+## Reconectar sin perderse nada (D27)
 
-- **3.3** — reconexión: el cliente devolverá `last_event_id` y recibirá lo que se perdió.
+Guarda el `id` del último `event` que procesaste —o el `last_event_id` del `welcome` si
+aún no llegó ninguno— y devuélvelo como `since_id` al reconectar.
+
+1. Llega `welcome` con `resuming: true`.
+2. Llega `resume_started` con cuántos eventos faltaban.
+3. Llegan esos eventos, **en orden**, con la misma filtrada por audiencia que en vivo:
+   reconectar no es una forma de leer lo que no era para ti.
+4. Llega `resume_complete`. Guarda su `last_event_id`.
+5. A partir de ahí, eventos en vivo.
+
+**Los eventos en vivo que ocurran durante los pasos 2-4 se retienen y se entregan al
+final**, sin repetir los que ya venían en la recuperación. El orden que ves es siempre el
+orden real.
+
+Dos límites, y los dos se avisan en vez de disimularse:
+
+- Se recuperan hasta **500 eventos** y hasta **24 horas** atrás. Si el hueco es mayor,
+  `resume_complete` trae `complete: false` y llega un `resync_required` con
+  `reason: "gap_too_large"`: **vuelve a cargar el estado desde la API REST**, porque una
+  historia a medias que parece completa es peor que admitir el hueco.
+- Si la recuperación falla, llega `resync_required` con `reason: "replay_failed"` y la
+  conexión sigue viva en vivo.
+
+Un `since_id` que no sea un entero se responde con `error` de código `bad_since_id` y la
+conexión continúa como sesión nueva.
+
+Alternativa sin socket: `GET /api/nightclubs/{id}/sync/events?since_id=` hace lo mismo por
+REST, con la misma filtrada por audiencia.

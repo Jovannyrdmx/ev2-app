@@ -28,7 +28,8 @@ const http = require('http');
 const jwt = require('jsonwebtoken');
 const { WebSocketServer } = require('ws');
 const { pool } = require('./db/pool');
-const { Hub } = require('./realtime/hub');
+const { matchesAudience } = require('./services/events');
+const { Hub, toMessage, pendingAfter } = require('./realtime/hub');
 const { EventSubscriber } = require('./realtime/subscriber');
 const { redis } = require('./db/redis');
 
@@ -36,6 +37,16 @@ const PORT = Number(process.env.WS_PORT || process.env.PORT || 4000);
 const HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS || 30_000);
 const MAX_PER_USER = Number(process.env.WS_MAX_CONNECTIONS_PER_USER || 5);
 const MAX_MESSAGE_BYTES = 4096;
+// How much of a gap the catch-up read will close. Beyond this the client is told to
+// reload from the API instead: handing it a partial replay and letting it believe it is
+// up to date is worse than admitting the gap.
+const RESUME_MAX_EVENTS = Number(process.env.WS_RESUME_MAX_EVENTS || 500);
+// Matches the retention of GET /sync/events. Older than this and there is nothing to
+// replay from, whatever the client asks for.
+const RESUME_WINDOW_HOURS = 24;
+// Frames per chunk while replaying, so one catching-up client cannot monopolise the
+// event loop.
+const RESUME_CHUNK = 50;
 const CLIENT_MESSAGE_LIMIT_PER_MIN = 120;
 
 // Close codes the client is expected to understand.
@@ -73,6 +84,19 @@ function extractToken(req) {
   const q = url.searchParams.get('access_token');
   if (q) return { token: q, viaSubprotocol: false };
   return { token: null, viaSubprotocol: false };
+}
+
+/**
+ * The id the client last saw, from `?since_id=`. It is not a secret -- it is a counter --
+ * so the query string is the right place for it. Anything that is not a non-negative
+ * integer is treated as absent and reported, rather than guessed at.
+ */
+function extractSinceId(req) {
+  const url = new URL(req.url || '/', 'http://localhost');
+  const raw = url.searchParams.get('since_id');
+  if (raw === null) return { sinceId: null, invalid: false };
+  if (!/^\d{1,19}$/.test(raw)) return { sinceId: null, invalid: true };
+  return { sinceId: BigInt(raw), invalid: false };
 }
 
 /**
@@ -148,9 +172,23 @@ function createRealtimeServer({ db = pool, hub = new Hub({ maxPerUser: MAX_PER_U
     if (conn.ws.readyState === conn.ws.OPEN) conn.ws.send(JSON.stringify(message));
   }
 
-  /** The one way a domain event reaches clients. Step 3.2 feeds this from Redis. */
+  /**
+   * Live delivery. While a connection is still replaying what it missed, its live
+   * events are held back instead of being sent: otherwise a brand new event would
+   * arrive before older ones the client has not seen yet, and "in order" would be a
+   * lie the first time it mattered.
+   */
+  function deliverToConn(conn, message, event) {
+    if (conn.replaying) {
+      conn.buffered.push({ id: BigInt(event.id), message });
+      return;
+    }
+    send(conn, message);
+  }
+
+  /** The one way a domain event reaches clients; fed from Redis (D26). */
   function deliver(event) {
-    return hub.deliver(event, send);
+    return hub.deliver(event, deliverToConn);
   }
 
   wss.on('connection', async (ws, req) => {
@@ -167,6 +205,7 @@ function createRealtimeServer({ db = pool, hub = new Hub({ maxPerUser: MAX_PER_U
       return;
     }
 
+    const { sinceId, invalid: badSince } = extractSinceId(req);
     const conn = {
       ws,
       user: auth.user,
@@ -175,6 +214,9 @@ function createRealtimeServer({ db = pool, hub = new Hub({ maxPerUser: MAX_PER_U
       alive: true,
       messagesThisMinute: 0,
       windowStartedAt: Date.now(),
+      // Live events are queued here until the catch-up read has finished (D27).
+      replaying: sinceId !== null,
+      buffered: [],
     };
 
     // A new device pushes out the oldest session instead of being refused: being told
@@ -204,7 +246,29 @@ function createRealtimeServer({ db = pool, hub = new Hub({ maxPerUser: MAX_PER_U
       heartbeat_ms: HEARTBEAT_MS,
       token_expires_at: new Date(conn.expiresAt).toISOString(),
       server_time: new Date().toISOString(),
+      resuming: conn.replaying,
     });
+
+    if (badSince) {
+      send(conn, {
+        type: 'error',
+        code: 'bad_since_id',
+        message: 'since_id debe ser un entero; se ignoró y esta conexión empieza en vivo.',
+      });
+    }
+    if (conn.replaying) {
+      await replayMissed(conn, sinceId, db).catch((err) => {
+        // A catch-up that fails must not leave the socket mute: it opens live and says
+        // the gap could not be closed.
+        send(conn, {
+          type: 'resync_required',
+          reason: 'replay_failed',
+          message: 'No se pudo recuperar lo perdido; vuelve a cargar desde la API.',
+        });
+        (req.log?.error || console.error)('Replay failed:', err.message);
+      });
+      flushBuffered(conn);
+    }
 
     ws.on('pong', () => { conn.alive = true; });
 
@@ -245,6 +309,72 @@ function createRealtimeServer({ db = pool, hub = new Hub({ maxPerUser: MAX_PER_U
     ws.on('close', () => hub.remove(conn));
     ws.on('error', () => hub.remove(conn));
   });
+
+  /**
+   * Sends what this connection missed, in order, filtered by the same audience rules as
+   * live delivery -- a reconnect must not become a way to read other people's events.
+   */
+  async function replayMissed(conn, sinceId, database) {
+    const { rows } = await database.query(
+      `SELECT e.id::text AS event_id, e.type, e.audience, e.payload, e.created_at
+         FROM events e
+        WHERE e.nightclub_id = $1 AND e.id > $2
+          AND e.created_at > now() - ($3 || ' hours')::interval
+        ORDER BY e.id ASC LIMIT $4`,
+      [conn.user.nightclub_id, sinceId.toString(), String(RESUME_WINDOW_HOURS),
+        RESUME_MAX_EVENTS + 1],
+    );
+
+    // One row over the limit means the gap is wider than we will replay. Rather than
+    // sending a partial history that looks complete, the client is told to reload.
+    const truncated = rows.length > RESUME_MAX_EVENTS;
+    const batch = truncated ? rows.slice(0, RESUME_MAX_EVENTS) : rows;
+    const mine = batch.filter((row) => matchesAudience(row.audience, conn.user));
+
+    send(conn, { type: 'resume_started', since_id: sinceId.toString(), count: mine.length });
+    // Sent in chunks with a yield in between. Pushing five hundred frames in one go
+    // blocks the event loop and starves every other socket in the room while one phone
+    // catches up; it also fills the send buffer with nobody draining it.
+    for (let i = 0; i < mine.length; i += RESUME_CHUNK) {
+      if (conn.ws.readyState !== conn.ws.OPEN) return;
+      for (const row of mine.slice(i, i + RESUME_CHUNK)) {
+        send(conn, toMessage({
+          id: row.event_id,
+          type: row.type,
+          payload: row.payload,
+          created_at: row.created_at,
+        }));
+        conn.lastReplayedId = BigInt(row.event_id);
+      }
+      await new Promise(setImmediate);
+    }
+    send(conn, {
+      type: 'resume_complete',
+      last_event_id: batch.length > 0 ? batch[batch.length - 1].event_id : sinceId.toString(),
+      delivered: mine.length,
+      complete: !truncated,
+    });
+    if (truncated) {
+      send(conn, {
+        type: 'resync_required',
+        reason: 'gap_too_large',
+        message: `Estuviste desconectado más de ${RESUME_MAX_EVENTS} eventos; vuelve a cargar desde la API.`,
+      });
+    }
+  }
+
+  /**
+   * Releases the live events held during the replay, dropping any the replay already
+   * sent. Without the de-duplication a client would see the same event twice whenever
+   * something happened while it was catching up.
+   */
+  function flushBuffered(conn) {
+    conn.replaying = false;
+    for (const message of pendingAfter(conn.buffered, conn.lastReplayedId)) {
+      send(conn, message);
+    }
+    conn.buffered = [];
+  }
 
   // Heartbeat: drop sockets that stopped answering, and close the ones whose token has
   // run out so the client refreshes instead of holding an unbacked session.
@@ -328,4 +458,7 @@ if (require.main === module) {
   });
 }
 
-module.exports = { createRealtimeServer, authenticateRequest, extractToken, start, CLOSE, Hub };
+module.exports = {
+  createRealtimeServer, authenticateRequest, extractToken, extractSinceId, start,
+  CLOSE, Hub, RESUME_MAX_EVENTS,
+};
