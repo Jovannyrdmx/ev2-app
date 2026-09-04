@@ -8,16 +8,18 @@
 //   * a block hides both people from each other and every send fails with a neutral 404;
 //   * the manager sees counts and reports, never contents.
 //
-// Part 1 (this file): preferences, people tonight, send emoji/meet, inbox, view, react.
-// Part 2 adds blocks, reports, drink/bottle gifts and the manager panel.
+// Drink and bottle gifts are REAL orders: charged to the sender when placed and
+// prepared right away. If the recipient declines, the order goes back to the sender's
+// table — it is never cancelled and never refunded.
 'use strict';
 
 const express = require('express');
 const { pool } = require('../db/pool');
 const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, pagination } = require('../middleware/validate');
-const { authenticate, sameNightclub } = require('../middleware/auth');
+const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const events = require('../services/events');
+const { createOrder, ORDER_SELECT } = require('../services/orders');
 
 const router = express.Router({ mergeParams: true });
 
@@ -269,25 +271,42 @@ router.post('/nightclubs/:nightclubId/flirts',
       return res.status(200).json({ flirt: dup.rows[0] });
     }
 
-    if (b.type === 'drink' || b.type === 'bottle') {
-      // Wired in part 2 of step 2.3: creates the real order and handles declines.
-      throw ApiError.notImplemented('Invitar trago o botella se habilita en la parte 2 del paso 2.3');
-    }
+    const isGift = b.type === 'drink' || b.type === 'bottle';
+    if (isGift && !b.drink_id) throw ApiError.badRequest('drink_id is required to send a drink or a bottle');
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const { senderTable, recipientTable } = await assertCanSend({
+      const { senderTable, recipientTable, recipient } = await assertCanSend({
         nightclubId, sender: req.user, recipientId: b.recipient_id, runner: client,
       });
 
+      // A gift is a real order for the recipient's table, paid by the sender (D18).
+      let order = null;
+      if (isGift) {
+        order = await createOrder({
+          client, nightclubId, senderId: req.user.id, recipientId: b.recipient_id,
+          tableId: recipientTable.id, clientRequestId: b.client_request_id,
+          message: `Invitación de ${req.user.display_name} (mesa ${senderTable.code})`,
+          items: [{ drink_id: b.drink_id, quantity: b.quantity }],
+        });
+        await client.query(
+          `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status,
+                                     payer_user_id, provider, reference_type, reference_id, metadata)
+           VALUES ($1,$2,'in',$3,$4,'pending',$5,'manual','drink_order',$6,$7)`,
+          [nightclubId, b.type === 'bottle' ? 'bottle_service' : 'drink_order', order.subtotal,
+            order.currency, req.user.id, order.id,
+            JSON.stringify({ gift: true, recipient_id: b.recipient_id, non_refundable: true })],
+        );
+      }
+
       const created = await client.query(
         `INSERT INTO flirts (nightclub_id, sender_id, recipient_id, type, emoji, message,
-                             client_request_id, sender_table_id, expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + make_interval(hours => $9))
+                             client_request_id, sender_table_id, drink_order_id, expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now() + make_interval(hours => $10))
          RETURNING id`,
         [nightclubId, req.user.id, b.recipient_id, b.type, b.emoji || null, b.message || null,
-          b.client_request_id, senderTable.id, LIMITS.nightHours],
+          b.client_request_id, senderTable.id, order ? order.id : null, LIMITS.nightHours],
       );
 
       await events.publish({
@@ -296,8 +315,17 @@ router.post('/nightclubs/:nightclubId/flirts',
         payload: {
           flirt_id: created.rows[0].id, type: b.type, emoji: b.emoji || null,
           from_table: senderTable.code, to_table: recipientTable.code,
+          order_id: order ? order.id : null,
         },
       });
+      if (order) {
+        await events.publish({
+          nightclubId, type: 'order_created', client,
+          audience: { roles: ['bartender', 'manager'], userIds: [req.user.id, recipient.id] },
+          payload: { order_id: order.id, table_id: recipientTable.id, gift: true,
+            subtotal: order.subtotal, currency: order.currency },
+        });
+      }
       await client.query('COMMIT');
 
       const full = await pool.query(`${FLIRT_SELECT} WHERE f.id = $1`, [created.rows[0].id]);
@@ -397,10 +425,17 @@ router.post('/nightclubs/:nightclubId/flirts/:flirtId/react',
         `UPDATE flirts SET status = $2, viewed_at = COALESCE(viewed_at, now()) WHERE id = $1`,
         [f.id, status]);
 
+      // Declining a drink or bottle hands the order back to the sender's table. It is
+      // never cancelled and never refunded (D18).
+      let returned = null;
+      if (status === 'declined' && f.drink_order_id) {
+        returned = await returnGiftToSender({ client, nightclubId, flirt: f });
+      }
+
       await events.publish({
         nightclubId, type: 'flirt_reaction', client,
         audience: { userIds: [f.sender_id] },
-        payload: { flirt_id: f.id, reaction, status },
+        payload: { flirt_id: f.id, reaction, status, order_returned: !!returned },
       });
       await client.query('COMMIT');
 
@@ -414,9 +449,255 @@ router.post('/nightclubs/:nightclubId/flirts/:flirtId/react',
     }
   }));
 
+/**
+ * Moves a declined gift order to the sender's table. Works for orders still in the
+ * bar's hands; a delivered or cancelled order is left alone.
+ */
+async function returnGiftToSender({ client, nightclubId, flirt }) {
+  const senderTable = await seatedAt(flirt.sender_id, client);
+  const { rows } = await client.query(
+    `UPDATE drink_orders
+        SET table_id = COALESCE($3, table_id),
+            recipient_id = NULL,
+            returned_to_sender = true,
+            returned_at = now(),
+            message = COALESCE(message, '') || ' — RECHAZADO: devolver a mesa ' || COALESCE($4, '?'),
+            updated_at = now()
+      WHERE id = $1 AND nightclub_id = $2
+        AND status IN ('pending', 'confirmed', 'preparing', 'ready', 'pos_error')
+      RETURNING id, status, table_id`,
+    [flirt.drink_order_id, nightclubId, senderTable ? senderTable.id : null,
+      senderTable ? senderTable.code : null]);
+  if (rows.length === 0) return null;
+
+  await events.publish({
+    nightclubId, type: 'order_returned', client,
+    audience: { roles: ['bartender', 'waiter', 'manager'], userIds: [flirt.sender_id] },
+    payload: {
+      order_id: rows[0].id, status: rows[0].status,
+      return_to_table: senderTable ? senderTable.code : null,
+    },
+  });
+  return rows[0];
+}
+
+// ---------------------------------------------------------------- blocks
+
+router.get('/me/blocks', authenticate, asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT b.blocked_id AS user_id, u.display_name, b.created_at
+       FROM user_blocks b JOIN users u ON u.id = b.blocked_id
+      WHERE b.blocker_id = $1 ORDER BY b.created_at DESC`,
+    [req.user.id]);
+  res.json({ blocks: rows });
+}));
+
+router.post('/me/blocks/:userId', authenticate,
+  validate({ params: z.object({ userId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const target = req.params.userId;
+    if (target === req.user.id) throw ApiError.unprocessable('No puedes bloquearte a ti mismo');
+    const u = await pool.query('SELECT id FROM users WHERE id = $1 AND nightclub_id = $2',
+      [target, req.user.nightclub_id]);
+    if (u.rowCount === 0) throw ApiError.notFound('User not found');
+
+    await pool.query(
+      `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+      [req.user.id, target]);
+    // Anything still pending from that person is closed; the bar keeps any gift order.
+    await pool.query(
+      `UPDATE flirts SET status = 'declined'
+        WHERE recipient_id = $1 AND sender_id = $2 AND status IN ('sent', 'viewed')`,
+      [req.user.id, target]);
+    res.status(201).json({ blocked: true, user_id: target });
+  }));
+
+router.delete('/me/blocks/:userId', authenticate,
+  validate({ params: z.object({ userId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    await pool.query('DELETE FROM user_blocks WHERE blocker_id = $1 AND blocked_id = $2',
+      [req.user.id, req.params.userId]);
+    res.status(204).end();
+  }));
+
+// ---------------------------------------------------------------- reports
+
+const REPORT_REASONS = ['harassment', 'underage', 'fake_profile', 'other'];
+
+router.post('/nightclubs/:nightclubId/users/:userId/report',
+  validate({
+    params: z.object({ nightclubId: uuid, userId: uuid }),
+    body: z.object({
+      reason: z.enum(REPORT_REASONS),
+      details: z.string().trim().max(500).optional(),
+      flirt_id: uuid.optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, userId } = req.params;
+    if (userId === req.user.id) throw ApiError.unprocessable('No puedes reportarte a ti mismo');
+    const u = await pool.query('SELECT id FROM users WHERE id = $1 AND nightclub_id = $2',
+      [userId, nightclubId]);
+    if (u.rowCount === 0) throw ApiError.notFound('User not found');
+
+    if (req.body.flirt_id) {
+      // Only a flirt the reporter actually received can be attached as evidence.
+      const fl = await pool.query('SELECT 1 FROM flirts WHERE id = $1 AND recipient_id = $2 AND sender_id = $3',
+        [req.body.flirt_id, req.user.id, userId]);
+      if (fl.rowCount === 0) throw ApiError.notFound('Flirt not found');
+    }
+
+    let report;
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO user_reports (nightclub_id, reporter_id, reported_id, reason, details, flirt_id)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, reason, status, created_at`,
+        [nightclubId, req.user.id, userId, req.body.reason, req.body.details || null,
+          req.body.flirt_id || null]);
+      report = rows[0];
+    } catch (err) {
+      if (err.code === '23505') throw ApiError.conflict('Ya tienes un reporte abierto sobre esa persona');
+      throw err;
+    }
+
+    await events.publish({
+      nightclubId, type: 'user_reported',
+      audience: { roles: ['manager'] },
+      payload: { report_id: report.id, reason: report.reason },
+    });
+    res.status(201).json({ report });
+  }));
+
+const REPORT_SELECT = `
+  SELECT r.id, r.reason, r.details, r.status, r.resolution_note, r.created_at, r.reviewed_at,
+         r.reporter_id, ru.display_name AS reporter_name,
+         r.reported_id, du.display_name AS reported_name, du.status AS reported_account_status,
+         r.reviewed_by, mu.display_name AS reviewed_by_name,
+         r.flirt_id, f.type AS flirt_type, f.created_at AS flirt_sent_at,
+         (SELECT count(*)::int FROM user_reports x
+           WHERE x.reported_id = r.reported_id AND x.status <> 'dismissed') AS reports_against
+    FROM user_reports r
+    JOIN users ru ON ru.id = r.reporter_id
+    JOIN users du ON du.id = r.reported_id
+    LEFT JOIN users mu ON mu.id = r.reviewed_by
+    LEFT JOIN flirts f ON f.id = r.flirt_id`;
+
+// The manager sees who, why and when — never the flirt's message.
+router.get('/nightclubs/:nightclubId/reports',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: pagination.extend({
+      status: z.enum(['open', 'reviewed', 'actioned', 'dismissed']).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `${REPORT_SELECT}
+        WHERE r.nightclub_id = $1 AND ($2::text IS NULL OR r.status = $2)
+        ORDER BY (r.status = 'open') DESC, r.created_at DESC
+        LIMIT $3 OFFSET $4`,
+      [req.params.nightclubId, req.query.status || null, req.query.limit, req.query.offset]);
+    res.json({ reports: rows });
+  }));
+
+router.patch('/nightclubs/:nightclubId/reports/:reportId',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid, reportId: uuid }),
+    body: z.object({
+      status: z.enum(['reviewed', 'actioned', 'dismissed']),
+      resolution_note: z.string().trim().max(500).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, reportId } = req.params;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const cur = await client.query(
+        'SELECT * FROM user_reports WHERE id = $1 AND nightclub_id = $2 FOR UPDATE', [reportId, nightclubId]);
+      if (cur.rowCount === 0) throw ApiError.notFound('Report not found');
+
+      await client.query(
+        `UPDATE user_reports
+            SET status = $2, resolution_note = COALESCE($3, resolution_note),
+                reviewed_by = $4, reviewed_at = now()
+          WHERE id = $1`,
+        [reportId, req.body.status, req.body.resolution_note || null, req.user.id]);
+
+      // "Actioned" blocks the account: the person can no longer sign in or be listed.
+      if (req.body.status === 'actioned') {
+        await client.query(`UPDATE users SET status = 'blocked', updated_at = now() WHERE id = $1`,
+          [cur.rows[0].reported_id]);
+        await client.query(`DELETE FROM refresh_tokens WHERE user_id = $1`, [cur.rows[0].reported_id]);
+        await client.query(`UPDATE table_occupants SET left_at = now() WHERE user_id = $1 AND left_at IS NULL`,
+          [cur.rows[0].reported_id]);
+      }
+      await client.query('COMMIT');
+      const full = await pool.query(`${REPORT_SELECT} WHERE r.id = $1`, [reportId]);
+      res.json({ report: full.rows[0] });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }));
+
+// ---------------------------------------------------------------- manager stats
+
+// Counts only. No names, no messages.
+router.get('/nightclubs/:nightclubId/flirts/stats',
+  requireRole('manager'),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const id = req.params.nightclubId;
+    const [flirts, gifts, reports, optIn] = await Promise.all([
+      pool.query(
+        `SELECT count(*)::int AS sent,
+                count(*) FILTER (WHERE status = 'accepted')::int AS accepted,
+                count(*) FILTER (WHERE status = 'declined')::int AS declined,
+                count(*) FILTER (WHERE type = 'emoji')::int AS emoji,
+                count(*) FILTER (WHERE type = 'meet')::int AS meet,
+                count(DISTINCT sender_id)::int AS senders
+           FROM flirts WHERE nightclub_id = $1 AND created_at > now() - make_interval(hours => $2)`,
+        [id, LIMITS.nightHours]),
+      pool.query(
+        `SELECT count(*)::int AS orders,
+                count(*) FILTER (WHERE o.returned_to_sender)::int AS returned,
+                COALESCE(sum(o.subtotal), 0)::text AS total,
+                COALESCE(max(o.currency), 'MXN') AS currency
+           FROM flirts f JOIN drink_orders o ON o.id = f.drink_order_id
+          WHERE f.nightclub_id = $1 AND f.created_at > now() - make_interval(hours => $2)`,
+        [id, LIMITS.nightHours]),
+      pool.query(
+        `SELECT count(*) FILTER (WHERE status = 'open')::int AS open,
+                count(*) FILTER (WHERE created_at > now() - make_interval(hours => $2))::int AS tonight
+           FROM user_reports WHERE nightclub_id = $1`,
+        [id, LIMITS.nightHours]),
+      pool.query(
+        `SELECT count(*) FILTER (WHERE p.accept_flirts)::int AS accepting,
+                count(*) FILTER (WHERE p.discoverable)::int AS discoverable
+           FROM user_preferences p JOIN users u ON u.id = p.user_id
+          WHERE u.nightclub_id = $1 AND u.role = 'guest' AND u.status = 'active'`,
+        [id]),
+    ]);
+    res.json({
+      window_hours: LIMITS.nightHours,
+      flirts: flirts.rows[0],
+      gifts: gifts.rows[0],
+      reports: reports.rows[0],
+      opt_in: optIn.rows[0],
+      generated_at: new Date().toISOString(),
+    });
+  }));
+
 module.exports = router;
 module.exports.LIMITS = LIMITS;
 module.exports.EMOJI_CATALOGUE = EMOJI_CATALOGUE;
 module.exports.seatedAt = seatedAt;
 module.exports.assertCanSend = assertCanSend;
 module.exports.FLIRT_SELECT = FLIRT_SELECT;
+module.exports.ORDER_SELECT = ORDER_SELECT;
+module.exports.REPORT_REASONS = REPORT_REASONS;

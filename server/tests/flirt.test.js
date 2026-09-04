@@ -1,8 +1,7 @@
 'use strict';
 
-// Flirt, parte 1: preferencias, personas de la noche, envío, bandeja y reacciones.
-// Las reglas de protección (opt-in, sentados, límites, silencio) se prueban aquí;
-// bloqueos, reportes y trago/botella llegan en la parte 2.
+// Flirt: preferencias, personas de la noche, envío, bandeja, reacciones, bloqueos,
+// reportes, trago/botella con devolución al emisor y panel del gerente (D18).
 
 const { randomUUID } = require('crypto');
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
@@ -10,8 +9,8 @@ const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
 const { LIMITS } = require('../src/routes/flirts');
 
-let club; let ana; let beto; let carla; let waiter; let manager;
-let mesaA; let mesaB; let mesaC;
+let club; let ana; let beto; let carla; let waiter; let manager; let bartender;
+let mesaA; let mesaB; let mesaC; let cerveza; let botella;
 
 beforeAll(setupSchema);
 afterAll(closePool);
@@ -24,6 +23,9 @@ beforeEach(async () => {
   carla = await f.createUser(club.id, { role: 'guest', display_name: 'Carla', accept_flirts: false });
   waiter = await f.createUser(club.id, { role: 'waiter' });
   manager = await f.createUser(club.id, { role: 'manager' });
+  bartender = await f.createUser(club.id, { role: 'bartender' });
+  cerveza = await f.createDrink(club.id, { name: 'Cerveza', price: 120, stock: 10 });
+  botella = await f.createDrink(club.id, { name: 'Botella de tequila', category: 'bottle', price: 1400, stock: 3 });
 
   mesaA = await f.createTable(club.id, { code: '5', section: 'GENERAL' });
   mesaB = await f.createTable(club.id, { code: '39', section: 'ZONA ROJA' });
@@ -198,11 +200,250 @@ describe('Enviar un flirt', () => {
     expect((await send(manager, beto)).status).toBe(403);
   });
 
-  it('trago y botella quedan para la parte 2 (501, sin cobrar nada)', async () => {
-    const res = await send(ana, beto, { type: 'drink', emoji: undefined, drink_id: randomUUID() });
-    expect(res.status).toBe(501);
-    const { rows } = await pool.query('SELECT count(*)::int AS n FROM drink_orders');
-    expect(rows[0].n).toBe(0);
+  it('un trago sin drink_id se rechaza', async () => {
+    const res = await send(ana, beto, { type: 'drink', emoji: undefined });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('Invitar trago o botella', () => {
+  beforeEach(seatEveryone);
+  const gift = (over = {}) => send(ana, beto, { type: 'drink', emoji: undefined, drink_id: cerveza.id, ...over });
+  const react = (flirtId, user, reaction) => api().post(url(`/flirts/${flirtId}/react`)).set(auth(user)).send({ reaction });
+  const orderOf = async (flirtId) => (await pool.query(
+    'SELECT o.* FROM drink_orders o JOIN flirts f ON f.drink_order_id = o.id WHERE f.id = $1', [flirtId])).rows[0];
+
+  it('crea un pedido real para la mesa del receptor, cobrado al emisor', async () => {
+    const res = await gift({ quantity: 2 });
+    expect(res.status).toBe(201);
+    expect(res.body.flirt.type).toBe('drink');
+    const order = await orderOf(res.body.flirt.id);
+    expect(order).toMatchObject({ sender_id: ana.id, recipient_id: beto.id, table_id: mesaB.id, status: 'pending' });
+    expect(order.subtotal).toBe('240.00');
+    expect(order.message).toMatch(/Invitación de Ana \(mesa 5\)/);
+
+    const ledger = await pool.query('SELECT type, direction, amount, status, payer_user_id, metadata FROM transactions');
+    expect(ledger.rows).toHaveLength(1);
+    expect(ledger.rows[0]).toMatchObject({
+      type: 'drink_order', direction: 'in', amount: '240.00', status: 'pending', payer_user_id: ana.id,
+    });
+    expect(ledger.rows[0].metadata.non_refundable).toBe(true);
+
+    const stock = await pool.query('SELECT quantity FROM inventory WHERE drink_id = $1', [cerveza.id]);
+    expect(Number(stock.rows[0].quantity)).toBe(8);
+  });
+
+  it('una botella se asienta como servicio de botella', async () => {
+    const res = await gift({ type: 'bottle', drink_id: botella.id });
+    expect(res.status).toBe(201);
+    const ledger = await pool.query('SELECT type, amount FROM transactions');
+    expect(ledger.rows[0]).toMatchObject({ type: 'bottle_service', amount: '1400.00' });
+  });
+
+  it('la barra lo ve en su cola como cualquier pedido', async () => {
+    const res = await gift();
+    const queue = await api().get(url('/orders')).set(auth(bartender));
+    const order = queue.body.orders.find((o) => o.id === res.body.flirt.drink_order_id);
+    expect(order).toBeTruthy();
+    expect(order.table_code).toBe('39');
+    expect(order.recipient_name).toBe('Beto');
+  });
+
+  it('si el receptor lo rechaza, el pedido vuelve a la mesa del emisor y no se reembolsa', async () => {
+    const res = await gift();
+    await api().post(url(`/orders/${res.body.flirt.drink_order_id}/status`)).set(auth(bartender)).send({ status: 'confirmed' });
+
+    const declined = await react(res.body.flirt.id, beto, 'not_interested');
+    expect(declined.status).toBe(200);
+    expect(declined.body.flirt.status).toBe('declined');
+
+    const order = await orderOf(res.body.flirt.id);
+    expect(order).toMatchObject({ status: 'confirmed', table_id: mesaA.id, recipient_id: null, returned_to_sender: true });
+    expect(order.returned_at).toBeTruthy();
+    expect(order.message).toMatch(/devolver a mesa 5/);
+
+    const ledger = await pool.query('SELECT status FROM transactions');
+    expect(ledger.rows).toEqual([{ status: 'pending' }]); // ni cancelado ni reembolsado
+    const stock = await pool.query('SELECT quantity FROM inventory WHERE drink_id = $1', [cerveza.id]);
+    expect(Number(stock.rows[0].quantity)).toBe(9); // el trago sigue preparándose
+
+    const ev = await pool.query(`SELECT payload FROM events WHERE type = 'order_returned'`);
+    expect(ev.rows[0].payload.return_to_table).toBe('5');
+  });
+
+  it('un rechazo después de entregado no mueve nada', async () => {
+    const res = await gift();
+    const id = res.body.flirt.drink_order_id;
+    for (const status of ['confirmed', 'preparing', 'ready', 'delivered']) {
+      await api().post(url(`/orders/${id}/status`)).set(auth(bartender)).send({ status });
+    }
+    await react(res.body.flirt.id, beto, 'not_interested');
+    const order = await orderOf(res.body.flirt.id);
+    expect(order).toMatchObject({ status: 'delivered', table_id: mesaB.id, returned_to_sender: false });
+  });
+
+  it('el emisor no puede cancelar la invitación', async () => {
+    const res = await gift();
+    const cancel = await api().post(url(`/orders/${res.body.flirt.drink_order_id}/status`))
+      .set(auth(ana)).send({ status: 'cancelled' });
+    expect(cancel.status).toBe(403);
+    expect(cancel.body.error.message).toMatch(/no se cancela ni se reembolsa/);
+  });
+
+  it('sin existencias no se cobra ni se crea el flirt', async () => {
+    const res = await gift({ quantity: 10, drink_id: botella.id, type: 'bottle' });
+    expect(res.status).toBe(409);
+    const n = await pool.query('SELECT (SELECT count(*) FROM flirts)::int AS f, (SELECT count(*) FROM transactions)::int AS t');
+    expect(n.rows[0]).toEqual({ f: 0, t: 0 });
+  });
+
+  it('respeta el opt-in y el bloqueo igual que un emoji', async () => {
+    expect((await send(ana, carla, { type: 'drink', emoji: undefined, drink_id: cerveza.id })).status).toBe(403);
+    await api().post(`/api/me/blocks/${ana.id}`).set(auth(beto));
+    expect((await gift()).status).toBe(404);
+    const n = await pool.query('SELECT count(*)::int AS n FROM drink_orders');
+    expect(n.rows[0].n).toBe(0);
+  });
+
+  it('es idempotente: reenviar no cobra dos veces', async () => {
+    const id = randomUUID();
+    await gift({ client_request_id: id });
+    const again = await gift({ client_request_id: id });
+    expect(again.status).toBe(200);
+    const n = await pool.query('SELECT (SELECT count(*) FROM drink_orders)::int AS o, (SELECT count(*) FROM transactions)::int AS t');
+    expect(n.rows[0]).toEqual({ o: 1, t: 1 });
+  });
+});
+
+describe('Bloqueos', () => {
+  beforeEach(seatEveryone);
+  const block = (who, whom) => api().post(`/api/me/blocks/${whom.id}`).set(auth(who));
+
+  it('bloquear oculta a ambos en la lista y cierra lo pendiente', async () => {
+    const pending = await send(ana, beto);
+    expect((await block(beto, ana)).status).toBe(201);
+
+    const listaBeto = await api().get(url('/flirts/people')).set(auth(beto));
+    expect(listaBeto.body.people.map((p) => p.display_name)).not.toContain('Ana');
+    const listaAna = await api().get(url('/flirts/people')).set(auth(ana));
+    expect(listaAna.body.people.map((p) => p.display_name)).not.toContain('Beto');
+
+    const { rows } = await pool.query('SELECT status FROM flirts WHERE id = $1', [pending.body.flirt.id]);
+    expect(rows[0].status).toBe('declined');
+  });
+
+  it('el bloqueado recibe un 404 neutro al intentar enviar, y también al revés', async () => {
+    await block(beto, ana);
+    const res = await send(ana, beto);
+    expect(res.status).toBe(404);
+    expect(res.body.error.message).not.toMatch(/bloque/i);
+    expect((await send(beto, ana)).status).toBe(404);
+  });
+
+  it('se puede listar y deshacer', async () => {
+    await block(beto, ana);
+    const list = await api().get('/api/me/blocks').set(auth(beto));
+    expect(list.body.blocks.map((b) => b.display_name)).toEqual(['Ana']);
+    expect((await api().delete(`/api/me/blocks/${ana.id}`).set(auth(beto))).status).toBe(204);
+    expect((await send(ana, beto)).status).toBe(201);
+  });
+
+  it('bloquearse a uno mismo o a alguien de otro club falla', async () => {
+    expect((await block(beto, beto)).status).toBe(422);
+    const otro = await f.createNightclub({ slug: 'otro-club' });
+    const ajeno = await f.createUser(otro.id, { role: 'guest' });
+    expect((await block(beto, ajeno)).status).toBe(404);
+  });
+});
+
+describe('Reportes', () => {
+  beforeEach(seatEveryone);
+  const report = (who, whom, body = { reason: 'harassment' }) =>
+    api().post(url(`/users/${whom.id}/report`)).set(auth(who)).send(body);
+
+  it('se registra con motivo y avisa al gerente', async () => {
+    const res = await report(beto, ana, { reason: 'harassment', details: 'Insiste aunque le dije que no' });
+    expect(res.status).toBe(201);
+    expect(res.body.report).toMatchObject({ reason: 'harassment', status: 'open' });
+    const ev = await pool.query(`SELECT audience FROM events WHERE type = 'user_reported'`);
+    expect(ev.rows[0].audience.roles).toEqual(['manager']);
+  });
+
+  it('un motivo fuera de la lista se rechaza', async () => {
+    expect((await report(beto, ana, { reason: 'feo' })).status).toBe(400);
+  });
+
+  it('solo un reporte abierto por persona', async () => {
+    await report(beto, ana);
+    expect((await report(beto, ana)).status).toBe(409);
+  });
+
+  it('puede adjuntar el flirt recibido como evidencia, pero no uno ajeno', async () => {
+    const mine = await send(ana, beto);
+    expect((await report(beto, ana, { reason: 'harassment', flirt_id: mine.body.flirt.id })).status).toBe(201);
+    expect((await report(carla, ana, { reason: 'harassment', flirt_id: mine.body.flirt.id })).status).toBe(404);
+  });
+
+  it('con dos reportes abiertos la persona desaparece de la lista y no recibe', async () => {
+    await report(beto, ana);
+    await report(carla, ana);
+    const list = await api().get(url('/flirts/people')).set(auth(beto));
+    expect(list.body.people.map((p) => p.display_name)).not.toContain('Ana');
+    expect((await send(beto, ana)).status).toBe(404);
+  });
+
+  it('el gerente ve los reportes sin el mensaje del flirt', async () => {
+    const mine = await send(ana, beto, { message: 'texto privado' });
+    await report(beto, ana, { reason: 'harassment', details: 'me incomoda', flirt_id: mine.body.flirt.id });
+
+    const res = await api().get(url('/reports')).set(auth(manager));
+    expect(res.status).toBe(200);
+    expect(res.body.reports).toHaveLength(1);
+    expect(res.body.reports[0]).toMatchObject({ reporter_name: 'Beto', reported_name: 'Ana', flirt_type: 'emoji' });
+    expect(JSON.stringify(res.body)).not.toContain('texto privado');
+    expect((await api().get(url('/reports')).set(auth(ana))).status).toBe(403);
+  });
+
+  it('marcar "actioned" bloquea la cuenta y la saca del club', async () => {
+    const r = await report(beto, ana);
+    const res = await api().patch(url(`/reports/${r.body.report.id}`)).set(auth(manager))
+      .send({ status: 'actioned', resolution_note: 'Expulsado esta noche' });
+    expect(res.status).toBe(200);
+    expect(res.body.report).toMatchObject({ status: 'actioned', reported_account_status: 'blocked', reviewed_by_name: 'manager Test' });
+
+    expect((await api().get('/api/me/preferences').set(auth(ana))).status).toBe(403);
+    const seated = await pool.query('SELECT count(*)::int AS n FROM table_occupants WHERE user_id = $1 AND left_at IS NULL', [ana.id]);
+    expect(seated.rows[0].n).toBe(0);
+  });
+
+  it('desestimar un reporte vuelve a mostrar a la persona', async () => {
+    const a = await report(beto, ana);
+    await report(carla, ana);
+    await api().patch(url(`/reports/${a.body.report.id}`)).set(auth(manager)).send({ status: 'dismissed' });
+    const list = await api().get(url('/flirts/people')).set(auth(carla));
+    expect(list.body.people.map((p) => p.display_name)).toContain('Ana');
+  });
+});
+
+describe('Panel del gerente', () => {
+  beforeEach(seatEveryone);
+
+  it('solo conteos: nada de nombres ni mensajes', async () => {
+    const a = await send(ana, beto, { message: 'secreto' });
+    await send(beto, ana, { type: 'drink', emoji: undefined, drink_id: cerveza.id });
+    await api().post(url(`/flirts/${a.body.flirt.id}/react`)).set(auth(beto)).send({ reaction: 'like' });
+
+    const res = await api().get(url('/flirts/stats')).set(auth(manager));
+    expect(res.status).toBe(200);
+    expect(res.body.flirts).toMatchObject({ sent: 2, accepted: 1, declined: 0, emoji: 1, senders: 2 });
+    expect(res.body.gifts).toMatchObject({ orders: 1, returned: 0, total: '120.00' });
+    expect(res.body.opt_in).toMatchObject({ accepting: 2, discoverable: 3 });
+    const text = JSON.stringify(res.body);
+    expect(text).not.toMatch(/secreto|Ana|Beto/);
+  });
+
+  it('el personal de piso no lo ve', async () => {
+    expect((await api().get(url('/flirts/stats')).set(auth(waiter))).status).toBe(403);
   });
 });
 
