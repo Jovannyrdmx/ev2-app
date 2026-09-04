@@ -35,6 +35,7 @@ jobs:
       DB_USER: postgres
       DB_PASSWORD: ci-password
       DB_NAME: ev2_test
+      BANK_ENCRYPTION_KEY: ci-only-not-a-real-key-0123456789abcdef
     steps:
       - uses: actions/checkout@v4
 
@@ -70,6 +71,7 @@ jobs:
           cat > .env <<'ENV'
           DB_PASSWORD=ci-only-not-a-real-password
           JWT_SECRET=ci-only-not-a-real-secret
+          BANK_ENCRYPTION_KEY=ci-only-not-a-real-key-0123456789abcdef
           ENV
 
       - name: Build images
