@@ -18,6 +18,9 @@ async function start() {
     if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 16) {
       throw new Error('JWT_SECRET is missing or shorter than 16 characters');
     }
+    if (!process.env.BANK_ENCRYPTION_KEY || process.env.BANK_ENCRYPTION_KEY.length < 32) {
+      throw new Error('BANK_ENCRYPTION_KEY is missing or shorter than 32 characters (employee bank accounts)');
+    }
     await pool.query('SELECT 1');
     console.log(`PostgreSQL connected (${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 5432})`);
     await redis.connect();

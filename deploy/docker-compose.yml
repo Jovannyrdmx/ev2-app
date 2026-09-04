@@ -1,6 +1,6 @@
 # EV2 Clandestinoz - local / staging stack
 # Usage (from repo root):  docker compose -f deploy/docker-compose.yml up -d
-# Required in .env: DB_PASSWORD, JWT_SECRET (no defaults on purpose).
+# Required in .env: DB_PASSWORD, JWT_SECRET, BANK_ENCRYPTION_KEY (no defaults on purpose).
 
 name: ev2
 
@@ -47,6 +47,7 @@ services:
       NODE_ENV: ${ENVIRONMENT:-development}
       PORT: 3000
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required in .env}
+      BANK_ENCRYPTION_KEY: ${BANK_ENCRYPTION_KEY:?BANK_ENCRYPTION_KEY is required in .env}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required in .env}
       DB_HOST: postgres

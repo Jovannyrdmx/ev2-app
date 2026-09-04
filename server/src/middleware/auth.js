@@ -7,6 +7,7 @@ const { pool } = require('../db/pool');
 const { ApiError } = require('./errors');
 
 const ACCESS_TTL = process.env.JWT_ACCESS_TTL || '15m';
+const PASSWORD_CHANGE_ALLOWED = /^\/api\/auth\/(password|logout|me)(\?|$)/;
 const REFRESH_TTL_DAYS = Number(process.env.JWT_REFRESH_TTL_DAYS || 30);
 
 function jwtSecret() {
@@ -75,13 +76,19 @@ async function authenticate(req, res, next) {
 
     const { rows } = await pool.query(
       `SELECT id, nightclub_id, email, first_name, last_name, display_name, role, status,
-              locale, preferred_currency
+              locale, preferred_currency, must_change_password
          FROM users WHERE id = $1`,
       [payload.sub],
     );
     const user = rows[0];
     if (!user) throw ApiError.unauthorized('User no longer exists');
     if (user.status !== 'active') throw ApiError.forbidden('Account is not active');
+
+    // A temporary password opens only the door to replace it.
+    if (user.must_change_password && !PASSWORD_CHANGE_ALLOWED.test(req.originalUrl || req.url)) {
+      throw new ApiError(403, 'password_change_required',
+        'Debes cambiar tu contraseña temporal antes de continuar (POST /api/auth/password)');
+    }
 
     req.user = user;
     return next();

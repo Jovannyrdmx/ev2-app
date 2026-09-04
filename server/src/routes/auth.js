@@ -36,6 +36,7 @@ function publicUser(u) {
     role: u.role,
     locale: u.locale,
     preferred_currency: u.preferred_currency,
+    must_change_password: !!u.must_change_password,
   };
 }
 
@@ -156,6 +157,31 @@ router.post('/logout', authenticate, asyncHandler(async (req, res) => {
   await revokeAllRefreshTokens(req.user.id);
   res.status(204).end();
 }));
+
+// Change password. Required after a manager-issued temporary password; the current
+// password is always checked, and every other session is closed.
+router.post('/password', authenticate,
+  validate({ body: z.object({ current_password: z.string().min(1).max(200), new_password: password }) }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
+    const ok = await bcrypt.compare(req.body.current_password, rows[0].password_hash);
+    if (!ok) throw ApiError.unauthorized('La contraseña actual no es correcta');
+    if (req.body.current_password === req.body.new_password) {
+      throw ApiError.unprocessable('La contraseña nueva debe ser distinta de la actual');
+    }
+    await pool.query(
+      'UPDATE users SET password_hash = $2, must_change_password = false, updated_at = now() WHERE id = $1',
+      [req.user.id, await bcrypt.hash(req.body.new_password, 10)]);
+    await revokeAllRefreshTokens(req.user.id);
+    const refresh = await issueRefreshToken(req.user.id, req.headers['user-agent']);
+    res.json({
+      changed: true,
+      access_token: signAccessToken({ ...req.user, must_change_password: false }),
+      token_type: 'Bearer',
+      expires_in: ACCESS_TTL,
+      refresh_token: refresh.token,
+    });
+  }));
 
 router.get('/me', authenticate, asyncHandler(async (req, res) => {
   const prefs = await pool.query('SELECT accept_flirts, show_on_map FROM user_preferences WHERE user_id = $1',
