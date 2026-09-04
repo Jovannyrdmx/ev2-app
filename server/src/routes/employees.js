@@ -372,5 +372,412 @@ router.post('/nightclubs/:nightclubId/employees/:userId/bank-accounts/:accountId
     res.json({ bank_account: banking.maskAccount(rows[0]) });
   }));
 
+// ---------------------------------------------------------------- exchange rate
+
+/** Latest USD->MXN rate (MXN per 1 USD), or null when the manager has never set one. */
+async function currentRate(runner = pool) {
+  const { rows } = await runner.query(
+    `SELECT id, rate, effective_from, source, set_by FROM exchange_rates
+      WHERE base = 'USD' AND quote = 'MXN' AND effective_from <= now()
+      ORDER BY effective_from DESC, id DESC LIMIT 1`);
+  return rows[0] || null;
+}
+
+function convert(amount, from, to, rate) {
+  if (from === to) return Number(amount);
+  const r = Number(rate);
+  return Number((from === 'USD' ? Number(amount) * r : Number(amount) / r).toFixed(2));
+}
+
+router.get('/nightclubs/:nightclubId/exchange-rate',
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const current = await currentRate();
+    const isManager = ['manager', 'admin'].includes(req.user.role);
+    let history = [];
+    if (isManager) {
+      const { rows } = await pool.query(
+        `SELECT r.id, r.rate, r.effective_from, r.source, u.display_name AS set_by_name
+           FROM exchange_rates r LEFT JOIN users u ON u.id = r.set_by
+          WHERE r.base = 'USD' AND r.quote = 'MXN'
+          ORDER BY r.effective_from DESC, r.id DESC LIMIT 30`);
+      history = rows;
+    }
+    res.json({ base: 'USD', quote: 'MXN', current, history });
+  }));
+
+router.put('/nightclubs/:nightclubId/exchange-rate',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      rate: z.number().positive().max(1000),
+      effective_from: z.coerce.date().optional(),
+      source: z.string().trim().max(40).default('manual'),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `INSERT INTO exchange_rates (base, quote, rate, effective_from, source, set_by)
+       VALUES ('USD','MXN',$1, COALESCE($2, now()), $3, $4)
+       RETURNING id, rate, effective_from, source`,
+      [req.body.rate, req.body.effective_from || null, req.body.source, req.user.id]);
+    res.status(201).json({ rate: rows[0] });
+  }));
+
+// ---------------------------------------------------------------- earnings
+
+/**
+ * Balance per currency, always computed: everything paid to this person in the ledger
+ * minus every withdrawal that is pending, approved or paid (rejected ones never counted).
+ */
+async function balancesFor(userId, runner = pool) {
+  const { rows } = await runner.query(
+    `WITH earned AS (
+       SELECT currency, COALESCE(sum(amount), 0) AS total, count(*)::int AS movements
+         FROM transactions
+        WHERE payee_user_id = $1 AND direction = 'in' AND status = 'paid'
+        GROUP BY currency),
+     withdrawn AS (
+       SELECT currency,
+              COALESCE(sum(amount) FILTER (WHERE status = 'paid'), 0)                 AS paid,
+              COALESCE(sum(amount) FILTER (WHERE status IN ('pending','approved')), 0) AS reserved
+         FROM withdrawals WHERE user_id = $1 GROUP BY currency)
+     SELECT c.currency,
+            COALESCE(e.total, 0)::numeric(12,2)::text     AS earned,
+            COALESCE(w.paid, 0)::numeric(12,2)::text      AS withdrawn,
+            COALESCE(w.reserved, 0)::numeric(12,2)::text  AS reserved,
+            (COALESCE(e.total, 0) - COALESCE(w.paid, 0) - COALESCE(w.reserved, 0))::numeric(12,2)::text AS available,
+            COALESCE(e.movements, 0)       AS movements
+       FROM (VALUES ('MXN'), ('USD')) AS c(currency)
+       LEFT JOIN earned e ON e.currency = c.currency
+       LEFT JOIN withdrawn w ON w.currency = c.currency
+      ORDER BY c.currency`,
+    [userId]);
+  return rows;
+}
+
+const earningsQuery = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+async function earningsReport(userId, { from, to }) {
+  const params = [userId, from || null, to || null];
+  const where = `payee_user_id = $1 AND direction = 'in' AND status = 'paid'
+                 AND ($2::date IS NULL OR created_at >= $2::date)
+                 AND ($3::date IS NULL OR created_at < ($3::date + interval '1 day'))`;
+  const [byType, byDay, totals] = await Promise.all([
+    pool.query(
+      `SELECT currency, type, sum(amount)::text AS total, count(*)::int AS count
+         FROM transactions WHERE ${where} GROUP BY currency, type ORDER BY currency, type`, params),
+    pool.query(
+      `SELECT currency, (created_at AT TIME ZONE 'America/Hermosillo')::date AS day,
+              sum(amount)::text AS total, count(*)::int AS count
+         FROM transactions WHERE ${where} GROUP BY currency, day ORDER BY day DESC, currency`, params),
+    pool.query(
+      `SELECT currency, sum(amount)::text AS total, count(*)::int AS count
+         FROM transactions WHERE ${where} GROUP BY currency ORDER BY currency`, params),
+  ]);
+  return { from: from || null, to: to || null, totals: totals.rows, by_type: byType.rows, by_day: byDay.rows };
+}
+
+router.get('/employees/me/earnings', authenticate, requireEmployee,
+  validate({ query: earningsQuery }),
+  asyncHandler(async (req, res) => {
+    res.json({ balances: await balancesFor(req.user.id), ...(await earningsReport(req.user.id, req.query)) });
+  }));
+
+const WITHDRAWAL_SELECT = `
+  SELECT w.id, w.user_id, u.display_name AS employee_name, u.role AS employee_role,
+         w.amount::text, w.currency, w.payout_currency, w.exchange_rate, w.amount_paid::text,
+         w.status, w.note, w.rejection_reason, w.created_at, w.reviewed_at, w.paid_at,
+         w.reviewed_by, m.display_name AS reviewed_by_name, w.transaction_id,
+         w.bank_account_id, a.bank_name, a.type AS bank_account_type, a.account_last4
+    FROM withdrawals w
+    JOIN users u ON u.id = w.user_id
+    LEFT JOIN users m ON m.id = w.reviewed_by
+    LEFT JOIN employee_bank_accounts a ON a.id = w.bank_account_id`;
+
+function publicWithdrawal(row) {
+  const { account_last4: last4, ...rest } = row;
+  return { ...rest, account_masked: last4 ? `****${last4}` : null };
+}
+
+router.get('/employees/me/dashboard', authenticate, requireEmployee, asyncHandler(async (req, res) => {
+  const [balances, recent, open, rate, profile] = await Promise.all([
+    balancesFor(req.user.id),
+    pool.query(
+      `SELECT id, type, amount::text, currency, created_at, metadata
+         FROM transactions
+        WHERE payee_user_id = $1 AND direction = 'in' AND status = 'paid'
+        ORDER BY created_at DESC LIMIT 10`, [req.user.id]),
+    pool.query(`${WITHDRAWAL_SELECT} WHERE w.user_id = $1 AND w.status IN ('pending','approved')`, [req.user.id]),
+    currentRate(),
+    pool.query(`${EMPLOYEE_SELECT} WHERE u.id = $1`, [req.user.id]),
+  ]);
+  res.json({
+    employee: profile.rows[0],
+    balances,
+    recent_movements: recent.rows,
+    open_withdrawal: open.rows[0] ? publicWithdrawal(open.rows[0]) : null,
+    exchange_rate: rate,
+    generated_at: new Date().toISOString(),
+  });
+}));
+
+// ---------------------------------------------------------------- withdrawals: employee
+
+router.get('/employees/me/withdrawals', authenticate, requireEmployee,
+  validate({ query: pagination }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `${WITHDRAWAL_SELECT} WHERE w.user_id = $1 ORDER BY w.created_at DESC LIMIT $2 OFFSET $3`,
+      [req.user.id, req.query.limit, req.query.offset]);
+    res.json({ withdrawals: rows.map(publicWithdrawal) });
+  }));
+
+router.post('/employees/me/withdrawals', authenticate, requireEmployee,
+  validate({
+    body: z.object({
+      amount: z.number().positive().max(1_000_000),
+      currency,
+      payout_currency: currency.optional(),
+      bank_account_id: uuid.optional(),
+      note: z.string().trim().max(300).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const b = req.body;
+    const amount = Number(b.amount.toFixed(2));
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Serialize withdrawals per employee so two requests cannot both pass the balance check.
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`withdrawal:${req.user.id}`]);
+
+      const acct = await client.query(
+        `SELECT id, country, verified_at FROM employee_bank_accounts
+          WHERE user_id = $1 AND active AND ($2::uuid IS NULL OR id = $2)
+          ORDER BY is_default DESC, created_at LIMIT 1`,
+        [req.user.id, b.bank_account_id || null]);
+      if (acct.rowCount === 0) throw ApiError.unprocessable('Registra una cuenta bancaria antes de pedir un retiro');
+      const account = acct.rows[0];
+      if (!account.verified_at) {
+        throw ApiError.unprocessable('El gerente debe verificar tu cuenta bancaria antes del primer retiro');
+      }
+
+      const payoutCurrency = b.payout_currency || (account.country === 'US' ? 'USD' : 'MXN');
+      const balances = await balancesFor(req.user.id, client);
+      const available = Number(balances.find((x) => x.currency === b.currency).available);
+      if (amount > available) {
+        throw ApiError.unprocessable(`Saldo insuficiente: tienes ${available.toFixed(2)} ${b.currency} disponibles`,
+          { available, currency: b.currency });
+      }
+
+      let rate = null; let amountPaid = amount;
+      if (payoutCurrency !== b.currency) {
+        const r = await currentRate(client);
+        if (!r) throw ApiError.unprocessable('No hay tipo de cambio registrado; pide al gerente que lo capture');
+        rate = Number(r.rate);
+        amountPaid = convert(amount, b.currency, payoutCurrency, rate);
+      }
+
+      let created;
+      try {
+        created = await client.query(
+          `INSERT INTO withdrawals (nightclub_id, user_id, bank_account_id, amount, currency,
+                                    payout_currency, exchange_rate, amount_paid, note)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+          [req.user.nightclub_id, req.user.id, account.id, amount, b.currency,
+            payoutCurrency, rate, amountPaid, b.note || null]);
+      } catch (err) {
+        if (err.code === '23505') throw ApiError.conflict('Ya tienes un retiro en proceso; espera a que se resuelva');
+        throw err;
+      }
+      await client.query('COMMIT');
+      const full = await pool.query(`${WITHDRAWAL_SELECT} WHERE w.id = $1`, [created.rows[0].id]);
+      res.status(201).json({ withdrawal: publicWithdrawal(full.rows[0]) });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }));
+
+// ---------------------------------------------------------------- withdrawals: manager
+
+router.get('/nightclubs/:nightclubId/withdrawals',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: pagination.extend({ status: z.enum(['pending', 'approved', 'paid', 'rejected']).optional() }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `${WITHDRAWAL_SELECT}
+        WHERE w.nightclub_id = $1 AND ($2::text IS NULL OR w.status = $2)
+        ORDER BY (w.status = 'pending') DESC, (w.status = 'approved') DESC, w.created_at
+        LIMIT $3 OFFSET $4`,
+      [req.params.nightclubId, req.query.status || null, req.query.limit, req.query.offset]);
+    res.json({ withdrawals: rows.map(publicWithdrawal) });
+  }));
+
+async function lockedWithdrawal(client, id, nightclubId) {
+  const { rows } = await client.query(
+    'SELECT * FROM withdrawals WHERE id = $1 AND nightclub_id = $2 FOR UPDATE', [id, nightclubId]);
+  if (rows.length === 0) throw ApiError.notFound('Withdrawal not found');
+  return rows[0];
+}
+
+const withdrawalParams = z.object({ nightclubId: uuid, withdrawalId: uuid });
+
+// Approval fixes the exchange rate at that moment: that is when money actually moves.
+router.post('/nightclubs/:nightclubId/withdrawals/:withdrawalId/approve',
+  requireRole('manager'),
+  validate({ params: withdrawalParams, body: z.object({ note: z.string().trim().max(300).optional() }).default({}) }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, withdrawalId } = req.params;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const w = await lockedWithdrawal(client, withdrawalId, nightclubId);
+      if (w.status !== 'pending') throw ApiError.conflict(`El retiro ya está '${w.status}'`);
+
+      let rate = w.exchange_rate; let amountPaid = w.amount_paid;
+      if (w.payout_currency && w.payout_currency !== w.currency) {
+        const r = await currentRate(client);
+        if (!r) throw ApiError.unprocessable('No hay tipo de cambio registrado');
+        rate = Number(r.rate);
+        amountPaid = convert(w.amount, w.currency, w.payout_currency, rate);
+      }
+      await client.query(
+        `UPDATE withdrawals SET status = 'approved', reviewed_by = $2, reviewed_at = now(),
+                exchange_rate = $3, amount_paid = $4, note = COALESCE($5, note), updated_at = now()
+          WHERE id = $1`,
+        [withdrawalId, req.user.id, rate, amountPaid, req.body.note || null]);
+      await client.query('COMMIT');
+      const full = await pool.query(`${WITHDRAWAL_SELECT} WHERE w.id = $1`, [withdrawalId]);
+      res.json({ withdrawal: publicWithdrawal(full.rows[0]) });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }));
+
+router.post('/nightclubs/:nightclubId/withdrawals/:withdrawalId/reject',
+  requireRole('manager'),
+  validate({ params: withdrawalParams, body: z.object({ reason: z.string().trim().min(1).max(300) }) }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, withdrawalId } = req.params;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const w = await lockedWithdrawal(client, withdrawalId, nightclubId);
+      if (!['pending', 'approved'].includes(w.status)) throw ApiError.conflict(`El retiro ya está '${w.status}'`);
+      await client.query(
+        `UPDATE withdrawals SET status = 'rejected', reviewed_by = $2, reviewed_at = now(),
+                rejection_reason = $3, updated_at = now() WHERE id = $1`,
+        [withdrawalId, req.user.id, req.body.reason]);
+      await client.query('COMMIT');
+      const full = await pool.query(`${WITHDRAWAL_SELECT} WHERE w.id = $1`, [withdrawalId]);
+      res.json({ withdrawal: publicWithdrawal(full.rows[0]) });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }));
+
+// The manager made the transfer outside the system: record it in the ledger.
+router.post('/nightclubs/:nightclubId/withdrawals/:withdrawalId/paid',
+  requireRole('manager'),
+  validate({
+    params: withdrawalParams,
+    body: z.object({ reference: z.string().trim().max(120).optional() }).default({}),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, withdrawalId } = req.params;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const w = await lockedWithdrawal(client, withdrawalId, nightclubId);
+      if (w.status !== 'approved') throw ApiError.conflict('Solo se marca pagado un retiro aprobado');
+
+      const tx = await client.query(
+        `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status,
+                                   payee_user_id, provider, provider_ref, reference_type, reference_id,
+                                   confirmed_by, confirmed_at, metadata)
+         VALUES ($1,'withdrawal','out',$2,$3,'paid',$4,'manual',$5,'withdrawal',$6,$7, now(), $8)
+         RETURNING id`,
+        [nightclubId, w.amount_paid || w.amount, w.payout_currency || w.currency, w.user_id,
+          req.body.reference || null, withdrawalId, req.user.id,
+          JSON.stringify({ balance_amount: w.amount, balance_currency: w.currency, exchange_rate: w.exchange_rate })]);
+      await client.query(
+        `UPDATE withdrawals SET status = 'paid', paid_at = now(), transaction_id = $2, updated_at = now()
+          WHERE id = $1`,
+        [withdrawalId, tx.rows[0].id]);
+      await client.query('COMMIT');
+      const full = await pool.query(`${WITHDRAWAL_SELECT} WHERE w.id = $1`, [withdrawalId]);
+      res.json({ withdrawal: publicWithdrawal(full.rows[0]) });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }));
+
+// ---------------------------------------------------------------- manager: payroll view
+
+router.get('/nightclubs/:nightclubId/employees/:userId/earnings',
+  requireRole('manager'),
+  validate({ params: z.object({ nightclubId: uuid, userId: uuid }), query: earningsQuery }),
+  asyncHandler(async (req, res) => {
+    const e = await pool.query(
+      `SELECT 1 FROM users u JOIN employee_profiles p ON p.user_id = u.id
+        WHERE u.id = $1 AND u.nightclub_id = $2`, [req.params.userId, req.params.nightclubId]);
+    if (e.rowCount === 0) throw ApiError.notFound('Employee not found');
+    res.json({ balances: await balancesFor(req.params.userId), ...(await earningsReport(req.params.userId, req.query)) });
+  }));
+
+router.get('/nightclubs/:nightclubId/payroll',
+  requireRole('manager'),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `WITH earned AS (
+         SELECT payee_user_id AS user_id, currency, sum(amount) AS total
+           FROM transactions WHERE nightclub_id = $1 AND direction = 'in' AND status = 'paid'
+            AND payee_user_id IS NOT NULL GROUP BY 1, 2),
+       withdrawn AS (
+         SELECT user_id, currency,
+                sum(amount) FILTER (WHERE status = 'paid') AS paid,
+                sum(amount) FILTER (WHERE status IN ('pending','approved')) AS reserved
+           FROM withdrawals WHERE nightclub_id = $1 GROUP BY 1, 2)
+       SELECT u.id AS user_id, u.display_name, u.role, p.active, c.currency,
+              COALESCE(e.total, 0)::numeric(12,2)::text AS earned,
+              COALESCE(w.paid, 0)::numeric(12,2)::text AS withdrawn,
+              COALESCE(w.reserved, 0)::numeric(12,2)::text AS reserved,
+              (COALESCE(e.total, 0) - COALESCE(w.paid, 0) - COALESCE(w.reserved, 0))::numeric(12,2)::text AS available
+         FROM users u
+         JOIN employee_profiles p ON p.user_id = u.id
+         CROSS JOIN (VALUES ('MXN'), ('USD')) AS c(currency)
+         LEFT JOIN earned e ON e.user_id = u.id AND e.currency = c.currency
+         LEFT JOIN withdrawn w ON w.user_id = u.id AND w.currency = c.currency
+        WHERE u.nightclub_id = $1
+          AND (COALESCE(e.total, 0) <> 0 OR COALESCE(w.paid, 0) <> 0 OR COALESCE(w.reserved, 0) <> 0)
+        ORDER BY u.role, u.display_name, c.currency`,
+      [req.params.nightclubId]);
+    const pending = await pool.query(
+      `SELECT count(*)::int AS n FROM withdrawals WHERE nightclub_id = $1 AND status = 'pending'`,
+      [req.params.nightclubId]);
+    res.json({ rows, pending_withdrawals: pending.rows[0].n, exchange_rate: await currentRate() });
+  }));
+
 module.exports = router;
 module.exports.EMPLOYEE_ROLES = EMPLOYEE_ROLES;

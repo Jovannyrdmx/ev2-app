@@ -277,3 +277,247 @@ describe('Cuentas bancarias', () => {
     expect(rows[0].n).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------- parte 2
+
+/** Propina ya cobrada al empleado, directo en el libro contable. */
+async function paidTip(to, amount, cur = 'MXN', type = 'tip') {
+  await pool.query(
+    `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status, payer_user_id, payee_user_id, provider)
+     VALUES ($1,$2,'in',$3,$4,'paid',$5,$6,'manual')`, [club.id, type, amount, cur, guest.id, to.id]);
+}
+
+async function verifiedAccount(user, over = {}) {
+  const res = await api().post('/api/employees/me/bank-accounts').set(auth(user)).send({
+    type: 'clabe', bank_name: 'BBVA', holder_name: 'Titular', account_number: CLABE_OK, ...over,
+  });
+  await api().post(url(`/employees/${user.id}/bank-accounts/${res.body.bank_account.id}/verify`)).set(auth(manager)).send({});
+  return res.body.bank_account;
+}
+
+const withdraw = (user, body) => api().post('/api/employees/me/withdrawals').set(auth(user)).send(body);
+const setRate = (rate) => api().put(url('/exchange-rate')).set(auth(manager)).send({ rate });
+
+describe('Saldo y ganancias', () => {
+  it('el saldo se calcula desde el libro, por moneda', async () => {
+    await paidTip(waiter, 300);
+    await paidTip(waiter, 200, 'MXN', 'song_request');
+    await paidTip(waiter, 20, 'USD');
+    const res = await api().get('/api/employees/me/earnings').set(auth(waiter));
+    expect(res.status).toBe(200);
+    expect(res.body.balances).toEqual([
+      expect.objectContaining({ currency: 'MXN', earned: '500.00', available: '500.00', movements: 2 }),
+      expect.objectContaining({ currency: 'USD', earned: '20.00', available: '20.00', movements: 1 }),
+    ]);
+    expect(res.body.by_type).toEqual(expect.arrayContaining([
+      expect.objectContaining({ currency: 'MXN', type: 'tip', total: '300.00' }),
+      expect.objectContaining({ currency: 'MXN', type: 'song_request', total: '200.00' }),
+    ]));
+  });
+
+  it('solo cuenta lo efectivamente pagado', async () => {
+    await paidTip(waiter, 300);
+    await pool.query(
+      `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status, payee_user_id, provider)
+       VALUES ($1,'tip','in',999,'MXN','pending',$2,'manual')`, [club.id, waiter.id]);
+    const res = await api().get('/api/employees/me/earnings').set(auth(waiter));
+    expect(res.body.balances[0].earned).toBe('300.00');
+  });
+
+  it('filtra por fechas', async () => {
+    // El libro es inmutable, así que la propina vieja se inserta ya con su fecha.
+    await pool.query(
+      `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status, payee_user_id, provider, created_at)
+       VALUES ($1,'tip','in',100,'MXN','paid',$2,'manual', now() - interval '10 days')`, [club.id, waiter.id]);
+    await paidTip(waiter, 50);
+    const from = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+    const res = await api().get(`/api/employees/me/earnings?from=${from}`).set(auth(waiter));
+    expect(res.body.totals).toEqual([expect.objectContaining({ currency: 'MXN', total: '50.00' })]);
+    expect(res.body.balances[0].earned).toBe('150.00'); // el saldo no depende del filtro
+  });
+
+  it('un empleado no ve las ganancias de otro; el gerente sí', async () => {
+    await paidTip(dancer, 40, 'USD');
+    expect((await api().get(url(`/employees/${dancer.id}/earnings`)).set(auth(waiter))).status).toBe(403);
+    const res = await api().get(url(`/employees/${dancer.id}/earnings`)).set(auth(manager));
+    expect(res.status).toBe(200);
+    expect(res.body.balances[1]).toMatchObject({ currency: 'USD', earned: '40.00' });
+    expect((await api().get(url(`/employees/${guest.id}/earnings`)).set(auth(manager))).status).toBe(404);
+  });
+
+  it('el tablero trae saldo, movimientos, retiro abierto y tipo de cambio', async () => {
+    await setRate(18.5);
+    await paidTip(waiter, 300);
+    await verifiedAccount(waiter);
+    await withdraw(waiter, { amount: 100, currency: 'MXN' });
+    const res = await api().get('/api/employees/me/dashboard').set(auth(waiter));
+    expect(res.status).toBe(200);
+    expect(res.body.balances[0]).toMatchObject({ available: '200.00', reserved: '100.00' });
+    expect(res.body.recent_movements).toHaveLength(1);
+    expect(res.body.open_withdrawal).toMatchObject({ amount: '100.00', status: 'pending', account_masked: `****${CLABE_OK.slice(-4)}` });
+    expect(Number(res.body.exchange_rate.rate)).toBe(18.5);
+    expect(JSON.stringify(res.body)).not.toContain(CLABE_OK);
+  });
+});
+
+describe('Tipo de cambio', () => {
+  it('el gerente lo fija y queda historial con fecha y autor', async () => {
+    expect((await setRate(17.9)).status).toBe(201);
+    await setRate(18.2);
+    const res = await api().get(url('/exchange-rate')).set(auth(manager));
+    expect(Number(res.body.current.rate)).toBe(18.2);
+    expect(res.body.history).toHaveLength(2);
+    expect(res.body.history[0].set_by_name).toBe('manager Test');
+  });
+
+  it('un empleado ve el vigente, sin historial; no puede fijarlo', async () => {
+    await setRate(18);
+    const res = await api().get(url('/exchange-rate')).set(auth(waiter));
+    expect(Number(res.body.current.rate)).toBe(18);
+    expect(res.body.history).toEqual([]);
+    expect((await api().put(url('/exchange-rate')).set(auth(waiter)).send({ rate: 1 })).status).toBe(403);
+  });
+
+  it('rechaza valores absurdos', async () => {
+    expect((await setRate(0)).status).toBe(400);
+    expect((await setRate(-5)).status).toBe(400);
+  });
+});
+
+describe('Retiros', () => {
+  beforeEach(async () => { await paidTip(waiter, 1000); });
+
+  it('nace pendiente, reserva el saldo y no exige mínimo', async () => {
+    await verifiedAccount(waiter);
+    const res = await withdraw(waiter, { amount: 1, currency: 'MXN' });
+    expect(res.status).toBe(201);
+    expect(res.body.withdrawal).toMatchObject({ status: 'pending', amount: '1.00', currency: 'MXN', payout_currency: 'MXN' });
+    const bal = (await api().get('/api/employees/me/earnings').set(auth(waiter))).body.balances[0];
+    expect(bal).toMatchObject({ available: '999.00', reserved: '1.00' });
+  });
+
+  it('no excede el saldo', async () => {
+    await verifiedAccount(waiter);
+    const res = await withdraw(waiter, { amount: 1000.01, currency: 'MXN' });
+    expect(res.status).toBe(422);
+    expect(res.body.error.details.available).toBe(1000);
+    expect((await withdraw(waiter, { amount: 1000, currency: 'MXN' })).status).toBe(201);
+  });
+
+  it('sin cuenta, o sin verificar, no hay retiro', async () => {
+    expect((await withdraw(waiter, { amount: 10, currency: 'MXN' })).status).toBe(422);
+    await api().post('/api/employees/me/bank-accounts').set(auth(waiter)).send({
+      type: 'clabe', bank_name: 'BBVA', holder_name: 'Luis', account_number: CLABE_OK });
+    const res = await withdraw(waiter, { amount: 10, currency: 'MXN' });
+    expect(res.status).toBe(422);
+    expect(res.body.error.message).toMatch(/verificar/);
+  });
+
+  it('solo un retiro en proceso a la vez', async () => {
+    await verifiedAccount(waiter);
+    await withdraw(waiter, { amount: 10, currency: 'MXN' });
+    expect((await withdraw(waiter, { amount: 10, currency: 'MXN' })).status).toBe(409);
+  });
+
+  it('dos peticiones simultáneas no gastan el saldo dos veces', async () => {
+    await verifiedAccount(waiter);
+    const results = await Promise.all([
+      withdraw(waiter, { amount: 800, currency: 'MXN' }),
+      withdraw(waiter, { amount: 800, currency: 'MXN' }),
+    ]);
+    // La segunda espera a la primera y ve el saldo ya reservado (422), o choca con el
+    // índice de un retiro en proceso (409). Nunca pasan las dos.
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses[0]).toBe(201);
+    expect([409, 422]).toContain(statuses[1]);
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM withdrawals');
+    expect(rows[0].n).toBe(1);
+  });
+
+  it('convierte USD a MXN con el tipo de cambio del día y lo deja escrito', async () => {
+    await paidTip(dancer, 100, 'USD');
+    await verifiedAccount(dancer);
+    await setRate(18);
+    const res = await withdraw(dancer, { amount: 100, currency: 'USD', payout_currency: 'MXN' });
+    expect(res.status).toBe(201);
+    expect(res.body.withdrawal).toMatchObject({ amount: '100.00', currency: 'USD', payout_currency: 'MXN', amount_paid: '1800.00' });
+    expect(Number(res.body.withdrawal.exchange_rate)).toBe(18);
+
+    // Al aprobar se vuelve a fijar con el tipo vigente en ese momento.
+    await setRate(18.5);
+    const ok = await api().post(url(`/withdrawals/${res.body.withdrawal.id}/approve`)).set(auth(manager)).send({});
+    expect(ok.body.withdrawal.amount_paid).toBe('1850.00');
+    expect(Number(ok.body.withdrawal.exchange_rate)).toBe(18.5);
+  });
+
+  it('sin tipo de cambio no se puede convertir', async () => {
+    await paidTip(dancer, 100, 'USD');
+    await verifiedAccount(dancer);
+    const res = await withdraw(dancer, { amount: 50, currency: 'USD', payout_currency: 'MXN' });
+    expect(res.status).toBe(422);
+  });
+
+  it('el gerente aprueba, marca pagado y queda el asiento de salida', async () => {
+    await verifiedAccount(waiter);
+    const w = (await withdraw(waiter, { amount: 400, currency: 'MXN' })).body.withdrawal;
+
+    const paidTooSoon = await api().post(url(`/withdrawals/${w.id}/paid`)).set(auth(manager)).send({});
+    expect(paidTooSoon.status).toBe(409);
+
+    const ok = await api().post(url(`/withdrawals/${w.id}/approve`)).set(auth(manager)).send({ note: 'ok' });
+    expect(ok.body.withdrawal).toMatchObject({ status: 'approved', reviewed_by_name: 'manager Test' });
+
+    const paid = await api().post(url(`/withdrawals/${w.id}/paid`)).set(auth(manager)).send({ reference: 'SPEI 12345' });
+    expect(paid.body.withdrawal).toMatchObject({ status: 'paid' });
+    expect(paid.body.withdrawal.paid_at).toBeTruthy();
+
+    const { rows } = await pool.query(
+      `SELECT type, direction, amount, currency, status, payee_user_id, provider_ref FROM transactions WHERE type = 'withdrawal'`);
+    expect(rows).toEqual([expect.objectContaining({
+      direction: 'out', amount: '400.00', currency: 'MXN', status: 'paid', payee_user_id: waiter.id, provider_ref: 'SPEI 12345',
+    })]);
+    const bal = (await api().get('/api/employees/me/earnings').set(auth(waiter))).body.balances[0];
+    expect(bal).toMatchObject({ earned: '1000.00', withdrawn: '400.00', reserved: '0.00', available: '600.00' });
+  });
+
+  it('rechazar devuelve el saldo y permite pedir de nuevo', async () => {
+    await verifiedAccount(waiter);
+    const w = (await withdraw(waiter, { amount: 400, currency: 'MXN' })).body.withdrawal;
+    const noReason = await api().post(url(`/withdrawals/${w.id}/reject`)).set(auth(manager)).send({});
+    expect(noReason.status).toBe(400);
+    const rej = await api().post(url(`/withdrawals/${w.id}/reject`)).set(auth(manager)).send({ reason: 'Cuenta a nombre de otra persona' });
+    expect(rej.body.withdrawal).toMatchObject({ status: 'rejected', rejection_reason: 'Cuenta a nombre de otra persona' });
+
+    const bal = (await api().get('/api/employees/me/earnings').set(auth(waiter))).body.balances[0];
+    expect(bal).toMatchObject({ available: '1000.00', reserved: '0.00' });
+    expect((await withdraw(waiter, { amount: 400, currency: 'MXN' })).status).toBe(201);
+    expect((await api().post(url(`/withdrawals/${w.id}/approve`)).set(auth(manager)).send({})).status).toBe(409);
+  });
+
+  it('solo el gerente revisa; el empleado ve solo los suyos', async () => {
+    await verifiedAccount(waiter);
+    const w = (await withdraw(waiter, { amount: 10, currency: 'MXN' })).body.withdrawal;
+    expect((await api().post(url(`/withdrawals/${w.id}/approve`)).set(auth(waiter)).send({})).status).toBe(403);
+    expect((await api().get(url('/withdrawals')).set(auth(waiter))).status).toBe(403);
+
+    const mine = await api().get('/api/employees/me/withdrawals').set(auth(dancer));
+    expect(mine.body.withdrawals).toHaveLength(0);
+    const list = await api().get(url('/withdrawals?status=pending')).set(auth(manager));
+    expect(list.body.withdrawals.map((x) => x.employee_name)).toEqual(['Luis']);
+    expect(JSON.stringify(list.body)).not.toContain(CLABE_OK);
+  });
+
+  it('el gerente ve la nómina por empleado y moneda', async () => {
+    await paidTip(dancer, 30, 'USD');
+    await verifiedAccount(waiter);
+    await withdraw(waiter, { amount: 250, currency: 'MXN' });
+    const res = await api().get(url('/payroll')).set(auth(manager));
+    expect(res.status).toBe(200);
+    expect(res.body.pending_withdrawals).toBe(1);
+    expect(res.body.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ display_name: 'Nina', currency: 'USD', earned: '30.00', available: '30.00' }),
+      expect.objectContaining({ display_name: 'Luis', currency: 'MXN', earned: '1000.00', reserved: '250.00', available: '750.00' }),
+    ]));
+    expect((await api().get(url('/payroll')).set(auth(waiter))).status).toBe(403);
+  });
+});
