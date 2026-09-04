@@ -27,6 +27,7 @@ const employeeRoutes = require('./routes/employees');
 const tipRoutes = require('./routes/tips');
 const taxiRoutes = require('./routes/taxi');
 const valetRoutes = require('./routes/valet');
+const posRoutes = require('./routes/pos');
 
 // The OpenAPI contract is the agreement between backend, web and mobile.
 // It is served at /api/docs; a missing file must not stop the API from starting.
@@ -108,6 +109,7 @@ function createApp() {
   app.use('/api', tipRoutes);
   app.use('/api', taxiRoutes);
   app.use('/api', valetRoutes);
+  app.use('/api', posRoutes);
 
   // Interactive API documentation (disable in production with SERVE_API_DOCS=false).
   if (process.env.SERVE_API_DOCS !== 'false') {

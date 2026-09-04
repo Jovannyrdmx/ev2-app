@@ -89,3 +89,19 @@ Un servicio de Windows ligero (`agent/`, Node.js, en este repositorio) instalado
 - https://softrestaurant.com/integraciones
 - https://softrestaurant.com/manuales (OPE.ANA.SR11 Guía ERP/PMS)
 - https://softrestaurant.com/addons/movil
+
+## 9. Lo que la app ya expone para el agente (paso 2.8)
+
+El registro de integraciones existe desde el paso 2.8 (decision D24). El agente que se
+escriba en la Fase 4 tiene que hablar este protocolo:
+
+| Que | Como |
+|---|---|
+| Autenticacion | Cabecera `X-Agent-Key` con la llave que entrega el gerente al declarar la integracion. No es una sesion de usuario. La llave se muestra una sola vez; si se pierde, el gerente la rota. |
+| Latido | `POST /api/pos/agent/heartbeat` con `{version, hostname, status, error?}`. Responde `{enabled, mode, config, heartbeat_interval_seconds, capabilities, server_time}`. El agente **obedece `enabled` y `capabilities`**: asi el club lo apaga desde la app sin tocar el servidor del local. |
+| Reporte de sincronizacion | `POST /api/pos/agent/sync` con `{kind, ok, items_synced, started_at?, error?, details?, client_request_id?}`. Manda siempre `client_request_id` para que un reintento tras un timeout no duplique la corrida. |
+| Configuracion | Llega en `config` y solo lleva **nombres** (servidor, instancia, base, que sincronizar). Las credenciales de SQL Server viven en el servidor del club, nunca en la API. |
+| Escritura de comandas | `capabilities.push_orders` es **false** y lo seguira siendo hasta que National Soft entregue el mecanismo oficial. Hasta entonces, plan B: el bartender captura en el POS y la conciliacion diaria detecta diferencias. |
+
+Nada de esto lee todavia la base del POS: eso empieza en 4.1, y contra el ambiente de
+pruebas de la regla 2 de la seccion 3, nunca contra `192.168.2.108` en produccion.

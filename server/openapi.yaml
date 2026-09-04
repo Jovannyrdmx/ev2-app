@@ -126,6 +126,11 @@ tags:
       Recepcion de autos con comprobante QR, tablero del estacionamiento, entrega
       verificada con el token del QR y entrega sin QR autorizada por el gerente con
       constancia. El estacionamiento es gratis: lo que gana el valet es la propina.
+  - name: Integración POS
+    description: |
+      Registro de la integracion con el punto de venta y enrolamiento del agente local:
+      llave propia y rotable, latido, bitacora de sincronizaciones y salud. La lectura
+      real de SoftRestaurant llega en la fase 4 (docs/POS_REAL.md).
   - name: Pagos
     description: Métodos de pago guardados por el usuario.
 
@@ -4782,6 +4787,243 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/nightclubs/{nightclubId}/pos-integrations:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listPosIntegrations
+      tags: [Integración POS]
+      summary: Integraciones declaradas (gerente)
+      responses:
+        '200':
+          description: Integraciones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  integrations:
+                    type: array
+                    items: { $ref: '#/components/schemas/PosIntegration' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createPosIntegration
+      tags: [Integración POS]
+      summary: Declarar la integración (gerente)
+      description: |
+        En modo `agent` devuelve la llave del agente **una sola vez**: solo se guarda su
+        SHA-256, de modo que una copia de esta base de datos no es una entrada al POS.
+        **No se guardan credenciales de SQL Server**: con el agente local (D16) el usuario
+        de solo lectura vive en el servidor del club. `config` admite únicamente nombres
+        (servidor, instancia, base) y qué sincronizar; cualquier otra llave se rechaza.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PosIntegrationCreate' }
+      responses:
+        '201':
+          description: Integración declarada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  integration: { $ref: '#/components/schemas/PosIntegration' }
+                  agent_key:
+                    type: string
+                    description: Solo en modo `agent`. No vuelve a mostrarse nunca.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/pos-integrations/{integrationId}:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/IntegrationId'
+    get:
+      operationId: getPosIntegration
+      tags: [Integración POS]
+      summary: Estado y salud de una integración (gerente)
+      responses:
+        '200':
+          description: Integración
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  integration: { $ref: '#/components/schemas/PosIntegration' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updatePosIntegration
+      tags: [Integración POS]
+      summary: Encender, apagar o reconfigurar (gerente)
+      description: |
+        Encender una integración de agente sin llave responde 422: sería un foco verde
+        sobre nada.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PosIntegrationUpdate' }
+      responses:
+        '200':
+          description: Integración actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  integration: { $ref: '#/components/schemas/PosIntegration' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+    delete:
+      operationId: deletePosIntegration
+      tags: [Integración POS]
+      summary: Eliminar la integración (gerente)
+      description: Hay que apagarla primero; una encendida responde 409.
+      responses:
+        '204': { description: Eliminada }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/pos-integrations/{integrationId}/rotate-key:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/IntegrationId'
+    post:
+      operationId: rotatePosAgentKey
+      tags: [Integración POS]
+      summary: Rotar la llave del agente (gerente)
+      description: |
+        La llave anterior deja de valer de inmediato, que es justo para lo que sirve rotar.
+        Se borra también lo que sabíamos del agente anterior (versión, equipo, último
+        latido): ya no es el mismo.
+      responses:
+        '200':
+          description: Llave rotada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  integration: { $ref: '#/components/schemas/PosIntegration' }
+                  agent_key: { type: string, description: No vuelve a mostrarse nunca. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/pos-sync-log:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listPosSyncLog
+      tags: [Integración POS]
+      summary: Bitácora de sincronizaciones (gerente)
+      parameters:
+        - name: kind
+          in: query
+          schema: { type: string, enum: [menu, inventory, orders, status, tables] }
+        - name: only_failed
+          in: query
+          schema: { type: boolean, default: false }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Corridas y resumen de los últimos 7 días
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runs:
+                    type: array
+                    items: { $ref: '#/components/schemas/PosSyncRun' }
+                  last_7_days:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind: { type: string }
+                        runs: { type: integer }
+                        ok: { type: integer }
+                        failed: { type: integer }
+                        items: { type: integer }
+                        last_success_at: { type: [string, 'null'], format: date-time }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/pos/agent/heartbeat:
+    post:
+      operationId: posAgentHeartbeat
+      tags: [Integración POS]
+      summary: Latido del agente local
+      description: |
+        Lo llama el agente instalado en el servidor del club, autenticándose con
+        `X-Agent-Key` y **no** con una sesión de usuario: es una máquina, no hereda los
+        permisos de nadie. La respuesta le dice qué puede hacer, de modo que el club
+        encienda y apague la integración desde la app sin tocar el equipo del local.
+      security:
+        - agentKey: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: { type: string, maxLength: 30 }
+                hostname: { type: string, maxLength: 120 }
+                status: { type: string, enum: [ok, error], default: ok }
+                error: { type: string, maxLength: 2000 }
+      responses:
+        '200':
+          description: Instrucciones para el agente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PosAgentInstructions' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/pos/agent/sync:
+    post:
+      operationId: posAgentReportSync
+      tags: [Integración POS]
+      summary: Reportar una corrida de sincronización
+      description: |
+        Idempotente por `client_request_id`: un agente que reintenta tras un timeout no
+        duplica su propia historia. Una corrida fallida marca la integración en rojo en la
+        pantalla del gerente en vez de quedarse enterrada en el log.
+      security:
+        - agentKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PosSyncReport' }
+      responses:
+        '201':
+          description: Corrida registrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id: { type: string, description: Entero de 64 bits como cadena. }
+        '200':
+          description: Ya estaba registrada (idempotencia)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id: { type: string }
+                  idempotent: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -4789,6 +5031,13 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Token de acceso de 15 minutos obtenido en login o refresh.
+    agentKey:
+      type: apiKey
+      in: header
+      name: X-Agent-Key
+      description: |
+        Llave propia del agente local del POS. Autentica una maquina, no una persona:
+        no hereda permisos de ningun usuario y solo sirve en las rutas /api/pos/agent/*.
 
   parameters:
     NightclubId:
@@ -4908,6 +5157,11 @@ components:
       schema: { type: string, format: uuid }
     TicketId:
       name: ticketId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IntegrationId:
+      name: integrationId
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -6521,3 +6775,121 @@ components:
               delivered: { type: integer }
               rating_avg: { type: [string, 'null'] }
               avg_retrieval_minutes: { type: [integer, 'null'] }
+
+    PosIntegration:
+      type: object
+      description: |
+        El hash de la llave del agente nunca sale de la base de datos, y `credentials_encrypted`
+        no se usa: no hay credenciales de SQL Server que guardar mientras el mecanismo sea
+        el agente local (D16).
+      properties:
+        id: { type: string, format: uuid }
+        nightclub_id: { type: string, format: uuid }
+        provider: { type: string, enum: [softrestaurant11, mock] }
+        mode: { type: string, enum: [agent, api, mock] }
+        enabled: { type: boolean, description: La intención del club. }
+        status: { type: string, enum: [inactive, active, error] }
+        enrolled: { type: boolean, description: Ya existe una llave de agente. }
+        config: { $ref: '#/components/schemas/PosAgentConfig' }
+        agent_version: { type: [string, 'null'] }
+        agent_hostname: { type: [string, 'null'] }
+        heartbeat_interval_seconds: { type: integer, minimum: 15, maximum: 3600 }
+        stale_after_seconds: { type: integer, minimum: 60, maximum: 86400 }
+        last_seen_at: { type: [string, 'null'], format: date-time }
+        last_error: { type: [string, 'null'] }
+        key_rotated_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        health: { $ref: '#/components/schemas/PosIntegrationHealth' }
+
+    PosIntegrationHealth:
+      type: object
+      description: |
+        Lo que de verdad está pasando, frente a `enabled`, que es solo la intención.
+      properties:
+        state:
+          type: string
+          enum: [not_enrolled, never_seen, ok, stale, error]
+        seconds_since_last_seen: { type: integer }
+        message: { type: [string, 'null'] }
+
+    PosAgentConfig:
+      type: object
+      additionalProperties: false
+      description: |
+        Solo nombres, nunca secretos: qué servidor, qué instancia, qué base. Ninguno de
+        estos valores da acceso por sí mismo.
+      properties:
+        sql_server_host: { type: string, maxLength: 120, examples: ['192.168.2.108'] }
+        sql_instance: { type: string, maxLength: 60 }
+        sql_database: { type: string, maxLength: 60 }
+        sync_menu: { type: boolean }
+        sync_inventory: { type: boolean }
+        sync_tables: { type: boolean }
+        sync_orders: { type: boolean }
+        notes: { type: string, maxLength: 500 }
+
+    PosIntegrationCreate:
+      type: object
+      properties:
+        provider: { type: string, enum: [softrestaurant11, mock], default: softrestaurant11 }
+        mode: { type: string, enum: [agent, api, mock], default: agent }
+        config: { $ref: '#/components/schemas/PosAgentConfig' }
+        heartbeat_interval_seconds: { type: integer, minimum: 15, maximum: 3600 }
+        stale_after_seconds: { type: integer, minimum: 60, maximum: 86400 }
+
+    PosIntegrationUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        mode: { type: string, enum: [agent, api, mock] }
+        config: { $ref: '#/components/schemas/PosAgentConfig' }
+        enabled: { type: boolean }
+        heartbeat_interval_seconds: { type: integer, minimum: 15, maximum: 3600 }
+        stale_after_seconds: { type: integer, minimum: 60, maximum: 86400 }
+
+    PosAgentInstructions:
+      type: object
+      properties:
+        integration_id: { type: string, format: uuid }
+        nightclub_id: { type: string, format: uuid }
+        enabled: { type: boolean }
+        mode: { type: string, enum: [agent, api, mock] }
+        config: { $ref: '#/components/schemas/PosAgentConfig' }
+        heartbeat_interval_seconds: { type: integer }
+        capabilities:
+          type: object
+          description: |
+            `push_orders` es siempre false hasta la fase 4: escribir comandas en el POS
+            requiere el mecanismo oficial de National Soft (docs/POS_REAL.md).
+          properties:
+            read_catalog: { type: boolean }
+            read_inventory: { type: boolean }
+            push_orders: { type: boolean }
+        server_time: { type: string, format: date-time }
+
+    PosSyncReport:
+      type: object
+      required: [kind, ok]
+      properties:
+        kind: { type: string, enum: [menu, inventory, orders, status, tables] }
+        ok: { type: boolean }
+        items_synced: { type: integer, minimum: 0, default: 0 }
+        started_at: { type: string, format: date-time }
+        error: { type: string, maxLength: 2000 }
+        details: { type: object, additionalProperties: true }
+        client_request_id: { type: string, format: uuid }
+
+    PosSyncRun:
+      type: object
+      properties:
+        id: { type: string, description: Entero de 64 bits como cadena. }
+        integration_id: { type: [string, 'null'], format: uuid }
+        kind: { type: string, enum: [menu, inventory, orders, status, tables] }
+        source: { type: string, enum: [agent, manual, scheduled] }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: [string, 'null'], format: date-time }
+        ok: { type: [boolean, 'null'] }
+        items_synced: { type: integer }
+        error: { type: [string, 'null'] }
+        details: { type: object, additionalProperties: true }
