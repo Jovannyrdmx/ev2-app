@@ -116,6 +116,11 @@ tags:
       Turnos del personal, propinas (mínimos y sugeridos por rol, editables), tragos al
       personal autorizado, solicitudes de canción al DJ con votos y tablero de
       reconocimiento.
+  - name: Taxi y salida segura
+    description: |
+      Conductores de confianza dados de alta por el gerente, disponibilidad declarada por
+      el conductor, tarifas por zona, ciclo del viaje confirmado por el conductor, cobro en
+      efectivo asentado en el libro y constancia de salida con folio verificable.
   - name: Pagos
     description: Métodos de pago guardados por el usuario.
 
@@ -3423,6 +3428,804 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
 
+  /api/nightclubs/{nightclubId}/taxi-settings:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: getTaxiSettings
+      tags: [Taxi y salida segura]
+      summary: Ajustes del módulo de salida segura
+      description: |
+        El cliente recibe solo el punto de encuentro, la moneda y los términos. La comisión
+        y los plazos internos son del gerente.
+      responses:
+        '200':
+          description: Ajustes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settings: { $ref: '#/components/schemas/TaxiSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      operationId: putTaxiSettings
+      tags: [Taxi y salida segura]
+      summary: Editar los ajustes (gerente)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaxiSettingsUpdate' }
+      responses:
+        '200':
+          description: Ajustes actualizados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settings: { $ref: '#/components/schemas/TaxiSettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/taxi-fares:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listTaxiFares
+      tags: [Taxi y salida segura]
+      summary: Lista de tarifas por zona
+      parameters:
+        - name: include_inactive
+          in: query
+          description: Solo el gerente ve las tarifas retiradas.
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Tarifas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fares:
+                    type: array
+                    items: { $ref: '#/components/schemas/TaxiFare' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createTaxiFare
+      tags: [Taxi y salida segura]
+      summary: Cargar una tarifa (gerente)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaxiFareCreate' }
+      responses:
+        '201':
+          description: Tarifa creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fare: { $ref: '#/components/schemas/TaxiFare' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/taxi-fares/{fareId}:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/FareId'
+    put:
+      operationId: updateTaxiFare
+      tags: [Taxi y salida segura]
+      summary: Editar una tarifa (gerente)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaxiFareUpdate' }
+      responses:
+        '200':
+          description: Tarifa actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fare: { $ref: '#/components/schemas/TaxiFare' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: retireTaxiFare
+      tags: [Taxi y salida segura]
+      summary: Retirar una tarifa (gerente)
+      description: |
+        La tarifa se marca inactiva, nunca se borra: los viajes pasados se cotizaron con ella.
+      responses:
+        '200':
+          description: Tarifa retirada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fare: { $ref: '#/components/schemas/TaxiFare' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/drivers:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listDrivers
+      tags: [Taxi y salida segura]
+      summary: Conductores registrados (gerente)
+      parameters:
+        - name: availability
+          in: query
+          schema: { type: string, enum: [off, available, on_trip] }
+        - name: include_inactive
+          in: query
+          schema: { type: boolean, default: false }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Conductores
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drivers:
+                    type: array
+                    items: { $ref: '#/components/schemas/Driver' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createDriver
+      tags: [Taxi y salida segura]
+      summary: Registrar un conductor de confianza (gerente)
+      description: |
+        Crea una cuenta real con rol `driver`. La contraseña temporal viaja **una sola vez**
+        en esta respuesta y nunca se guarda en claro; hasta cambiarla, la cuenta solo puede
+        usar `POST /api/auth/password`. `trusted` es el aval del gerente tras ver licencia y
+        papeles: un conductor sin aval puede entrar pero nunca se despacha.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DriverCreate' }
+      responses:
+        '201':
+          description: Conductor registrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  driver: { $ref: '#/components/schemas/Driver' }
+                  temporary_password: { type: string, minLength: 12, maxLength: 12 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/drivers/{driverId}:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/DriverId'
+    get:
+      operationId: getDriver
+      tags: [Taxi y salida segura]
+      summary: Ficha de un conductor (gerente)
+      responses:
+        '200':
+          description: Conductor
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  driver: { $ref: '#/components/schemas/Driver' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateDriver
+      tags: [Taxi y salida segura]
+      summary: Editar, verificar o dar de baja a un conductor (gerente)
+      description: |
+        `active: false` bloquea la cuenta y cierra sus sesiones. Quitar `trusted` o dar de
+        baja también apaga su disponibilidad. Si tiene un viaje vivo responde 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DriverUpdate' }
+      responses:
+        '200':
+          description: Conductor actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  driver: { $ref: '#/components/schemas/Driver' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/drivers/{driverId}/reset-password:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/DriverId'
+    post:
+      operationId: resetDriverPassword
+      tags: [Taxi y salida segura]
+      summary: Reiniciar la contraseña de un conductor (gerente)
+      responses:
+        '200':
+          description: Nueva contraseña temporal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  temporary_password: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/taxi/me:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: getMyDriverProfile
+      tags: [Taxi y salida segura]
+      summary: Mi ficha de conductor
+      responses:
+        '200':
+          description: Ficha
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  driver: { $ref: '#/components/schemas/Driver' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/taxi/me/availability:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    put:
+      operationId: setDriverAvailability
+      tags: [Taxi y salida segura]
+      summary: Marcarme disponible o no disponible
+      description: |
+        `at_venue: true` significa «ya estoy estacionado en la salida», y es lo que permite
+        que la app le diga al cliente que baje sin esperar. `on_trip` lo pone el sistema al
+        aceptar un viaje; no se declara a mano. Apagarse siempre limpia `at_venue`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [availability]
+              properties:
+                availability: { type: string, enum: [off, available] }
+                at_venue: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Disponibilidad actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  availability: { $ref: '#/components/schemas/DriverAvailability' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/taxi/me/offers:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listDriverOffers
+      tags: [Taxi y salida segura]
+      summary: Solicitudes abiertas que puedo tomar
+      description: |
+        Una solicitud abierta se ofrece a todos los conductores disponibles a la vez; el
+        primero que acepta se la lleva. Las que rechacé no vuelven a aparecer en mi lista,
+        pero siguen en la de los demás.
+      responses:
+        '200':
+          description: Ofertas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  offers:
+                    type: array
+                    items: { $ref: '#/components/schemas/TaxiRide' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/taxi/me/rides:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listDriverRides
+      tags: [Taxi y salida segura]
+      summary: Mis viajes y lo cobrado esta noche
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Viajes del conductor
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rides:
+                    type: array
+                    items: { $ref: '#/components/schemas/TaxiRide' }
+                  live:
+                    oneOf:
+                      - { $ref: '#/components/schemas/TaxiRide' }
+                      - { type: 'null' }
+                  tonight:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        currency: { type: string, enum: [MXN, USD] }
+                        rides: { type: integer }
+                        charged: { type: string, description: Decimal con dos cifras. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/taxi/availability:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: getTaxiAvailability
+      tags: [Taxi y salida segura]
+      summary: Cuántos conductores hay y cuánto se espera
+      description: |
+        No hay GPS en esta fase. `estimated_wait_minutes` es **0** cuando hay un conductor
+        estacionado en la salida, o el promedio real de recogidas anteriores de los
+        conductores disponibles. Si no existe ninguna de las dos cosas devuelve `null`: no
+        se inventa un tiempo.
+      responses:
+        '200':
+          description: Disponibilidad
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaxiAvailability' }
+
+  /api/nightclubs/{nightclubId}/taxi/rides:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listTaxiRides
+      tags: [Taxi y salida segura]
+      summary: Tablero de viajes (gerente)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [requested, assigned, driver_arrived, in_progress, completed, cancelled, no_driver]
+        - name: driver_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: live
+          in: query
+          description: Solo los viajes vivos (solicitado, asignado, en la salida o en curso).
+          schema: { type: boolean, default: false }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Viajes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rides:
+                    type: array
+                    items: { $ref: '#/components/schemas/TaxiRide' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createTaxiRide
+      tags: [Taxi y salida segura]
+      summary: Solicitar un taxi
+      description: |
+        Idempotente por `client_request_id`: reenviar la misma clave devuelve 200 con el
+        viaje ya creado en vez de duplicarlo. Un cliente no puede tener dos solicitudes
+        abiertas (409). La respuesta incluye la disponibilidad del momento para que la
+        pantalla diga «espéralo en la salida» cuando corresponde.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaxiRideCreate' }
+      responses:
+        '201':
+          description: Solicitud creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ride: { $ref: '#/components/schemas/TaxiRide' }
+                  availability: { $ref: '#/components/schemas/TaxiAvailability' }
+                  pickup_point: { type: string }
+        '200':
+          description: La misma solicitud ya existía (idempotencia)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ride: { $ref: '#/components/schemas/TaxiRide' }
+                  idempotent: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/taxi/rides/mine:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listMyTaxiRides
+      tags: [Taxi y salida segura]
+      summary: Mis viajes
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Viajes del cliente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rides:
+                    type: array
+                    items: { $ref: '#/components/schemas/TaxiRide' }
+                  live:
+                    oneOf:
+                      - { $ref: '#/components/schemas/TaxiRide' }
+                      - { type: 'null' }
+
+  /api/nightclubs/{nightclubId}/taxi/rides/expire:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    post:
+      operationId: expireTaxiRides
+      tags: [Taxi y salida segura]
+      summary: Cerrar solicitudes que nadie tomó (gerente o anfitriona)
+      description: |
+        Marca como `no_driver` las solicitudes abiertas que superaron el plazo del club.
+        Idempotente; a partir de la fase 7 lo ejecuta también una tarea programada.
+      responses:
+        '200':
+          description: Solicitudes cerradas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expired: { type: integer }
+                  ride_ids:
+                    type: array
+                    items: { type: string, format: uuid }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/taxi/rides/{rideId}:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/RideId'
+    get:
+      operationId: getTaxiRide
+      tags: [Taxi y salida segura]
+      summary: Estado de un viaje
+      description: |
+        La misma fila se lee de tres maneras: el cliente ve el auto y el teléfono del
+        conductor (solo desde que hay uno asignado), el conductor ve a quién recoge pero
+        nunca su teléfono, y el gerente lo ve todo. Un viaje ajeno responde 404.
+      responses:
+        '200':
+          description: Viaje
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ride: { $ref: '#/components/schemas/TaxiRide' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/taxi/rides/{rideId}/accept:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/RideId'
+    post:
+      operationId: acceptTaxiRide
+      tags: [Taxi y salida segura]
+      summary: Aceptar un viaje declarando en cuántos minutos llego
+      description: |
+        Si dos conductores aceptan al mismo instante, el segundo recibe 409 y el viaje no
+        cambia de dueño. Aceptar deja al conductor `on_trip`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eta_minutes]
+              properties:
+                eta_minutes:
+                  type: integer
+                  minimum: 0
+                  maximum: 120
+                  description: 0 significa «ya estoy en la salida».
+      responses:
+        '200':
+          description: Viaje asignado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ride: { $ref: '#/components/schemas/TaxiRide' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/taxi/rides/{rideId}/decline:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/RideId'
+    post:
+      operationId: declineTaxiRide
+      tags: [Taxi y salida segura]
+      summary: Quitar una solicitud de mi lista
+      description: Idempotente; no se la quita a los demás conductores.
+      responses:
+        '200':
+          description: Rechazada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  declined: { type: boolean }
+                  ride_id: { type: string, format: uuid }
+                  changed: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/taxi/rides/{rideId}/arrived:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/RideId'
+    post:
+      operationId: taxiRideArrived
+      tags: [Taxi y salida segura]
+      summary: Avisar que estoy en la salida (conductor)
+      responses:
+        '200':
+          description: Viaje en la salida
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ride: { $ref: '#/components/schemas/TaxiRide' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/taxi/rides/{rideId}/start:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/RideId'
+    post:
+      operationId: startTaxiRide
+      tags: [Taxi y salida segura]
+      summary: Confirmar el inicio del viaje (conductor)
+      description: |
+        Es el momento en que el pasajero sale, así que es el momento en que se emite la
+        constancia de salida con su folio y su vigencia.
+      responses:
+        '200':
+          description: Viaje iniciado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ride: { $ref: '#/components/schemas/TaxiRide' }
+                  certificate: { $ref: '#/components/schemas/DepartureCertificate' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/taxi/rides/{rideId}/finish:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/RideId'
+    post:
+      operationId: finishTaxiRide
+      tags: [Taxi y salida segura]
+      summary: Confirmar el fin del viaje y el cobro (conductor)
+      description: |
+        `cash` asienta el cobro en el libro contable (`taxi_ride`, proveedor `cash`, pagador
+        el cliente y beneficiario el conductor) con la nota de que el dinero pasó de mano a
+        mano: el club nunca lo tuvo. `courtesy` no lleva monto ni asiento. `card` responde
+        501 hasta la fase 3.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [final_amount, payment_method]
+              properties:
+                final_amount: { type: number, minimum: 0, maximum: 100000 }
+                payment_method: { type: string, enum: [cash, card, courtesy] }
+                notes: { type: string, maxLength: 280 }
+      responses:
+        '200':
+          description: Viaje terminado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ride: { $ref: '#/components/schemas/TaxiRide' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '501':
+          description: El cobro con tarjeta llega en la fase 3
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/taxi/rides/{rideId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/RideId'
+    post:
+      operationId: cancelTaxiRide
+      tags: [Taxi y salida segura]
+      summary: Cancelar el viaje (cliente o gerente)
+      description: |
+        Solo antes de que empiece. Un viaje en curso responde 409 y el conductor no cancela:
+        rechaza la solicitud antes de aceptarla.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 160 }
+      responses:
+        '200':
+          description: Viaje cancelado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ride: { $ref: '#/components/schemas/TaxiRide' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/taxi/rides/{rideId}/rate:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/RideId'
+    post:
+      operationId: rateTaxiRide
+      tags: [Taxi y salida segura]
+      summary: Calificar el viaje (cliente)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating: { type: integer, minimum: 1, maximum: 5 }
+                comment: { type: string, maxLength: 280 }
+      responses:
+        '200':
+          description: Calificación registrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rating:
+                    type: object
+                    properties:
+                      rating: { type: integer }
+                      rating_comment: { type: [string, 'null'] }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/taxi/rides/{rideId}/certificate:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/RideId'
+    get:
+      operationId: getDepartureCertificate
+      tags: [Taxi y salida segura]
+      summary: Constancia de salida del viaje
+      responses:
+        '200':
+          description: Constancia
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  certificate: { $ref: '#/components/schemas/DepartureCertificate' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/taxi/stats:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: getTaxiStats
+      tags: [Taxi y salida segura]
+      summary: Números del módulo por conductor (gerente)
+      parameters:
+        - $ref: '#/components/parameters/DateFrom'
+        - $ref: '#/components/parameters/DateTo'
+      responses:
+        '200':
+          description: Estadísticas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaxiStats' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/taxi/verify/{folio}:
+    get:
+      operationId: verifyDepartureCertificate
+      tags: [Taxi y salida segura]
+      summary: Verificar una constancia por su folio (público)
+      description: |
+        Sin sesión: quien tiene el folio impreso puede comprobarlo. Devuelve el mínimo que
+        hace útil la comprobación —club, hora de salida, vigencia, nombre corto del pasajero
+        y el auto— y **nunca** el destino, el monto, el teléfono ni el apellido completo.
+        Limitado a 20 peticiones por minuto.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Folio'
+      responses:
+        '200':
+          description: Constancia
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  certificate: { $ref: '#/components/schemas/DepartureCertificate' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3520,6 +4323,28 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+
+    DriverId:
+      name: driverId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    FareId:
+      name: fareId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RideId:
+      name: rideId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Folio:
+      name: folio
+      in: path
+      required: true
+      description: Folio impreso en la constancia; no distingue mayusculas.
+      schema: { type: string, minLength: 4, maxLength: 20 }
 
   responses:
     BadRequest:
@@ -4692,3 +5517,289 @@ components:
         brand: { type: string, maxLength: 30 }
         label: { type: string, maxLength: 60 }
         is_default: { type: boolean, default: false }
+
+    TaxiSettings:
+      type: object
+      description: |
+        El cliente recibe solo `enabled`, `pickup_point`, `currency` y `conduct_terms`.
+      properties:
+        nightclub_id: { type: string, format: uuid }
+        enabled: { type: boolean }
+        pickup_point: { type: string, description: Dónde espera el pasajero al conductor. }
+        currency: { type: string, enum: [MXN, USD] }
+        certificate_ttl_minutes: { type: integer, minimum: 15, maximum: 720 }
+        request_timeout_minutes: { type: integer, minimum: 3, maximum: 60 }
+        club_commission_pct:
+          type: string
+          description: |
+            Decimal. 0 por omisión: la tarifa es del conductor. Cualquier otro valor debe
+            acordarse con los conductores antes de fijarlo.
+        conduct_terms: { type: [string, 'null'] }
+        updated_at: { type: string, format: date-time }
+
+    TaxiSettingsUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        enabled: { type: boolean }
+        pickup_point: { type: string, minLength: 1, maxLength: 120 }
+        currency: { type: string, enum: [MXN, USD] }
+        certificate_ttl_minutes: { type: integer, minimum: 15, maximum: 720 }
+        request_timeout_minutes: { type: integer, minimum: 3, maximum: 60 }
+        club_commission_pct: { type: number, minimum: 0, maximum: 100 }
+        conduct_terms: { type: [string, 'null'], maxLength: 4000 }
+
+    TaxiFare:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        zone: { type: string }
+        description: { type: [string, 'null'] }
+        amount: { type: string, description: Decimal con dos cifras. }
+        currency: { type: string, enum: [MXN, USD] }
+        active: { type: boolean }
+        sort_order: { type: integer }
+
+    TaxiFareCreate:
+      type: object
+      required: [zone, amount]
+      properties:
+        zone: { type: string, minLength: 1, maxLength: 80 }
+        description: { type: [string, 'null'], maxLength: 160 }
+        amount: { type: number, minimum: 0, maximum: 100000 }
+        currency: { type: string, enum: [MXN, USD] }
+        sort_order: { type: integer }
+
+    TaxiFareUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        zone: { type: string, minLength: 1, maxLength: 80 }
+        description: { type: [string, 'null'], maxLength: 160 }
+        amount: { type: number, minimum: 0, maximum: 100000 }
+        currency: { type: string, enum: [MXN, USD] }
+        active: { type: boolean }
+        sort_order: { type: integer }
+
+    Driver:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        first_name: { type: string }
+        last_name: { type: string }
+        display_name: { type: [string, 'null'] }
+        account_status: { type: string, enum: [active, blocked, deleted] }
+        must_change_password: { type: boolean }
+        phone: { type: string }
+        company: { type: [string, 'null'], description: Sitio de taxis o independiente. }
+        license_number: { type: [string, 'null'] }
+        vehicle_plate: { type: string }
+        vehicle_make: { type: [string, 'null'] }
+        vehicle_model: { type: [string, 'null'] }
+        vehicle_color: { type: [string, 'null'] }
+        vehicle_year: { type: [integer, 'null'] }
+        seats: { type: integer, minimum: 1, maximum: 8 }
+        notes: { type: [string, 'null'] }
+        trusted: { type: boolean, description: Aval del gerente tras ver licencia y papeles. }
+        verified_at: { type: [string, 'null'], format: date-time }
+        active: { type: boolean }
+        availability: { type: string, enum: [off, available, on_trip] }
+        at_venue: { type: boolean }
+        available_since: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        rides_completed: { type: integer }
+        rating_avg: { type: [string, 'null'] }
+        avg_pickup_minutes:
+          type: [integer, 'null']
+          description: Promedio real entre aceptar y llegar; null mientras no tenga historial.
+
+    DriverCreate:
+      type: object
+      required: [email, first_name, last_name, birth_date, phone, vehicle_plate]
+      properties:
+        email: { type: string, format: email }
+        first_name: { type: string, minLength: 1, maxLength: 100 }
+        last_name: { type: string, minLength: 1, maxLength: 100 }
+        birth_date: { type: string, format: date, description: Debe ser mayor de edad. }
+        phone: { type: string, minLength: 7, maxLength: 30 }
+        vehicle_plate: { type: string, minLength: 3, maxLength: 20 }
+        company: { type: [string, 'null'], maxLength: 80 }
+        license_number: { type: [string, 'null'], maxLength: 40 }
+        vehicle_make: { type: [string, 'null'], maxLength: 40 }
+        vehicle_model: { type: [string, 'null'], maxLength: 40 }
+        vehicle_color: { type: [string, 'null'], maxLength: 30 }
+        vehicle_year: { type: [integer, 'null'], minimum: 1980, maximum: 2100 }
+        seats: { type: integer, minimum: 1, maximum: 8, default: 4 }
+        notes: { type: [string, 'null'], maxLength: 2000 }
+        trusted: { type: boolean, default: false }
+
+    DriverUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        phone: { type: string, minLength: 7, maxLength: 30 }
+        company: { type: [string, 'null'], maxLength: 80 }
+        license_number: { type: [string, 'null'], maxLength: 40 }
+        vehicle_plate: { type: string, minLength: 3, maxLength: 20 }
+        vehicle_make: { type: [string, 'null'], maxLength: 40 }
+        vehicle_model: { type: [string, 'null'], maxLength: 40 }
+        vehicle_color: { type: [string, 'null'], maxLength: 30 }
+        vehicle_year: { type: [integer, 'null'], minimum: 1980, maximum: 2100 }
+        seats: { type: integer, minimum: 1, maximum: 8 }
+        notes: { type: [string, 'null'], maxLength: 2000 }
+        trusted: { type: boolean }
+        active: { type: boolean }
+
+    DriverAvailability:
+      type: object
+      properties:
+        availability: { type: string, enum: [off, available, on_trip] }
+        at_venue: { type: boolean }
+        available_since: { type: [string, 'null'], format: date-time }
+
+    TaxiAvailability:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        pickup_point: { type: string }
+        available_drivers: { type: integer }
+        drivers_at_venue: { type: integer }
+        wait_at_exit:
+          type: boolean
+          description: Hay un conductor estacionado en la salida ahora mismo.
+        estimated_wait_minutes:
+          type: [integer, 'null']
+          description: 0 si hay uno en la salida; promedio real si hay historial; null si no.
+        message: { type: string }
+
+    RideVehicle:
+      type: object
+      properties:
+        plate: { type: string }
+        color: { type: [string, 'null'] }
+        description: { type: [string, 'null'] }
+
+    RideDriver:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: [string, 'null'] }
+        first_name: { type: string }
+        company: { type: [string, 'null'] }
+        phone: { type: string }
+        vehicle: { $ref: '#/components/schemas/RideVehicle' }
+
+    TaxiRide:
+      type: object
+      description: |
+        Una misma fila con tres lecturas. `driver` (con teléfono y auto) lo reciben el
+        cliente y el gerente, y solo desde que hay conductor asignado. El conductor recibe
+        `guest` con el nombre del pasajero, nunca su teléfono; el gerente sí lo recibe,
+        porque tiene que poder localizarlo.
+      properties:
+        id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [requested, assigned, driver_arrived, in_progress, completed, cancelled, no_driver]
+        passengers: { type: integer, minimum: 1, maximum: 8 }
+        pickup_location: { type: [string, 'null'] }
+        destination: { type: [string, 'null'] }
+        destination_zone: { type: [string, 'null'] }
+        quoted_amount:
+          type: [string, 'null']
+          description: Decimal. null cuando el destino no está en la lista de tarifas.
+        final_amount: { type: [string, 'null'], description: Decimal cobrado realmente. }
+        currency: { type: string, enum: [MXN, USD] }
+        payment_method: { type: [string, 'null'], enum: [cash, card, courtesy, null] }
+        eta_minutes: { type: [integer, 'null'] }
+        expected_arrival_at: { type: [string, 'null'], format: date-time }
+        notes: { type: [string, 'null'] }
+        rating: { type: [integer, 'null'], minimum: 1, maximum: 5 }
+        rating_comment: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+        accepted_at: { type: [string, 'null'], format: date-time }
+        arrived_at: { type: [string, 'null'], format: date-time }
+        started_at: { type: [string, 'null'], format: date-time }
+        ended_at: { type: [string, 'null'], format: date-time }
+        cancelled_at: { type: [string, 'null'], format: date-time }
+        cancel_reason: { type: [string, 'null'] }
+        certificate_folio: { type: [string, 'null'] }
+        certificate_expires_at: { type: [string, 'null'], format: date-time }
+        transaction_id: { type: [string, 'null'], format: uuid }
+        driver:
+          oneOf:
+            - { $ref: '#/components/schemas/RideDriver' }
+            - { type: 'null' }
+        guest:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: [string, 'null'] }
+            phone: { type: [string, 'null'] }
+
+    TaxiRideCreate:
+      type: object
+      properties:
+        client_request_id:
+          type: string
+          format: uuid
+          description: Clave de idempotencia; reenviarla devuelve el mismo viaje.
+        fare_id:
+          type: string
+          format: uuid
+          description: Zona de la lista de tarifas. Sin ella el viaje va a convenir.
+        destination: { type: string, maxLength: 300 }
+        passengers: { type: integer, minimum: 1, maximum: 8, default: 1 }
+        notes: { type: string, maxLength: 280 }
+
+    DepartureCertificate:
+      type: object
+      description: |
+        Acredita únicamente que la persona salió del establecimiento a la hora indicada en
+        un viaje coordinado por el club. No sustituye ninguna identificación oficial ni
+        otorga permiso, autorización o efecto legal alguno.
+      properties:
+        folio: { type: string, examples: ['EV2-K7M2-P4XQ'] }
+        nightclub: { type: [string, 'null'] }
+        issued_at: { type: [string, 'null'], format: date-time }
+        expires_at: { type: [string, 'null'], format: date-time }
+        valid: { type: boolean, description: Vigente en este momento. }
+        guest: { type: string, description: 'Nombre e inicial del apellido, por ejemplo Ana P.' }
+        driver: { type: [string, 'null'] }
+        vehicle:
+          oneOf:
+            - { $ref: '#/components/schemas/RideVehicle' }
+            - { type: 'null' }
+        disclaimer: { type: string }
+
+    TaxiStats:
+      type: object
+      properties:
+        totals:
+          type: object
+          properties:
+            rides: { type: integer }
+            completed: { type: integer }
+            cancelled: { type: integer }
+            without_driver: { type: integer }
+            paid_cash: { type: integer }
+            courtesy: { type: integer }
+            charged: { type: string, description: Decimal con dos cifras. }
+            avg_pickup_minutes: { type: [integer, 'null'] }
+        drivers:
+          type: array
+          items:
+            type: object
+            properties:
+              driver_id: { type: string, format: uuid }
+              display_name: { type: [string, 'null'] }
+              vehicle_plate: { type: string }
+              trusted: { type: boolean }
+              active: { type: boolean }
+              rides: { type: integer }
+              cancelled: { type: integer }
+              charged: { type: string }
+              rating_avg: { type: [string, 'null'] }
+              avg_pickup_minutes: { type: [integer, 'null'] }
