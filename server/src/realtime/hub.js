@@ -9,6 +9,30 @@
 
 const { matchesAudience } = require('../services/events');
 
+/** The wire form of an event. Ids travel as strings: they are 64-bit. */
+function toMessage(event) {
+  return {
+    type: 'event',
+    id: String(event.id),
+    event_type: event.type,
+    payload: event.payload,
+    created_at: event.created_at,
+  };
+}
+
+/**
+ * Of the live events held back while a connection was replaying, the ones it has not
+ * already been sent. Without this, an event that arrived during the catch-up read and
+ * was also part of it would be shown twice (D27).
+ *
+ * @param {{id: bigint, message: object}[]} buffered
+ * @param {bigint|null|undefined} lastReplayedId
+ */
+function pendingAfter(buffered, lastReplayedId) {
+  const cutoff = lastReplayedId ?? -1n;
+  return buffered.filter((held) => held.id > cutoff).map((held) => held.message);
+}
+
 class Hub {
   /**
    * @param {object} [opts]
@@ -74,13 +98,9 @@ class Hub {
     let delivered = 0;
     for (const conn of conns) {
       if (!matchesAudience(event.audience, conn.user)) continue;
-      send(conn, {
-        type: 'event',
-        id: String(event.id),
-        event_type: event.type,
-        payload: event.payload,
-        created_at: event.created_at,
-      });
+      // The event is handed over too, not just the message: a connection that is still
+      // replaying what it missed needs the id to buffer and de-duplicate (D27).
+      send(conn, toMessage(event), event);
       delivered += 1;
     }
     return delivered;
@@ -106,4 +126,4 @@ class Hub {
   }
 }
 
-module.exports = { Hub };
+module.exports = { Hub, toMessage, pendingAfter };
