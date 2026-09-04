@@ -44,6 +44,16 @@ info:
     botella enviado por flirt es un pedido real, **cobrado al emisor al pedirlo**; si el
     receptor lo rechaza, el pedido vuelve a la mesa del emisor y **nunca se reembolsa**.
 
+    ## Empleados y dinero
+    El club no retiene nada de las propinas y no hay monto mínimo de retiro. El saldo de un
+    empleado nunca se guarda: se **calcula** desde el libro contable (lo cobrado como
+    beneficiario menos lo retirado), por moneda. Las cuentas bancarias se validan (CLABE con
+    dígito verificador, routing ABA con checksum), se cifran en la base y solo se muestran
+    como `****1234`, también al gerente, quien debe **verificarlas** antes del primer retiro.
+    Un retiro nace `pending`; el gerente lo aprueba (fijando el tipo de cambio de ese
+    momento si hay conversión), lo rechaza, o lo marca `paid` cuando hizo la transferencia,
+    y en ese momento se asienta la salida en el libro.
+
     ## Idempotencia
     Crear un pedido o una reservación exige un `client_request_id` (UUID generado por el
     cliente). Reenviar la misma petición devuelve el recurso original con la cabecera
@@ -85,6 +95,11 @@ tags:
       Conexión entre clientes dentro del club: opt-in, solo sentados y solo esa noche.
       Bloqueos y reportes; trago o botella como pedido real. El gerente ve conteos y
       reportes, nunca mensajes.
+  - name: Empleados
+    description: |
+      Alta por el gerente con contraseña temporal, perfil, cuentas bancarias cifradas y
+      verificadas por el gerente, saldo calculado desde el libro contable, retiros con
+      aprobación y tipo de cambio con historial.
   - name: Pagos
     description: Métodos de pago guardados por el usuario.
 
@@ -2035,6 +2050,625 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/auth/password:
+    post:
+      operationId: postAuthPassword
+      tags: [Autenticación]
+      summary: Cambiar contraseña
+      description: |
+        Exige la contraseña actual y una nueva distinta; cierra las demás sesiones y
+        devuelve tokens nuevos. Obligatorio tras recibir una contraseña temporal del
+        gerente: mientras `must_change_password` esté activo, cualquier otra ruta responde
+        403 con código `password_change_required`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string }
+                new_password: { type: string, minLength: 8, maxLength: 200 }
+      responses:
+        '200':
+          description: Contraseña cambiada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  changed: { type: boolean }
+                  access_token: { type: string }
+                  token_type: { type: string, example: Bearer }
+                  expires_in: { type: string }
+                  refresh_token: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/employees/me:
+    get:
+      operationId: getEmployeesMe
+      tags: [Empleados]
+      summary: Mi perfil de empleado
+      responses:
+        '200':
+          description: Perfil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  employee: { $ref: '#/components/schemas/Employee' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      operationId: putEmployeesMe
+      tags: [Empleados]
+      summary: Editar mi perfil
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                stage_name: { type: [string, 'null'], maxLength: 80 }
+                avatar_url: { type: [string, 'null'], format: uri }
+                phone: { type: [string, 'null'], maxLength: 30 }
+                preferred_currency: { $ref: '#/components/schemas/Currency' }
+                preferred_payout_currency: { $ref: '#/components/schemas/Currency' }
+      responses:
+        '200':
+          description: Perfil actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  employee: { $ref: '#/components/schemas/Employee' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/employees/me/bank-accounts:
+    get:
+      operationId: getEmployeesMeBankAccounts
+      tags: [Empleados]
+      summary: Mis cuentas bancarias (enmascaradas)
+      responses:
+        '200':
+          description: Cuentas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bank_accounts:
+                    type: array
+                    items: { $ref: '#/components/schemas/BankAccount' }
+    post:
+      operationId: postEmployeesMeBankAccounts
+      tags: [Empleados]
+      summary: Registrar una cuenta bancaria
+      description: |
+        `clabe` exige 18 dígitos con dígito verificador válido; `us_checking` y
+        `us_savings` exigen `routing_number` (9 dígitos, checksum ABA) y cuenta de 4 a 17
+        dígitos. El número se cifra y **nunca vuelve a salir del servidor**.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BankAccountCreate' }
+      responses:
+        '201':
+          description: Cuenta guardada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bank_account: { $ref: '#/components/schemas/BankAccount' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/employees/me/bank-accounts/{accountId}:
+    delete:
+      operationId: deleteEmployeesMeBankAccountsByAccountId
+      tags: [Empleados]
+      summary: Quitar una cuenta
+      parameters: [{ $ref: '#/components/parameters/AccountId' }]
+      responses:
+        '204': { description: Cuenta retirada (se conserva para retiros ya pagados) }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/employees/me/earnings:
+    get:
+      operationId: getEmployeesMeEarnings
+      tags: [Empleados]
+      summary: Mi saldo y mis ganancias
+      parameters:
+        - { $ref: '#/components/parameters/DateFrom' }
+        - { $ref: '#/components/parameters/DateTo' }
+      responses:
+        '200':
+          description: Saldo por moneda (no depende del filtro) y desglose del periodo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Earnings' }
+
+  /api/employees/me/dashboard:
+    get:
+      operationId: getEmployeesMeDashboard
+      tags: [Empleados]
+      summary: Mi tablero
+      responses:
+        '200':
+          description: Saldo, últimos movimientos, retiro en proceso y tipo de cambio
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  employee: { $ref: '#/components/schemas/Employee' }
+                  balances:
+                    type: array
+                    items: { $ref: '#/components/schemas/Balance' }
+                  recent_movements:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        type: { type: string }
+                        amount: { $ref: '#/components/schemas/Money' }
+                        currency: { $ref: '#/components/schemas/Currency' }
+                        created_at: { type: string, format: date-time }
+                        metadata: { type: object, additionalProperties: true }
+                  open_withdrawal:
+                    oneOf:
+                      - { $ref: '#/components/schemas/Withdrawal' }
+                      - { type: 'null' }
+                  exchange_rate:
+                    oneOf:
+                      - { $ref: '#/components/schemas/ExchangeRate' }
+                      - { type: 'null' }
+                  generated_at: { type: string, format: date-time }
+
+  /api/employees/me/withdrawals:
+    get:
+      operationId: getEmployeesMeWithdrawals
+      tags: [Empleados]
+      summary: Mis retiros
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Retiros
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  withdrawals:
+                    type: array
+                    items: { $ref: '#/components/schemas/Withdrawal' }
+    post:
+      operationId: postEmployeesMeWithdrawals
+      tags: [Empleados]
+      summary: Solicitar un retiro
+      description: |
+        Sin monto mínimo. Exige una cuenta verificada por el gerente, saldo suficiente en
+        `currency` y ningún otro retiro en proceso (409). Si `payout_currency` difiere,
+        se estima con el tipo de cambio vigente; el definitivo se fija al aprobar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, currency]
+              properties:
+                amount: { type: number, exclusiveMinimum: 0 }
+                currency: { $ref: '#/components/schemas/Currency' }
+                payout_currency: { $ref: '#/components/schemas/Currency' }
+                bank_account_id: { type: string, format: uuid, description: Por omisión la predeterminada. }
+                note: { type: string, maxLength: 300 }
+      responses:
+        '201':
+          description: Retiro solicitado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  withdrawal: { $ref: '#/components/schemas/Withdrawal' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: Sin cuenta verificada, saldo insuficiente o sin tipo de cambio
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/employees:
+    get:
+      operationId: getNightclubsByNightclubIdEmployees
+      tags: [Empleados]
+      summary: Plantilla del club
+      description: Requiere rol `manager`.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: role
+          in: query
+          schema: { $ref: '#/components/schemas/EmployeeRole' }
+        - name: include_inactive
+          in: query
+          schema: { type: boolean, default: false }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Empleados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  employees:
+                    type: array
+                    items: { $ref: '#/components/schemas/Employee' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: postNightclubsByNightclubIdEmployees
+      tags: [Empleados]
+      summary: Dar de alta a un empleado
+      description: |
+        Requiere rol `manager`. Devuelve una **contraseña temporal una sola vez**; el
+        empleado debe cambiarla al entrar. Nunca se guarda en claro.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmployeeCreate' }
+      responses:
+        '201':
+          description: Empleado creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  employee: { $ref: '#/components/schemas/Employee' }
+                  temporary_password: { type: string, description: Se muestra solo aquí. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Ya existe una cuenta con ese correo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/employees/{userId}:
+    get:
+      operationId: getNightclubsByNightclubIdEmployeesByUserId
+      tags: [Empleados]
+      summary: Un empleado
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/UserId' }
+      responses:
+        '200':
+          description: Empleado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  employee: { $ref: '#/components/schemas/Employee' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: patchNightclubsByNightclubIdEmployeesByUserId
+      tags: [Empleados]
+      summary: Editar, dar de baja o reiniciar contraseña
+      description: |
+        Requiere rol `manager`. `active: false` bloquea el acceso y cierra sesiones pero
+        conserva historial y saldo. `reset_password: true` devuelve una nueva contraseña
+        temporal.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/UserId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                role: { $ref: '#/components/schemas/EmployeeRole' }
+                stage_name: { type: [string, 'null'], maxLength: 80 }
+                employee_code: { type: [string, 'null'], maxLength: 30 }
+                hire_date: { type: [string, 'null'], format: date }
+                phone: { type: [string, 'null'], maxLength: 30 }
+                active: { type: boolean }
+                reset_password: { type: boolean }
+      responses:
+        '200':
+          description: Empleado actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  employee: { $ref: '#/components/schemas/Employee' }
+                  temporary_password: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/employees/{userId}/bank-accounts:
+    get:
+      operationId: getNightclubsByNightclubIdEmployeesByUserIdBankAccounts
+      tags: [Empleados]
+      summary: Cuentas de un empleado (enmascaradas) para verificarlas
+      description: Requiere rol `manager`. El gerente tampoco ve el número completo.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/UserId' }
+      responses:
+        '200':
+          description: Cuentas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bank_accounts:
+                    type: array
+                    items: { $ref: '#/components/schemas/BankAccount' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/employees/{userId}/bank-accounts/{accountId}/verify:
+    post:
+      operationId: postNightclubsByNightclubIdEmployeesByUserIdBankAccountsByAccountIdVerify
+      tags: [Empleados]
+      summary: Verificar (o desverificar) una cuenta
+      description: Requiere rol `manager`. Sin cuenta verificada no hay retiro.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/UserId' }
+        - { $ref: '#/components/parameters/AccountId' }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                verified: { type: boolean, default: true }
+      responses:
+        '200':
+          description: Cuenta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bank_account: { $ref: '#/components/schemas/BankAccount' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/employees/{userId}/earnings:
+    get:
+      operationId: getNightclubsByNightclubIdEmployeesByUserIdEarnings
+      tags: [Empleados]
+      summary: Saldo y ganancias de un empleado
+      description: Requiere rol `manager`.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/UserId' }
+        - { $ref: '#/components/parameters/DateFrom' }
+        - { $ref: '#/components/parameters/DateTo' }
+      responses:
+        '200':
+          description: Ganancias
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Earnings' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/payroll:
+    get:
+      operationId: getNightclubsByNightclubIdPayroll
+      tags: [Empleados]
+      summary: "Nómina: saldo de cada empleado por moneda"
+      description: Requiere rol `manager`. Solo empleados con algún movimiento.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Nómina
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rows:
+                    type: array
+                    items:
+                      allOf:
+                        - { $ref: '#/components/schemas/Balance' }
+                        - type: object
+                          properties:
+                            user_id: { type: string, format: uuid }
+                            display_name: { type: string }
+                            role: { $ref: '#/components/schemas/EmployeeRole' }
+                            active: { type: boolean }
+                  pending_withdrawals: { type: integer }
+                  exchange_rate:
+                    oneOf:
+                      - { $ref: '#/components/schemas/ExchangeRate' }
+                      - { type: 'null' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/withdrawals:
+    get:
+      operationId: getNightclubsByNightclubIdWithdrawals
+      tags: [Empleados]
+      summary: Retiros por revisar
+      description: Requiere rol `manager`. Pendientes primero.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, approved, paid, rejected] }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Retiros
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  withdrawals:
+                    type: array
+                    items: { $ref: '#/components/schemas/Withdrawal' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/withdrawals/{withdrawalId}/approve:
+    post:
+      operationId: postNightclubsByNightclubIdWithdrawalsByWithdrawalIdApprove
+      tags: [Empleados]
+      summary: Aprobar un retiro
+      description: Requiere rol `manager`. Fija el tipo de cambio de ese momento si hay conversión.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/WithdrawalId' }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 300 }
+      responses:
+        '200':
+          description: Retiro aprobado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  withdrawal: { $ref: '#/components/schemas/Withdrawal' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/withdrawals/{withdrawalId}/reject:
+    post:
+      operationId: postNightclubsByNightclubIdWithdrawalsByWithdrawalIdReject
+      tags: [Empleados]
+      summary: Rechazar un retiro
+      description: Requiere rol `manager`. El saldo vuelve a estar disponible (nunca se descontó).
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/WithdrawalId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 300 }
+      responses:
+        '200':
+          description: Retiro rechazado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  withdrawal: { $ref: '#/components/schemas/Withdrawal' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/withdrawals/{withdrawalId}/paid:
+    post:
+      operationId: postNightclubsByNightclubIdWithdrawalsByWithdrawalIdPaid
+      tags: [Empleados]
+      summary: Marcar pagado
+      description: |
+        Requiere rol `manager` y un retiro `approved`. Se llama cuando la transferencia ya
+        se hizo por fuera; asienta la salida en el libro contable y descuenta el saldo.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/WithdrawalId' }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reference: { type: string, maxLength: 120, description: Folio de la transferencia. }
+      responses:
+        '200':
+          description: Retiro pagado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  withdrawal: { $ref: '#/components/schemas/Withdrawal' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/exchange-rate:
+    get:
+      operationId: getNightclubsByNightclubIdExchangeRate
+      tags: [Empleados]
+      summary: Tipo de cambio vigente (USD a MXN)
+      description: El historial solo se devuelve al gerente.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Tipo de cambio
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  base: { type: string, example: USD }
+                  quote: { type: string, example: MXN }
+                  current:
+                    oneOf:
+                      - { $ref: '#/components/schemas/ExchangeRate' }
+                      - { type: 'null' }
+                  history:
+                    type: array
+                    items: { $ref: '#/components/schemas/ExchangeRate' }
+    put:
+      operationId: putNightclubsByNightclubIdExchangeRate
+      tags: [Empleados]
+      summary: Fijar el tipo de cambio
+      description: Requiere rol `manager`. Cada valor queda en el historial con fecha y autor; nunca se sobreescribe.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rate]
+              properties:
+                rate: { type: number, exclusiveMinimum: 0, maximum: 1000, description: Pesos por dólar. }
+                effective_from: { type: string, format: date-time }
+                source: { type: string, maxLength: 40, default: manual }
+      responses:
+        '201':
+          description: Registrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rate: { $ref: '#/components/schemas/ExchangeRate' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/me/payment-methods:
     get:
       operationId: getMePaymentMethods
@@ -2179,6 +2813,25 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    WithdrawalId:
+      name: withdrawalId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DateFrom:
+      name: from
+      in: query
+      schema: { type: string, format: date }
+    DateTo:
+      name: to
+      in: query
+      schema: { type: string, format: date }
 
   responses:
     BadRequest:
@@ -3057,6 +3710,159 @@ components:
         flirt_type: { type: [string, 'null'] }
         flirt_sent_at: { type: [string, 'null'], format: date-time }
         reports_against: { type: integer, description: Reportes no desestimados contra esa persona. }
+
+    EmployeeRole:
+      type: string
+      enum: [waiter, bartender, dancer, dj, light_tech, valet, hostess]
+
+    Employee:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        phone: { type: [string, 'null'] }
+        first_name: { type: string }
+        last_name: { type: string }
+        display_name: { type: string }
+        role: { $ref: '#/components/schemas/EmployeeRole' }
+        status: { type: string, enum: [active, blocked, deleted] }
+        preferred_currency: { $ref: '#/components/schemas/Currency' }
+        must_change_password: { type: boolean }
+        last_login_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        employee_code: { type: [string, 'null'] }
+        country: { type: string, enum: [MX, US] }
+        stage_name: { type: [string, 'null'] }
+        avatar_url: { type: [string, 'null'] }
+        hire_date: { type: [string, 'null'], format: date }
+        active: { type: boolean }
+        preferred_payout_currency: { $ref: '#/components/schemas/Currency' }
+        deactivated_at: { type: [string, 'null'], format: date-time }
+        on_shift: { type: boolean }
+
+    EmployeeCreate:
+      type: object
+      required: [email, first_name, last_name, role, birth_date]
+      properties:
+        email: { type: string, format: email }
+        first_name: { type: string, maxLength: 100 }
+        last_name: { type: string, maxLength: 100 }
+        role: { $ref: '#/components/schemas/EmployeeRole' }
+        country: { type: string, enum: [MX, US], default: MX }
+        birth_date: { type: string, format: date }
+        phone: { type: string, maxLength: 30 }
+        stage_name: { type: string, maxLength: 80 }
+        employee_code: { type: string, maxLength: 30 }
+        hire_date: { type: string, format: date }
+        preferred_currency: { $ref: '#/components/schemas/Currency' }
+
+    BankAccount:
+      type: object
+      description: Lo único que sale del servidor. El número completo nunca.
+      properties:
+        id: { type: string, format: uuid }
+        country: { type: string, enum: [MX, US] }
+        type: { type: string, enum: [clabe, us_checking, us_savings] }
+        bank_name: { type: string }
+        holder_name: { type: string }
+        account_masked: { type: string, example: '****1234' }
+        routing_masked: { type: [string, 'null'], example: '****0021' }
+        is_default: { type: boolean }
+        verified: { type: boolean }
+        verified_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+
+    BankAccountCreate:
+      type: object
+      required: [type, bank_name, holder_name, account_number]
+      properties:
+        type: { type: string, enum: [clabe, us_checking, us_savings] }
+        bank_name: { type: string, maxLength: 80 }
+        holder_name: { type: string, maxLength: 120 }
+        account_number: { type: string, description: CLABE de 18 dígitos o cuenta de EE. UU. de 4 a 17. }
+        routing_number: { type: string, description: 9 dígitos; obligatorio para cuentas de EE. UU. }
+        is_default: { type: boolean, default: true }
+
+    Balance:
+      type: object
+      description: Calculado siempre desde el libro contable.
+      properties:
+        currency: { $ref: '#/components/schemas/Currency' }
+        earned: { $ref: '#/components/schemas/Money' }
+        withdrawn: { $ref: '#/components/schemas/Money' }
+        reserved: { $ref: '#/components/schemas/Money' }
+        available: { $ref: '#/components/schemas/Money' }
+        movements: { type: integer }
+
+    Earnings:
+      type: object
+      properties:
+        balances:
+          type: array
+          items: { $ref: '#/components/schemas/Balance' }
+        from: { type: [string, 'null'], format: date }
+        to: { type: [string, 'null'], format: date }
+        totals:
+          type: array
+          items:
+            type: object
+            properties:
+              currency: { $ref: '#/components/schemas/Currency' }
+              total: { $ref: '#/components/schemas/Money' }
+              count: { type: integer }
+        by_type:
+          type: array
+          items:
+            type: object
+            properties:
+              currency: { $ref: '#/components/schemas/Currency' }
+              type: { type: string }
+              total: { $ref: '#/components/schemas/Money' }
+              count: { type: integer }
+        by_day:
+          type: array
+          items:
+            type: object
+            properties:
+              currency: { $ref: '#/components/schemas/Currency' }
+              day: { type: string, format: date }
+              total: { $ref: '#/components/schemas/Money' }
+              count: { type: integer }
+
+    Withdrawal:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        employee_name: { type: string }
+        employee_role: { $ref: '#/components/schemas/EmployeeRole' }
+        amount: { $ref: '#/components/schemas/Money' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        payout_currency: { $ref: '#/components/schemas/Currency' }
+        exchange_rate: { type: [string, 'null'], description: Pesos por dólar aplicados si hubo conversión. }
+        amount_paid: { type: [string, 'null'], description: Importe en la moneda de pago. }
+        status: { type: string, enum: [pending, approved, paid, rejected] }
+        note: { type: [string, 'null'] }
+        rejection_reason: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+        reviewed_at: { type: [string, 'null'], format: date-time }
+        paid_at: { type: [string, 'null'], format: date-time }
+        reviewed_by: { type: [string, 'null'], format: uuid }
+        reviewed_by_name: { type: [string, 'null'] }
+        transaction_id: { type: [string, 'null'], format: uuid }
+        bank_account_id: { type: [string, 'null'], format: uuid }
+        bank_name: { type: [string, 'null'] }
+        bank_account_type: { type: [string, 'null'] }
+        account_masked: { type: [string, 'null'], example: '****1234' }
+
+    ExchangeRate:
+      type: object
+      properties:
+        id: { type: string, description: Entero de 64 bits serializado como cadena. }
+        rate: { type: string, description: Pesos por dólar. }
+        effective_from: { type: string, format: date-time }
+        source: { type: string }
+        set_by_name: { type: [string, 'null'] }
 
     PaymentMethod:
       type: object
