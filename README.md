@@ -10,8 +10,9 @@ POS SoftRestaurant11. Backend Node.js + PostgreSQL + Redis, web HTML/Tailwind (P
 
 ## Estado del proyecto
 
-En desarrollo, siguiendo `docs/MANUAL_IMPLEMENTACION_EV2.pdf` paso a paso. El avance real se registra en
-`docs/AVANCE.md`. **Advertencia:** los documentos antiguos en `docs/` (resúmenes, guías "production ready",
+En desarrollo, siguiendo `docs/MANUAL_IMPLEMENTACION_EV2.pdf` paso a paso. **Fases 0, 1 y 2 completas.**
+El avance real se registra en `docs/AVANCE.md` y la hoja de control por fases e hitos (seccion 15 del
+manual) en `docs/CONTROL_AVANCE.md`. **Advertencia:** los documentos antiguos en `docs/` (resúmenes, guías "production ready",
 material de ventas) describen la visión del producto, no el estado actual del código. La fuente de verdad
 sobre qué funciona es el manual y la bitácora.
 

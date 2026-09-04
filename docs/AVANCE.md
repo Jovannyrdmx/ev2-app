@@ -43,4 +43,4 @@ Siguiente: **Fase 3 — tiempo real y pagos** (90 h): 3.1 WebSocket autenticado 
 
 **Pendiente del dueno antes de 3.4/3.5:** cuentas de Stripe y de Mercado Pago (alta del negocio, datos fiscales y llaves de prueba). Sin ellas se puede llegar hasta 3.3.
 
-**Recordatorio del manual (seccion 15):** al cerrar la fase, llenar la hoja de control de avance.
+**Hoja de control (seccion 15 del manual):** `docs/CONTROL_AVANCE.md`. Fases 0-2 y el hito H1 registrados; faltan las horas reales y las firmas, que llena Erick.
