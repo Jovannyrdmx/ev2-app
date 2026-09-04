@@ -210,7 +210,7 @@ describe('Club', () => {
     const table = await f.createTable(club.id);
     await api().post(url(`/tables/${table.id}/seat`)).set(auth(guest));
 
-    const res = await api().get(url('/events?since_id=0')).set(auth(guest));
+    const res = await api().get(url('/sync/events?since_id=0')).set(auth(guest));
     expect(res.status).toBe(200);
     expect(res.body.events.length).toBeGreaterThanOrEqual(1);
     // Los ids de evento viajan como cadena: son enteros de 64 bits y JavaScript
@@ -228,10 +228,10 @@ describe('Club', () => {
 
     // El pedido va dirigido a la barra y a quien lo hizo, no a otro cliente.
     const outsider = await f.createUser(club.id, { role: 'guest' });
-    const res = await api().get(url('/events?since_id=0')).set(auth(outsider));
+    const res = await api().get(url('/sync/events?since_id=0')).set(auth(outsider));
     expect(res.body.events.filter((e) => e.type === 'order_created')).toHaveLength(0);
 
-    const barra = await api().get(url('/events?since_id=0')).set(auth(bartender));
+    const barra = await api().get(url('/sync/events?since_id=0')).set(auth(bartender));
     expect(barra.body.events.filter((e) => e.type === 'order_created')).toHaveLength(1);
   });
 });

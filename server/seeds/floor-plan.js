@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Loads the club's real floor plan (52 tables + 6 landmarks) into a nightclub.
+// Loads the club's real floor plan (55 tables + landmarks) into a nightclub.
 //
 //   npm run seed:floor -- --slug ev2
 //
@@ -57,16 +57,28 @@ async function loadFloorPlan({ slug, planPath = PLAN_PATH } = {}) {
       [nightclubId, codes],
     );
 
-    for (const l of plan.landmarks) {
+    for (const [i, l] of plan.landmarks.entries()) {
       await client.query(
-        `INSERT INTO venue_landmarks (nightclub_id, code, name, type, description, floor, sort_order)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `INSERT INTO venue_landmarks (nightclub_id, code, name, type, description, floor,
+                                      x, y, width, height, sort_order)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
          ON CONFLICT (nightclub_id, code) DO UPDATE SET
            name = EXCLUDED.name, type = EXCLUDED.type, description = EXCLUDED.description,
-           floor = EXCLUDED.floor, sort_order = EXCLUDED.sort_order, active = true`,
-        [nightclubId, l.code, l.name, l.type, l.description, l.floor, l.sort_order],
+           floor = EXCLUDED.floor, x = EXCLUDED.x, y = EXCLUDED.y,
+           width = EXCLUDED.width, height = EXCLUDED.height,
+           sort_order = EXCLUDED.sort_order, active = true`,
+        [nightclubId, l.code, l.name, l.type, l.description || null, l.floor,
+          l.x ?? null, l.y ?? null, l.width ?? null, l.height ?? null,
+          l.sort_order ?? i],
       );
     }
+
+    const landmarkCodes = plan.landmarks.map((l) => l.code);
+    await client.query(
+      `UPDATE venue_landmarks SET active = false
+        WHERE nightclub_id = $1 AND active AND NOT (code = ANY($2::text[]))`,
+      [nightclubId, landmarkCodes],
+    );
 
     await client.query(
       `UPDATE nightclubs SET settings = settings || $2::jsonb WHERE id = $1`,
