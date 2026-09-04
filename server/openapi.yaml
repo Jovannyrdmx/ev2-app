@@ -121,6 +121,11 @@ tags:
       Conductores de confianza dados de alta por el gerente, disponibilidad declarada por
       el conductor, tarifas por zona, ciclo del viaje confirmado por el conductor, cobro en
       efectivo asentado en el libro y constancia de salida con folio verificable.
+  - name: Valet
+    description: |
+      Recepcion de autos con comprobante QR, tablero del estacionamiento, entrega
+      verificada con el token del QR y entrega sin QR autorizada por el gerente con
+      constancia. El estacionamiento es gratis: lo que gana el valet es la propina.
   - name: Pagos
     description: Métodos de pago guardados por el usuario.
 
@@ -4226,6 +4231,557 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
 
+  /api/nightclubs/{nightclubId}/valet-settings:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: getValetSettings
+      tags: [Valet]
+      summary: Ajustes del valet
+      responses:
+        '200':
+          description: Ajustes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settings: { $ref: '#/components/schemas/ValetSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      operationId: putValetSettings
+      tags: [Valet]
+      summary: Editar los ajustes (gerente)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ValetSettingsUpdate' }
+      responses:
+        '200':
+          description: Ajustes actualizados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settings: { $ref: '#/components/schemas/ValetSettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/parking-spots:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listParkingSpots
+      tags: [Valet]
+      summary: Cajones y qué hay en cada uno (personal del valet)
+      parameters:
+        - name: include_inactive
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Cajones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  spots:
+                    type: array
+                    items: { $ref: '#/components/schemas/ParkingSpot' }
+                  occupancy: { $ref: '#/components/schemas/ParkingOccupancy' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createParkingSpots
+      tags: [Valet]
+      summary: Cargar cajones (gerente)
+      description: |
+        Se cargan en bloque porque un estacionamiento se da de alta una vez, como A1..A20.
+        Los códigos que ya existen se omiten en lugar de fallar; los repetidos dentro de la
+        misma petición responden 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [spots]
+              properties:
+                spots:
+                  type: array
+                  minItems: 1
+                  maxItems: 300
+                  items:
+                    type: object
+                    required: [code]
+                    properties:
+                      code: { type: string, minLength: 1, maxLength: 20 }
+                      zone: { type: [string, 'null'], maxLength: 40 }
+      responses:
+        '201':
+          description: Cajones creados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created:
+                    type: array
+                    items: { $ref: '#/components/schemas/ParkingSpot' }
+                  skipped: { type: integer, description: Códigos que ya existían. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/parking-spots/{spotId}:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/SpotId'
+    put:
+      operationId: updateParkingSpot
+      tags: [Valet]
+      summary: Editar un cajón (gerente)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                code: { type: string, minLength: 1, maxLength: 20 }
+                zone: { type: [string, 'null'], maxLength: 40 }
+                active: { type: boolean }
+      responses:
+        '200':
+          description: Cajón actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  spot: { $ref: '#/components/schemas/ParkingSpot' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      operationId: retireParkingSpot
+      tags: [Valet]
+      summary: Retirar un cajón (gerente)
+      description: 'Se marca inactivo, nunca se borra: los tickets pasados lo referencian.'
+      responses:
+        '200':
+          description: Cajón retirado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  spot: { $ref: '#/components/schemas/ParkingSpot' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/valet/tickets:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listValetTickets
+      tags: [Valet]
+      summary: Tablero del valet
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [parked, requested, ready, delivered, cancelled] }
+        - name: open
+          in: query
+          description: Solo los autos que siguen en el estacionamiento.
+          schema: { type: boolean, default: false }
+        - name: plate
+          in: query
+          schema: { type: string, maxLength: 20 }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Tickets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tickets:
+                    type: array
+                    items: { $ref: '#/components/schemas/ValetTicket' }
+                  occupancy: { $ref: '#/components/schemas/ParkingOccupancy' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createValetTicket
+      tags: [Valet]
+      summary: Recibir un auto
+      description: |
+        Devuelve dos identificadores distintos. `code` es corto y se dice en voz alta; **no
+        es un secreto**. `qr_token` es lo que libera el auto y viaja **una sola vez**, aquí,
+        para imprimirse como QR en el comprobante: no aparece en ninguna consulta posterior,
+        porque si el personal pudiera leerlo de una lista, exigirlo al entregar sería teatro.
+        Idempotente por `client_request_id`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ValetTicketCreate' }
+      responses:
+        '201':
+          description: Auto recibido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket: { $ref: '#/components/schemas/ValetTicket' }
+                  qr_token: { type: string, description: 48 caracteres hexadecimales. }
+                  handover_point: { type: string }
+        '200':
+          description: El mismo ticket ya existía (idempotencia)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket: { $ref: '#/components/schemas/ValetTicket' }
+                  idempotent: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/valet/tickets/mine:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listMyValetTickets
+      tags: [Valet]
+      summary: Mis autos
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Tickets del cliente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tickets:
+                    type: array
+                    items: { $ref: '#/components/schemas/ValetTicket' }
+                  open:
+                    type: array
+                    items: { $ref: '#/components/schemas/ValetTicket' }
+
+  /api/nightclubs/{nightclubId}/valet/tickets/by-token/{token}:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - name: token
+        in: path
+        required: true
+        description: El token leído del QR. Es la entrada de esta consulta, nunca su salida.
+        schema: { type: string, minLength: 16, maxLength: 64 }
+    get:
+      operationId: getValetTicketByToken
+      tags: [Valet]
+      summary: Resolver un escaneo del QR (personal del valet)
+      responses:
+        '200':
+          description: Ticket
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket: { $ref: '#/components/schemas/ValetTicket' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/valet/occupancy:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: getParkingOccupancy
+      tags: [Valet]
+      summary: Cuántos cajones quedan libres (personal del valet)
+      responses:
+        '200':
+          description: Ocupación
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  occupancy: { $ref: '#/components/schemas/ParkingOccupancy' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/valet/stats:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: getValetStats
+      tags: [Valet]
+      summary: Números del valet (gerente)
+      parameters:
+        - $ref: '#/components/parameters/DateFrom'
+        - $ref: '#/components/parameters/DateTo'
+      responses:
+        '200':
+          description: Estadísticas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValetStats' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/valet/claim:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    post:
+      operationId: claimValetTicket
+      tags: [Valet]
+      summary: Reclamar mi ticket escaneando el QR
+      description: |
+        Asocia el ticket a la cuenta para poder pedir el auto desde la app. Un ticket ya
+        asociado a otra cuenta responde 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [qr_token]
+              properties:
+                qr_token: { type: string, minLength: 16, maxLength: 64 }
+      responses:
+        '200':
+          description: Ticket reclamado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket: { $ref: '#/components/schemas/ValetTicket' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/valet/tickets/{ticketId}:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/TicketId'
+    get:
+      operationId: getValetTicket
+      tags: [Valet]
+      summary: Ver un ticket
+      description: |
+        El cliente ve su auto y su estado; el personal ve además el teléfono, las notas y
+        quién lo recibió; el gerente ve también el rastro de una entrega sin QR. Un ticket
+        ajeno responde 404.
+      responses:
+        '200':
+          description: Ticket
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket: { $ref: '#/components/schemas/ValetTicket' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/valet/tickets/{ticketId}/request:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/TicketId'
+    post:
+      operationId: requestValetCar
+      tags: [Valet]
+      summary: Pedir que traigan mi auto
+      description: Pedirlo dos veces no es un error; responde con `already_requested`.
+      responses:
+        '200':
+          description: Auto solicitado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket: { $ref: '#/components/schemas/ValetTicket' }
+                  already_requested: { type: boolean }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/valet/tickets/{ticketId}/ready:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/TicketId'
+    post:
+      operationId: valetCarReady
+      tags: [Valet]
+      summary: El auto ya está en la puerta (personal del valet)
+      responses:
+        '200':
+          description: Auto listo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket: { $ref: '#/components/schemas/ValetTicket' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/valet/tickets/{ticketId}/deliver:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/TicketId'
+    post:
+      operationId: deliverValetCar
+      tags: [Valet]
+      summary: Entregar el auto escaneando el QR (personal del valet)
+      description: |
+        El token es el control, no el estado: quien tiene el ticket -en papel o en el
+        teléfono- se lleva el auto, lo haya pedido antes o no. Un token que no corresponde
+        responde 403 con el mismo mensaje en todos los casos, para no ir diciendo a nadie
+        que se está acercando. Si el club cobra el valet, aquí se indica cómo se pagó.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [qr_token]
+              properties:
+                qr_token: { type: string, minLength: 16, maxLength: 64 }
+                payment_method:
+                  type: string
+                  enum: [cash, card, courtesy]
+                  description: Obligatorio solo si la tarifa del ticket es mayor que cero.
+      responses:
+        '200':
+          description: Auto entregado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket: { $ref: '#/components/schemas/ValetTicket' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '501':
+          description: El cobro con tarjeta llega en la fase 3
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/valet/tickets/{ticketId}/deliver-override:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/TicketId'
+    post:
+      operationId: deliverValetCarWithoutQr
+      tags: [Valet]
+      summary: Entregar sin QR, solo el gerente
+      description: |
+        La única puerta que se salta el QR, y es del gerente. Queda asentado en `audit_log`
+        el motivo, el tipo de identificación y el nombre que aparece en ella. **El número
+        del documento no se guarda**: no aporta nada a la pregunta de quién se llevó el auto
+        y sí sería un riesgo tenerlo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, id_type, id_name]
+              properties:
+                reason: { type: string, minLength: 5, maxLength: 200 }
+                id_type: { type: string, enum: [INE, pasaporte, licencia, otro] }
+                id_name: { type: string, minLength: 2, maxLength: 120 }
+      responses:
+        '200':
+          description: Auto entregado con constancia del gerente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket: { $ref: '#/components/schemas/ValetTicket' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/valet/tickets/{ticketId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/TicketId'
+    post:
+      operationId: cancelValetTicket
+      tags: [Valet]
+      summary: Cancelar un ticket (personal del valet)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 160 }
+      responses:
+        '200':
+          description: Ticket cancelado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket: { $ref: '#/components/schemas/ValetTicket' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/valet/tickets/{ticketId}/rate:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/TicketId'
+    post:
+      operationId: rateValetService
+      tags: [Valet]
+      summary: Calificar el servicio (cliente)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating: { type: integer, minimum: 1, maximum: 5 }
+                comment: { type: string, maxLength: 280 }
+      responses:
+        '200':
+          description: Calificación registrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rating:
+                    type: object
+                    properties:
+                      rating: { type: integer }
+                      rating_comment: { type: [string, 'null'] }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -4345,6 +4901,16 @@ components:
       required: true
       description: Folio impreso en la constancia; no distingue mayusculas.
       schema: { type: string, minLength: 4, maxLength: 20 }
+    SpotId:
+      name: spotId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TicketId:
+      name: ticketId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
 
   responses:
     BadRequest:
@@ -4552,12 +5118,20 @@ components:
             pos_errors: { type: integer }
         revenue_today:
           type: array
+          description: |
+            No todo lo que pasa por el libro contable es dinero del club. `total` es lo que
+            el club se queda (consumo, servicio de botella, reservaciones, valet, ajustes);
+            `to_staff` son propinas y canciones, que son del empleado, y `to_drivers` las
+            tarifas de taxi, que son del conductor. Los tres se reportan por separado en
+            lugar de sumarse.
           items:
             type: object
             properties:
               currency: { $ref: '#/components/schemas/Currency' }
               total: { $ref: '#/components/schemas/Money' }
-              count: { type: integer }
+              count: { type: integer, description: Movimientos que son ingreso del club. }
+              to_staff: { $ref: '#/components/schemas/Money' }
+              to_drivers: { $ref: '#/components/schemas/Money' }
         staff:
           type: object
           properties:
@@ -5803,3 +6377,147 @@ components:
               charged: { type: string }
               rating_avg: { type: [string, 'null'] }
               avg_pickup_minutes: { type: [integer, 'null'] }
+
+    ValetSettings:
+      type: object
+      properties:
+        nightclub_id: { type: string, format: uuid }
+        enabled: { type: boolean }
+        handover_point: { type: string, description: Dónde se entrega el auto al cliente. }
+        fee_amount:
+          type: string
+          description: |
+            Decimal. **0 por decisión del club**: el estacionamiento es gratis y lo que gana
+            el valet es la propina, que va por el módulo de propinas. Si algún día se pone
+            un valor mayor, la entrega pasa a exigir método de pago.
+        currency: { type: string, enum: [MXN, USD] }
+        terms: { type: [string, 'null'] }
+        updated_at: { type: string, format: date-time }
+
+    ValetSettingsUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        enabled: { type: boolean }
+        handover_point: { type: string, minLength: 1, maxLength: 120 }
+        fee_amount: { type: number, minimum: 0, maximum: 100000 }
+        currency: { type: string, enum: [MXN, USD] }
+        terms: { type: [string, 'null'], maxLength: 4000 }
+
+    ParkingSpot:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        zone: { type: [string, 'null'] }
+        active: { type: boolean }
+        occupied_by:
+          oneOf:
+            - type: object
+              properties:
+                ticket_id: { type: string, format: uuid }
+                code: { type: string }
+                plate: { type: string }
+            - { type: 'null' }
+
+    ParkingOccupancy:
+      type: object
+      properties:
+        total: { type: integer }
+        occupied: { type: integer }
+        free: { type: integer }
+
+    ValetTicket:
+      type: object
+      description: |
+        Tres lecturas de la misma fila. El cliente ve su auto y su estado; el personal ve
+        además el teléfono, las notas y quién lo recibió; el gerente ve también el rastro de
+        una entrega sin QR. **El token del QR no aparece en ninguna de las tres.**
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, examples: ['V-7K2M'], description: Corto y público. }
+        status: { type: string, enum: [parked, requested, ready, delivered, cancelled] }
+        plate: { type: string }
+        vehicle_desc: { type: [string, 'null'] }
+        fee: { type: string, description: Tarifa congelada al recibir el auto. }
+        currency: { type: string, enum: [MXN, USD] }
+        rating: { type: [integer, 'null'], minimum: 1, maximum: 5 }
+        claimed: { type: boolean, description: El cliente ya asoció el ticket a su cuenta. }
+        spot:
+          oneOf:
+            - type: object
+              properties:
+                id: { type: string, format: uuid }
+                code: { type: string }
+                zone: { type: [string, 'null'] }
+            - { type: 'null' }
+        checked_in_at: { type: string, format: date-time }
+        requested_at: { type: [string, 'null'], format: date-time }
+        ready_at: { type: [string, 'null'], format: date-time }
+        delivered_at: { type: [string, 'null'], format: date-time }
+        cancelled_at: { type: [string, 'null'], format: date-time }
+        cancel_reason: { type: [string, 'null'] }
+        phone: { type: [string, 'null'], description: Solo para el personal. }
+        notes: { type: [string, 'null'], description: Solo para el personal. }
+        received_by: { type: [string, 'null'], description: Solo para el personal. }
+        delivered_by: { type: [string, 'null'], description: Solo para el personal. }
+        rating_comment: { type: [string, 'null'], description: Solo para el personal. }
+        owner:
+          description: Solo para el personal.
+          oneOf:
+            - type: object
+              properties:
+                id: { type: string, format: uuid }
+                name: { type: [string, 'null'] }
+                phone: { type: [string, 'null'] }
+            - { type: 'null' }
+        transaction_id: { type: [string, 'null'], format: uuid }
+        override:
+          description: Entrega sin QR. Solo para el gerente.
+          oneOf:
+            - type: object
+              properties:
+                by: { type: [string, 'null'] }
+                at: { type: string, format: date-time }
+                reason: { type: string }
+                id_type: { type: string, enum: [INE, pasaporte, licencia, otro] }
+                id_name: { type: string }
+            - { type: 'null' }
+
+    ValetTicketCreate:
+      type: object
+      required: [plate]
+      properties:
+        plate: { type: string, minLength: 3, maxLength: 20 }
+        vehicle_desc: { type: string, maxLength: 120 }
+        phone: { type: string, maxLength: 30 }
+        spot_id: { type: string, format: uuid }
+        notes: { type: string, maxLength: 280 }
+        client_request_id: { type: string, format: uuid }
+
+    ValetStats:
+      type: object
+      properties:
+        totals:
+          type: object
+          properties:
+            tickets: { type: integer }
+            open: { type: integer }
+            delivered: { type: integer }
+            cancelled: { type: integer }
+            handed_over_without_qr:
+              type: integer
+              description: Entregas autorizadas por el gerente sin escanear el QR.
+            avg_retrieval_minutes: { type: [integer, 'null'] }
+            rating_avg: { type: [string, 'null'] }
+        valets:
+          type: array
+          items:
+            type: object
+            properties:
+              user_id: { type: string, format: uuid }
+              display_name: { type: [string, 'null'] }
+              received: { type: integer }
+              delivered: { type: integer }
+              rating_avg: { type: [string, 'null'] }
+              avg_retrieval_minutes: { type: [integer, 'null'] }
