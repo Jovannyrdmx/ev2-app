@@ -1,0 +1,321 @@
+'use strict';
+
+// Flirt, parte 1: preferencias, personas de la noche, envío, bandeja y reacciones.
+// Las reglas de protección (opt-in, sentados, límites, silencio) se prueban aquí;
+// bloqueos, reportes y trago/botella llegan en la parte 2.
+
+const { randomUUID } = require('crypto');
+const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
+const { api, auth } = require('./helpers/api');
+const f = require('./helpers/factories');
+const { LIMITS } = require('../src/routes/flirts');
+
+let club; let ana; let beto; let carla; let waiter; let manager;
+let mesaA; let mesaB; let mesaC;
+
+beforeAll(setupSchema);
+afterAll(closePool);
+
+beforeEach(async () => {
+  await truncateAll();
+  club = await f.createNightclub({ slug: 'ev2-flirt' });
+  ana = await f.createUser(club.id, { role: 'guest', display_name: 'Ana', accept_flirts: true });
+  beto = await f.createUser(club.id, { role: 'guest', display_name: 'Beto', accept_flirts: true });
+  carla = await f.createUser(club.id, { role: 'guest', display_name: 'Carla', accept_flirts: false });
+  waiter = await f.createUser(club.id, { role: 'waiter' });
+  manager = await f.createUser(club.id, { role: 'manager' });
+
+  mesaA = await f.createTable(club.id, { code: '5', section: 'GENERAL' });
+  mesaB = await f.createTable(club.id, { code: '39', section: 'ZONA ROJA' });
+  mesaC = await f.createTable(club.id, { code: 'AZ13', section: 'ZONA AZUL' });
+
+  // Todos visibles en la lista salvo que una prueba diga lo contrario.
+  await pool.query('UPDATE user_preferences SET discoverable = true WHERE user_id = ANY($1::uuid[])',
+    [[ana.id, beto.id, carla.id]]);
+});
+
+const url = (p) => `/api/nightclubs/${club.id}${p}`;
+const seat = (user, table) => api().post(url(`/tables/${table.id}/seat`)).set(auth(user));
+const prefs = (user, body) => api().put('/api/me/preferences').set(auth(user)).send(body);
+
+const send = (from, to, over = {}) => api().post(url('/flirts')).set(auth(from)).send({
+  client_request_id: randomUUID(),
+  recipient_id: to.id,
+  type: 'emoji',
+  emoji: 'wave',
+  ...over,
+});
+
+async function seatEveryone() {
+  await seat(ana, mesaA);
+  await seat(beto, mesaB);
+  await seat(carla, mesaC);
+}
+
+describe('Preferencias', () => {
+  it('nacen apagadas: nadie recibe ni aparece sin pedirlo', async () => {
+    const nuevo = await f.createUser(club.id, { role: 'guest' });
+    const res = await api().get('/api/me/preferences').set(auth(nuevo));
+    expect(res.status).toBe(200);
+    expect(res.body.preferences).toMatchObject({ accept_flirts: false, discoverable: false });
+  });
+
+  it('cada quien activa o apaga lo suyo', async () => {
+    const on = await prefs(carla, { accept_flirts: true, discoverable: true });
+    expect(on.status).toBe(200);
+    expect(on.body.preferences).toMatchObject({ accept_flirts: true, discoverable: true });
+
+    const off = await prefs(carla, { accept_flirts: false });
+    expect(off.body.preferences).toMatchObject({ accept_flirts: false, discoverable: true });
+  });
+
+  it('rechaza un cuerpo vacío', async () => {
+    expect((await prefs(carla, {})).status).toBe(400);
+  });
+});
+
+describe('Personas esta noche', () => {
+  it('solo muestra a quienes están sentados y quieren aparecer', async () => {
+    await seat(ana, mesaA);
+    await seat(beto, mesaB);
+    // Carla está en la lista pero no se sentó.
+    const res = await api().get(url('/flirts/people')).set(auth(ana));
+    expect(res.status).toBe(200);
+    expect(res.body.people.map((p) => p.display_name)).toEqual(['Beto']);
+    expect(res.body.people[0]).toMatchObject({ table_code: '39', section: 'ZONA ROJA', accept_flirts: true });
+  });
+
+  it('nunca expone teléfono, correo ni fecha de nacimiento', async () => {
+    await seatEveryone();
+    const res = await api().get(url('/flirts/people')).set(auth(ana));
+    const text = JSON.stringify(res.body);
+    expect(text).not.toMatch(/email|phone|birth_date|@test\.mx/);
+  });
+
+  it('oculta a quien apagó "aparecer en la lista"', async () => {
+    await seatEveryone();
+    await prefs(beto, { discoverable: false });
+    const res = await api().get(url('/flirts/people')).set(auth(ana));
+    expect(res.body.people.map((p) => p.display_name)).toEqual(['Carla']);
+  });
+
+  it('hay que estar sentado para ver la lista', async () => {
+    await seat(beto, mesaB);
+    const res = await api().get(url('/flirts/people')).set(auth(ana));
+    expect(res.status).toBe(422);
+  });
+
+  it('no lista al personal aunque esté en una mesa', async () => {
+    await seatEveryone();
+    await seat(waiter, mesaC);
+    await pool.query('UPDATE user_preferences SET discoverable = true WHERE user_id = $1', [waiter.id]);
+    const res = await api().get(url('/flirts/people')).set(auth(ana));
+    expect(res.body.people.map((p) => p.display_name)).not.toContain('waiter Test');
+  });
+
+  it('filtra por zona', async () => {
+    await seatEveryone();
+    const res = await api().get(url('/flirts/people?section=ZONA AZUL')).set(auth(ana));
+    expect(res.body.people.map((p) => p.display_name)).toEqual(['Carla']);
+  });
+
+  it('el catálogo de emojis y los límites son públicos para el cliente', async () => {
+    const res = await api().get(url('/flirts/catalogue')).set(auth(ana));
+    expect(res.body.emojis.map((e) => e.key)).toEqual(['wave', 'wink', 'kiss', 'fire', 'heart', 'dance', 'star']);
+    expect(res.body.limits.per_hour).toBe(20);
+  });
+});
+
+describe('Enviar un flirt', () => {
+  beforeEach(seatEveryone);
+
+  it('crea el flirt con la mesa del emisor y avisa al receptor', async () => {
+    const res = await send(ana, beto, { emoji: 'wink', message: 'Hola 👋' });
+    expect(res.status).toBe(201);
+    expect(res.body.flirt).toMatchObject({
+      type: 'emoji', emoji: 'wink', message: 'Hola 👋', status: 'sent',
+      sender_name: 'Ana', recipient_name: 'Beto', sender_table_code: '5', sender_section: 'GENERAL',
+    });
+    const { rows } = await pool.query(`SELECT type, audience FROM events WHERE type = 'flirt_received'`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].audience.userIds).toEqual([beto.id]);
+  });
+
+  it('un "meet" lleva la invitación a la mesa del emisor', async () => {
+    const res = await send(ana, beto, { type: 'meet', emoji: undefined, message: '¿Vienes a la 5?' });
+    expect(res.status).toBe(201);
+    expect(res.body.flirt.type).toBe('meet');
+    expect(res.body.flirt.sender_table_code).toBe('5');
+  });
+
+  it('es idempotente', async () => {
+    const id = randomUUID();
+    const first = await send(ana, beto, { client_request_id: id });
+    const again = await send(ana, beto, { client_request_id: id });
+    expect(again.status).toBe(200);
+    expect(again.headers['idempotent-replay']).toBe('true');
+    expect(again.body.flirt.id).toBe(first.body.flirt.id);
+  });
+
+  it('sin opt-in del receptor no se envía (403)', async () => {
+    const res = await send(ana, carla);
+    expect(res.status).toBe(403);
+  });
+
+  it('el receptor puede apagarlo a media noche y deja de recibir', async () => {
+    expect((await send(ana, beto)).status).toBe(201);
+    await prefs(beto, { accept_flirts: false });
+    expect((await send(ana, beto)).status).toBe(403);
+  });
+
+  it('el emisor tiene que estar sentado', async () => {
+    const suelto = await f.createUser(club.id, { role: 'guest', accept_flirts: true });
+    const res = await send(suelto, beto);
+    expect(res.status).toBe(422);
+  });
+
+  it('el receptor tiene que seguir en el club', async () => {
+    await pool.query('UPDATE table_occupants SET left_at = now() WHERE user_id = $1', [beto.id]);
+    const res = await send(ana, beto);
+    expect(res.status).toBe(422);
+  });
+
+  it('no se puede enviar a uno mismo', async () => {
+    expect((await send(ana, ana)).status).toBe(422);
+  });
+
+  it('un emoji fuera del catálogo se rechaza', async () => {
+    expect((await send(ana, beto, { emoji: 'eggplant' })).status).toBe(400);
+  });
+
+  it('un mensaje más largo de lo permitido se rechaza', async () => {
+    expect((await send(ana, beto, { message: 'x'.repeat(LIMITS.messageMax + 1) })).status).toBe(400);
+  });
+
+  it('el personal no envía flirts', async () => {
+    await seat(waiter, mesaC);
+    expect((await send(waiter, beto)).status).toBe(403);
+    expect((await send(manager, beto)).status).toBe(403);
+  });
+
+  it('trago y botella quedan para la parte 2 (501, sin cobrar nada)', async () => {
+    const res = await send(ana, beto, { type: 'drink', emoji: undefined, drink_id: randomUUID() });
+    expect(res.status).toBe(501);
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM drink_orders');
+    expect(rows[0].n).toBe(0);
+  });
+});
+
+describe('Límites contra el acoso', () => {
+  beforeEach(seatEveryone);
+
+  it('a la cuarta sin respuesta a la misma persona responde 429', async () => {
+    for (let i = 0; i < LIMITS.unansweredPerNight; i += 1) {
+      expect((await send(ana, beto)).status).toBe(201);
+    }
+    const res = await send(ana, beto);
+    expect(res.status).toBe(429);
+    expect(res.body.error.message).toMatch(/sin respuesta/);
+  });
+
+  it('cuando la otra persona responde, se puede seguir', async () => {
+    const first = await send(ana, beto);
+    await send(ana, beto);
+    await send(ana, beto);
+    await api().post(url(`/flirts/${first.body.flirt.id}/react`)).set(auth(beto)).send({ reaction: 'like' });
+    expect((await send(ana, beto)).status).toBe(201);
+  });
+
+  it('el tope de 20 por hora responde 429 aunque sea a personas distintas', async () => {
+    // Se rellenan 19 directamente en la base para no depender del tope por persona.
+    const values = Array.from({ length: LIMITS.perHour - 1 }, () =>
+      `('${club.id}','${ana.id}','${carla.id}','emoji','wave')`).join(',');
+    await pool.query(
+      `INSERT INTO flirts (nightclub_id, sender_id, recipient_id, type, emoji) VALUES ${values}`);
+
+    expect((await send(ana, beto)).status).toBe(201); // el 20
+    const res = await send(ana, beto);
+    expect(res.status).toBe(429);
+    expect(res.body.error.message).toMatch(/por hora/);
+  });
+
+  it('"no me interesa" corta al emisor por el resto de la noche', async () => {
+    const first = await send(ana, beto);
+    const react = await api().post(url(`/flirts/${first.body.flirt.id}/react`))
+      .set(auth(beto)).send({ reaction: 'not_interested' });
+    expect(react.status).toBe(200);
+    expect(react.body.flirt.status).toBe('declined');
+
+    const res = await send(ana, beto);
+    expect(res.status).toBe(403);
+    // Beto sí puede escribirle a Ana: el silencio es en un solo sentido.
+    expect((await send(beto, ana)).status).toBe(201);
+  });
+});
+
+describe('Bandeja y reacciones', () => {
+  beforeEach(seatEveryone);
+
+  it('cada quien ve lo que recibió y lo que envió', async () => {
+    await send(ana, beto);
+    await send(carla, ana).catch(() => {}); // carla no acepta, pero sí puede enviar
+    const recibidos = await api().get(url('/flirts/received')).set(auth(beto));
+    const enviados = await api().get(url('/flirts/sent')).set(auth(ana));
+    expect(recibidos.body.flirts).toHaveLength(1);
+    expect(recibidos.body.flirts[0].sender_name).toBe('Ana');
+    expect(enviados.body.flirts).toHaveLength(1);
+  });
+
+  it('quien apagó los flirts ve la bandeja vacía', async () => {
+    await send(ana, beto);
+    await prefs(beto, { accept_flirts: false });
+    const res = await api().get(url('/flirts/received')).set(auth(beto));
+    expect(res.body).toEqual({ flirts: [], accept_flirts: false });
+  });
+
+  it('marcar visto cambia el estado una sola vez', async () => {
+    const { body } = await send(ana, beto);
+    const seen = await api().post(url(`/flirts/${body.flirt.id}/view`)).set(auth(beto));
+    expect(seen.body.flirt.status).toBe('viewed');
+    const viewedAt = seen.body.flirt.viewed_at;
+    const again = await api().post(url(`/flirts/${body.flirt.id}/view`)).set(auth(beto));
+    expect(again.body.flirt.viewed_at).toBe(viewedAt);
+  });
+
+  it('reaccionar acepta el flirt y avisa al emisor', async () => {
+    const { body } = await send(ana, beto);
+    const res = await api().post(url(`/flirts/${body.flirt.id}/react`)).set(auth(beto)).send({ reaction: 'fire' });
+    expect(res.status).toBe(200);
+    expect(res.body.flirt).toMatchObject({ status: 'accepted', reaction: 'fire' });
+    const { rows } = await pool.query(`SELECT audience FROM events WHERE type = 'flirt_reaction'`);
+    expect(rows[0].audience.userIds).toEqual([ana.id]);
+  });
+
+  it('solo el receptor puede ver o reaccionar; un tercero recibe 404', async () => {
+    const { body } = await send(ana, beto);
+    expect((await api().post(url(`/flirts/${body.flirt.id}/react`)).set(auth(carla))
+      .send({ reaction: 'like' })).status).toBe(404);
+    expect((await api().post(url(`/flirts/${body.flirt.id}/view`)).set(auth(ana))).status).toBe(404);
+  });
+
+  it('una reacción inventada se rechaza', async () => {
+    const { body } = await send(ana, beto);
+    expect((await api().post(url(`/flirts/${body.flirt.id}/react`)).set(auth(beto))
+      .send({ reaction: 'marry_me' })).status).toBe(400);
+  });
+
+  it('los flirts caducan con la noche y desaparecen de la bandeja', async () => {
+    const { body } = await send(ana, beto);
+    await pool.query(`UPDATE flirts SET expires_at = now() - interval '1 minute' WHERE id = $1`, [body.flirt.id]);
+    const inbox = await api().get(url('/flirts/received')).set(auth(beto));
+    expect(inbox.body.flirts).toHaveLength(0);
+    const react = await api().post(url(`/flirts/${body.flirt.id}/react`)).set(auth(beto)).send({ reaction: 'like' });
+    expect(react.status).toBe(409);
+  });
+
+  it('el gerente no tiene acceso a la bandeja de nadie', async () => {
+    const { body } = await send(ana, beto);
+    const res = await api().post(url(`/flirts/${body.flirt.id}/view`)).set(auth(manager));
+    expect(res.status).toBe(404);
+  });
+});
