@@ -29,6 +29,8 @@ const jwt = require('jsonwebtoken');
 const { WebSocketServer } = require('ws');
 const { pool } = require('./db/pool');
 const { Hub } = require('./realtime/hub');
+const { EventSubscriber } = require('./realtime/subscriber');
+const { redis } = require('./db/redis');
 
 const PORT = Number(process.env.WS_PORT || process.env.PORT || 4000);
 const HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS || 30_000);
@@ -118,11 +120,18 @@ async function authenticateRequest(req, { db = pool } = {}) {
   return { user, expiresAt: payload.exp * 1000, viaSubprotocol };
 }
 
-function createRealtimeServer({ db = pool, hub = new Hub({ maxPerUser: MAX_PER_USER }) } = {}) {
+function createRealtimeServer({ db = pool, hub = new Hub({ maxPerUser: MAX_PER_USER }), subscriber = null } = {}) {
   const server = http.createServer((req, res) => {
     if (req.url === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', service: 'ev2-ws', ...hub.stats() }));
+      // `realtime` says whether events can actually arrive. A socket server with happy
+      // sockets and a dead subscription looks fine and delivers nothing.
+      const body = { status: 'ok', service: 'ev2-ws', ...hub.stats() };
+      if (subscriber) {
+        body.realtime = subscriber.status();
+        if (!body.realtime.connected) body.status = 'degraded';
+      }
+      res.writeHead(body.status === 'ok' ? 200 : 503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(body));
       return;
     }
     res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -261,6 +270,7 @@ function createRealtimeServer({ db = pool, hub = new Hub({ maxPerUser: MAX_PER_U
 
   async function close() {
     clearInterval(heartbeat);
+    if (subscriber) await subscriber.stop().catch(() => {});
     for (const conn of hub.all()) {
       send(conn, { type: 'closing', code: CLOSE.GOING_AWAY, message: 'El servidor se está reiniciando' });
       conn.ws.close(CLOSE.GOING_AWAY, 'Server shutting down');
@@ -269,7 +279,7 @@ function createRealtimeServer({ db = pool, hub = new Hub({ maxPerUser: MAX_PER_U
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { server, wss, hub, deliver, close, CLOSE };
+  return { server, wss, hub, deliver, close, CLOSE, subscriber };
 }
 
 async function latestEventId(nightclubId, db = pool) {
@@ -288,13 +298,21 @@ async function latestEventId(nightclubId, db = pool) {
 async function start() {
   jwtSecret();
   await pool.query('SELECT 1');
-  const realtime = createRealtimeServer();
+  await redis.connect();
+
+  // Built first so the server can report the subscription in /health, then pointed at
+  // the server's deliver() once it exists.
+  let realtime;
+  const subscriber = new EventSubscriber({ redis, onEvent: (event) => realtime.deliver(event) });
+  realtime = createRealtimeServer({ subscriber });
+  await subscriber.start();
   await new Promise((resolve) => realtime.server.listen(PORT, resolve));
   console.log(`EV2 realtime server listening on ${PORT}`);
 
   const shutdown = async (signal) => {
       console.log(`${signal} received, closing realtime server`);
     await realtime.close();
+    await redis.quit().catch(() => {});
     await pool.end().catch(() => {});
     process.exit(0);
   };

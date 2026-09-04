@@ -7,11 +7,13 @@ const http = require('http');
 const { createApp } = require('./app');
 const { pool } = require('./db/pool');
 const { redis } = require('./db/redis');
+const { EventRelay } = require('./realtime/relay');
 
 const PORT = Number(process.env.PORT || 3000);
 
 const app = createApp();
 const server = http.createServer(app);
+let relay = null;
 
 async function start() {
   try {
@@ -25,6 +27,13 @@ async function start() {
     console.log(`PostgreSQL connected (${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 5432})`);
     await redis.connect();
     console.log(`Redis connected (${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379})`);
+    // Committed events reach the sockets through this relay (D26). Exactly one API
+    // process leads; the rest stand by and take over if it dies.
+    relay = await new EventRelay({ redis }).start();
+    app.locals.relay = relay;
+    console.log(relay.isLeader
+      ? `Realtime relay: leading from event ${relay.cursor}`
+      : 'Realtime relay: standing by (another instance is leading)');
   } catch (err) {
     console.error('Startup failed:', err.message);
     process.exit(1);
@@ -41,6 +50,7 @@ async function shutdown(signal) {
   shuttingDown = true;
   console.log(`${signal} received, shutting down...`);
   server.close();
+  if (relay) await relay.stop().catch(() => {});
   await Promise.allSettled([redis.quit(), pool.end()]);
   process.exit(0);
 }
@@ -53,4 +63,4 @@ process.on('unhandledRejection', (reason) => {
 
 if (require.main === module) start();
 
-module.exports = { app, server, start };
+module.exports = { app, server, start, relay: () => relay };
