@@ -9,7 +9,6 @@
 //   * every employee sees only their own data; anyone else's answers 404.
 'use strict';
 
-const crypto = require('crypto');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { pool } = require('../db/pool');
@@ -17,6 +16,7 @@ const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, email, currency, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const banking = require('../services/banking');
+const { temporaryPassword } = require('../services/credentials');
 
 const router = express.Router({ mergeParams: true });
 
@@ -31,13 +31,6 @@ const EMPLOYEE_SELECT = `
     FROM users u
     JOIN employee_profiles p ON p.user_id = u.id
     LEFT JOIN staff_shifts s ON s.user_id = u.id AND s.ended_at IS NULL`;
-
-/** 12 characters, unambiguous alphabet, shown to the manager once. */
-function temporaryPassword() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-  const bytes = crypto.randomBytes(12);
-  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
-}
 
 function isEmployee(user) {
   return EMPLOYEE_ROLES.includes(user.role);

@@ -394,3 +394,471 @@ describe('Tarifas por zona', () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ---------------------------------------------------------------- ciclo del viaje
+
+describe('Solicitud del cliente', () => {
+  let fare;
+  beforeEach(async () => {
+    const created = await api().post(url('/taxi-fares')).set(auth(manager))
+      .send({ zone: 'Centro', amount: 120 });
+    fare = created.body.fare;
+  });
+
+  it('crea la solicitud con la tarifa de la zona y el punto de encuentro', async () => {
+    const res = await api().post(url('/taxi/rides')).set(auth(guest))
+      .send({ fare_id: fare.id, passengers: 2, destination: 'Calle Obregón 45' });
+    expect(res.status).toBe(201);
+    expect(res.body.ride).toMatchObject({
+      status: 'requested', passengers: 2, destination_zone: 'Centro',
+      quoted_amount: '120.00', currency: 'MXN', pickup_location: 'Salida principal',
+      driver: null, eta_minutes: null,
+    });
+    expect(res.body.availability.available_drivers).toBe(0);
+  });
+
+  it('sin zona no inventa un precio', async () => {
+    const res = await api().post(url('/taxi/rides')).set(auth(guest))
+      .send({ destination: 'Rancho fuera de la ciudad' });
+    expect(res.body.ride.quoted_amount).toBeNull();
+    expect(res.body.ride.destination_zone).toBeNull();
+  });
+
+  it('el mismo client_request_id no crea dos solicitudes', async () => {
+    const key = '77777777-7777-4777-8777-777777777777';
+    const first = await api().post(url('/taxi/rides')).set(auth(guest))
+      .send({ client_request_id: key, fare_id: fare.id });
+    const second = await api().post(url('/taxi/rides')).set(auth(guest))
+      .send({ client_request_id: key, fare_id: fare.id });
+    expect(second.status).toBe(200);
+    expect(second.body.idempotent).toBe(true);
+    expect(second.body.ride.id).toBe(first.body.ride.id);
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM taxi_requests');
+    expect(rows[0].n).toBe(1);
+  });
+
+  it('una segunda solicitud abierta responde 409', async () => {
+    await api().post(url('/taxi/rides')).set(auth(guest)).send({ fare_id: fare.id });
+    const second = await api().post(url('/taxi/rides')).set(auth(guest)).send({ fare_id: fare.id });
+    expect(second.status).toBe(409);
+  });
+
+  it('un conductor no pide taxi desde su cuenta y una zona inexistente responde 422', async () => {
+    const { user } = await trustedDriver();
+    expect((await api().post(url('/taxi/rides')).set(auth(user)).send({})).status).toBe(403);
+    const bad = await api().post(url('/taxi/rides')).set(auth(guest))
+      .send({ fare_id: '00000000-0000-4000-8000-000000000000' });
+    expect(bad.status).toBe(422);
+  });
+
+  it('con el módulo apagado no se puede solicitar', async () => {
+    await api().put(url('/taxi-settings')).set(auth(manager)).send({ enabled: false });
+    const res = await api().post(url('/taxi/rides')).set(auth(guest)).send({});
+    expect(res.status).toBe(422);
+  });
+});
+
+// ---------------------------------------------------------------- asignación
+
+describe('Aceptar y asignar', () => {
+  let driverA; let driverB; let ride;
+
+  beforeEach(async () => {
+    driverA = await trustedDriver();
+    driverB = await trustedDriver();
+    for (const d of [driverA, driverB]) {
+      await api().put(url('/taxi/me/availability')).set(auth(d.user)).send({ availability: 'available' });
+    }
+    const created = await api().post(url('/taxi/rides')).set(auth(guest)).send({ passengers: 1 });
+    ride = created.body.ride;
+  });
+
+  it('la solicitud abierta se ofrece a todos los conductores disponibles', async () => {
+    for (const d of [driverA, driverB]) {
+      const res = await api().get(url('/taxi/me/offers')).set(auth(d.user));
+      expect(res.status).toBe(200);
+      expect(res.body.offers.map((o) => o.id)).toContain(ride.id);
+      // El conductor ve a quién recoge, no su teléfono.
+      expect(res.body.offers[0].guest).toEqual({ name: 'Ana' });
+      expect(res.body.offers[0]).not.toHaveProperty('guest_phone');
+    }
+  });
+
+  it('aceptar declara los minutos y calcula la hora esperada', async () => {
+    const res = await api().post(url(`/taxi/rides/${ride.id}/accept`)).set(auth(driverA.user))
+      .send({ eta_minutes: 10 });
+    expect(res.status).toBe(200);
+    expect(res.body.ride).toMatchObject({ status: 'assigned', eta_minutes: 10 });
+    const expected = new Date(res.body.ride.expected_arrival_at) - new Date(res.body.ride.accepted_at);
+    expect(Math.round(expected / 60000)).toBe(10);
+
+    const { rows } = await pool.query('SELECT availability, at_venue FROM drivers WHERE id = $1',
+      [driverA.driver.id]);
+    expect(rows[0]).toMatchObject({ availability: 'on_trip', at_venue: false });
+  });
+
+  it('el segundo conductor que acepta recibe 409 y el viaje no cambia de dueño', async () => {
+    await api().post(url(`/taxi/rides/${ride.id}/accept`)).set(auth(driverA.user))
+      .send({ eta_minutes: 5 });
+    const late = await api().post(url(`/taxi/rides/${ride.id}/accept`)).set(auth(driverB.user))
+      .send({ eta_minutes: 5 });
+    expect(late.status).toBe(409);
+    const { rows } = await pool.query('SELECT driver_id FROM taxi_requests WHERE id = $1', [ride.id]);
+    expect(rows[0].driver_id).toBe(driverA.driver.id);
+  });
+
+  it('rechazar saca la oferta de mi lista pero no de la del otro conductor', async () => {
+    const declined = await api().post(url(`/taxi/rides/${ride.id}/decline`)).set(auth(driverA.user));
+    expect(declined.status).toBe(200);
+    expect((await api().get(url('/taxi/me/offers')).set(auth(driverA.user))).body.offers).toHaveLength(0);
+    expect((await api().get(url('/taxi/me/offers')).set(auth(driverB.user))).body.offers).toHaveLength(1);
+    // Rechazar dos veces no es un error.
+    expect((await api().post(url(`/taxi/rides/${ride.id}/decline`)).set(auth(driverA.user))).status).toBe(200);
+  });
+
+  it('con un viaje en curso no se puede aceptar otro', async () => {
+    await api().post(url(`/taxi/rides/${ride.id}/accept`)).set(auth(driverA.user)).send({ eta_minutes: 5 });
+    const otherGuest = await f.createUser(club.id, { role: 'guest' });
+    const second = await api().post(url('/taxi/rides')).set(auth(otherGuest)).send({});
+    const res = await api().post(url(`/taxi/rides/${second.body.ride.id}/accept`))
+      .set(auth(driverA.user)).send({ eta_minutes: 5 });
+    expect(res.status).toBe(409);
+  });
+
+  it('el cliente ve el auto y el teléfono solo cuando ya hay conductor asignado', async () => {
+    const before = await api().get(url(`/taxi/rides/${ride.id}`)).set(auth(guest));
+    expect(before.body.ride.driver).toBeNull();
+
+    await api().post(url(`/taxi/rides/${ride.id}/accept`)).set(auth(driverA.user)).send({ eta_minutes: 8 });
+    const after = await api().get(url(`/taxi/rides/${ride.id}`)).set(auth(guest));
+    expect(after.body.ride.driver).toMatchObject({ first_name: 'Raúl', phone: '+526311234567' });
+    expect(after.body.ride.driver.vehicle.plate).toMatch(/^ABC-/);
+  });
+});
+
+// ---------------------------------------------------------------- llegada, inicio y fin
+
+describe('El conductor confirma llegada, inicio y fin', () => {
+  let driver; let ride;
+
+  beforeEach(async () => {
+    driver = await trustedDriver();
+    await api().put(url('/taxi/me/availability')).set(auth(driver.user)).send({ availability: 'available' });
+    const fare = await api().post(url('/taxi-fares')).set(auth(manager))
+      .send({ zone: 'Centro', amount: 120 });
+    const created = await api().post(url('/taxi/rides')).set(auth(guest))
+      .send({ fare_id: fare.body.fare.id });
+    ride = created.body.ride;
+    await api().post(url(`/taxi/rides/${ride.id}/accept`)).set(auth(driver.user)).send({ eta_minutes: 10 });
+  });
+
+  const step = (name, as = driver.user, body = {}) => api()
+    .post(url(`/taxi/rides/${ride.id}/${name}`)).set(auth(as)).send(body);
+
+  it('avisar que llegó le dice al cliente dónde esperar', async () => {
+    const res = await api().post(url(`/taxi/rides/${ride.id}/arrived`)).set(auth(driver.user));
+    expect(res.status).toBe(200);
+    expect(res.body.ride.status).toBe('driver_arrived');
+
+    const { rows } = await pool.query(
+      `SELECT audience, payload FROM events WHERE type = 'taxi_driver_arrived'`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].audience.userIds).toEqual([guest.id]);
+    expect(rows[0].payload.message).toContain('Salida principal');
+  });
+
+  it('no se puede saltar un paso del ciclo', async () => {
+    // Iniciar sin haber llegado.
+    expect((await api().post(url(`/taxi/rides/${ride.id}/start`)).set(auth(driver.user))).status).toBe(409);
+    await api().post(url(`/taxi/rides/${ride.id}/arrived`)).set(auth(driver.user));
+    // Llegar dos veces.
+    expect((await api().post(url(`/taxi/rides/${ride.id}/arrived`)).set(auth(driver.user))).status).toBe(409);
+    // Cerrar sin haber iniciado.
+    const early = await api().post(url(`/taxi/rides/${ride.id}/finish`)).set(auth(driver.user))
+      .send({ final_amount: 120, payment_method: 'cash' });
+    expect(early.status).toBe(409);
+  });
+
+  it('iniciar el viaje emite la constancia con folio y vigencia', async () => {
+    await api().post(url(`/taxi/rides/${ride.id}/arrived`)).set(auth(driver.user));
+    const res = await api().post(url(`/taxi/rides/${ride.id}/start`)).set(auth(driver.user));
+    expect(res.status).toBe(200);
+    expect(res.body.ride.status).toBe('in_progress');
+    expect(res.body.certificate.folio).toMatch(/^EV2-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    expect(res.body.certificate.valid).toBe(true);
+    expect(res.body.certificate.disclaimer).toMatch(/no.*efecto legal/i);
+
+    const mine = await api().get(url(`/taxi/rides/${ride.id}/certificate`)).set(auth(guest));
+    expect(mine.body.certificate.folio).toBe(res.body.certificate.folio);
+    expect(mine.body.certificate.nightclub).toBe('EV2 Test');
+    // Nombre corto: suficiente para identificar, no para perfilar.
+    expect(mine.body.certificate.guest).toBe('guest T.');
+  });
+
+  it('cerrar en efectivo asienta el cobro y devuelve al conductor a la lista', async () => {
+    await api().post(url(`/taxi/rides/${ride.id}/arrived`)).set(auth(driver.user));
+    await api().post(url(`/taxi/rides/${ride.id}/start`)).set(auth(driver.user));
+    const res = await api().post(url(`/taxi/rides/${ride.id}/finish`)).set(auth(driver.user))
+      .send({ final_amount: 150, payment_method: 'cash' });
+    expect(res.status).toBe(200);
+    expect(res.body.ride).toMatchObject({
+      status: 'completed', final_amount: '150.00', payment_method: 'cash', quoted_amount: '120.00',
+    });
+
+    const tx = await pool.query(
+      `SELECT type, direction, amount::text, currency, status, provider, payer_user_id,
+              payee_user_id, reference_type, reference_id, metadata
+         FROM transactions WHERE reference_id = $1`, [ride.id]);
+    expect(tx.rows).toHaveLength(1);
+    expect(tx.rows[0]).toMatchObject({
+      type: 'taxi_ride', direction: 'in', amount: '150.00', currency: 'MXN', status: 'paid',
+      provider: 'cash', payer_user_id: guest.id, payee_user_id: driver.driver.user_id,
+      reference_type: 'taxi_request', reference_id: ride.id,
+    });
+    // El dinero pasó de mano a mano: el club nunca lo tuvo, y el asiento lo dice.
+    expect(tx.rows[0].metadata).toMatchObject({
+      settled_directly_with_driver: true, quoted_amount: '120.00', club_commission_amount: '0.00',
+    });
+
+    const d = await pool.query('SELECT availability, at_venue FROM drivers WHERE id = $1',
+      [driver.driver.id]);
+    expect(d.rows[0]).toMatchObject({ availability: 'available', at_venue: false });
+  });
+
+  it('el asiento del viaje es inmutable como el resto del libro', async () => {
+    await api().post(url(`/taxi/rides/${ride.id}/arrived`)).set(auth(driver.user));
+    await api().post(url(`/taxi/rides/${ride.id}/start`)).set(auth(driver.user));
+    await api().post(url(`/taxi/rides/${ride.id}/finish`)).set(auth(driver.user))
+      .send({ final_amount: 150, payment_method: 'cash' });
+    await expect(pool.query(`UPDATE transactions SET amount = 1 WHERE reference_id = $1`, [ride.id]))
+      .rejects.toThrow(/immutable/i);
+    await expect(pool.query(`DELETE FROM transactions WHERE reference_id = $1`, [ride.id]))
+      .rejects.toThrow();
+  });
+
+  it('la tarjeta todavía no cobra y la cortesía no lleva monto', async () => {
+    await api().post(url(`/taxi/rides/${ride.id}/arrived`)).set(auth(driver.user));
+    await api().post(url(`/taxi/rides/${ride.id}/start`)).set(auth(driver.user));
+
+    const card = await api().post(url(`/taxi/rides/${ride.id}/finish`)).set(auth(driver.user))
+      .send({ final_amount: 150, payment_method: 'card' });
+    expect(card.status).toBe(501);
+
+    const badCourtesy = await api().post(url(`/taxi/rides/${ride.id}/finish`)).set(auth(driver.user))
+      .send({ final_amount: 150, payment_method: 'courtesy' });
+    expect(badCourtesy.status).toBe(422);
+
+    const zeroCash = await api().post(url(`/taxi/rides/${ride.id}/finish`)).set(auth(driver.user))
+      .send({ final_amount: 0, payment_method: 'cash' });
+    expect(zeroCash.status).toBe(422);
+
+    const courtesy = await api().post(url(`/taxi/rides/${ride.id}/finish`)).set(auth(driver.user))
+      .send({ final_amount: 0, payment_method: 'courtesy' });
+    expect(courtesy.status).toBe(200);
+    const tx = await pool.query('SELECT count(*)::int AS n FROM transactions WHERE reference_id = $1',
+      [ride.id]);
+    expect(tx.rows[0].n).toBe(0);
+  });
+
+  it('otro conductor no puede mover mi viaje', async () => {
+    const other = await trustedDriver();
+    const res = await api().post(url(`/taxi/rides/${ride.id}/arrived`)).set(auth(other.user));
+    expect(res.status).toBe(409);
+    expect(step).toBeDefined();
+  });
+
+  it('el cobro del viaje no entra en la nómina: el conductor no es empleado', async () => {
+    await api().post(url(`/taxi/rides/${ride.id}/arrived`)).set(auth(driver.user));
+    await api().post(url(`/taxi/rides/${ride.id}/start`)).set(auth(driver.user));
+    await api().post(url(`/taxi/rides/${ride.id}/finish`)).set(auth(driver.user))
+      .send({ final_amount: 150, payment_method: 'cash' });
+    const payroll = await api().get(url('/payroll')).set(auth(manager));
+    expect(payroll.status).toBe(200);
+    expect(payroll.body.rows.map((p) => p.user_id)).not.toContain(driver.driver.user_id);
+  });
+});
+
+// ---------------------------------------------------------------- cancelar y calificar
+
+describe('Cancelación y calificación', () => {
+  let driver; let ride;
+
+  beforeEach(async () => {
+    driver = await trustedDriver();
+    await api().put(url('/taxi/me/availability')).set(auth(driver.user)).send({ availability: 'available' });
+    ride = (await api().post(url('/taxi/rides')).set(auth(guest)).send({})).body.ride;
+  });
+
+  it('el cliente cancela y el conductor vuelve a estar disponible', async () => {
+    await api().post(url(`/taxi/rides/${ride.id}/accept`)).set(auth(driver.user)).send({ eta_minutes: 10 });
+    const res = await api().post(url(`/taxi/rides/${ride.id}/cancel`)).set(auth(guest))
+      .send({ reason: 'Me fui con un amigo' });
+    expect(res.status).toBe(200);
+    expect(res.body.ride).toMatchObject({ status: 'cancelled', cancel_reason: 'Me fui con un amigo' });
+    const d = await pool.query('SELECT availability FROM drivers WHERE id = $1', [driver.driver.id]);
+    expect(d.rows[0].availability).toBe('available');
+    // Cancelado deja de ser un viaje vivo: se puede pedir otro.
+    expect((await api().post(url('/taxi/rides')).set(auth(guest)).send({})).status).toBe(201);
+  });
+
+  it('un viaje ya iniciado no se cancela y el conductor tampoco cancela', async () => {
+    await api().post(url(`/taxi/rides/${ride.id}/accept`)).set(auth(driver.user)).send({ eta_minutes: 5 });
+    expect((await api().post(url(`/taxi/rides/${ride.id}/cancel`)).set(auth(driver.user)).send({})).status)
+      .toBe(403);
+    await api().post(url(`/taxi/rides/${ride.id}/arrived`)).set(auth(driver.user));
+    await api().post(url(`/taxi/rides/${ride.id}/start`)).set(auth(driver.user));
+    const res = await api().post(url(`/taxi/rides/${ride.id}/cancel`)).set(auth(guest)).send({});
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toMatch(/ya comenzó/i);
+  });
+
+  it('solo se califica un viaje terminado, una sola vez y por quien viajó', async () => {
+    await api().post(url(`/taxi/rides/${ride.id}/accept`)).set(auth(driver.user)).send({ eta_minutes: 5 });
+    const early = await api().post(url(`/taxi/rides/${ride.id}/rate`)).set(auth(guest)).send({ rating: 5 });
+    expect(early.status).toBe(409);
+
+    await api().post(url(`/taxi/rides/${ride.id}/arrived`)).set(auth(driver.user));
+    await api().post(url(`/taxi/rides/${ride.id}/start`)).set(auth(driver.user));
+    await api().post(url(`/taxi/rides/${ride.id}/finish`)).set(auth(driver.user))
+      .send({ final_amount: 100, payment_method: 'cash' });
+
+    const ok = await api().post(url(`/taxi/rides/${ride.id}/rate`)).set(auth(guest))
+      .send({ rating: 5, comment: 'Puntual' });
+    expect(ok.status).toBe(200);
+    expect((await api().post(url(`/taxi/rides/${ride.id}/rate`)).set(auth(guest)).send({ rating: 1 })).status)
+      .toBe(409);
+
+    const stranger = await f.createUser(club.id, { role: 'guest' });
+    expect((await api().get(url(`/taxi/rides/${ride.id}`)).set(auth(stranger))).status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------- constancia pública
+
+describe('Verificación pública de la constancia', () => {
+  let driver; let ride; let folio;
+
+  beforeEach(async () => {
+    driver = await trustedDriver();
+    await api().put(url('/taxi/me/availability')).set(auth(driver.user)).send({ availability: 'available' });
+    ride = (await api().post(url('/taxi/rides')).set(auth(guest)).send({ destination: 'Calle Obregón 45' })).body.ride;
+    await api().post(url(`/taxi/rides/${ride.id}/accept`)).set(auth(driver.user)).send({ eta_minutes: 5 });
+    await api().post(url(`/taxi/rides/${ride.id}/arrived`)).set(auth(driver.user));
+    const started = await api().post(url(`/taxi/rides/${ride.id}/start`)).set(auth(driver.user));
+    folio = started.body.certificate.folio;
+  });
+
+  it('cualquiera con el folio verifica lo mínimo, sin sesión', async () => {
+    const res = await api().get(`/api/taxi/verify/${folio}`);
+    expect(res.status).toBe(200);
+    const c = res.body.certificate;
+    expect(c).toMatchObject({ folio, nightclub: 'EV2 Test', valid: true, guest: 'guest T.', driver: 'Raúl' });
+    expect(c.vehicle.plate).toMatch(/^ABC-/);
+    // Lo que la constancia NO dice.
+    expect(JSON.stringify(c)).not.toContain('Obregón');
+    expect(JSON.stringify(c)).not.toContain('+526311234567');
+    expect(c).not.toHaveProperty('final_amount');
+    expect(c).not.toHaveProperty('destination');
+  });
+
+  it('el folio no distingue mayúsculas y uno inexistente responde 404', async () => {
+    expect((await api().get(`/api/taxi/verify/${folio.toLowerCase()}`)).status).toBe(200);
+    const missing = await api().get('/api/taxi/verify/EV2-ZZZZ-ZZZZ');
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe('not_found');
+  });
+
+  it('una constancia vencida se reporta como no vigente, no desaparece', async () => {
+    await pool.query(`UPDATE taxi_requests SET code_expires_at = now() - interval '1 minute' WHERE id = $1`,
+      [ride.id]);
+    const res = await api().get(`/api/taxi/verify/${folio}`);
+    expect(res.status).toBe(200);
+    expect(res.body.certificate.valid).toBe(false);
+  });
+
+  it('la constancia no existe antes de que el viaje empiece', async () => {
+    const other = await f.createUser(club.id, { role: 'guest' });
+    const fresh = (await api().post(url('/taxi/rides')).set(auth(other)).send({})).body.ride;
+    const res = await api().get(url(`/taxi/rides/${fresh.id}/certificate`)).set(auth(other));
+    expect(res.status).toBe(409);
+  });
+});
+
+// ---------------------------------------------------------------- tablero del gerente
+
+describe('Tablero y números del gerente', () => {
+  let driver;
+
+  beforeEach(async () => {
+    driver = await trustedDriver();
+    await api().put(url('/taxi/me/availability')).set(auth(driver.user)).send({ availability: 'available' });
+  });
+
+  /** Runs one full ride for `who` and returns it completed. */
+  async function fullRide(who, amount = 120) {
+    const ride = (await api().post(url('/taxi/rides')).set(auth(who)).send({})).body.ride;
+    await api().post(url(`/taxi/rides/${ride.id}/accept`)).set(auth(driver.user)).send({ eta_minutes: 10 });
+    await pool.query(`UPDATE taxi_requests SET accepted_at = now() - interval '9 minutes' WHERE id = $1`,
+      [ride.id]);
+    await api().post(url(`/taxi/rides/${ride.id}/arrived`)).set(auth(driver.user));
+    await api().post(url(`/taxi/rides/${ride.id}/start`)).set(auth(driver.user));
+    await api().post(url(`/taxi/rides/${ride.id}/finish`)).set(auth(driver.user))
+      .send({ final_amount: amount, payment_method: 'cash' });
+    return ride;
+  }
+
+  it('el tablero filtra por viaje vivo y por conductor', async () => {
+    await fullRide(guest, 120);
+    const other = await f.createUser(club.id, { role: 'guest' });
+    const live = (await api().post(url('/taxi/rides')).set(auth(other)).send({})).body.ride;
+
+    const all = await api().get(url('/taxi/rides')).set(auth(manager));
+    expect(all.body.rides).toHaveLength(2);
+    // El gerente sí necesita el teléfono del pasajero para localizarlo.
+    expect(all.body.rides[0].guest).toHaveProperty('phone');
+
+    const onlyLive = await api().get(url('/taxi/rides?live=true')).set(auth(manager));
+    expect(onlyLive.body.rides.map((r) => r.id)).toEqual([live.id]);
+
+    const byDriver = await api().get(url(`/taxi/rides?driver_id=${driver.driver.id}`)).set(auth(manager));
+    expect(byDriver.body.rides).toHaveLength(1);
+  });
+
+  it('las estadísticas suman lo cobrado y el promedio real de recogida', async () => {
+    await fullRide(guest, 120);
+    const other = await f.createUser(club.id, { role: 'guest' });
+    await fullRide(other, 180);
+
+    const res = await api().get(url('/taxi/stats')).set(auth(manager));
+    expect(res.status).toBe(200);
+    expect(res.body.totals).toMatchObject({
+      rides: 2, completed: 2, paid_cash: 2, charged: '300.00', avg_pickup_minutes: 9,
+    });
+    expect(res.body.drivers[0]).toMatchObject({
+      driver_id: driver.driver.id, rides: 2, charged: '300.00', avg_pickup_minutes: 9,
+    });
+  });
+
+  it('las solicitudes que nadie tomó se cierran como sin conductor', async () => {
+    const ride = (await api().post(url('/taxi/rides')).set(auth(guest)).send({})).body.ride;
+    // Todavía dentro del plazo: no se cierra nada.
+    expect((await api().post(url('/taxi/rides/expire')).set(auth(manager))).body.expired).toBe(0);
+
+    await pool.query(`UPDATE taxi_requests SET created_at = now() - interval '30 minutes' WHERE id = $1`,
+      [ride.id]);
+    const res = await api().post(url('/taxi/rides/expire')).set(auth(manager));
+    expect(res.body.expired).toBe(1);
+    // Idempotente.
+    expect((await api().post(url('/taxi/rides/expire')).set(auth(manager))).body.expired).toBe(0);
+
+    const after = await api().get(url(`/taxi/rides/${ride.id}`)).set(auth(guest));
+    expect(after.body.ride.status).toBe('no_driver');
+    // Cerrada la anterior, el cliente puede volver a pedir.
+    expect((await api().post(url('/taxi/rides')).set(auth(guest)).send({})).status).toBe(201);
+  });
+
+  it('un cliente no ve el tablero ni las estadísticas', async () => {
+    expect((await api().get(url('/taxi/rides')).set(auth(guest))).status).toBe(403);
+    expect((await api().get(url('/taxi/stats')).set(auth(guest))).status).toBe(403);
+  });
+});
