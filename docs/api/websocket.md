@@ -72,8 +72,23 @@ El servidor envía `ping` de protocolo cada `heartbeat_ms`; la librería del cli
 responde sola. Un socket que deja de contestar se corta. El `{"type":"ping"}` de
 aplicación es aparte y sirve para medir latencia.
 
+## De dónde salen los eventos (D26)
+
+La tabla `events` es el buzón de salida. Un evento se escribe dentro de la misma
+transacción que cambia el dato, y un disparador con `pg_notify` —que es **transaccional**:
+solo se entrega si la transacción confirma— despierta al relevo, que lo publica en el canal
+`ev2:events` de Redis. Este servidor está suscrito y lo entrega a quien corresponde.
+
+Consecuencia práctica para el cliente: **si ves un evento, ya ocurrió de verdad.** Nunca
+llega el aviso de un pedido que después se deshizo.
+
+Los eventos de más de 5 minutos no se entregan en vivo: si estuviste desconectado, se
+recuperan al reconectar (paso 3.3), no como una ráfaga de avisos sobre cosas ya pasadas.
+
+`GET /health` responde **503 con `status: "degraded"`** si la suscripción a Redis no está
+viva. Un servidor de sockets con las conexiones sanas y la suscripción muerta se ve
+perfecto y no entrega nada, así que el monitoreo tiene que poder distinguirlo.
+
 ## Lo que falta
 
-- **3.2** — Redis pub/sub: hoy `deliver()` es el punto de entrada y la API todavía no
-  publica hacia él. Los eventos ya se persisten en la tabla `events`.
 - **3.3** — reconexión: el cliente devolverá `last_event_id` y recibirá lo que se perdió.

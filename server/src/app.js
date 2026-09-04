@@ -73,7 +73,12 @@ function createApp() {
 
   // Health check stays outside rate limiting so monitoring never trips it.
   app.get('/health', (req, res) => {
-    res.json({ status: 'ok', service: 'ev2-api', timestamp: new Date().toISOString() });
+    const body = { status: 'ok', service: 'ev2-api', timestamp: new Date().toISOString() };
+    // Set by src/index.js when the process is running the event relay (D26). Absent in
+    // tests, which import the app without starting the relay.
+    const relay = req.app.locals.relay;
+    if (relay) body.relay = relay.status();
+    res.json(body);
   });
 
   const generalLimiter = rateLimit({
