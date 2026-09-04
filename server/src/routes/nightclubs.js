@@ -10,6 +10,12 @@ const events = require('../services/events');
 
 const router = express.Router({ mergeParams: true });
 
+// What the club actually keeps out of the ledger, versus what only passes through it
+// on its way to a person (see the dashboard query below).
+const CLUB_REVENUE_TYPES = ['drink_order', 'bottle_service', 'reservation_deposit',
+  'reservation_balance', 'valet', 'adjustment'];
+const STAFF_INCOME_TYPES = ['tip', 'song_request'];
+
 // Public: lets the web app resolve a slug before anyone signs in.
 router.get('/nightclubs/by-slug/:slug',
   validate({ params: z.object({ slug: z.string().trim().min(1).max(100) }) }),
@@ -113,12 +119,24 @@ router.get('/nightclubs/:nightclubId/dashboard',
                 count(*) FILTER (WHERE status = 'pos_error')::int AS pos_errors
            FROM drink_orders
           WHERE nightclub_id = $1 AND created_at > date_trunc('day', now() - interval '6 hours')`, [id]),
+      // Not every paid transaction is the club's money. A tip belongs to the employee
+      // and a taxi fare to the driver -- both only pass through the ledger so the night
+      // can be audited. Counting them as revenue overstated the club's takings, so they
+      // are reported separately instead of being hidden.
       pool.query(
-        `SELECT currency, COALESCE(sum(amount), 0) AS total, count(*)::int AS count
+        `SELECT currency,
+                COALESCE(sum(amount) FILTER (WHERE type = ANY($2::text[])), 0)::numeric(12,2)::text
+                  AS total,
+                count(*) FILTER (WHERE type = ANY($2::text[]))::int AS count,
+                COALESCE(sum(amount) FILTER (WHERE type = ANY($3::text[])), 0)::numeric(12,2)::text
+                  AS to_staff,
+                COALESCE(sum(amount) FILTER (WHERE type = 'taxi_ride'), 0)::numeric(12,2)::text
+                  AS to_drivers
            FROM transactions
-          WHERE nightclub_id = $1 AND status = 'paid'
+          WHERE nightclub_id = $1 AND status = 'paid' AND direction = 'in'
             AND created_at > date_trunc('day', now() - interval '6 hours')
-          GROUP BY currency`, [id]),
+          GROUP BY currency`,
+        [id, CLUB_REVENUE_TYPES, STAFF_INCOME_TYPES]),
       pool.query(
         `SELECT count(*)::int AS on_shift FROM staff_shifts WHERE nightclub_id = $1 AND ended_at IS NULL`, [id]),
     ]);
