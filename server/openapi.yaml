@@ -35,6 +35,15 @@ info:
     Quien no llega antes del plazo de llegada del evento (3 horas por omisión desde la
     apertura de puertas) pierde la mesa y el depósito.
 
+    ## Flirt
+    Nadie recibe un flirt sin activar `accept_flirts`, ni aparece en la lista sin activar
+    `discoverable` (ambos nacen apagados). Emisor y receptor deben estar sentados en el
+    club; un flirt caduca a las 12 horas. Límites: 20 por hora, 3 sin respuesta a la misma
+    persona por noche, y «no me interesa» silencia a ese emisor el resto de la noche. Un
+    bloqueo o una persona con reportes abiertos responde con un **404 neutro**. Un trago o
+    botella enviado por flirt es un pedido real, **cobrado al emisor al pedirlo**; si el
+    receptor lo rechaza, el pedido vuelve a la mesa del emisor y **nunca se reembolsa**.
+
     ## Idempotencia
     Crear un pedido o una reservación exige un `client_request_id` (UUID generado por el
     cliente). Reenviar la misma petición devuelve el recurso original con la cabecera
@@ -71,6 +80,11 @@ tags:
       precio para un evento concreto. Todo lo edita el gerente desde la aplicación.
   - name: Reservaciones
     description: Reglas, disponibilidad, cotización, reserva, llegada tardía y cancelación.
+  - name: Flirt
+    description: |
+      Conexión entre clientes dentro del club: opt-in, solo sentados y solo esa noche.
+      Bloqueos y reportes; trago o botella como pedido real. El gerente ve conteos y
+      reportes, nunca mensajes.
   - name: Pagos
     description: Métodos de pago guardados por el usuario.
 
@@ -1591,6 +1605,436 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/me/preferences:
+    get:
+      operationId: getMePreferences
+      tags: [Flirt]
+      summary: Mis preferencias
+      responses:
+        '200':
+          description: Preferencias
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preferences: { $ref: '#/components/schemas/Preferences' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      operationId: putMePreferences
+      tags: [Flirt]
+      summary: Activar o apagar recibir flirts y aparecer en la lista
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                accept_flirts: { type: boolean }
+                discoverable: { type: boolean }
+                show_on_map: { type: boolean }
+                notifications:
+                  type: object
+                  additionalProperties: { type: boolean }
+      responses:
+        '200':
+          description: Preferencias actualizadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preferences: { $ref: '#/components/schemas/Preferences' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/me/blocks:
+    get:
+      operationId: getMeBlocks
+      tags: [Flirt]
+      summary: Personas que bloqueé
+      responses:
+        '200':
+          description: Bloqueos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  blocks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        user_id: { type: string, format: uuid }
+                        display_name: { type: string }
+                        created_at: { type: string, format: date-time }
+
+  /api/me/blocks/{userId}:
+    post:
+      operationId: postMeBlocksByUserId
+      tags: [Flirt]
+      summary: Bloquear a una persona
+      description: |
+        Ambos desaparecen de la lista del otro y cualquier envío falla con un 404 neutro.
+        Los flirts pendientes de esa persona se cierran; un trago ya pedido sigue su curso.
+      parameters: [{ $ref: '#/components/parameters/UserId' }]
+      responses:
+        '201':
+          description: Bloqueado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  blocked: { type: boolean }
+                  user_id: { type: string, format: uuid }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+    delete:
+      operationId: deleteMeBlocksByUserId
+      tags: [Flirt]
+      summary: Quitar un bloqueo
+      parameters: [{ $ref: '#/components/parameters/UserId' }]
+      responses:
+        '204': { description: Desbloqueado }
+
+  /api/nightclubs/{nightclubId}/flirts/catalogue:
+    get:
+      operationId: getNightclubsByNightclubIdFlirtsCatalogue
+      tags: [Flirt]
+      summary: Emojis permitidos, reacciones y límites
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Catálogo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  emojis:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key: { type: string, enum: [wave, wink, kiss, fire, heart, dance, star] }
+                        icon: { type: string }
+                        label_es: { type: string }
+                  reactions:
+                    type: array
+                    items: { $ref: '#/components/schemas/FlirtReaction' }
+                  limits:
+                    type: object
+                    properties:
+                      per_hour: { type: integer, example: 20 }
+                      unanswered_per_night: { type: integer, example: 3 }
+                      message_max: { type: integer, example: 140 }
+
+  /api/nightclubs/{nightclubId}/flirts/people:
+    get:
+      operationId: getNightclubsByNightclubIdFlirtsPeople
+      tags: [Flirt]
+      summary: Personas disponibles esta noche
+      description: |
+        Clientes sentados ahora mismo que eligieron aparecer, sin bloqueos en ningún
+        sentido y sin reportes abiertos. Solo sale nombre visible, mesa y zona. Hay que
+        estar sentado para consultarla.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: section
+          in: query
+          schema: { type: string }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Personas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  people:
+                    type: array
+                    items: { $ref: '#/components/schemas/Person' }
+        '422':
+          description: Quien consulta no está sentado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/flirts:
+    post:
+      operationId: postNightclubsByNightclubIdFlirts
+      tags: [Flirt]
+      summary: Enviar un flirt
+      description: |
+        Idempotente por `client_request_id`. Solo clientes. `emoji` exige una clave del
+        catálogo; `meet` invita a la mesa del emisor; `drink` y `bottle` exigen `drink_id`
+        y crean un **pedido real** para la mesa del receptor, cobrado al emisor.
+
+        Errores: 403 sin opt-in o silenciado; 404 neutro si hay bloqueo o reportes; 422 si
+        alguno no está sentado; 429 por límite de hora o de flirts sin respuesta; 409 si
+        no hay existencias del trago.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FlirtCreate' }
+      responses:
+        '201':
+          description: Flirt enviado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  flirt: { $ref: '#/components/schemas/Flirt' }
+        '200':
+          description: Reenvío idempotente
+          headers:
+            Idempotent-Replay:
+              schema: { type: string, enum: ['true'] }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  flirt: { $ref: '#/components/schemas/Flirt' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/nightclubs/{nightclubId}/flirts/received:
+    get:
+      operationId: getNightclubsByNightclubIdFlirtsReceived
+      tags: [Flirt]
+      summary: Flirts recibidos esta noche
+      description: Vacío si la persona apagó `accept_flirts`. Los caducados no aparecen.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Bandeja
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  flirts:
+                    type: array
+                    items: { $ref: '#/components/schemas/Flirt' }
+                  accept_flirts: { type: boolean }
+
+  /api/nightclubs/{nightclubId}/flirts/sent:
+    get:
+      operationId: getNightclubsByNightclubIdFlirtsSent
+      tags: [Flirt]
+      summary: Flirts que envié esta noche
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Enviados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  flirts:
+                    type: array
+                    items: { $ref: '#/components/schemas/Flirt' }
+
+  /api/nightclubs/{nightclubId}/flirts/stats:
+    get:
+      operationId: getNightclubsByNightclubIdFlirtsStats
+      tags: [Flirt]
+      summary: Conteos de la noche para el gerente
+      description: Requiere rol `manager`. Solo números; nunca nombres ni mensajes.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Estadísticas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FlirtStats' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/flirts/{flirtId}/view:
+    post:
+      operationId: postNightclubsByNightclubIdFlirtsByFlirtIdView
+      tags: [Flirt]
+      summary: Marcar un flirt como visto
+      description: Solo el receptor. Un tercero recibe 404.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/FlirtId' }
+      responses:
+        '200':
+          description: Flirt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  flirt: { $ref: '#/components/schemas/Flirt' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El flirt ya caducó
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/flirts/{flirtId}/react:
+    post:
+      operationId: postNightclubsByNightclubIdFlirtsByFlirtIdReact
+      tags: [Flirt]
+      summary: Responder a un flirt
+      description: |
+        Solo el receptor. `not_interested` rechaza el flirt, silencia a ese emisor por el
+        resto de la noche y, si era un trago o botella, **devuelve el pedido a la mesa del
+        emisor** (sin cancelar ni reembolsar). Cualquier otra reacción lo acepta.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/FlirtId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reaction]
+              properties:
+                reaction: { $ref: '#/components/schemas/FlirtReaction' }
+      responses:
+        '200':
+          description: Flirt con la reacción
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  flirt: { $ref: '#/components/schemas/Flirt' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/users/{userId}/report:
+    post:
+      operationId: postNightclubsByNightclubIdUsersByUserIdReport
+      tags: [Flirt]
+      summary: Reportar a una persona
+      description: |
+        Un reporte abierto por persona reportada. Con dos reportes abiertos la persona
+        deja de aparecer en la lista y de recibir flirts hasta que el gerente revise.
+        `flirt_id` solo puede ser un flirt que el reportante recibió de esa persona.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/UserId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { $ref: '#/components/schemas/ReportReason' }
+                details: { type: string, maxLength: 500 }
+                flirt_id: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Reporte creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      reason: { $ref: '#/components/schemas/ReportReason' }
+                      status: { type: string, example: open }
+                      created_at: { type: string, format: date-time }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Ya hay un reporte abierto sobre esa persona
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/reports:
+    get:
+      operationId: getNightclubsByNightclubIdReports
+      tags: [Flirt]
+      summary: Reportes para revisar
+      description: Requiere rol `manager`. Trae quién, a quién, motivo y detalle; nunca el mensaje del flirt.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, reviewed, actioned, dismissed] }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Reportes, los abiertos primero
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reports:
+                    type: array
+                    items: { $ref: '#/components/schemas/Report' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/reports/{reportId}:
+    patch:
+      operationId: patchNightclubsByNightclubIdReportsByReportId
+      tags: [Flirt]
+      summary: Resolver un reporte
+      description: |
+        Requiere rol `manager`. `actioned` **bloquea la cuenta** de la persona reportada,
+        cierra sus sesiones y la saca de su mesa. `dismissed` la vuelve a mostrar.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [reviewed, actioned, dismissed] }
+                resolution_note: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: Reporte actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report: { $ref: '#/components/schemas/Report' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/me/payment-methods:
     get:
       operationId: getMePaymentMethods
@@ -1724,6 +2168,17 @@ components:
       required: true
       description: Nombre de la zona, tal como aparece en la lista de precios.
       schema: { type: string, maxLength: 40 }
+
+    FlirtId:
+      name: flirtId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
 
   responses:
     BadRequest:
@@ -2092,6 +2547,10 @@ components:
         recipient_id: { type: [string, 'null'], format: uuid }
         recipient_name: { type: [string, 'null'] }
         bartender_id: { type: [string, 'null'], format: uuid }
+        returned_to_sender:
+          type: boolean
+          description: Invitación rechazada por el receptor y devuelta a la mesa del emisor (nunca cancelada ni reembolsada).
+        returned_at: { type: [string, 'null'], format: date-time }
         pos_order_id:
           type: [string, 'null']
           description: Identificador en el punto de venta (fase 4).
@@ -2472,6 +2931,132 @@ components:
               price: { $ref: '#/components/schemas/Money' }
               quantity: { type: integer }
         created_at: { type: string, format: date-time }
+
+    Preferences:
+      type: object
+      properties:
+        accept_flirts: { type: boolean, description: Recibir flirts. Nace en false. }
+        discoverable: { type: boolean, description: Aparecer en la lista de la noche. Nace en false. }
+        show_on_map: { type: boolean }
+        notifications: { type: object, additionalProperties: { type: boolean } }
+        updated_at: { type: [string, 'null'], format: date-time }
+
+    Person:
+      type: object
+      description: Lo único que se expone de otra persona.
+      properties:
+        id: { type: string, format: uuid }
+        display_name: { type: string }
+        table_id: { type: string, format: uuid }
+        table_code: { type: string }
+        section: { type: string }
+        floor: { type: [string, 'null'] }
+        accept_flirts: { type: boolean }
+
+    FlirtReaction:
+      type: string
+      enum: [like, wave, kiss, fire, interested, not_interested]
+
+    FlirtCreate:
+      type: object
+      required: [client_request_id, recipient_id, type]
+      properties:
+        client_request_id: { type: string, format: uuid }
+        recipient_id: { type: string, format: uuid }
+        type: { type: string, enum: [emoji, meet, drink, bottle] }
+        emoji:
+          type: string
+          enum: [wave, wink, kiss, fire, heart, dance, star]
+          description: Obligatorio cuando `type` es `emoji`.
+        message: { type: string, maxLength: 140 }
+        drink_id:
+          type: string
+          format: uuid
+          description: Obligatorio cuando `type` es `drink` o `bottle`.
+        quantity: { type: integer, minimum: 1, maximum: 10, default: 1 }
+
+    Flirt:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [emoji, meet, drink, bottle] }
+        emoji: { type: [string, 'null'] }
+        message: { type: [string, 'null'] }
+        status: { type: string, enum: [sent, viewed, accepted, declined, expired] }
+        created_at: { type: string, format: date-time }
+        viewed_at: { type: [string, 'null'], format: date-time }
+        expires_at: { type: string, format: date-time }
+        drink_order_id: { type: [string, 'null'], format: uuid, description: El pedido cuando es trago o botella. }
+        sender_id: { type: string, format: uuid }
+        sender_name: { type: string }
+        recipient_id: { type: string, format: uuid }
+        recipient_name: { type: string }
+        sender_table_id: { type: [string, 'null'], format: uuid }
+        sender_table_code: { type: [string, 'null'] }
+        sender_section: { type: [string, 'null'] }
+        reaction:
+          oneOf:
+            - { $ref: '#/components/schemas/FlirtReaction' }
+            - { type: 'null' }
+        reacted_at: { type: [string, 'null'], format: date-time }
+
+    FlirtStats:
+      type: object
+      properties:
+        window_hours: { type: integer }
+        flirts:
+          type: object
+          properties:
+            sent: { type: integer }
+            accepted: { type: integer }
+            declined: { type: integer }
+            emoji: { type: integer }
+            meet: { type: integer }
+            senders: { type: integer }
+        gifts:
+          type: object
+          properties:
+            orders: { type: integer }
+            returned: { type: integer }
+            total: { $ref: '#/components/schemas/Money' }
+            currency: { $ref: '#/components/schemas/Currency' }
+        reports:
+          type: object
+          properties:
+            open: { type: integer }
+            tonight: { type: integer }
+        opt_in:
+          type: object
+          properties:
+            accepting: { type: integer }
+            discoverable: { type: integer }
+        generated_at: { type: string, format: date-time }
+
+    ReportReason:
+      type: string
+      enum: [harassment, underage, fake_profile, other]
+
+    Report:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        reason: { $ref: '#/components/schemas/ReportReason' }
+        details: { type: [string, 'null'] }
+        status: { type: string, enum: [open, reviewed, actioned, dismissed] }
+        resolution_note: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+        reviewed_at: { type: [string, 'null'], format: date-time }
+        reporter_id: { type: string, format: uuid }
+        reporter_name: { type: string }
+        reported_id: { type: string, format: uuid }
+        reported_name: { type: string }
+        reported_account_status: { type: string, enum: [active, blocked, deleted] }
+        reviewed_by: { type: [string, 'null'], format: uuid }
+        reviewed_by_name: { type: [string, 'null'] }
+        flirt_id: { type: [string, 'null'], format: uuid }
+        flirt_type: { type: [string, 'null'] }
+        flirt_sent_at: { type: [string, 'null'], format: date-time }
+        reports_against: { type: integer, description: Reportes no desestimados contra esa persona. }
 
     PaymentMethod:
       type: object
