@@ -56,6 +56,8 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+      # Solo lo usa `npm run seed`, que se niega a correr con NODE_ENV=production.
+      SEED_PASSWORD: ${SEED_PASSWORD:-}
       SOFTRESTAURANT11_URL: ${SOFTRESTAURANT11_URL:-}
       SOFTRESTAURANT11_API_KEY: ${SOFTRESTAURANT11_API_KEY:-}
       SOFTRESTAURANT11_WEBHOOK_SECRET: ${SOFTRESTAURANT11_WEBHOOK_SECRET:-}
