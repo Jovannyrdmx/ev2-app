@@ -60,7 +60,11 @@ cp .env.example .env          # y llena DB_PASSWORD, JWT_SECRET, BANK_ENCRYPTION
 docker compose --env-file .env -f deploy/docker-compose.yml up --build -d
 docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed
 docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed:floor
+docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed:prices
 ```
+
+> `seed:prices` no es opcional: carga el precio de cada zona. Sin el, la pantalla de
+> reservacion no encuentra ninguna mesa con precio y no se puede reservar nada.
 
 Abre **http://localhost:8080**. El contenedor `web` sirve la pagina y reenvia `/api` a la
 API y `/ws` al servidor de tiempo real, asi que todo va por un solo origen.
