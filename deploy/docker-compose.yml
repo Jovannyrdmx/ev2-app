@@ -84,11 +84,21 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required in .env}
+      # ws.js valida cada conexion contra la tabla users (no confia en el token),
+      # asi que necesita la base igual que la API. Sin esto arranca, falla el
+      # SELECT 1 y sale con codigo 1 en bucle.
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required in .env}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-ev2}
     ports:
       - "${WS_PORT:-4000}:4000"
     depends_on:
       api:
         condition: service_started
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped

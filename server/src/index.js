@@ -35,9 +35,10 @@ async function start() {
     // process leads; the rest stand by and take over if it dies.
     relay = await new EventRelay({ redis }).start();
     app.locals.relay = relay;
-    console.log(relay.isLeader
-      ? `Realtime relay: leading from event ${relay.cursor}`
-      : 'Realtime relay: standing by (another instance is leading)');
+    // El caso lider ya lo anuncia relay.start(); aqui solo falta el otro.
+    if (!relay.isLeader) {
+      console.log('Realtime relay: standing by (another instance is leading)');
+    }
   } catch (err) {
     console.error('Startup failed:', err.message);
     process.exit(1);

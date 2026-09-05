@@ -11,6 +11,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
 COPY migrations ./migrations
+# `npm run seed` / `seed:floor` corren dentro de este contenedor (docker compose exec).
+COPY seeds ./seeds
 # The API contract is served at /api/docs and /api/openapi.yaml.
 COPY openapi.yaml ./
 USER node
