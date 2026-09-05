@@ -356,10 +356,14 @@
       const seen = new Set();       // ids ya entregados a la pantalla
       const seenOrder = [];
 
+      // Sin `wsUrl` explicito se asume el mismo origen detras del proxy, en la ruta
+      // `/ws` (ver deploy/nginx-web.conf). El servidor de sockets no mira la ruta: lee
+      // `since_id` de la query, venga en `/` o en `/ws`.
+      const wsPath = rtOptions.path || cfg.wsPath || '/ws';
       const wsBase = cfg.wsUrl || (() => {
-        if (typeof location === 'undefined') return 'ws://localhost:4000';
+        if (typeof location === 'undefined') return `ws://localhost:4000${wsPath}`;
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        return `${proto}//${location.host}`;
+        return `${proto}//${location.host}${wsPath}`;
       })();
 
       /** Evita entregar dos veces el mismo evento tras una reconexión. */
@@ -391,7 +395,7 @@
         if (!WS) throw new Error('No hay WebSocket disponible; pásalo en createClient({ WebSocket })');
         if (!session.accessToken) { scheduleReconnect(1000); return; }
         closedByUs = false;
-        const url = wsBase + (lastEventId ? `/?since_id=${encodeURIComponent(lastEventId)}` : '/');
+        const url = wsBase + (lastEventId ? `?since_id=${encodeURIComponent(lastEventId)}` : '');
         ws = new WS(url, ['bearer', session.accessToken]);
 
         ws.onopen = () => { openedAt = Date.now(); rt.emit('open', {}); };

@@ -52,3 +52,23 @@ Documentación interactiva de la API: <http://localhost:3000/api/docs>
 
 Reglas en `CLAUDE.md`; decisiones de arquitectura en `docs/DECISIONES.md`. Rama por paso (`faseN/descripcion`), PR hacia `main`, verificación obligatoria de
 cada paso antes de avanzar. Nunca versionar `.env`; nunca probar contra la caja activa del club antes de la Fase 7.
+
+## Probar la app en tu maquina
+
+```bash
+cp .env.example .env          # y llena DB_PASSWORD, JWT_SECRET, BANK_ENCRYPTION_KEY, SEED_PASSWORD
+docker compose --env-file .env -f deploy/docker-compose.yml up --build -d
+docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed
+docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed:floor
+```
+
+Abre **http://localhost:8080**. El contenedor `web` sirve la pagina y reenvia `/api` a la
+API y `/ws` al servidor de tiempo real, asi que todo va por un solo origen.
+
+Entra con `guest@ev2.local` y la contrasena que pusiste en `SEED_PASSWORD`. Para ver el
+pedido avanzar solo, abre otra ventana con `bartender@ev2.local` (paso 5.7).
+
+> `ALLOWED_ORIGINS` **tiene que incluir el origen desde el que abres la pagina**, aunque
+> la API vaya detras del mismo proxy: el navegador manda la cabecera `Origin` tambien en
+> peticiones al mismo origen cuando no son GET. Si falta, la API responde 403 diciendo
+> exactamente que agregar.

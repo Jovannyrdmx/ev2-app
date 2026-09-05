@@ -18,7 +18,7 @@
     baseUrl: meta('ev2:api', '/api'),
     wsUrl: meta('ev2:ws', '') || null,
   });
-  const CLUB_SLUG = meta('ev2:club', 'ev2-clandestinoz');
+  const CLUB_SLUG = meta('ev2:club', 'ev2');
 
   const state = {
     club: null, drinks: [], categories: [], category: null,
