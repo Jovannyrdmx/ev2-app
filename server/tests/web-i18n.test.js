@@ -75,15 +75,29 @@ describe('Catálogo de textos', () => {
 
 describe('El HTML marcado y el catálogo van juntos', () => {
   const { F } = loadFormat();
-  const html = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
-  const keysIn = (attr) => [...html.matchAll(new RegExp(`${attr}="([^"]+)"`, 'g'))].map((m) => m[1]);
+  // Cada pantalla que se conecta entra aquí: una clave marcada en el HTML que no existe
+  // en el catálogo imprime el nombre de la clave en pantalla y nadie lo ve hasta que
+  // alguien cambia de idioma.
+  const PAGES = ['index.html', 'bartender.html'];
+  const sources = Object.fromEntries(
+    PAGES.map((page) => [page, fs.readFileSync(path.join(WEB, page), 'utf8')]),
+  );
+  const html = sources['index.html'];
+  const keysOf = (source, attr) => [...source.matchAll(new RegExp(`${attr}="([^"]+)"`, 'g'))]
+    .map((m) => m[1]);
+  const keysIn = (attr) => keysOf(html, attr);
 
-  it('toda clave usada en index.html existe en el catálogo', () => {
-    const used = [...keysIn('data-i18n'), ...keysIn('data-i18n-placeholder'),
-      ...keysIn('data-i18n-title')];
-    expect(used.length).toBeGreaterThan(30);
+  it.each(PAGES)('toda clave usada en %s existe en el catálogo', (page) => {
+    const source = sources[page];
+    const used = [...keysOf(source, 'data-i18n'), ...keysOf(source, 'data-i18n-placeholder'),
+      ...keysOf(source, 'data-i18n-title')];
+    expect(used.length).toBeGreaterThan(5);
     const huerfanas = [...new Set(used)].filter((k) => F.STRINGS.es[k] === undefined);
     expect(huerfanas).toEqual([]);
+  });
+
+  it.each(PAGES)('%s declara el idioma del documento', (page) => {
+    expect(sources[page]).toMatch(/<html lang="(es|en)"/);
   });
 
   it('la pantalla de acceso está marcada: es lo primero que se ve', () => {

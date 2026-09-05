@@ -30,7 +30,7 @@
       does: { es: 'Recibir los pedidos de sus mesas, marcarlos entregados y ver sus propinas.', en: 'Take orders from their tables, mark them delivered and see their tips.' },
     },
     bartender: {
-      label: { es: 'Bartender', en: 'Bartender' }, home: 'bartender.html', ready: false, step: '5.7',
+      label: { es: 'Bartender', en: 'Bartender' }, home: 'bartender.html', ready: true,
       does: { es: 'La cola de pedidos de la barra en tiempo real: preparar, marcar listo.', en: "The bar's live order queue: prepare, mark ready." },
     },
     hostess: {

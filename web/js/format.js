@@ -22,6 +22,10 @@
     es: {
       'error.network': 'Sin conexión. Revisa tu señal e intenta de nuevo.',
       'error.unauthorized': 'Tu sesión terminó. Vuelve a entrar.',
+      // Un 401 al ENTRAR no es una sesión vencida: no había sesión. Decirle a alguien
+      // que su sesión terminó cuando lo que pasó es que se equivocó de contraseña lo
+      // manda a buscar el problema donde no está.
+      'error.badLogin': 'Correo o contraseña incorrectos.',
       'error.forbidden': 'No tienes permiso para hacer esto.',
       'error.not_found': 'No encontramos eso.',
       'error.conflict': 'Alguien se adelantó. Vuelve a intentar.',
@@ -113,10 +117,41 @@
       'banner.replaced': 'Abriste la app en otro lado. Recarga si quieres seguir aquí.',
       'banner.expired': 'Tu sesión terminó. Vuelve a entrar.',
       'banner.updating': 'Actualizando…',
+
+      // --- barra (paso 5.7) ---
+      'bar.title': 'Barra',
+      'bar.laneNew': 'Nuevos',
+      'bar.lanePrep': 'En preparación',
+      'bar.laneReady': 'Listos',
+      'bar.accept': 'Aceptar',
+      'bar.retry': 'Reintentar',
+      'bar.start': 'Empezar',
+      'bar.markReady': 'Listo',
+      'bar.markDelivered': 'Entregado',
+      'bar.cancel': 'Cancelar',
+      'bar.confirmCancel': '¿Cancelar este pedido? Se devuelve la existencia.',
+      'bar.emptyNew': 'Sin pedidos nuevos.',
+      'bar.emptyPrep': 'Nada en preparación.',
+      'bar.emptyReady': 'Nada listo para recoger.',
+      'bar.table': 'Mesa',
+      'bar.noTable': 'Sin mesa',
+      'bar.for': 'Para',
+      'bar.gift': 'Invitación',
+      'bar.note': 'Nota',
+      'bar.justNow': 'recién',
+      'bar.minutes': '{n} min',
+      'bar.oldest': 'El más viejo',
+      'bar.open': 'Abiertos',
+      'bar.posError': 'La caja rechazó este pedido.',
+      'bar.alertOn': 'Aviso activado',
+      'bar.alertOff': 'Aviso apagado',
+      'bar.newOrder': 'Pedido nuevo',
+      'bar.reload': 'Actualizar',
     },
     en: {
       'error.network': 'No connection. Check your signal and try again.',
       'error.unauthorized': 'Your session ended. Please sign in again.',
+      'error.badLogin': 'Wrong email or password.',
       'error.forbidden': "You don't have permission to do this.",
       'error.not_found': "We couldn't find that.",
       'error.conflict': 'Someone got there first. Try again.',
@@ -208,8 +243,48 @@
       'banner.replaced': 'You opened the app somewhere else. Reload if you want to continue here.',
       'banner.expired': 'Your session ended. Please sign in again.',
       'banner.updating': 'Refreshing…',
+
+      // --- bar (step 5.7) ---
+      'bar.title': 'Bar',
+      'bar.laneNew': 'New',
+      'bar.lanePrep': 'In progress',
+      'bar.laneReady': 'Ready',
+      'bar.accept': 'Accept',
+      'bar.retry': 'Retry',
+      'bar.start': 'Start',
+      'bar.markReady': 'Ready',
+      'bar.markDelivered': 'Delivered',
+      'bar.cancel': 'Cancel',
+      'bar.confirmCancel': 'Cancel this order? The stock goes back.',
+      'bar.emptyNew': 'No new orders.',
+      'bar.emptyPrep': 'Nothing in progress.',
+      'bar.emptyReady': 'Nothing waiting for pickup.',
+      'bar.table': 'Table',
+      'bar.noTable': 'No table',
+      'bar.for': 'For',
+      'bar.gift': 'Gift',
+      'bar.note': 'Note',
+      'bar.justNow': 'just now',
+      'bar.minutes': '{n} min',
+      'bar.oldest': 'Longest wait',
+      'bar.open': 'Open',
+      'bar.posError': 'The register rejected this order.',
+      'bar.alertOn': 'Alert on',
+      'bar.alertOff': 'Alert off',
+      'bar.newOrder': 'New order',
+      'bar.reload': 'Refresh',
     },
   };
+
+  /**
+   * Mensajes que el servidor todavía manda en inglés. Mostrarlos tal cual a un usuario
+   * en español es peor que el texto genérico; se traducen por catálogo mientras la API
+   * no los localice.
+   */
+  const ENGLISH_SERVER_MESSAGES = new Set([
+    'Invalid credentials', 'Order not found', 'Table not found', 'Not your order',
+    'Only staff can change this order',
+  ]);
 
   const STORAGE_KEY = 'ev2.lang';
   const SUPPORTED = Object.keys(STRINGS);
@@ -297,10 +372,21 @@
    * El mensaje del servidor ya viene en español y suele ser más útil que uno genérico
    * (dice *por qué* no se pudo). Se usa ese, y el texto propio solo cuando no hay.
    */
-  function errorMessage(err) {
+  function errorMessage(err, opts) {
     if (!err) return t('error.unknown');
     if (err.name === 'NetworkError') return t('error.network');
-    if (err.message && err.code && err.code !== 'unknown' && lang === 'es') return err.message;
+
+    // En la pantalla de acceso, un 401 significa credenciales malas. El servidor
+    // responde 'unauthorized' para los dos casos, así que la pantalla es la única que
+    // sabe cuál es; sin esto el texto es literalmente falso.
+    if (opts && opts.context === 'login' && err.status === 401) return t('error.badLogin');
+
+    // El mensaje del servidor viene en español y suele decir *por qué* mejor que uno
+    // genérico. En inglés no sirve: está en español, así que se usa el catálogo.
+    if (err.message && err.code && err.code !== 'unknown' && lang === 'es'
+        && !ENGLISH_SERVER_MESSAGES.has(err.message)) {
+      return err.message;
+    }
     return t(`error.${err.code || 'unknown'}`, err.message);
   }
 

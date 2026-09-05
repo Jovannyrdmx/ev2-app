@@ -293,10 +293,18 @@ describe('A dónde va cada rol al entrar', () => {
   });
 
   it('mientras su pantalla no esté conectada se le dice, no se le manda a datos falsos', () => {
-    const r = Roles.route('bartender', '/index.html');
+    // El mesero sigue esperando la suya (paso 5.7); el bartender ya tiene la de la
+    // barra, así que ese caso lo cubre la prueba de redirección de abajo.
+    const r = Roles.route('waiter', '/index.html');
     expect(r.action).toBe('pending');
     expect(r.info.step).toBe('5.7');
-    expect(r.info.does).toMatch(/barra/i);
+    expect(r.info.does).toMatch(/propinas/i);
+  });
+
+  it('el bartender, cuya pantalla ya está conectada, se redirige a ella', () => {
+    expect(Roles.route('bartender', '/index.html')).toMatchObject({
+      action: 'redirect', to: 'bartender.html',
+    });
   });
 
   it('un rol que la base acepta pero la app no conoce no deja la pantalla en blanco', () => {
@@ -319,16 +327,16 @@ describe('A dónde va cada rol al entrar', () => {
   });
 
   it('cuando una pantalla se conecte, el rol se redirige sin tocar nada más', () => {
-    // Simula el paso 5.7 ya hecho: basta con ready:true en roles.js.
-    const original = Roles.ROLES.bartender.ready;
-    Roles.ROLES.bartender.ready = true;
+    // Simula el paso 5.6 ya hecho: basta con ready:true en roles.js.
+    const original = Roles.ROLES.valet.ready;
+    Roles.ROLES.valet.ready = true;
     try {
-      expect(Roles.route('bartender', '/index.html')).toEqual(
-        expect.objectContaining({ action: 'redirect', to: 'bartender.html' }),
+      expect(Roles.route('valet', '/index.html')).toEqual(
+        expect.objectContaining({ action: 'redirect', to: 'valet.html' }),
       );
-      expect(Roles.route('bartender', '/bartender.html').action).toBe('stay');
+      expect(Roles.route('valet', '/valet.html').action).toBe('stay');
     } finally {
-      Roles.ROLES.bartender.ready = original;
+      Roles.ROLES.valet.ready = original;
     }
   });
 });

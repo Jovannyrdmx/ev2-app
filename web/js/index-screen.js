@@ -55,8 +55,8 @@
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   /** Un error de la API se muestra tal cual: dice *por qué* mejor que un texto genérico. */
-  function showError(err, where) {
-    const message = EV2Format.errorMessage(err);
+  function showError(err, where, opts) {
+    const message = EV2Format.errorMessage(err, opts);
     if (where) { where.textContent = message; where.hidden = false; } else toast(message, 'error');
   }
 
@@ -85,7 +85,7 @@
       });
       await afterSignIn();
     } catch (err) {
-      showError(err, $('auth-error'));
+      showError(err, $('auth-error'), { context: 'login' });
     }
   };
 
