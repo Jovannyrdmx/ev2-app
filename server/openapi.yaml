@@ -131,6 +131,12 @@ tags:
       Registro de la integracion con el punto de venta y enrolamiento del agente local:
       llave propia y rotable, latido, bitacora de sincronizaciones y salud. La lectura
       real de SoftRestaurant llega en la fase 4 (docs/POS_REAL.md).
+  - name: Pagos manuales
+    description: |
+      Dinero que el club recibe fuera de una pasarela: efectivo, Zelle, Cash App,
+      transferencia y SPEI. Nada de esto cobra por si solo; el cliente declara y el
+      gerente confirma contra el estado de cuenta, y solo esa confirmacion mueve el
+      libro contable.
   - name: Pagos
     description: Métodos de pago guardados por el usuario.
 
@@ -5024,6 +5030,329 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
 
+  /api/nightclubs/{nightclubId}/manual-payment-options:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listManualPaymentOptions
+      tags: [Pagos manuales]
+      summary: A dónde puede pagar el cliente
+      parameters:
+        - name: include_inactive
+          in: query
+          description: Solo el gerente ve las retiradas.
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Formas de pago
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  options:
+                    type: array
+                    items: { $ref: '#/components/schemas/ManualPaymentOption' }
+    post:
+      operationId: createManualPaymentOption
+      tags: [Pagos manuales]
+      summary: Cargar una forma de pago (gerente)
+      description: |
+        `destination` es la cuenta, CLABE o usuario al que el cliente envía el dinero, y se
+        guarda en claro a propósito: a diferencia de la cuenta de un empleado (cifrada en
+        la migración 007), esta es la cuenta receptora del club y su función es mostrarse a
+        quien va a pagar. Una transferencia sin destino se rechaza; el efectivo no lo pide.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ManualPaymentOptionCreate' }
+      responses:
+        '201':
+          description: Forma de pago creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  option: { $ref: '#/components/schemas/ManualPaymentOption' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/manual-payment-options/{optionId}:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/OptionId'
+    put:
+      operationId: updateManualPaymentOption
+      tags: [Pagos manuales]
+      summary: Editar una forma de pago (gerente)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ManualPaymentOptionUpdate' }
+      responses:
+        '200':
+          description: Forma de pago actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  option: { $ref: '#/components/schemas/ManualPaymentOption' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: retireManualPaymentOption
+      tags: [Pagos manuales]
+      summary: Retirar una forma de pago (gerente)
+      description: 'Se marca inactiva, nunca se borra: los pagos ya declarados la referencian.'
+      responses:
+        '200':
+          description: Retirada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  option: { $ref: '#/components/schemas/ManualPaymentOption' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/manual-payments:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listManualPayments
+      tags: [Pagos manuales]
+      summary: Cola de pagos por revisar (gerente)
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [declared, confirmed, rejected, cancelled] }
+        - name: method
+          in: query
+          schema: { type: string, enum: [cash, zelle, cash_app, bank_transfer, spei] }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Pagos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payments:
+                    type: array
+                    items: { $ref: '#/components/schemas/ManualPayment' }
+                  awaiting_review:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        currency: { $ref: '#/components/schemas/Currency' }
+                        count: { type: integer }
+                        total: { $ref: '#/components/schemas/Money' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: declareManualPayment
+      tags: [Pagos manuales]
+      summary: Declarar que ya se pagó
+      description: |
+        **No cobra nada.** Deja el asiento del libro en `pending_manual` a la espera de que
+        el gerente lo confirme contra el estado de cuenta. Una transferencia exige folio:
+        sin él no hay forma de comprobarla. Un cliente solo declara sus propios cobros; el
+        personal puede declarar por otra persona con `on_behalf_of`. Idempotente por
+        `client_request_id`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ManualPaymentDeclare' }
+      responses:
+        '201':
+          description: Pago declarado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment: { $ref: '#/components/schemas/ManualPayment' }
+        '200':
+          description: Ya estaba declarado (idempotencia)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment: { $ref: '#/components/schemas/ManualPayment' }
+                  idempotent: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/manual-payments/mine:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listMyManualPayments
+      tags: [Pagos manuales]
+      summary: Mis pagos declarados
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Pagos del cliente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payments:
+                    type: array
+                    items: { $ref: '#/components/schemas/ManualPayment' }
+
+  /api/nightclubs/{nightclubId}/manual-payments/register:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    post:
+      operationId: registerManualPayment
+      tags: [Pagos manuales]
+      summary: Registrar dinero ya recibido (anfitriona o gerente)
+      description: |
+        Efectivo en la puerta: se declara y se confirma en un solo paso, porque quien lo
+        registra es quien lo recibió. No hay segunda persona que verifique, así que el
+        registro deja constancia de **quién tomó el dinero** y de parte de quién.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ManualPaymentDeclare' }
+      responses:
+        '201':
+          description: Pago registrado y confirmado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment: { $ref: '#/components/schemas/ManualPayment' }
+                  reservation_confirmed: { type: [string, 'null'], format: uuid }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/manual-payments/{paymentId}:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/PaymentId'
+    get:
+      operationId: getManualPayment
+      tags: [Pagos manuales]
+      summary: Ver un pago
+      description: |
+        El cliente ve su declaración y en qué va; el gerente ve además quién la hizo, quién
+        la revisó y el asiento contra el que se aplica. Un pago ajeno responde 404.
+      responses:
+        '200':
+          description: Pago
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment: { $ref: '#/components/schemas/ManualPayment' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/manual-payments/{paymentId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/PaymentId'
+    post:
+      operationId: cancelManualPayment
+      tags: [Pagos manuales]
+      summary: Retirar mi declaración
+      description: Solo mientras esté `declared`. El cobro vuelve a `pending` y se puede declarar de nuevo.
+      responses:
+        '200':
+          description: Declaración retirada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment: { $ref: '#/components/schemas/ManualPayment' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/manual-payments/{paymentId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/PaymentId'
+    post:
+      operationId: confirmManualPayment
+      tags: [Pagos manuales]
+      summary: Confirmar el pago contra el estado de cuenta (gerente)
+      description: |
+        Lo único que mueve el asiento a `paid`. Si el cobro pagaba el depósito de una
+        reservación, **la reservación pasa a `confirmed`** en la misma transacción SQL.
+        Un monto distinto al del cobro responde 422 con ambas cifras: el importe del libro
+        es inmutable, así que la diferencia se resuelve rechazando y pidiendo el faltante,
+        no cuadrando el asiento por detrás.
+      responses:
+        '200':
+          description: Pago confirmado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment: { $ref: '#/components/schemas/ManualPayment' }
+                  reservation_confirmed: { type: [string, 'null'], format: uuid }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/manual-payments/{paymentId}/reject:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/PaymentId'
+    post:
+      operationId: rejectManualPayment
+      tags: [Pagos manuales]
+      summary: Rechazar el pago (gerente)
+      description: |
+        El cobro vuelve a `pending`, no a `failed`: el cliente corrige el folio y declara de
+        nuevo. El motivo le llega en el evento `payment_rejected`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 5, maxLength: 200 }
+      responses:
+        '200':
+          description: Pago rechazado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment: { $ref: '#/components/schemas/ManualPayment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -5162,6 +5491,16 @@ components:
       schema: { type: string, format: uuid }
     IntegrationId:
       name: integrationId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OptionId:
+      name: optionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PaymentId:
+      name: paymentId
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -6893,3 +7232,134 @@ components:
         items_synced: { type: integer }
         error: { type: [string, 'null'] }
         details: { type: object, additionalProperties: true }
+
+    ManualPaymentMethod:
+      type: string
+      enum: [cash, zelle, cash_app, bank_transfer, spei]
+
+    ManualPaymentOption:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        method: { $ref: '#/components/schemas/ManualPaymentMethod' }
+        label: { type: string }
+        destination:
+          type: [string, 'null']
+          description: Cuenta receptora del club. Se muestra al cliente a propósito.
+        instructions: { type: [string, 'null'] }
+        currency: { $ref: '#/components/schemas/Currency' }
+        requires_reference:
+          type: boolean
+          description: |
+            El efectivo se entrega en mano y no lleva folio; una transferencia sí, y sin él
+            el gerente no puede cuadrarla contra el estado de cuenta.
+        active: { type: boolean }
+        sort_order: { type: integer }
+
+    ManualPaymentOptionCreate:
+      type: object
+      required: [method, label]
+      properties:
+        method: { $ref: '#/components/schemas/ManualPaymentMethod' }
+        label: { type: string, minLength: 1, maxLength: 80 }
+        destination: { type: [string, 'null'], maxLength: 120 }
+        instructions: { type: [string, 'null'], maxLength: 2000 }
+        currency: { $ref: '#/components/schemas/Currency' }
+        requires_reference: { type: boolean }
+        sort_order: { type: integer }
+
+    ManualPaymentOptionUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        method: { $ref: '#/components/schemas/ManualPaymentMethod' }
+        label: { type: string, minLength: 1, maxLength: 80 }
+        destination: { type: [string, 'null'], maxLength: 120 }
+        instructions: { type: [string, 'null'], maxLength: 2000 }
+        currency: { $ref: '#/components/schemas/Currency' }
+        requires_reference: { type: boolean }
+        active: { type: boolean }
+        sort_order: { type: integer }
+
+    ManualPaymentDeclare:
+      type: object
+      required: [transaction_id, method, amount, currency]
+      properties:
+        transaction_id:
+          type: string
+          format: uuid
+          description: El asiento del libro que se está pagando.
+        option_id: { type: string, format: uuid }
+        method: { $ref: '#/components/schemas/ManualPaymentMethod' }
+        amount: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+        currency: { $ref: '#/components/schemas/Currency' }
+        reference:
+          type: string
+          minLength: 3
+          maxLength: 60
+          description: |
+            Folio de la transferencia. Obligatorio salvo en efectivo. No puede repetirse:
+            una misma transferencia no paga dos cosas.
+        note: { type: string, maxLength: 280 }
+        on_behalf_of:
+          type: string
+          format: uuid
+          description: Solo el personal. Quién entregó el dinero.
+        client_request_id: { type: string, format: uuid }
+
+    ManualPayment:
+      type: object
+      description: |
+        Dos lecturas. El cliente ve su declaración y en qué va; el gerente ve además quién
+        la hizo, quién la revisó y el asiento contra el que se aplica.
+      properties:
+        id: { type: string, format: uuid }
+        transaction_id: { type: string, format: uuid }
+        method: { $ref: '#/components/schemas/ManualPaymentMethod' }
+        amount: { $ref: '#/components/schemas/Money' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        reference: { type: [string, 'null'] }
+        note: { type: [string, 'null'] }
+        status: { type: string, enum: [declared, confirmed, rejected, cancelled] }
+        rejection_reason: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+        reviewed_at: { type: [string, 'null'], format: date-time }
+        pays_for:
+          type: object
+          properties:
+            type: { type: string, examples: ['reservation_deposit'] }
+            reference_type: { type: [string, 'null'] }
+        declared_by:
+          description: Solo para el gerente.
+          oneOf:
+            - type: object
+              properties:
+                id: { type: string, format: uuid }
+                name: { type: [string, 'null'] }
+            - { type: 'null' }
+        on_behalf_of:
+          description: Solo para el gerente.
+          oneOf:
+            - type: object
+              properties:
+                id: { type: string, format: uuid }
+                name: { type: [string, 'null'] }
+            - { type: 'null' }
+        reviewed_by:
+          description: Solo para el gerente.
+          oneOf:
+            - type: object
+              properties:
+                id: { type: string, format: uuid }
+                name: { type: [string, 'null'] }
+            - { type: 'null' }
+        transaction:
+          description: Solo para el gerente.
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            type: { type: string }
+            amount: { $ref: '#/components/schemas/Money' }
+            status: { type: string }
+            reference_type: { type: [string, 'null'] }
+            reference_id: { type: [string, 'null'], format: uuid }
