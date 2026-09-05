@@ -10,6 +10,7 @@ const DATA_TABLES = [
   'audit_log', 'events', 'transactions', 'withdrawals', 'tips', 'staff_drinks', 'song_requests',
   'staff_shifts', 'valet_tickets', 'parking_spots', 'taxi_requests', 'emergency_contacts',
   'drivers', 'taxi_fares', 'taxi_settings', 'valet_settings',
+  'manual_payments', 'manual_payment_options',
   'reservation_addons', 'reservations', 'reservation_discounts', 'reservation_rules',
   'drink_order_items', 'drink_orders', 'inventory', 'drinks',
   'flirt_reactions', 'flirts', 'user_blocks', 'user_reports', 'user_preferences',

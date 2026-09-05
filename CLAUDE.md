@@ -40,3 +40,21 @@ Móvil con proyectos reales y cliente desde `server/openapi.yaml` · Pagos Strip
 manuales para Zelle/Cash App/depósito; retiros con aprobación manual · Seguridad: helmet, rate-limit, zod,
 JWT 15 min + refresh revocable, pgcrypto, flirt con opt-in/bloqueo/18+ · VPS Ubuntu 24.04 + Docker Compose,
 Caddy/nginx con SSL, respaldos probados, Uptime Kuma, CI/CD con producción bajo aprobación manual.
+
+## Trampas de SQL que ya nos costaron tiempo
+
+Tres defectos reales, encontrados en 2.6, 2.8 y 3.6. Si escribes SQL en este repositorio,
+lee esto antes:
+
+1. **`42P08 inconsistent types deduced for parameter $N`.** Ocurre cuando el mismo
+   parámetro se usa como valor de una columna `varchar` **y** en una comparación con un
+   literal o un `ANY(...)`: Postgres deduce dos tipos y se niega. Solución: castear
+   siempre, `$2::text`, en **todas** sus apariciones.
+
+2. **`ORDER BY` prefiere el alias de salida.** Con `SELECT id::text AS id ... ORDER BY id`,
+   Postgres ordena por la columna **de texto**, no por el número: 1, 10, 2. Rompió el orden
+   de los eventos en 3.2. Solución: calificar (`ORDER BY e.id`) y no reutilizar el nombre
+   de la columna como alias de otro tipo.
+
+3. **`FOR UPDATE` no puede tocar el lado nulo de un `LEFT JOIN`** (error `0A000`). Bloquea
+   solo las tablas que de verdad quieres bloquear: `FOR UPDATE OF t`.
