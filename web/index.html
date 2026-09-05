@@ -122,47 +122,47 @@
   <section id="screen-auth" class="flex-1 flex flex-col justify-center px-6 py-10">
     <div class="text-center mb-8">
       <h1 class="font-display text-3xl ev2-gradient mb-1">EV2 Clandestinoz</h1>
-      <p id="club-city" class="text-white/50 text-sm">Nogales, Sonora</p>
+      <p id="club-city" class="text-white/50 text-sm" data-i18n="auth.city">Nogales, Sonora</p>
     </div>
 
     <div class="flex mb-6 text-sm">
-      <button id="tab-login" class="flex-1 py-2 tab-active font-semibold">Entrar</button>
-      <button id="tab-register" class="flex-1 py-2 text-white/50">Crear cuenta</button>
+      <button id="tab-login" class="flex-1 py-2 tab-active font-semibold" data-i18n="auth.signin">Entrar</button>
+      <button id="tab-register" class="flex-1 py-2 text-white/50" data-i18n="auth.signup">Crear cuenta</button>
     </div>
 
     <form id="form-login" class="space-y-3">
-      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo"
+      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo" data-i18n-placeholder="auth.email"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
-      <input id="login-password" type="password" autocomplete="current-password" required placeholder="Contraseña"
+      <input id="login-password" type="password" autocomplete="current-password" required placeholder="Contraseña" data-i18n-placeholder="auth.password"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
-      <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display">Entrar al club</button>
+      <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.enter">Entrar al club</button>
     </form>
 
     <form id="form-register" class="space-y-3" hidden>
       <div class="flex gap-2">
-        <input id="reg-first" required placeholder="Nombre" class="w-1/2 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
-        <input id="reg-last" placeholder="Apellido" class="w-1/2 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+        <input id="reg-first" required placeholder="Nombre" data-i18n-placeholder="auth.firstName" class="w-1/2 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+        <input id="reg-last" placeholder="Apellido" data-i18n-placeholder="auth.lastName" class="w-1/2 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       </div>
-      <input id="reg-email" type="email" autocomplete="email" required placeholder="Correo"
+      <input id="reg-email" type="email" autocomplete="email" required placeholder="Correo" data-i18n-placeholder="auth.email"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
-      <input id="reg-password" type="password" autocomplete="new-password" required minlength="8" placeholder="Contraseña (mínimo 8)"
+      <input id="reg-password" type="password" autocomplete="new-password" required minlength="8" placeholder="Contraseña (mínimo 8)" data-i18n-placeholder="auth.newPassword"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
-      <label class="block text-xs text-white/50 pt-1">Fecha de nacimiento</label>
+      <label class="block text-xs text-white/50 pt-1" data-i18n="auth.birthDate">Fecha de nacimiento</label>
       <input id="reg-birth" type="date" required
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       <label class="flex items-start gap-3 text-sm text-white/70 tap">
         <input id="reg-terms" type="checkbox" required class="mt-1 w-5 h-5 accent-cyan-400">
-        <span>Tengo 18 años o más y acepto los términos y el código de conducta.</span>
+        <span data-i18n="auth.terms">Tengo 18 años o más y acepto los términos y el código de conducta.</span>
       </label>
       <label class="flex items-start gap-3 text-sm text-white/70 tap">
         <input id="reg-flirts" type="checkbox" class="mt-1 w-5 h-5 accent-pink-400">
-        <span>Quiero recibir invitaciones de otras personas. <span class="text-white/40">Puedes cambiarlo cuando quieras.</span></span>
+        <span><span data-i18n="auth.flirts">Quiero recibir invitaciones de otras personas.</span> <span class="text-white/40" data-i18n="auth.flirtsNote">Puedes cambiarlo cuando quieras.</span></span>
       </label>
-      <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display">Crear cuenta</button>
+      <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.create">Crear cuenta</button>
     </form>
 
     <p id="auth-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
-    <p class="mt-8 text-center text-xs text-white/30">Solo +18 · EV2 Clandestinoz</p>
+    <p class="mt-8 text-center text-xs text-white/30" data-i18n="auth.adults">Solo +18 · EV2 Clandestinoz</p>
   </section>
 
   <!-- ================== EMPLEADO SIN PANTALLA TODAVÍA ================== -->
@@ -172,7 +172,7 @@
          style="background:linear-gradient(135deg,rgba(0,191,255,.2),rgba(255,20,147,.2));border:1px solid rgba(0,191,255,.4)">
       <i class="fa-solid fa-helmet-safety" style="color:var(--ev2-cyan)"></i>
     </div>
-    <p class="text-xs uppercase tracking-widest text-white/40">Entraste como</p>
+    <p class="text-xs uppercase tracking-widest text-white/40" data-i18n="staff.signedInAs">Entraste como</p>
     <h2 id="staff-role" class="font-display text-2xl ev2-gradient mb-1">—</h2>
     <p id="staff-name" class="text-sm text-white/60 mb-6">—</p>
 
@@ -181,7 +181,7 @@
       <p class="text-xs text-white/50 mt-3" id="staff-pending">—</p>
     </div>
 
-    <button id="btn-staff-logout" class="mt-8 text-sm text-white/60 underline">Salir</button>
+    <button id="btn-staff-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Salir</button>
   </section>
 
   <!-- ============================ APP (INVITADO) ============================ -->
@@ -196,7 +196,7 @@
           <span id="rt-dot" class="dot dot-off"></span><span id="rt-text">Conectando…</span>
         </span>
         <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
-        <button id="btn-logout" class="text-xs text-white/60 px-2" title="Salir"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
+        <button id="btn-logout" class="text-xs text-white/60 px-2" title="Salir" data-i18n-title="top.signOut"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
       </div>
     </header>
 
@@ -207,10 +207,10 @@
       <!-- ---------------------------- MAPA ---------------------------- -->
       <div id="view-map" class="p-3 space-y-3">
         <div class="grid grid-cols-4 gap-2">
-          <div class="stat-card"><div class="stat-number" id="stat-total">—</div><div class="stat-label">Mesas</div></div>
-          <div class="stat-card"><div class="stat-number" id="stat-free">—</div><div class="stat-label">Libres</div></div>
-          <div class="stat-card"><div class="stat-number" id="stat-vip">—</div><div class="stat-label">VIP</div></div>
-          <div class="stat-card"><div class="stat-number" id="stat-busy">—</div><div class="stat-label">Ocupadas</div></div>
+          <div class="stat-card"><div class="stat-number" id="stat-total">—</div><div class="stat-label" data-i18n="map.tables">Mesas</div></div>
+          <div class="stat-card"><div class="stat-number" id="stat-free">—</div><div class="stat-label" data-i18n="map.free">Libres</div></div>
+          <div class="stat-card"><div class="stat-number" id="stat-vip">—</div><div class="stat-label" data-i18n="map.vip">VIP</div></div>
+          <div class="stat-card"><div class="stat-number" id="stat-busy">—</div><div class="stat-label" data-i18n="map.busy">Ocupadas</div></div>
         </div>
 
         <div id="floor-buttons" class="flex gap-2 justify-center overflow-x-auto pb-1"></div>
@@ -219,23 +219,23 @@
           <canvas id="floor-canvas" width="800" height="580"></canvas>
         </div>
 
-        <p class="text-center text-[11px] text-white/40">Toca tu mesa en el plano</p>
+        <p class="text-center text-[11px] text-white/40" data-i18n="map.hint">Toca tu mesa en el plano</p>
 
         <div id="legend" class="flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-white/70 px-1"></div>
 
         <div class="info-panel">
           <h3 class="font-display text-sm mb-3" style="color:var(--ev2-pink)">
-            <i class="fa-solid fa-location-dot mr-1"></i> Mesa seleccionada
+            <i class="fa-solid fa-location-dot mr-1"></i> <span data-i18n="map.selected">Mesa seleccionada</span>
           </h3>
           <div class="grid grid-cols-2 gap-2">
-            <div class="info-item"><div class="info-label">Mesa</div><div class="info-value" id="sel-number">—</div></div>
-            <div class="info-item"><div class="info-label">Zona</div><div class="info-value" id="sel-section">—</div></div>
-            <div class="info-item"><div class="info-label">Capacidad</div><div class="info-value" id="sel-capacity">—</div></div>
-            <div class="info-item"><div class="info-label">Tipo</div><div class="info-value" id="sel-type">—</div></div>
+            <div class="info-item"><div class="info-label" data-i18n="map.table">Mesa</div><div class="info-value" id="sel-number">—</div></div>
+            <div class="info-item"><div class="info-label" data-i18n="map.zone">Zona</div><div class="info-value" id="sel-section">—</div></div>
+            <div class="info-item"><div class="info-label" data-i18n="map.capacity">Capacidad</div><div class="info-value" id="sel-capacity">—</div></div>
+            <div class="info-item"><div class="info-label" data-i18n="map.type">Tipo</div><div class="info-value" id="sel-type">—</div></div>
           </div>
           <p id="sel-note" class="text-xs text-white/50 mt-3" hidden></p>
           <button id="btn-sit" class="ev2-button w-full py-3 rounded-lg mt-3 font-display" disabled>Sentarme aquí</button>
-          <button id="btn-leave" class="w-full py-2 mt-2 text-sm text-red-300 underline" hidden>Dejar mi mesa</button>
+          <button id="btn-leave" class="w-full py-2 mt-2 text-sm text-red-300 underline" data-i18n="map.leave" hidden>Dejar mi mesa</button>
         </div>
       </div>
 
@@ -247,7 +247,7 @@
 
       <!-- ---------------------------- PEDIDOS ---------------------------- -->
       <div id="view-orders" class="p-4 space-y-3" hidden>
-        <p id="orders-empty" class="text-sm text-white/50 text-center py-10" hidden>Todavía no has pedido nada.</p>
+        <p id="orders-empty" class="text-sm text-white/50 text-center py-10" data-i18n="orders.empty" hidden>Todavía no has pedido nada.</p>
         <div id="orders-list" class="space-y-3"></div>
       </div>
 
@@ -260,11 +260,11 @@
           <p id="profile-email" class="text-sm text-white/50">—</p>
         </div>
         <div class="card rounded-xl divide-y divide-white/5">
-          <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50">Mesa</span><span id="profile-table">sin mesa</span></div>
-          <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50">Club</span><span id="profile-club">—</span></div>
-          <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50">Cuenta</span><span id="profile-role">—</span></div>
+          <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50" data-i18n="profile.table">Mesa</span><span id="profile-table">sin mesa</span></div>
+          <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50" data-i18n="profile.club">Club</span><span id="profile-club">—</span></div>
+          <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50" data-i18n="profile.account">Cuenta</span><span id="profile-role">—</span></div>
         </div>
-        <button id="btn-profile-logout" class="w-full py-3 rounded-xl card text-sm text-red-300">Cerrar sesión</button>
+        <button id="btn-profile-logout" class="w-full py-3 rounded-xl card text-sm text-red-300" data-i18n="profile.signOut">Cerrar sesión</button>
       </div>
     </main>
 
@@ -272,15 +272,15 @@
     <div id="cart-bar" class="fixed bottom-16 left-0 right-0 max-w-md mx-auto px-4 z-10" hidden>
       <button id="btn-order" class="ev2-button w-full py-3 rounded-xl font-display flex items-center justify-between px-5">
         <span><span id="cart-count">0</span> · <span id="cart-total">$0.00</span></span>
-        <span>Pedir <i class="fa-solid fa-arrow-right ml-1"></i></span>
+        <span><span data-i18n="cart.order">Pedir</span> <i class="fa-solid fa-arrow-right ml-1"></i></span>
       </button>
     </div>
 
     <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto grid grid-cols-4 border-t border-white/10 bg-black/95 backdrop-blur z-20">
-      <button data-view="map" class="nav-tab py-3 text-xs tab-active"><i class="fa-solid fa-map-location-dot block text-lg mb-1"></i>Mapa</button>
-      <button data-view="menu" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-martini-glass block text-lg mb-1"></i>Menú</button>
-      <button data-view="orders" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-receipt block text-lg mb-1"></i>Pedidos<span id="orders-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
-      <button data-view="profile" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-user block text-lg mb-1"></i>Perfil</button>
+      <button data-view="map" class="nav-tab py-3 text-xs tab-active"><i class="fa-solid fa-map-location-dot block text-lg mb-1"></i><span data-i18n="nav.map">Mapa</span></button>
+      <button data-view="menu" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-martini-glass block text-lg mb-1"></i><span data-i18n="nav.menu">Menú</span></button>
+      <button data-view="orders" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-receipt block text-lg mb-1"></i><span data-i18n="nav.orders">Pedidos</span><span id="orders-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
+      <button data-view="profile" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-user block text-lg mb-1"></i><span data-i18n="nav.profile">Perfil</span></button>
     </nav>
   </section>
 

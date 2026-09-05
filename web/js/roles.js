@@ -23,59 +23,83 @@
   // El orden de las claves sigue el CHECK de `users.role` en la migración 009.
   const ROLES = {
     guest: {
-      label: 'Invitado', home: GUEST_HOME, ready: true,
+      label: { es: 'Invitado', en: 'Guest' }, home: GUEST_HOME, ready: true,
     },
     waiter: {
-      label: 'Mesero', home: 'staff.html', ready: false, step: '5.7',
-      does: 'Recibir los pedidos de sus mesas, marcarlos entregados y ver sus propinas.',
+      label: { es: 'Mesero', en: 'Waiter' }, home: 'staff.html', ready: false, step: '5.7',
+      does: { es: 'Recibir los pedidos de sus mesas, marcarlos entregados y ver sus propinas.', en: 'Take orders from their tables, mark them delivered and see their tips.' },
     },
     bartender: {
-      label: 'Bartender', home: 'bartender.html', ready: false, step: '5.7',
-      does: 'La cola de pedidos de la barra en tiempo real: preparar, marcar listo.',
+      label: { es: 'Bartender', en: 'Bartender' }, home: 'bartender.html', ready: false, step: '5.7',
+      does: { es: 'La cola de pedidos de la barra en tiempo real: preparar, marcar listo.', en: "The bar's live order queue: prepare, mark ready." },
     },
     hostess: {
-      label: 'Hostess', home: 'staff.html', ready: false, step: '5.7',
-      does: 'Acomodar gente en las mesas y ver qué zonas están llenas.',
+      label: { es: 'Hostess', en: 'Hostess' }, home: 'staff.html', ready: false, step: '5.7',
+      does: { es: 'Acomodar gente en las mesas y ver qué zonas están llenas.', en: 'Seat people at tables and see which zones are full.' },
     },
     dancer: {
-      label: 'Bailarina', home: 'employee-portal.html', ready: false, step: '5.4',
-      does: 'Sus propinas, sus ganancias y el registro de su cuenta para el retiro.',
+      label: { es: 'Bailarina', en: 'Dancer' }, home: 'employee-portal.html', ready: false, step: '5.4',
+      does: { es: 'Sus propinas, sus ganancias y el registro de su cuenta para el retiro.', en: 'Their tips, their earnings and the bank account for payouts.' },
     },
     dj: {
-      label: 'DJ', home: 'employee-portal.html', ready: false, step: '5.4',
-      does: 'Las canciones que le pidieron y lo que lleva ganado por ellas.',
+      label: { es: 'DJ', en: 'DJ' }, home: 'employee-portal.html', ready: false, step: '5.4',
+      does: { es: 'Las canciones que le pidieron y lo que lleva ganado por ellas.', en: 'The songs people requested and what they have earned from them.' },
     },
     light_tech: {
-      label: 'Iluminación', home: 'employee-portal.html', ready: false, step: '5.4',
-      does: 'Sus turnos y sus ganancias.',
+      label: { es: 'Iluminación', en: 'Lighting' }, home: 'employee-portal.html', ready: false, step: '5.4',
+      does: { es: 'Sus turnos y sus ganancias.', en: 'Their shifts and their earnings.' },
     },
     valet: {
-      label: 'Valet', home: 'valet.html', ready: false, step: '5.6',
-      does: 'Entregar y devolver autos con el boleto, y ver los cajones ocupados.',
+      label: { es: 'Valet', en: 'Valet' }, home: 'valet.html', ready: false, step: '5.6',
+      does: { es: 'Entregar y devolver autos con el boleto, y ver los cajones ocupados.', en: 'Hand over and return cars with the ticket, and see which spots are taken.' },
     },
     driver: {
-      label: 'Conductor', home: 'driver.html', ready: false, step: '5.6',
-      does: 'Aceptar viajes, confirmar inicio y fin, y ver lo cobrado.',
+      label: { es: 'Conductor', en: 'Driver' }, home: 'driver.html', ready: false, step: '5.6',
+      does: { es: 'Aceptar viajes, confirmar inicio y fin, y ver lo cobrado.', en: 'Accept rides, confirm start and end, and see what was charged.' },
     },
     manager: {
-      label: 'Gerente', home: 'manager.html', ready: false, step: '5.5',
-      does: 'Precios, plano, empleados, caja del turno y aprobación de retiros.',
+      label: { es: 'Gerente', en: 'Manager' }, home: 'manager.html', ready: false, step: '5.5',
+      does: { es: 'Precios, plano, empleados, caja del turno y aprobación de retiros.', en: "Prices, floor plan, staff, the shift's till and payout approvals." },
     },
     admin: {
-      label: 'Administrador', home: 'manager.html', ready: false, step: '5.5',
-      does: 'Todo lo del gerente, más conductores, integraciones y cuentas de pago.',
+      label: { es: 'Administrador', en: 'Administrator' }, home: 'manager.html', ready: false, step: '5.5',
+      does: { es: 'Todo lo del gerente, más conductores, integraciones y cuentas de pago.', en: 'Everything the manager has, plus drivers, integrations and payment accounts.' },
     },
   };
 
   const UNKNOWN = {
-    label: 'Sin rol asignado', home: null, ready: false, step: null,
-    does: 'Este usuario tiene un rol que la app todavía no conoce.',
+    label: { es: 'Sin rol asignado', en: 'No role assigned' },
+    home: null,
+    ready: false,
+    step: null,
+    does: {
+      es: 'Este usuario tiene un rol que la app todavía no conoce.',
+      en: 'This user has a role the app does not know yet.',
+    },
   };
 
-  /** Lo que se sabe del rol. Nunca devuelve `undefined`: un rol nuevo en la base no
-   *  debe dejar la pantalla en blanco. */
-  function describe(role) {
-    return Object.assign({ role: role || null }, ROLES[role] || UNKNOWN);
+  const pick = (value, lang) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value === 'string') return value;
+    // Si a un idioma le falta la traducción, español antes que vacío.
+    return value[lang] !== undefined ? value[lang] : value.es;
+  };
+
+  /**
+   * Lo que se sabe del rol, ya en el idioma pedido. Nunca devuelve `undefined`: un rol
+   * nuevo en la base no debe dejar la pantalla en blanco.
+   */
+  function describe(role, lang) {
+    const source = ROLES[role] || UNKNOWN;
+    const language = lang === 'en' ? 'en' : 'es';
+    return {
+      role: role || null,
+      label: pick(source.label, language),
+      does: pick(source.does, language),
+      home: source.home,
+      ready: source.ready,
+      step: source.step === undefined ? null : source.step,
+    };
   }
 
   const isGuest = (role) => role === 'guest';
@@ -88,8 +112,8 @@
    *   'redirect' — hay pantalla conectada para su rol y no es esta; `to` la nombra.
    *   'pending'  — su pantalla todavía no existe; hay que explicárselo.
    */
-  function route(role, currentPage) {
-    const info = describe(role);
+  function route(role, currentPage, lang) {
+    const info = describe(role, lang);
     const page = String(currentPage || '').split('/').pop() || GUEST_HOME;
 
     if (!info.ready) return { action: 'pending', info };

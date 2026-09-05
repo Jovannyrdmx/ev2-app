@@ -32,6 +32,87 @@
       'realtime.reconnecting': 'Reconectando…',
       'realtime.resync': 'Actualizando la pantalla…',
       'realtime.replaced': 'Abriste la app en otro lado.',
+
+      // --- acceso ---
+      'auth.city': 'Nogales, Sonora',
+      'auth.signin': 'Entrar',
+      'auth.signup': 'Crear cuenta',
+      'auth.email': 'Correo',
+      'auth.password': 'Contraseña',
+      'auth.enter': 'Entrar al club',
+      'auth.firstName': 'Nombre',
+      'auth.lastName': 'Apellido',
+      'auth.newPassword': 'Contraseña (mínimo 8)',
+      'auth.birthDate': 'Fecha de nacimiento',
+      'auth.terms': 'Tengo 18 años o más y acepto los términos y el código de conducta.',
+      'auth.flirts': 'Quiero recibir invitaciones de otras personas.',
+      'auth.flirtsNote': 'Puedes cambiarlo cuando quieras.',
+      'auth.create': 'Crear cuenta',
+      'auth.adults': 'Solo +18 · EV2 Clandestinoz',
+
+      // --- barra superior y navegación ---
+      'nav.map': 'Mapa',
+      'nav.menu': 'Menú',
+      'nav.orders': 'Pedidos',
+      'nav.profile': 'Perfil',
+      'top.noTable': 'sin mesa',
+      'top.table': 'mesa',
+      'top.live': 'En vivo',
+      'top.offline': 'Sin conexión',
+      'top.otherSession': 'Otra sesión',
+      'top.signOut': 'Salir',
+
+      // --- plano ---
+      'map.tables': 'Mesas',
+      'map.free': 'Libres',
+      'map.vip': 'VIP',
+      'map.busy': 'Ocupadas',
+      'map.hint': 'Toca tu mesa en el plano',
+      'map.selected': 'Mesa seleccionada',
+      'map.table': 'Mesa',
+      'map.zone': 'Zona',
+      'map.capacity': 'Capacidad',
+      'map.type': 'Tipo',
+      'map.sit': 'Sentarme aquí',
+      'map.move': 'Cambiarme a esta mesa',
+      'map.alreadyHere': 'Ya estás en esta mesa',
+      'map.youAreHere': 'Aquí estás sentado.',
+      'map.unavailable': 'No disponible',
+      'map.full': 'Esta mesa ya está llena.',
+      'map.leave': 'Dejar mi mesa',
+      'map.seated': 'Listo, esa es tu mesa',
+      'map.occupied': 'Ocupada',
+      'map.mine': 'Tu mesa',
+      'map.floorBaja': 'PLANTA BAJA',
+      'map.floorAlta': 'PLANTA ALTA',
+      'map.floorAmbas': 'TODO EL CLUB',
+
+      // --- menú y pedidos ---
+      'menu.all': 'Todo',
+      'menu.soldOut': 'agotado',
+      'menu.empty': 'No hay bebidas en esta categoría.',
+      'menu.noStock': 'No hay más existencias de eso',
+      'cart.order': 'Pedir',
+      'orders.empty': 'Todavía no has pedido nada.',
+      'orders.needTable': 'Primero elige tu mesa: el mesero necesita saber a dónde llevarlo',
+      'orders.sent': 'Pedido enviado a la barra',
+      'orders.ready': '¡Tu pedido está listo en la barra!',
+
+      // --- perfil ---
+      'profile.table': 'Mesa',
+      'profile.club': 'Club',
+      'profile.account': 'Cuenta',
+      'profile.signOut': 'Cerrar sesión',
+
+      // --- empleado sin pantalla ---
+      'staff.signedInAs': 'Entraste como',
+      'staff.pending': 'Esta pantalla todavía no está conectada al servidor. Se construye en el paso {step} del plan de implementación.',
+      'staff.noScreen': 'Esta cuenta no tiene una pantalla asignada. Avisa al administrador del club.',
+
+      // --- avisos ---
+      'banner.replaced': 'Abriste la app en otro lado. Recarga si quieres seguir aquí.',
+      'banner.expired': 'Tu sesión terminó. Vuelve a entrar.',
+      'banner.updating': 'Actualizando…',
     },
     en: {
       'error.network': 'No connection. Check your signal and try again.',
@@ -46,21 +127,170 @@
       'realtime.reconnecting': 'Reconnecting…',
       'realtime.resync': 'Refreshing…',
       'realtime.replaced': 'You opened the app somewhere else.',
+
+      // --- sign in ---
+      'auth.city': 'Nogales, Sonora',
+      'auth.signin': 'Sign in',
+      'auth.signup': 'Sign up',
+      'auth.email': 'Email',
+      'auth.password': 'Password',
+      'auth.enter': 'Enter the club',
+      'auth.firstName': 'First name',
+      'auth.lastName': 'Last name',
+      'auth.newPassword': 'Password (at least 8)',
+      'auth.birthDate': 'Date of birth',
+      'auth.terms': "I'm 18 or older and I accept the terms and the code of conduct.",
+      'auth.flirts': 'I want to receive invitations from other people.',
+      'auth.flirtsNote': 'You can change this anytime.',
+      'auth.create': 'Create account',
+      'auth.adults': '18+ only · EV2 Clandestinoz',
+
+      // --- top bar and navigation ---
+      'nav.map': 'Map',
+      'nav.menu': 'Menu',
+      'nav.orders': 'Orders',
+      'nav.profile': 'Profile',
+      'top.noTable': 'no table',
+      'top.table': 'table',
+      'top.live': 'Live',
+      'top.offline': 'Offline',
+      'top.otherSession': 'Other session',
+      'top.signOut': 'Sign out',
+
+      // --- floor plan ---
+      'map.tables': 'Tables',
+      'map.free': 'Free',
+      'map.vip': 'VIP',
+      'map.busy': 'Taken',
+      'map.hint': 'Tap your table on the map',
+      'map.selected': 'Selected table',
+      'map.table': 'Table',
+      'map.zone': 'Zone',
+      'map.capacity': 'Capacity',
+      'map.type': 'Type',
+      'map.sit': 'Sit here',
+      'map.move': 'Move to this table',
+      'map.alreadyHere': "You're already at this table",
+      'map.youAreHere': "You're sitting here.",
+      'map.unavailable': 'Not available',
+      'map.full': 'This table is full.',
+      'map.leave': 'Leave my table',
+      'map.seated': "Done, that's your table",
+      'map.occupied': 'Taken',
+      'map.mine': 'Your table',
+      'map.floorBaja': 'GROUND FLOOR',
+      'map.floorAlta': 'UPPER FLOOR',
+      'map.floorAmbas': 'WHOLE CLUB',
+
+      // --- menu and orders ---
+      'menu.all': 'All',
+      'menu.soldOut': 'sold out',
+      'menu.empty': 'No drinks in this category.',
+      'menu.noStock': "There's no more of that in stock",
+      'cart.order': 'Order',
+      'orders.empty': "You haven't ordered anything yet.",
+      'orders.needTable': 'Pick your table first: the waiter needs to know where to take it',
+      'orders.sent': 'Order sent to the bar',
+      'orders.ready': 'Your order is ready at the bar!',
+
+      // --- profile ---
+      'profile.table': 'Table',
+      'profile.club': 'Club',
+      'profile.account': 'Account',
+      'profile.signOut': 'Sign out',
+
+      // --- staff without a screen yet ---
+      'staff.signedInAs': 'You signed in as',
+      'staff.pending': 'This screen is not connected to the server yet. It is built in step {step} of the implementation plan.',
+      'staff.noScreen': 'This account has no screen assigned. Tell the club administrator.',
+
+      // --- notices ---
+      'banner.replaced': 'You opened the app somewhere else. Reload if you want to continue here.',
+      'banner.expired': 'Your session ended. Please sign in again.',
+      'banner.updating': 'Refreshing…',
     },
   };
 
-  let lang = 'es';
+  const STORAGE_KEY = 'ev2.lang';
+  const SUPPORTED = Object.keys(STRINGS);
+
+  /**
+   * El idioma se elige una vez y se recuerda. Antes vivía en una variable en memoria:
+   * el botón cambiaba de etiqueta, y al recargar volvía a español sin avisar.
+   */
+  function readStored(storage) {
+    try {
+      const saved = storage && storage.getItem(STORAGE_KEY);
+      if (saved && SUPPORTED.includes(saved)) return saved;
+    } catch { /* modo privado, cuota llena: no es motivo para no abrir la app */ }
+    return null;
+  }
+
+  function detect(nav) {
+    const tags = (nav && (nav.languages || (nav.language ? [nav.language] : []))) || [];
+    for (const tag of tags) {
+      const base = String(tag).slice(0, 2).toLowerCase();
+      if (SUPPORTED.includes(base)) return base;
+    }
+    return 'es';
+  }
+
+  const g = typeof globalThis !== 'undefined' ? globalThis : {};
+  let store = null;
+  try { store = g.localStorage || null; } catch { store = null; }
+
+  let lang = readStored(store) || detect(g.navigator) || 'es';
 
   function setLanguage(next) {
     lang = STRINGS[next] ? next : 'es';
+    try { if (store) store.setItem(STORAGE_KEY, lang); } catch { /* ver readStored */ }
+    if (g.document && g.document.documentElement) g.document.documentElement.lang = lang;
     return lang;
   }
   const getLanguage = () => lang;
   const locale = () => LOCALES[lang];
+  /** El otro idioma: es lo que tiene que decir el botón, no el actual. */
+  const otherLanguage = () => (lang === 'es' ? 'en' : 'es');
 
   function t(key, fallback) {
     const table = STRINGS[lang] || STRINGS.es;
-    return table[key] || fallback || key;
+    // Si a un idioma le falta una clave se cae al español antes que al nombre de la
+    // clave: un botón que diga "map.sit" es peor que uno que diga "Sentarme aquí".
+    const value = table[key] !== undefined ? table[key] : STRINGS.es[key];
+    return value !== undefined ? value : (fallback !== undefined ? fallback : key);
+  }
+
+  /** `t` con huecos: t('staff.pending', { step: '5.7' }). */
+  function tf(key, vars) {
+    return String(t(key)).replace(/\{(\w+)\}/g, (whole, name) => (
+      vars && vars[name] !== undefined ? vars[name] : whole));
+  }
+
+  /**
+   * Traduce el HTML ya escrito. Cada texto visible lleva `data-i18n="clave"`, y los
+   * textos que van dentro de un atributo llevan `data-i18n-placeholder` o
+   * `data-i18n-title`. Así el idioma se aplica sin volver a pintar la pantalla.
+   */
+  function applyTo(root) {
+    if (!root || !root.querySelectorAll) return 0;
+    let count = 0;
+    for (const el of root.querySelectorAll('[data-i18n]')) {
+      el.textContent = t(el.getAttribute('data-i18n'));
+      count += 1;
+    }
+    for (const attr of ['placeholder', 'title', 'aria-label']) {
+      for (const el of root.querySelectorAll(`[data-i18n-${attr}]`)) {
+        el.setAttribute(attr, t(el.getAttribute(`data-i18n-${attr}`)));
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  /** Las claves que le faltan a un idioma. Se usa en las pruebas. */
+  function missingKeys(language) {
+    const table = STRINGS[language] || {};
+    return Object.keys(STRINGS.es).filter((k) => table[k] === undefined);
   }
 
   /**
@@ -116,7 +346,8 @@
   }
 
   return {
-    setLanguage, getLanguage, locale, t, errorMessage, money, addMoney, dateTime, time,
-    minutesUntil, STRINGS,
+    setLanguage, getLanguage, otherLanguage, locale, t, tf, applyTo, missingKeys,
+    errorMessage, money, addMoney, dateTime, time, minutesUntil,
+    detect, STRINGS, SUPPORTED, STORAGE_KEY,
   };
 }));

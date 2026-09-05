@@ -49,6 +49,8 @@
   }
 
   const money = (amount, currency) => EV2Format.money(amount, currency || 'MXN');
+  const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
+  const lang = () => EV2Format.getLanguage();
   const escape = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -123,12 +125,26 @@
   $('btn-profile-logout').onclick = signOut;
   $('btn-staff-logout').onclick = signOut;
 
-  $('btn-lang').onclick = () => {
-    const next = EV2Format.getLanguage() === 'es' ? 'en' : 'es';
-    EV2Format.setLanguage(next);
-    $('btn-lang').textContent = next === 'es' ? 'EN' : 'ES';
-    renderOrders();
+  /**
+   * Cambiar de idioma tiene que cambiar TODA la pantalla, no solo la etiqueta del botón
+   * (que era lo único que pasaba). `applyTo` traduce el HTML marcado con `data-i18n`, y
+   * después se vuelven a pintar las partes que se generan desde JavaScript.
+   */
+  function applyLanguage() {
+    EV2Format.applyTo(document);
+    // El botón muestra el idioma AL QUE se cambia, no el actual.
+    $('btn-lang').textContent = EV2Format.otherLanguage().toUpperCase();
     renderMenu();
+    renderCart();
+    renderOrders();
+    if (!$('screen-app').hidden) renderFloor();
+    if (!$('screen-staff').hidden) renderStaffPending();
+    setConnection(lastConnection.on, lastConnection.key);
+  }
+
+  $('btn-lang').onclick = () => {
+    EV2Format.setLanguage(EV2Format.otherLanguage());
+    applyLanguage();
   };
 
   // ---------------------------------------------------------------- ruteo por rol
@@ -140,23 +156,28 @@
    */
   async function afterSignIn() {
     const role = api.session.user && api.session.user.role;
-    const decision = EV2Roles.route(role, location.pathname);
+    const decision = EV2Roles.route(role, location.pathname, lang());
 
     if (decision.action === 'redirect') { location.href = decision.to; return; }
-    if (decision.action === 'pending') { showStaffPending(decision.info); return; }
+    if (decision.action === 'pending') {
+      $('screen-auth').hidden = true;
+      $('screen-app').hidden = true;
+      $('screen-staff').hidden = false;
+      renderStaffPending();
+      return;
+    }
     await enterClub();
   }
 
-  function showStaffPending(info) {
-    $('screen-auth').hidden = true;
-    $('screen-app').hidden = true;
-    $('screen-staff').hidden = false;
+  function renderStaffPending() {
+    const role = api.session.user && api.session.user.role;
+    const info = EV2Roles.describe(role, lang());
     $('staff-role').textContent = info.label;
     $('staff-name').textContent = (api.session.user && api.session.user.display_name) || '';
     $('staff-does').textContent = info.does || '';
     $('staff-pending').textContent = info.step
-      ? `Esta pantalla todavía no está conectada al servidor. Se construye en el paso ${info.step} del plan de implementación.`
-      : 'Esta cuenta no tiene una pantalla asignada. Avisa al administrador del club.';
+      ? t('staff.pending', { step: info.step })
+      : t('staff.noScreen');
   }
 
   // ---------------------------------------------------------------- carga inicial
@@ -171,7 +192,7 @@
     $('me-name').textContent = user.display_name || 'Invitado';
     $('profile-name').textContent = user.display_name || 'Invitado';
     $('profile-email').textContent = user.email || '';
-    $('profile-role').textContent = EV2Roles.describe(user.role).label;
+    $('profile-role').textContent = EV2Roles.describe(user.role, lang()).label;
     $('profile-club').textContent = (state.club && state.club.name) || 'EV2 Clandestinoz';
     await Promise.all([loadFloor(), loadMenu(), loadOrders()]);
     connectRealtime();
@@ -236,16 +257,17 @@
     renderSelection();
 
     const table = state.myTable;
-    $('me-table').textContent = table ? `mesa ${table.table_number || table.code}` : 'sin mesa';
+    $('me-table').textContent = table
+      ? `${t('top.table')} ${table.table_number || table.code}` : t('top.noTable');
     $('profile-table').textContent = table
-      ? `${table.section || ''} ${table.table_number || table.code}`.trim() : 'sin mesa';
+      ? `${table.section || ''} ${table.table_number || table.code}`.trim() : t('top.noTable');
   }
 
   function renderFloorButtons() {
     const box = $('floor-buttons');
     box.innerHTML = state.floors.map((f) => `
       <button class="floor-btn ${f === state.floor ? 'active' : ''}" data-floor="${escape(f)}">
-        ${escape(EV2Map.floorLabel(f))}
+        ${escape(floorName(f))}
       </button>`).join('');
     box.querySelectorAll('[data-floor]').forEach((b) => {
       b.onclick = () => {
@@ -270,8 +292,8 @@
   function renderLegend() {
     const items = EV2Map.zones(tablesOnFloor())
       .map((z) => ({ name: z.name, color: z.color }))
-      .concat([{ name: 'Ocupada', color: EV2Map.COLORS.red },
-        { name: 'Tu mesa', color: EV2Map.COLORS.mine }]);
+      .concat([{ name: t('map.occupied'), color: EV2Map.COLORS.red },
+        { name: t('map.mine'), color: EV2Map.COLORS.mine }]);
     $('legend').innerHTML = items.map((z) => `
       <span class="flex items-center gap-1.5">
         <span class="legend-color" style="background:${escape(z.color)}"></span>${escape(z.name)}
@@ -308,8 +330,14 @@
   }
 
   const TYPE_LABELS = {
-    booth: 'Booth', vip: 'VIP', standard: 'Estándar', bar_top: 'Barra',
+    es: { booth: 'Booth', vip: 'VIP', standard: 'Estándar', bar_top: 'Barra' },
+    en: { booth: 'Booth', vip: 'VIP', standard: 'Standard', bar_top: 'Bar top' },
   };
+  const typeName = (type) => (TYPE_LABELS[lang()] || TYPE_LABELS.es)[type] || type || '—';
+  /** El nombre del piso sale del catálogo de idioma; EV2Map solo conoce el español. */
+  const FLOOR_KEYS = { baja: 'map.floorBaja', alta: 'map.floorAlta', ambas: 'map.floorAmbas' };
+  const floorName = (floor) => (FLOOR_KEYS[floor]
+    ? t(FLOOR_KEYS[floor]) : EV2Map.floorLabel(floor));
 
   function renderSelection() {
     const table = selectedTable();
@@ -328,34 +356,32 @@
       $('sel-type').textContent = '—';
       note.hidden = true;
       sit.disabled = true;
-      sit.textContent = 'Sentarme aquí';
+      sit.textContent = t('map.sit');
       return;
     }
 
     $('sel-number').textContent = table.table_number != null ? table.table_number : (table.code || '—');
     $('sel-section').textContent = table.section || '—';
     $('sel-capacity').textContent = `${EV2Map.seatedCount(table)}/${table.capacity}`;
-    $('sel-type').textContent = TYPE_LABELS[table.type] || (table.type || '—');
+    $('sel-type').textContent = typeName(table.type);
 
     if (isMine) {
-      note.textContent = 'Aquí estás sentado.';
+      note.textContent = t('map.youAreHere');
       note.hidden = false;
       sit.disabled = true;
-      sit.textContent = 'Ya estás en esta mesa';
+      sit.textContent = t('map.alreadyHere');
       return;
     }
     if (!EV2Map.isFree(table)) {
-      note.textContent = table.status && table.status !== 'available'
-        ? `Esta mesa está ${escape(table.status)}.`
-        : 'Esta mesa ya está llena.';
+      note.textContent = t('map.full');
       note.hidden = false;
       sit.disabled = true;
-      sit.textContent = 'No disponible';
+      sit.textContent = t('map.unavailable');
       return;
     }
     note.hidden = true;
     sit.disabled = false;
-    sit.textContent = mine ? 'Cambiarme a esta mesa' : 'Sentarme aquí';
+    sit.textContent = mine ? t('map.move') : t('map.sit');
   }
 
   $('btn-sit').onclick = async () => {
@@ -366,7 +392,7 @@
     try {
       await api.post(`/nightclubs/${clubId()}/tables/${table.id}/seat`, {});
       await loadFloor();
-      toast('Listo, esa es tu mesa', 'ok');
+      toast(t('map.seated'), 'ok');
     } catch (err) {
       showError(err);
       renderSelection();
@@ -390,7 +416,7 @@
     cats.innerHTML = [null, ...state.categories].map((c) => `
       <button data-cat="${c === null ? '' : escape(c)}"
               class="px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${state.category === c ? 'ev2-button' : 'card'}">
-        ${c === null ? 'Todo' : escape(c)}
+        ${c === null ? escape(t('menu.all')) : escape(c)}
       </button>`).join('');
     cats.querySelectorAll('[data-cat]').forEach((b) => {
       b.onclick = () => { state.category = b.dataset.cat || null; renderMenu(); };
@@ -404,7 +430,7 @@
       <div class="card rounded-xl p-3 flex items-center gap-3 ${out ? 'opacity-50' : ''}">
         <div class="flex-1">
           <p class="font-semibold">${escape(d.name)}</p>
-          <p class="text-xs text-white/50">${escape(d.category || '')}${out ? ' · agotado' : ''}</p>
+          <p class="text-xs text-white/50">${escape(d.category || '')}${out ? ` · ${escape(t('menu.soldOut'))}` : ''}</p>
           <p class="text-sm mt-1">${money(d.price, d.currency)}</p>
         </div>
         ${out ? '' : `
@@ -414,13 +440,13 @@
           <button data-more="${d.id}" class="w-9 h-9 rounded-full ev2-button">+</button>
         </div>`}
       </div>`;
-    }).join('') || '<p class="text-white/40 text-sm text-center py-10">No hay bebidas en esta categoría.</p>';
+    }).join('') || `<p class="text-white/40 text-sm text-center py-10">${escape(t('menu.empty'))}</p>`;
 
     $('menu-list').querySelectorAll('[data-more]').forEach((b) => {
       b.onclick = () => {
         const drink = state.drinks.find((d) => d.id === b.dataset.more);
         // El tope no es un capricho: pedir más de lo que hay solo produce un error al final.
-        if (!cart.add(drink)) toast('No hay más existencias de eso');
+        if (!cart.add(drink)) toast(t('menu.noStock'));
         renderMenu(); renderCart();
       };
     });
@@ -439,7 +465,7 @@
 
   $('btn-order').onclick = async () => {
     if (!state.myTable) {
-      toast('Primero elige tu mesa: el mesero necesita saber a dónde llevarlo');
+      toast(t('orders.needTable'));
       showView('map');
       return;
     }
@@ -456,7 +482,7 @@
       state.orders.unshift(order);
       renderOrders();
       showView('orders');
-      toast('Pedido enviado a la barra', 'ok');
+      toast(t('orders.sent'), 'ok');
     } catch (err) {
       // La clave del pedido NO se regenera: si esto fue un tiempo de espera y el pedido
       // sí entró, reintentar con la misma clave devuelve el mismo, no uno nuevo.
@@ -510,26 +536,33 @@
 
   // ---------------------------------------------------------------- tiempo real
 
-  function setConnection(on, text) {
+  // Se recuerda el último estado para poder repintarlo al cambiar de idioma.
+  const lastConnection = { on: false, key: 'realtime.reconnecting', vars: null };
+
+  function setConnection(on, key, vars) {
+    lastConnection.on = on;
+    lastConnection.key = key;
+    lastConnection.vars = vars || null;
     $('rt-dot').className = `dot ${on === true ? 'dot-on' : on === null ? 'dot-wait' : 'dot-off'}`;
-    $('rt-text').textContent = text;
+    $('rt-text').textContent = vars && vars.text ? vars.text : t(key);
   }
 
   function connectRealtime() {
     const rt = api.createRealtime();
     state.realtime = rt;
 
-    rt.on('open', () => { setConnection(true, 'En vivo'); banner(null); });
-    rt.on('reconnecting', (i) => setConnection(null, `Reconectando en ${Math.round(i.in_ms / 1000)}s`));
-    rt.on('close', () => setConnection(false, 'Sin conexión'));
+    rt.on('open', () => { setConnection(true, 'top.live'); banner(null); });
+    rt.on('reconnecting', (i) => setConnection(null, 'realtime.reconnecting',
+      { text: `${t('realtime.reconnecting')} ${Math.round(i.in_ms / 1000)}s` }));
+    rt.on('close', () => setConnection(false, 'top.offline'));
     rt.on('replaced', () => {
-      setConnection(false, 'Otra sesión');
-      banner('Abriste la app en otro lado. Recarga si quieres seguir aquí.');
+      setConnection(false, 'top.otherSession');
+      banner(t('banner.replaced'));
     });
     // El hueco fue mayor de lo que el servidor reproduce: recargar es lo honesto, en vez
     // de seguir pintando un estado que ya no corresponde.
     rt.on('resync_required', async () => {
-      banner('Actualizando…');
+      banner(t('banner.updating'));
       await Promise.all([loadFloor(), loadOrders()]);
       banner(null);
     });
@@ -539,13 +572,13 @@
       if (!change) return;
       if (change.changed === 'orders') {
         if (change.unknownOrder) await loadOrders(); else renderOrders();
-        if (change.status === 'ready') toast('¡Tu pedido está listo en la barra!', 'ok');
+        if (change.status === 'ready') toast(t('orders.ready'), 'ok');
       }
       if (change.changed === 'floorPlan') await loadFloor();
     });
 
     api.on('auth:expired', () => {
-      banner('Tu sesión terminó. Vuelve a entrar.');
+      banner(t('banner.expired'));
       setTimeout(() => location.reload(), 2500);
     });
 
@@ -555,9 +588,17 @@
   // ---------------------------------------------------------------- arranque
 
   (async function boot() {
+    // El idioma guardado (o el del navegador) se aplica ANTES de la primera pantalla:
+    // si no, se ve un parpadeo en español y luego cambia.
+    EV2Format.setLanguage(EV2Format.getLanguage());
+    EV2Format.applyTo(document);
+    $('btn-lang').textContent = EV2Format.otherLanguage().toUpperCase();
     try {
       const data = await api.get(`/nightclubs/by-slug/${encodeURIComponent(CLUB_SLUG)}`);
       state.club = data.nightclub;
+      // Viene del servidor, no del catálogo: se le quita la marca para que un cambio
+      // de idioma no lo reemplace por el texto por omisión.
+      $('club-city').removeAttribute('data-i18n');
       $('club-city').textContent = `${data.nightclub.city}, ${data.nightclub.country}`;
     } catch {
       // Sin club no se puede entrar, pero la pantalla de acceso debe verse igual.
