@@ -15,23 +15,25 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
 
+        /* Paleta del plano original (table-selector.html). */
         :root {
             --ev2-cyan: #00BFFF;
             --ev2-pink: #FF1493;
             --ev2-purple: #9D00FF;
             --ev2-lime: #00FF00;
             --ev2-gold: #FFD700;
+            --ev2-red: #FF4444;
         }
 
         body {
             font-family: 'Inter', system-ui, sans-serif;
-            background: linear-gradient(135deg, #0a0a0a 0%, #1a0033 50%, #001a33 100%);
+            background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%);
         }
 
         .font-display { font-family: 'Poppins', sans-serif; font-weight: 700; }
 
         .ev2-gradient {
-            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 25%, var(--ev2-purple) 50%, var(--ev2-lime) 75%, var(--ev2-gold) 100%);
+            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
             -webkit-background-clip: text;
             background-clip: text;
             -webkit-text-fill-color: transparent;
@@ -39,10 +41,12 @@
 
         .ev2-button {
             background: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink));
+            color: #000;
+            font-weight: 600;
             transition: filter .15s ease, transform .1s ease;
         }
         .ev2-button:active { transform: scale(.98); }
-        .ev2-button:disabled { filter: grayscale(1) brightness(.6); cursor: not-allowed; }
+        .ev2-button:disabled { filter: grayscale(1) brightness(.55); cursor: not-allowed; }
 
         .tab-active { color: var(--ev2-cyan); border-bottom: 3px solid var(--ev2-cyan); }
 
@@ -50,13 +54,59 @@
         button, .tap { min-height: 44px; }
 
         .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
-        .card-free { border-color: rgba(0,191,255,.45); }
-        .card-mine { border-color: var(--ev2-lime); box-shadow: 0 0 12px rgba(0,255,0,.25); }
-        .card-full { opacity: .45; }
+
+        /* Tarjetas de conteo del diseño original. */
+        .stat-card {
+            background: rgba(0, 191, 255, .10);
+            border: 1px solid var(--ev2-pink);
+            border-radius: 10px;
+            padding: 10px 6px;
+            text-align: center;
+        }
+        .stat-number { font-size: 1.5rem; font-weight: 700; color: var(--ev2-lime); line-height: 1.1; }
+        .stat-label { font-size: .62rem; color: var(--ev2-cyan); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
+
+        .floor-btn {
+            padding: 10px 18px;
+            border: 2px solid var(--ev2-cyan);
+            background: transparent;
+            color: var(--ev2-cyan);
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: .8rem;
+            white-space: nowrap;
+            transition: all .25s ease;
+        }
+        .floor-btn.active {
+            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
+            color: #000;
+            border-color: var(--ev2-pink);
+        }
+
+        .canvas-wrapper {
+            background: #000;
+            border: 2px solid var(--ev2-cyan);
+            border-radius: 12px;
+            padding: 8px;
+            box-shadow: 0 0 24px rgba(0, 191, 255, .28);
+        }
+        #floor-canvas { width: 100%; height: auto; display: block; border-radius: 8px; cursor: crosshair; }
+
+        .info-panel {
+            background: linear-gradient(135deg, rgba(0,191,255,.10) 0%, rgba(255,20,147,.10) 100%);
+            border: 2px solid var(--ev2-cyan);
+            border-radius: 10px;
+            padding: 14px;
+        }
+        .info-item { background: rgba(0,191,255,.05); padding: 8px 10px; border-radius: 6px; border-left: 3px solid var(--ev2-cyan); }
+        .info-label { font-size: .62rem; color: #9aa4b8; text-transform: uppercase; letter-spacing: .04em; }
+        .info-value { font-size: 1rem; color: var(--ev2-lime); font-weight: 700; margin-top: 2px; }
+
+        .legend-color { width: 14px; height: 14px; border-radius: 4px; border: 1px solid rgba(255,255,255,.7); flex: none; }
 
         .dot { width: .5rem; height: .5rem; border-radius: 9999px; display: inline-block; }
         .dot-on { background: var(--ev2-lime); }
-        .dot-off { background: #f87171; }
+        .dot-off { background: var(--ev2-red); }
         .dot-wait { background: var(--ev2-gold); }
 
         @keyframes pulse-soft { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
@@ -66,7 +116,7 @@
     </style>
 </head>
 <body class="text-white">
-<div class="max-w-md mx-auto min-h-screen bg-gradient-to-b from-slate-950 via-purple-950 to-slate-950 flex flex-col">
+<div class="max-w-md mx-auto min-h-screen flex flex-col">
 
   <!-- ============================ ENTRAR ============================ -->
   <section id="screen-auth" class="flex-1 flex flex-col justify-center px-6 py-10">
@@ -115,9 +165,28 @@
     <p class="mt-8 text-center text-xs text-white/30">Solo +18 · EV2 Clandestinoz</p>
   </section>
 
-  <!-- ============================ APP ============================ -->
+  <!-- ================== EMPLEADO SIN PANTALLA TODAVÍA ================== -->
+  <!-- No se le manda al plano de invitado ni a un archivo con datos inventados. -->
+  <section id="screen-staff" class="flex-1 flex flex-col justify-center px-6 py-10 text-center" hidden>
+    <div class="w-20 h-20 mx-auto mb-5 rounded-2xl flex items-center justify-center text-4xl"
+         style="background:linear-gradient(135deg,rgba(0,191,255,.2),rgba(255,20,147,.2));border:1px solid rgba(0,191,255,.4)">
+      <i class="fa-solid fa-helmet-safety" style="color:var(--ev2-cyan)"></i>
+    </div>
+    <p class="text-xs uppercase tracking-widest text-white/40">Entraste como</p>
+    <h2 id="staff-role" class="font-display text-2xl ev2-gradient mb-1">—</h2>
+    <p id="staff-name" class="text-sm text-white/60 mb-6">—</p>
+
+    <div class="info-panel text-left">
+      <p class="text-sm text-white/80" id="staff-does">—</p>
+      <p class="text-xs text-white/50 mt-3" id="staff-pending">—</p>
+    </div>
+
+    <button id="btn-staff-logout" class="mt-8 text-sm text-white/60 underline">Salir</button>
+  </section>
+
+  <!-- ============================ APP (INVITADO) ============================ -->
   <section id="screen-app" class="flex-1 flex flex-col" hidden>
-    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10 sticky top-0 backdrop-blur bg-slate-950/80 z-10">
+    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10 sticky top-0 backdrop-blur bg-black/70 z-20">
       <div>
         <p class="font-display text-lg ev2-gradient leading-none">EV2</p>
         <p class="text-xs text-white/50"><span id="me-name">—</span> · <span id="me-table">sin mesa</span></p>
@@ -134,42 +203,84 @@
     <div id="banner" class="px-4 py-2 text-sm text-center bg-amber-500/20 text-amber-100" hidden></div>
 
     <main class="flex-1 overflow-y-auto pb-28">
-      <!-- MESA -->
-      <div id="view-tables" class="p-4 space-y-4">
-        <div id="my-table-box" class="card rounded-xl p-4" hidden>
-          <p class="text-xs text-white/50">Tu mesa</p>
-          <p id="my-table-name" class="font-display text-xl"></p>
-          <button id="btn-leave" class="mt-3 text-sm text-red-300 underline">Dejar la mesa</button>
+
+      <!-- ---------------------------- MAPA ---------------------------- -->
+      <div id="view-map" class="p-3 space-y-3">
+        <div class="grid grid-cols-4 gap-2">
+          <div class="stat-card"><div class="stat-number" id="stat-total">—</div><div class="stat-label">Mesas</div></div>
+          <div class="stat-card"><div class="stat-number" id="stat-free">—</div><div class="stat-label">Libres</div></div>
+          <div class="stat-card"><div class="stat-number" id="stat-vip">—</div><div class="stat-label">VIP</div></div>
+          <div class="stat-card"><div class="stat-number" id="stat-busy">—</div><div class="stat-label">Ocupadas</div></div>
         </div>
-        <p id="tables-hint" class="text-sm text-white/60">Elige dónde te vas a sentar para poder pedir.</p>
-        <div id="floor-plan" class="space-y-5"></div>
+
+        <div id="floor-buttons" class="flex gap-2 justify-center overflow-x-auto pb-1"></div>
+
+        <div class="canvas-wrapper">
+          <canvas id="floor-canvas" width="800" height="580"></canvas>
+        </div>
+
+        <p class="text-center text-[11px] text-white/40">Toca tu mesa en el plano</p>
+
+        <div id="legend" class="flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-white/70 px-1"></div>
+
+        <div class="info-panel">
+          <h3 class="font-display text-sm mb-3" style="color:var(--ev2-pink)">
+            <i class="fa-solid fa-location-dot mr-1"></i> Mesa seleccionada
+          </h3>
+          <div class="grid grid-cols-2 gap-2">
+            <div class="info-item"><div class="info-label">Mesa</div><div class="info-value" id="sel-number">—</div></div>
+            <div class="info-item"><div class="info-label">Zona</div><div class="info-value" id="sel-section">—</div></div>
+            <div class="info-item"><div class="info-label">Capacidad</div><div class="info-value" id="sel-capacity">—</div></div>
+            <div class="info-item"><div class="info-label">Tipo</div><div class="info-value" id="sel-type">—</div></div>
+          </div>
+          <p id="sel-note" class="text-xs text-white/50 mt-3" hidden></p>
+          <button id="btn-sit" class="ev2-button w-full py-3 rounded-lg mt-3 font-display" disabled>Sentarme aquí</button>
+          <button id="btn-leave" class="w-full py-2 mt-2 text-sm text-red-300 underline" hidden>Dejar mi mesa</button>
+        </div>
       </div>
 
-      <!-- MENÚ -->
+      <!-- ---------------------------- MENÚ ---------------------------- -->
       <div id="view-menu" class="p-4" hidden>
         <div id="menu-categories" class="flex gap-2 overflow-x-auto pb-3 -mx-1 px-1"></div>
         <div id="menu-list" class="space-y-2"></div>
       </div>
 
-      <!-- PEDIDOS -->
-      <div id="view-orders" class="p-4 space-y-3">
+      <!-- ---------------------------- PEDIDOS ---------------------------- -->
+      <div id="view-orders" class="p-4 space-y-3" hidden>
         <p id="orders-empty" class="text-sm text-white/50 text-center py-10" hidden>Todavía no has pedido nada.</p>
         <div id="orders-list" class="space-y-3"></div>
+      </div>
+
+      <!-- ---------------------------- PERFIL ---------------------------- -->
+      <div id="view-profile" class="p-5 space-y-4" hidden>
+        <div class="text-center">
+          <div class="w-20 h-20 mx-auto rounded-2xl flex items-center justify-center text-4xl mb-3"
+               style="background:linear-gradient(135deg,var(--ev2-cyan),var(--ev2-pink))">👤</div>
+          <p id="profile-name" class="font-display text-xl">—</p>
+          <p id="profile-email" class="text-sm text-white/50">—</p>
+        </div>
+        <div class="card rounded-xl divide-y divide-white/5">
+          <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50">Mesa</span><span id="profile-table">sin mesa</span></div>
+          <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50">Club</span><span id="profile-club">—</span></div>
+          <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50">Cuenta</span><span id="profile-role">—</span></div>
+        </div>
+        <button id="btn-profile-logout" class="w-full py-3 rounded-xl card text-sm text-red-300">Cerrar sesión</button>
       </div>
     </main>
 
     <!-- CARRITO -->
-    <div id="cart-bar" class="fixed bottom-16 left-0 right-0 max-w-md mx-auto px-4" hidden>
+    <div id="cart-bar" class="fixed bottom-16 left-0 right-0 max-w-md mx-auto px-4 z-10" hidden>
       <button id="btn-order" class="ev2-button w-full py-3 rounded-xl font-display flex items-center justify-between px-5">
         <span><span id="cart-count">0</span> · <span id="cart-total">$0.00</span></span>
         <span>Pedir <i class="fa-solid fa-arrow-right ml-1"></i></span>
       </button>
     </div>
 
-    <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto grid grid-cols-3 border-t border-white/10 bg-slate-950/95 backdrop-blur">
-      <button data-view="tables" class="nav-tab py-3 text-xs tab-active"><i class="fa-solid fa-chair block text-lg mb-1"></i>Mesa</button>
+    <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto grid grid-cols-4 border-t border-white/10 bg-black/95 backdrop-blur z-20">
+      <button data-view="map" class="nav-tab py-3 text-xs tab-active"><i class="fa-solid fa-map-location-dot block text-lg mb-1"></i>Mapa</button>
       <button data-view="menu" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-martini-glass block text-lg mb-1"></i>Menú</button>
       <button data-view="orders" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-receipt block text-lg mb-1"></i>Pedidos<span id="orders-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
+      <button data-view="profile" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-user block text-lg mb-1"></i>Perfil</button>
     </nav>
   </section>
 
@@ -178,6 +289,8 @@
 
 <script src="js/api.js"></script>
 <script src="js/format.js"></script>
+<script src="js/roles.js"></script>
+<script src="js/floor-map.js"></script>
 <script src="js/client.js"></script>
 <script src="js/index-screen.js"></script>
 </body>

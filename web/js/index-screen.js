@@ -1,10 +1,11 @@
 /**
- * EV2 — pantalla del cliente (paso 5.2).
+ * EV2 — pantalla del cliente.
  *
- * Solo conecta el DOM con `EV2` (API y socket) y `EV2Client` (carrito, plano, eventos).
- * Ninguna decisión de negocio vive aquí: si algo hay que probar, va en client.js.
+ * Solo conecta el DOM con `EV2` (API y socket), `EV2Client` (carrito, pedidos, eventos),
+ * `EV2Map` (plano) y `EV2Roles` (a dónde va cada rol). Ninguna decisión de negocio vive
+ * aquí: si algo hay que probar, va en esos módulos.
  */
-/* global EV2, EV2Format, EV2Client */
+/* global EV2, EV2Format, EV2Client, EV2Map, EV2Roles */
 (function () {
   'use strict';
 
@@ -22,7 +23,8 @@
 
   const state = {
     club: null, drinks: [], categories: [], category: null,
-    floorPlan: [], myTable: null, orders: [], realtime: null,
+    tables: [], landmarks: [], canvas: null, floors: [], floor: null,
+    selectedId: null, myTable: null, orders: [], realtime: null,
   };
   const cart = EV2Client.createCart();
 
@@ -79,7 +81,7 @@
         email: $('login-email').value.trim(),
         password: $('login-password').value,
       });
-      await enterClub();
+      await afterSignIn();
     } catch (err) {
       showError(err, $('auth-error'));
     }
@@ -104,18 +106,22 @@
         email: $('reg-email').value.trim(),
         password: $('reg-password').value,
       });
-      await enterClub();
+      await afterSignIn();
     } catch (err) {
       // El servidor distingue "menor de edad" de "correo repetido"; ese texto es el útil.
       showError(err, $('auth-error'));
     }
   };
 
-  $('btn-logout').onclick = async () => {
+  async function signOut() {
     if (state.realtime) state.realtime.close();
     await api.logout();
     location.reload();
-  };
+  }
+
+  $('btn-logout').onclick = signOut;
+  $('btn-profile-logout').onclick = signOut;
+  $('btn-staff-logout').onclick = signOut;
 
   $('btn-lang').onclick = () => {
     const next = EV2Format.getLanguage() === 'es' ? 'en' : 'es';
@@ -125,29 +131,76 @@
     renderMenu();
   };
 
+  // ---------------------------------------------------------------- ruteo por rol
+
+  /**
+   * Un bartender no tiene por qué ver el plano de mesas para sentarse. Si su pantalla
+   * ya está conectada se le manda ahí; si todavía no existe se le dice, en vez de
+   * dejarlo en la del invitado o mandarlo a un archivo con datos inventados.
+   */
+  async function afterSignIn() {
+    const role = api.session.user && api.session.user.role;
+    const decision = EV2Roles.route(role, location.pathname);
+
+    if (decision.action === 'redirect') { location.href = decision.to; return; }
+    if (decision.action === 'pending') { showStaffPending(decision.info); return; }
+    await enterClub();
+  }
+
+  function showStaffPending(info) {
+    $('screen-auth').hidden = true;
+    $('screen-app').hidden = true;
+    $('screen-staff').hidden = false;
+    $('staff-role').textContent = info.label;
+    $('staff-name').textContent = (api.session.user && api.session.user.display_name) || '';
+    $('staff-does').textContent = info.does || '';
+    $('staff-pending').textContent = info.step
+      ? `Esta pantalla todavía no está conectada al servidor. Se construye en el paso ${info.step} del plan de implementación.`
+      : 'Esta cuenta no tiene una pantalla asignada. Avisa al administrador del club.';
+  }
+
   // ---------------------------------------------------------------- carga inicial
 
   const clubId = () => api.session.user && api.session.user.nightclub_id;
 
   async function enterClub() {
     $('screen-auth').hidden = true;
+    $('screen-staff').hidden = true;
     $('screen-app').hidden = false;
-    $('me-name').textContent = (api.session.user && api.session.user.display_name) || 'Invitado';
-    await Promise.all([loadFloorPlan(), loadMenu(), loadOrders()]);
+    const user = api.session.user || {};
+    $('me-name').textContent = user.display_name || 'Invitado';
+    $('profile-name').textContent = user.display_name || 'Invitado';
+    $('profile-email').textContent = user.email || '';
+    $('profile-role').textContent = EV2Roles.describe(user.role).label;
+    $('profile-club').textContent = (state.club && state.club.name) || 'EV2 Clandestinoz';
+    await Promise.all([loadFloor(), loadMenu(), loadOrders()]);
     connectRealtime();
   }
 
   /**
-   * Se usa `/tables` y no `/floor-plan`: es el único que dice **quién** está sentado, y
-   * sin eso la app no sabe cuál es tu mesa al recargar. Trae además capacidad, zona,
-   * piso y estado, así que una sola llamada basta para dibujar todo.
+   * Dos llamadas, a propósito:
+   *   `/floor-plan` trae el tamaño del plano y los elementos fijos (barra, pista, DJ,
+   *   entrada, baños) — sin ellos el mapa es una nube de puntos sin referencia.
+   *   `/tables`     es el único que dice **quién** está sentado, y sin eso la app no
+   *   sabe cuál es tu mesa al recargar.
    */
-  async function loadFloorPlan() {
+  async function loadFloor() {
     try {
-      const data = await api.get(`/nightclubs/${clubId()}/tables`);
-      state.floorPlan = data.tables || [];
-      state.myTable = EV2Client.myTable(state.floorPlan, api.session.user.id);
-      renderFloorPlan();
+      const [plan, tables] = await Promise.all([
+        api.get(`/nightclubs/${clubId()}/floor-plan`),
+        api.get(`/nightclubs/${clubId()}/tables`),
+      ]);
+      state.canvas = plan.canvas || EV2Map.DEFAULT_CANVAS;
+      state.landmarks = plan.landmarks || [];
+      state.tables = tables.tables || [];
+      state.floors = EV2Map.floors(state.tables);
+      state.myTable = EV2Client.myTable(state.tables, api.session.user.id);
+      if (!state.floor || !state.floors.includes(state.floor)) {
+        // Al entrar se muestra el piso donde ya estás sentado, no siempre la planta baja.
+        state.floor = (state.myTable && state.myTable.floor) || state.floors[0] || null;
+      }
+      if (state.myTable) state.selectedId = state.myTable.id;
+      renderFloor();
     } catch (err) { showError(err); }
   }
 
@@ -168,59 +221,165 @@
     } catch (err) { showError(err); }
   }
 
-  // ---------------------------------------------------------------- mesa
+  // ---------------------------------------------------------------- plano
 
-  function renderFloorPlan() {
-    const box = $('floor-plan');
-    const groups = EV2Client.groupFloorPlan(state.floorPlan);
-    $('my-table-box').hidden = !state.myTable;
-    $('tables-hint').hidden = Boolean(state.myTable);
-    if (state.myTable) {
-      $('my-table-name').textContent = `${state.myTable.section || ''} ${state.myTable.table_number || state.myTable.code}`.trim();
-      $('me-table').textContent = `mesa ${state.myTable.table_number || state.myTable.code}`;
-    } else {
-      $('me-table').textContent = 'sin mesa';
-    }
+  const canvasEl = () => $('floor-canvas');
+  const tablesOnFloor = () => state.tables.filter((t) => !state.floor || t.floor === state.floor);
+  const landmarksOnFloor = () => state.landmarks.filter(
+    (m) => !state.floor || m.floor === state.floor || m.floor === 'ambas');
 
-    box.innerHTML = groups.map((floor) => `
-      <div>
-        <p class="text-xs uppercase tracking-wider text-white/40 mb-2">${escape(floor.label)}</p>
-        ${floor.zones.map((z) => `
-          <p class="text-sm text-white/70 mt-3 mb-1">${escape(z.zone)}</p>
-          <div class="grid grid-cols-3 gap-2">
-            ${z.tables.map((t) => {
-    const mine = state.myTable && state.myTable.id === t.id;
-    const selectable = EV2Client.tableIsSelectable(t);
-    const cls = mine ? 'card card-mine' : selectable ? 'card card-free' : 'card card-full';
-    const seated = EV2Client.seatedCount(t);
-    return `<button class="${cls} rounded-xl p-2 text-center tap" data-table="${t.id}"
-                      ${selectable || mine ? '' : 'disabled'}>
-                <span class="block font-display">${escape(t.table_number || t.code)}</span>
-                <span class="block text-[11px] text-white/50">${seated}/${t.capacity}</span>
-              </button>`;
-  }).join('')}
-          </div>`).join('')}
-      </div>`).join('') || '<p class="text-white/40 text-sm">El plano todavía no está cargado.</p>';
+  function renderFloor() {
+    renderFloorButtons();
+    renderStats();
+    renderLegend();
+    drawMap();
+    renderSelection();
 
-    box.querySelectorAll('[data-table]').forEach((btn) => {
-      btn.onclick = () => sitAt(btn.dataset.table);
+    const table = state.myTable;
+    $('me-table').textContent = table ? `mesa ${table.table_number || table.code}` : 'sin mesa';
+    $('profile-table').textContent = table
+      ? `${table.section || ''} ${table.table_number || table.code}`.trim() : 'sin mesa';
+  }
+
+  function renderFloorButtons() {
+    const box = $('floor-buttons');
+    box.innerHTML = state.floors.map((f) => `
+      <button class="floor-btn ${f === state.floor ? 'active' : ''}" data-floor="${escape(f)}">
+        ${escape(EV2Map.floorLabel(f))}
+      </button>`).join('');
+    box.querySelectorAll('[data-floor]').forEach((b) => {
+      b.onclick = () => {
+        state.floor = b.dataset.floor;
+        // Al cambiar de piso la selección deja de tener sentido, salvo que sea tu mesa.
+        if (state.selectedId && !tablesOnFloor().some((t) => t.id === state.selectedId)) {
+          state.selectedId = null;
+        }
+        renderFloor();
+      };
     });
   }
 
-  async function sitAt(tableId) {
-    try {
-      await api.post(`/nightclubs/${clubId()}/tables/${tableId}/seat`, {});
-      await loadFloorPlan();
-      toast('Listo, esa es tu mesa', 'ok');
-    } catch (err) { showError(err); }
+  function renderStats() {
+    const s = EV2Map.stats(tablesOnFloor());
+    $('stat-total').textContent = s.total;
+    $('stat-free').textContent = s.available;
+    $('stat-vip').textContent = s.vip;
+    $('stat-busy').textContent = s.occupied;
   }
+
+  function renderLegend() {
+    const items = EV2Map.zones(tablesOnFloor())
+      .map((z) => ({ name: z.name, color: z.color }))
+      .concat([{ name: 'Ocupada', color: EV2Map.COLORS.red },
+        { name: 'Tu mesa', color: EV2Map.COLORS.mine }]);
+    $('legend').innerHTML = items.map((z) => `
+      <span class="flex items-center gap-1.5">
+        <span class="legend-color" style="background:${escape(z.color)}"></span>${escape(z.name)}
+      </span>`).join('');
+  }
+
+  function drawMap() {
+    const canvas = canvasEl();
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    return EV2Map.draw(ctx, {
+      canvasSize: { width: canvas.width, height: canvas.height },
+      planSize: state.canvas,
+      tables: tablesOnFloor(),
+      landmarks: landmarksOnFloor(),
+      selectedId: state.selectedId,
+      myTableId: state.myTable && state.myTable.id,
+    });
+  }
+
+  canvasEl().addEventListener('click', (ev) => {
+    const canvas = canvasEl();
+    const size = { width: canvas.width, height: canvas.height };
+    const l = EV2Map.layout(size, state.canvas);
+    const point = EV2Map.pointFromEvent(ev, canvas.getBoundingClientRect(), size, l);
+    const table = EV2Map.hitTest(tablesOnFloor(), point);
+    state.selectedId = table ? table.id : null;
+    drawMap();
+    renderSelection();
+  });
+
+  function selectedTable() {
+    return state.tables.find((t) => t.id === state.selectedId) || null;
+  }
+
+  const TYPE_LABELS = {
+    booth: 'Booth', vip: 'VIP', standard: 'Estándar', bar_top: 'Barra',
+  };
+
+  function renderSelection() {
+    const table = selectedTable();
+    const sit = $('btn-sit');
+    const leave = $('btn-leave');
+    const note = $('sel-note');
+    const mine = Boolean(state.myTable);
+    const isMine = Boolean(table && state.myTable && table.id === state.myTable.id);
+
+    leave.hidden = !mine;
+
+    if (!table) {
+      $('sel-number').textContent = '—';
+      $('sel-section').textContent = '—';
+      $('sel-capacity').textContent = '—';
+      $('sel-type').textContent = '—';
+      note.hidden = true;
+      sit.disabled = true;
+      sit.textContent = 'Sentarme aquí';
+      return;
+    }
+
+    $('sel-number').textContent = table.table_number != null ? table.table_number : (table.code || '—');
+    $('sel-section').textContent = table.section || '—';
+    $('sel-capacity').textContent = `${EV2Map.seatedCount(table)}/${table.capacity}`;
+    $('sel-type').textContent = TYPE_LABELS[table.type] || (table.type || '—');
+
+    if (isMine) {
+      note.textContent = 'Aquí estás sentado.';
+      note.hidden = false;
+      sit.disabled = true;
+      sit.textContent = 'Ya estás en esta mesa';
+      return;
+    }
+    if (!EV2Map.isFree(table)) {
+      note.textContent = table.status && table.status !== 'available'
+        ? `Esta mesa está ${escape(table.status)}.`
+        : 'Esta mesa ya está llena.';
+      note.hidden = false;
+      sit.disabled = true;
+      sit.textContent = 'No disponible';
+      return;
+    }
+    note.hidden = true;
+    sit.disabled = false;
+    sit.textContent = mine ? 'Cambiarme a esta mesa' : 'Sentarme aquí';
+  }
+
+  $('btn-sit').onclick = async () => {
+    const table = selectedTable();
+    if (!table) return;
+    const button = $('btn-sit');
+    button.disabled = true;
+    try {
+      await api.post(`/nightclubs/${clubId()}/tables/${table.id}/seat`, {});
+      await loadFloor();
+      toast('Listo, esa es tu mesa', 'ok');
+    } catch (err) {
+      showError(err);
+      renderSelection();
+    }
+  };
 
   $('btn-leave').onclick = async () => {
     if (!state.myTable) return;
     try {
       await api.post(`/nightclubs/${clubId()}/tables/${state.myTable.id}/release`, {});
       state.myTable = null;
-      await loadFloorPlan();
+      state.selectedId = null;
+      await loadFloor();
     } catch (err) { showError(err); }
   };
 
@@ -281,7 +440,7 @@
   $('btn-order').onclick = async () => {
     if (!state.myTable) {
       toast('Primero elige tu mesa: el mesero necesita saber a dónde llevarlo');
-      showView('tables');
+      showView('map');
       return;
     }
     const button = $('btn-order');
@@ -337,11 +496,15 @@
 
   // ---------------------------------------------------------------- navegación
 
+  const VIEWS = ['map', 'menu', 'orders', 'profile'];
+
   function showView(name) {
-    for (const v of ['tables', 'menu', 'orders']) $(`view-${v}`).hidden = v !== name;
+    for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
     document.querySelectorAll('.nav-tab').forEach((b) => {
       b.className = `nav-tab py-3 text-xs ${b.dataset.view === name ? 'tab-active' : 'text-white/50'}`;
     });
+    // El lienzo se mide al mostrarse: dibujarlo mientras estaba oculto lo deja en blanco.
+    if (name === 'map') drawMap();
   }
   document.querySelectorAll('.nav-tab').forEach((b) => { b.onclick = () => showView(b.dataset.view); });
 
@@ -367,7 +530,7 @@
     // de seguir pintando un estado que ya no corresponde.
     rt.on('resync_required', async () => {
       banner('Actualizando…');
-      await Promise.all([loadFloorPlan(), loadOrders()]);
+      await Promise.all([loadFloor(), loadOrders()]);
       banner(null);
     });
 
@@ -378,7 +541,7 @@
         if (change.unknownOrder) await loadOrders(); else renderOrders();
         if (change.status === 'ready') toast('¡Tu pedido está listo en la barra!', 'ok');
       }
-      if (change.changed === 'floorPlan') await loadFloorPlan();
+      if (change.changed === 'floorPlan') await loadFloor();
     });
 
     api.on('auth:expired', () => {
@@ -400,6 +563,6 @@
       // Sin club no se puede entrar, pero la pantalla de acceso debe verse igual.
     }
     const user = await api.resume();
-    if (user) await enterClub();
+    if (user) await afterSignIn();
   }());
 }());
