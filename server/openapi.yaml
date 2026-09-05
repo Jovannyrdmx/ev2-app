@@ -5030,6 +5030,38 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
 
+  /api/nightclubs/{nightclubId}/payment-providers:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: getPaymentProviders
+      tags: [Pagos manuales]
+      summary: Con qué se puede cobrar hoy
+      description: |
+        El gerente ve qué pasarelas están configuradas y **qué llaves faltan**, para que
+        conectar Stripe o Mercado Pago sea una lista de pendientes y no una adivinanza
+        (`docs/PAGOS_SETUP.md`). El cliente ve solo las que ya funcionan, con la llave
+        pública que su navegador necesita.
+
+        Las llaves **secretas viven en variables de entorno, nunca en la base de datos**, y
+        **nunca salen por esta ruta**. Mientras no haya ninguna pasarela, el club cobra con
+        pagos manuales, que no dependen de ninguna cuenta externa.
+      responses:
+        '200':
+          description: Estado de las pasarelas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  manual_available: { type: boolean }
+                  any_provider_configured:
+                    type: boolean
+                    description: Solo para el gerente.
+                  providers:
+                    type: array
+                    items: { $ref: '#/components/schemas/PaymentProviderStatus' }
+
   /api/nightclubs/{nightclubId}/manual-payment-options:
     parameters:
       - $ref: '#/components/parameters/NightclubId'
@@ -7363,3 +7395,27 @@ components:
             status: { type: string }
             reference_type: { type: [string, 'null'] }
             reference_id: { type: [string, 'null'], format: uuid }
+
+    PaymentProviderStatus:
+      type: object
+      properties:
+        provider: { type: string, enum: [stripe, mercadopago] }
+        configured: { type: boolean }
+        mode:
+          type: [string, 'null']
+          enum: [test, live, unknown, null]
+          description: |
+            Deducido del prefijo de la llave. La API se niega a arrancar en modo `live` si
+            `NODE_ENV` no es `production`.
+        missing:
+          type: array
+          description: Variables de entorno que faltan. Solo para el gerente.
+          items: { type: string }
+        publishable_key: { type: [string, 'null'] }
+        public_key: { type: [string, 'null'] }
+        currencies:
+          type: array
+          items: { $ref: '#/components/schemas/Currency' }
+        methods:
+          type: array
+          items: { type: string }

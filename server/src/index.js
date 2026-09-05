@@ -8,6 +8,7 @@ const { createApp } = require('./app');
 const { pool } = require('./db/pool');
 const { redis } = require('./db/redis');
 const { EventRelay } = require('./realtime/relay');
+const paymentConfig = require('./config/payments');
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -23,6 +24,9 @@ async function start() {
     if (!process.env.BANK_ENCRYPTION_KEY || process.env.BANK_ENCRYPTION_KEY.length < 32) {
       throw new Error('BANK_ENCRYPTION_KEY is missing or shorter than 32 characters (employee bank accounts)');
     }
+    // Refuses to start with live payment keys outside production, which is the mistake
+    // that charges a real card during a demo.
+    paymentConfig.assertSafeMode();
     await pool.query('SELECT 1');
     console.log(`PostgreSQL connected (${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 5432})`);
     await redis.connect();
@@ -37,6 +41,13 @@ async function start() {
   } catch (err) {
     console.error('Startup failed:', err.message);
     process.exit(1);
+  }
+
+  const pay = paymentConfig.status();
+  for (const p of pay.providers) {
+    console.log(p.configured
+      ? `Payments: ${p.provider} configured (${p.mode} mode)`
+      : `Payments: ${p.provider} NOT configured — falta ${p.missing.join(', ')} (docs/PAGOS_SETUP.md)`);
   }
 
   server.listen(PORT, () => {

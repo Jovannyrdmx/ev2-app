@@ -344,3 +344,87 @@ describe('Aislamiento entre clubes y visibilidad', () => {
       .toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------- configuración de pasarelas
+
+describe('El hueco para Stripe y Mercado Pago', () => {
+  const config = require('../src/config/payments');
+  const saved = {};
+  const VARS = ['STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET',
+    'MERCADOPAGO_ACCESS_TOKEN', 'MERCADOPAGO_PUBLIC_KEY', 'MERCADOPAGO_WEBHOOK_SECRET'];
+
+  beforeEach(() => { VARS.forEach((v) => { saved[v] = process.env[v]; delete process.env[v]; }); });
+  afterEach(() => {
+    VARS.forEach((v) => {
+      if (saved[v] === undefined) delete process.env[v]; else process.env[v] = saved[v];
+    });
+  });
+
+  it('sin llaves dice exactamente qué falta, en vez de fallar en silencio', async () => {
+    const res = await api().get(url('/payment-providers')).set(auth(manager));
+    expect(res.status).toBe(200);
+    const stripe = res.body.providers.find((p) => p.provider === 'stripe');
+    expect(stripe).toMatchObject({ configured: false, mode: null });
+    expect(stripe.missing).toEqual([
+      'STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET']);
+    // Y lo que el club sí puede cobrar hoy sigue disponible.
+    expect(res.body.manual_available).toBe(true);
+    expect(res.body.any_provider_configured).toBe(false);
+  });
+
+  it('con las llaves puestas reconoce el modo de prueba', () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_abc';
+    process.env.STRIPE_PUBLISHABLE_KEY = 'pk_test_abc';
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_abc';
+    expect(config.stripeConfig()).toMatchObject({ configured: true, mode: 'test', missing: [] });
+
+    process.env.MERCADOPAGO_ACCESS_TOKEN = 'TEST-123';
+    process.env.MERCADOPAGO_PUBLIC_KEY = 'TEST-pub';
+    process.env.MERCADOPAGO_WEBHOOK_SECRET = 'firma';
+    expect(config.mercadoPagoConfig()).toMatchObject({ configured: true, mode: 'test' });
+
+    process.env.STRIPE_SECRET_KEY = 'sk_live_abc';
+    expect(config.stripeConfig().mode).toBe('live');
+    process.env.MERCADOPAGO_ACCESS_TOKEN = 'APP_USR-123';
+    expect(config.mercadoPagoConfig().mode).toBe('live');
+  });
+
+  it('la llave secreta nunca sale por la API; la pública sí, porque la usa el navegador', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_SECRETO';
+    process.env.STRIPE_PUBLISHABLE_KEY = 'pk_test_publica';
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_SECRETO';
+
+    const asManager = await api().get(url('/payment-providers')).set(auth(manager));
+    expect(JSON.stringify(asManager.body)).not.toContain('sk_test_SECRETO');
+    expect(JSON.stringify(asManager.body)).not.toContain('whsec_SECRETO');
+
+    const asGuest = await api().get(url('/payment-providers')).set(auth(guest));
+    expect(asGuest.body.providers).toHaveLength(1);
+    expect(asGuest.body.providers[0]).toMatchObject({
+      provider: 'stripe', mode: 'test', publishable_key: 'pk_test_publica',
+    });
+    // El cliente no ve qué le falta configurar al club.
+    expect(asGuest.body.providers[0]).not.toHaveProperty('missing');
+  });
+
+  it('el cliente no ve pasarelas a medio configurar', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_abc'; // sin las otras dos
+    const asGuest = await api().get(url('/payment-providers')).set(auth(guest));
+    expect(asGuest.body.providers).toHaveLength(0);
+    expect(asGuest.body.manual_available).toBe(true);
+  });
+
+  it('con llaves de producción fuera de producción, la app se niega a arrancar', () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_live_de_verdad';
+    // Es el error que cobra una tarjeta real en una demostración.
+    expect(() => config.assertSafeMode()).toThrow(/PRODUCCIÓN.*Stripe/s);
+
+    const wasEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    expect(() => config.assertSafeMode()).not.toThrow();
+    process.env.NODE_ENV = wasEnv;
+
+    process.env.STRIPE_SECRET_KEY = 'sk_test_abc';
+    expect(() => config.assertSafeMode()).not.toThrow();
+  });
+});
