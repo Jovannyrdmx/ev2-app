@@ -13,6 +13,7 @@ const { validate, z, uuid, currency, pagination } = require('../middleware/valid
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const payments = require('../services/payments');
 const events = require('../services/events');
+const paymentConfig = require('../config/payments');
 
 const router = express.Router({ mergeParams: true });
 
@@ -27,6 +28,28 @@ function isStaff(user) {
 }
 
 router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
+
+// ------------------------------------------------------------------ providers
+
+/**
+ * What the app can charge with right now. The manager sees which keys are still missing
+ * so setting up Stripe or Mercado Pago is a checklist, not a guess; the guest sees only
+ * what they can actually pay with, plus the publishable key their browser needs.
+ */
+router.get('/nightclubs/:nightclubId/payment-providers',
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const state = paymentConfig.status();
+    if (isManager(req.user)) return res.json(state);
+    return res.json({
+      manual_available: state.manual_available,
+      providers: state.providers
+        .filter((p) => p.configured)
+        .map(({ provider, mode, publishable_key: pk, public_key: mpk, currencies, methods }) => ({
+          provider, mode, publishable_key: pk ?? mpk, currencies, methods,
+        })),
+    });
+  }));
 
 // ------------------------------------------------------------------ where to pay
 
