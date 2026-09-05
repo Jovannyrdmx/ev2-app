@@ -74,6 +74,8 @@
         @keyframes flash-in { from { background: rgba(0,191,255,.35); } to { background: rgba(255,255,255,.05); } }
         .just-arrived { animation: flash-in 1.4s ease-out; }
 
+        .field { width: 100%; padding: .6rem 1rem; border-radius: .6rem; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); outline: none; }
+        .field:focus { border-color: var(--ev2-cyan); }
         [hidden] { display: none !important; }
     </style>
 </head>
@@ -94,6 +96,21 @@
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.enter">Entrar al club</button>
     </form>
     <p id="auth-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
+  </section>
+
+
+  <!-- ====== CONTRASEÑA TEMPORAL: el servidor bloquea todo hasta cambiarla ====== -->
+  <section id="screen-password" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto" hidden>
+    <h2 class="font-display text-2xl ev2-gradient mb-1" data-i18n="gate.title">Cambia tu contraseña</h2>
+    <p class="text-sm text-white/60 mb-6" data-i18n="gate.note">Entraste con una contraseña temporal.</p>
+    <form id="form-password" class="space-y-3">
+      <input id="pw-current" type="password" autocomplete="current-password" required placeholder="Contraseña temporal" data-i18n-placeholder="gate.current" class="field">
+      <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" placeholder="Contraseña nueva (mínimo 8)" data-i18n-placeholder="gate.new" class="field">
+      <input id="pw-repeat" type="password" autocomplete="new-password" required placeholder="Repite la nueva" data-i18n-placeholder="gate.repeat" class="field">
+      <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="gate.save">Cambiar y entrar</button>
+    </form>
+    <p id="pw-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
+    <button id="btn-pw-logout" class="mt-6 text-sm text-white/50 underline" data-i18n="top.signOut">Salir</button>
   </section>
 
   <!-- ============ ENTRÓ ALGUIEN QUE NO ES DE LA BARRA ============ -->
@@ -158,6 +175,7 @@
 <script src="js/api.js"></script>
 <script src="js/format.js"></script>
 <script src="js/roles.js"></script>
+<script src="js/password-gate.js"></script>
 <script src="js/bar-queue.js"></script>
 <script src="js/bartender-screen.js"></script>
 </body>

@@ -78,7 +78,7 @@ describe('El HTML marcado y el catálogo van juntos', () => {
   // Cada pantalla que se conecta entra aquí: una clave marcada en el HTML que no existe
   // en el catálogo imprime el nombre de la clave en pantalla y nadie lo ve hasta que
   // alguien cambia de idioma.
-  const PAGES = ['index.html', 'bartender.html', 'driver.html'];
+  const PAGES = ['index.html', 'bartender.html', 'driver.html', 'manager.html'];
   const sources = Object.fromEntries(
     PAGES.map((page) => [page, fs.readFileSync(path.join(WEB, page), 'utf8')]),
   );

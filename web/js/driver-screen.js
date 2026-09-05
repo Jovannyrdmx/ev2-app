@@ -7,7 +7,7 @@
  *
  * Esto se usa manejando. Cada pantalla ofrece UNA acción, y nada más.
  */
-/* global EV2, EV2Format, EV2Taxi, EV2Roles */
+/* global EV2, EV2Format, EV2Taxi, EV2Roles, EV2PasswordGate */
 (function () {
   'use strict';
 
@@ -93,9 +93,51 @@
     setConnection(lastConnection.on, lastConnection.key, lastConnection.vars);
   }
 
+  const PASSWORD_GATE_HIDES = ['screen-auth', 'screen-wrong-role', 'screen-driver'];
+
+  // ---------------------------------------------------------------- contraseña temporal
+
+  /**
+   * El servidor bloquea TODAS las rutas de alguien con `must_change_password` salvo
+   * /auth/password, /auth/logout y /auth/me. Sin esta puerta, quien entra con una
+   * contraseña temporal ve errores en cada llamada y no puede hacer nada.
+   */
+  function showPasswordGate() {
+    for (const id of PASSWORD_GATE_HIDES) $(id).hidden = true;
+    $('screen-password').hidden = false;
+    $('pw-error').hidden = true;
+  }
+
+  $('btn-pw-logout').onclick = signOut;
+
+  $('form-password').onsubmit = async (ev) => {
+    ev.preventDefault();
+    $('pw-error').hidden = true;
+    const current = $('pw-current').value;
+    const next = $('pw-new').value;
+    const problem = EV2PasswordGate.validate(current, next, $('pw-repeat').value);
+    if (problem) { $('pw-error').textContent = t(problem); $('pw-error').hidden = false; return; }
+    const email = (api.session.user && api.session.user.email) || '';
+    try {
+      await api.post('/auth/password', { current_password: current, new_password: next });
+      // El servidor CIERRA todas las sesiones al cambiar la contraseña (revoca los
+      // tokens de refresco). El que tiene el navegador quedó muerto, así que hay que
+      // entrar de nuevo con la contraseña nueva: si no, la siguiente llamada falla y
+      // la persona se queda fuera justo después de hacer lo que se le pidió.
+      await api.login({ nightclubSlug: CLUB_SLUG, email, password: next });
+      // El servidor cierra las demás sesiones y devuelve tokens nuevos; el cliente ya los
+      // aplica. Se vuelve a entrar limpio en vez de arrastrar el estado de la puerta.
+      $('form-password').reset();
+      $('screen-password').hidden = true;
+      toast(t('gate.done'), 'ok');
+      await afterSignIn();
+    } catch (err) { showError(err, $('pw-error')); }
+  };
+
   // ---------------------------------------------------------------- quién entró
 
   async function afterSignIn() {
+    if (EV2PasswordGate.isRequired(api.session.user)) { showPasswordGate(); return; }
     const role = api.session.user && api.session.user.role;
     if (role !== 'driver') {
       const home = EV2Roles.describe(role, lang());

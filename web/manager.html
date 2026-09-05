@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>EV2 — Gerente</title>
+    <link rel="icon" href="images/favicon-32x32.png" type="image/png" sizes="32x32">
+    <meta name="ev2:api" content="/api">
+    <meta name="ev2:ws" content="">
+    <meta name="ev2:club" content="ev2">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
+
+        :root {
+            --ev2-cyan: #00BFFF;
+            --ev2-pink: #FF1493;
+            --ev2-lime: #00FF00;
+            --ev2-gold: #FFD700;
+            --ev2-red: #FF4444;
+        }
+
+        body { font-family: 'Inter', system-ui, sans-serif; background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%); }
+        .font-display { font-family: 'Poppins', sans-serif; font-weight: 700; }
+
+        .ev2-gradient {
+            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
+            -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .ev2-button {
+            background: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink));
+            color: #000; font-weight: 700;
+            transition: filter .15s ease, transform .1s ease;
+        }
+        .ev2-button:active { transform: scale(.98); }
+        .ev2-button:disabled { filter: grayscale(1) brightness(.55); cursor: not-allowed; }
+
+        button, select, input, textarea, .tap { min-height: 44px; }
+        textarea { min-height: 96px; }
+
+        .card { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10); }
+
+        .stat-card {
+            background: rgba(0,191,255,.10); border: 1px solid var(--ev2-pink);
+            border-radius: 10px; padding: 10px 8px; text-align: center;
+        }
+        .stat-number { font-size: 1.5rem; font-weight: 700; color: var(--ev2-lime); line-height: 1.1; }
+        .stat-label { font-size: .62rem; color: var(--ev2-cyan); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
+        .stat-card.warn { border-color: var(--ev2-red); }
+        .stat-card.warn .stat-number { color: var(--ev2-red); }
+
+        .tab { border-bottom: 3px solid transparent; color: rgba(255,255,255,.5); font-weight: 600; }
+        .tab.active { color: var(--ev2-cyan); border-bottom-color: var(--ev2-cyan); }
+
+        .pill { font-size: .65rem; padding: .15rem .5rem; border-radius: 9999px; font-weight: 700; white-space: nowrap; }
+        .pill-ok { background: rgba(0,255,0,.18); color: var(--ev2-lime); }
+        .pill-wait { background: rgba(255,215,0,.18); color: var(--ev2-gold); }
+        .pill-off { background: rgba(255,255,255,.12); color: rgba(255,255,255,.6); }
+        .pill-bad { background: rgba(255,68,68,.18); color: var(--ev2-red); }
+
+        .field { width: 100%; padding: .6rem 1rem; border-radius: .6rem; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); outline: none; }
+        .field:focus { border-color: var(--ev2-cyan); }
+        .field.bad { border-color: var(--ev2-red); }
+        .field-error { font-size: .7rem; color: var(--ev2-red); margin-top: .15rem; }
+        .label { font-size: .68rem; color: rgba(255,255,255,.5); display: block; margin-bottom: .2rem; }
+
+        .dot { width: .5rem; height: .5rem; border-radius: 9999px; display: inline-block; }
+        .dot-on { background: var(--ev2-lime); }
+        .dot-off { background: var(--ev2-red); }
+        .dot-wait { background: var(--ev2-gold); }
+
+        [hidden] { display: none !important; }
+    </style>
+</head>
+<body class="text-white">
+<div class="max-w-2xl mx-auto min-h-screen flex flex-col">
+
+  <!-- ============================ ENTRAR ============================ -->
+  <section id="screen-auth" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto">
+    <div class="text-center mb-8">
+      <h1 class="font-display text-3xl ev2-gradient mb-1">EV2 · <span data-i18n="manager.title">Gerente</span></h1>
+    </div>
+    <form id="form-login" class="space-y-3">
+      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo" data-i18n-placeholder="auth.email" class="field">
+      <input id="login-password" type="password" autocomplete="current-password" required placeholder="Contraseña" data-i18n-placeholder="auth.password" class="field">
+      <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.enter">Entrar al club</button>
+    </form>
+    <p id="auth-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
+  </section>
+
+
+  <!-- ====== CONTRASEÑA TEMPORAL: el servidor bloquea todo hasta cambiarla ====== -->
+  <section id="screen-password" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto" hidden>
+    <h2 class="font-display text-2xl ev2-gradient mb-1" data-i18n="gate.title">Cambia tu contraseña</h2>
+    <p class="text-sm text-white/60 mb-6" data-i18n="gate.note">Entraste con una contraseña temporal.</p>
+    <form id="form-password" class="space-y-3">
+      <input id="pw-current" type="password" autocomplete="current-password" required placeholder="Contraseña temporal" data-i18n-placeholder="gate.current" class="field">
+      <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" placeholder="Contraseña nueva (mínimo 8)" data-i18n-placeholder="gate.new" class="field">
+      <input id="pw-repeat" type="password" autocomplete="new-password" required placeholder="Repite la nueva" data-i18n-placeholder="gate.repeat" class="field">
+      <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="gate.save">Cambiar y entrar</button>
+    </form>
+    <p id="pw-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
+    <button id="btn-pw-logout" class="mt-6 text-sm text-white/50 underline" data-i18n="top.signOut">Salir</button>
+  </section>
+
+  <!-- ============ ENTRÓ ALGUIEN QUE NO ES GERENTE ============ -->
+  <section id="screen-wrong-role" class="flex-1 flex flex-col justify-center px-6 py-10 text-center max-w-md w-full mx-auto" hidden>
+    <p class="text-xs uppercase tracking-widest text-white/40" data-i18n="staff.signedInAs">Entraste como</p>
+    <h2 id="wrong-role" class="font-display text-2xl ev2-gradient mb-4">—</h2>
+    <p id="wrong-role-note" class="text-sm text-white/60"></p>
+    <button id="btn-wrong-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Salir</button>
+  </section>
+
+  <!-- ============================ PANEL ============================ -->
+  <section id="screen-manager" class="flex-1 flex flex-col" hidden>
+    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10 sticky top-0 backdrop-blur bg-black/80 z-20">
+      <div>
+        <p class="font-display text-lg ev2-gradient leading-none">EV2 · <span data-i18n="manager.title">Gerente</span></p>
+        <p class="text-xs text-white/50"><span id="me-name">—</span></p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-white/50 flex items-center gap-1">
+          <span id="rt-dot" class="dot dot-off"></span><span id="rt-text">Conectando…</span>
+        </span>
+        <button id="btn-refresh" class="text-xs text-white/60 px-2" data-i18n-title="manager.refresh" title="Actualizar"><i class="fa-solid fa-rotate"></i></button>
+        <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
+        <button id="btn-logout" class="text-xs text-white/60 px-2" data-i18n-title="top.signOut" title="Salir"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
+      </div>
+    </header>
+
+    <div id="banner" class="px-4 py-2 text-sm text-center bg-amber-500/20 text-amber-100" hidden></div>
+
+    <!-- La contraseña temporal se muestra UNA vez: no se puede perder en un render. -->
+    <div id="secret-box" class="m-4 rounded-xl p-4" style="background:rgba(0,255,0,.08);border:2px solid var(--ev2-lime)" hidden>
+      <p class="text-xs uppercase tracking-wider" style="color:var(--ev2-lime)"><span data-i18n="manager.tempPassword">Contraseña temporal</span> — <span id="secret-who"></span></p>
+      <p id="secret-value" class="font-display text-2xl tracking-wider my-2 select-all">—</p>
+      <p class="text-[11px] text-white/60" data-i18n="manager.tempPasswordNote">Anótala ahora: solo se muestra una vez.</p>
+      <button id="btn-secret-ok" class="ev2-button rounded-lg px-4 py-2 mt-3 text-sm" data-i18n="manager.gotIt">Ya la anoté</button>
+    </div>
+
+    <nav class="flex px-2 border-b border-white/10 overflow-x-auto">
+      <button data-tab="summary" class="tab active flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabSummary">Turno</button>
+      <button data-tab="drivers" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabDrivers">Conductores</button>
+      <button data-tab="taxi" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabTaxi">Taxi</button>
+      <button data-tab="parking" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabParking">Cajones</button>
+    </nav>
+
+    <main class="flex-1 overflow-y-auto p-4 space-y-4">
+
+      <!-- ---------------------------- TURNO ---------------------------- -->
+      <div id="tab-summary" class="space-y-4">
+        <div class="grid grid-cols-3 gap-2">
+          <div class="stat-card"><div class="stat-number" id="s-occupancy">—</div><div class="stat-label" data-i18n="manager.occupancy">Mesas ocupadas</div></div>
+          <div class="stat-card"><div class="stat-number" id="s-orders">—</div><div class="stat-label" data-i18n="manager.ordersOpen">Pedidos abiertos</div></div>
+          <div class="stat-card"><div class="stat-number" id="s-shift">—</div><div class="stat-label" data-i18n="manager.onShift">En turno</div></div>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div class="stat-card"><div class="stat-number" id="s-delivered">—</div><div class="stat-label" data-i18n="manager.ordersDelivered">Entregados hoy</div></div>
+          <div class="stat-card" id="s-poserr-card"><div class="stat-number" id="s-poserr">—</div><div class="stat-label" data-i18n="manager.posErrors">Rechazados por la caja</div></div>
+        </div>
+
+        <div class="card rounded-xl p-4 space-y-2">
+          <div class="flex justify-between items-baseline">
+            <span class="text-sm text-white/60" data-i18n="manager.clubRevenue">Caja del club</span>
+            <span id="s-club" class="font-display text-2xl" style="color:var(--ev2-lime)">—</span>
+          </div>
+          <div class="flex justify-between text-sm"><span class="text-white/50" data-i18n="manager.toStaff">Propinas al personal</span><span id="s-staff">—</span></div>
+          <div class="flex justify-between text-sm"><span class="text-white/50" data-i18n="manager.toDrivers">Viajes a conductores</span><span id="s-drivers">—</span></div>
+          <p class="text-[11px] text-white/40 pt-1" data-i18n="manager.revenueNote">Las propinas y los viajes pasan por el sistema pero no son ingreso del club.</p>
+          <div id="currency-switch" class="flex gap-2 pt-1"></div>
+        </div>
+      </div>
+
+      <!-- ---------------------------- CONDUCTORES ---------------------------- -->
+      <div id="tab-drivers" class="space-y-3" hidden>
+        <button id="btn-new-driver" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="manager.newDriver">Dar de alta un conductor</button>
+
+        <form id="driver-form" class="card rounded-xl p-4 space-y-3" hidden>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="label" for="d-first" data-i18n="manager.firstName">Nombre</label><input id="d-first" class="field"><p class="field-error" data-error="first_name" hidden></p></div>
+            <div><label class="label" for="d-last" data-i18n="manager.lastName">Apellido</label><input id="d-last" class="field"><p class="field-error" data-error="last_name" hidden></p></div>
+          </div>
+          <div><label class="label" for="d-email" data-i18n="manager.email">Correo</label><input id="d-email" type="email" class="field"><p class="field-error" data-error="email" hidden></p></div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="label" for="d-phone" data-i18n="manager.phone">Teléfono</label><input id="d-phone" class="field"><p class="field-error" data-error="phone" hidden></p></div>
+            <div><label class="label" for="d-birth" data-i18n="manager.birthDate">Fecha de nacimiento</label><input id="d-birth" type="date" class="field"><p class="field-error" data-error="birth_date" hidden></p></div>
+          </div>
+          <div><label class="label" for="d-company" data-i18n="manager.company">Empresa (opcional)</label><input id="d-company" class="field"></div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="label" for="d-plate" data-i18n="manager.plate">Placa</label><input id="d-plate" class="field"><p class="field-error" data-error="vehicle_plate" hidden></p></div>
+            <div><label class="label" for="d-color" data-i18n="manager.vehicleColor">Color</label><input id="d-color" class="field"></div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="label" for="d-make" data-i18n="manager.vehicleMake">Marca</label><input id="d-make" class="field"></div>
+            <div><label class="label" for="d-model" data-i18n="manager.vehicleModel">Modelo</label><input id="d-model" class="field"></div>
+          </div>
+          <label class="flex items-center gap-3 text-sm tap">
+            <input id="d-trusted" type="checkbox" checked class="w-5 h-5 accent-emerald-400">
+            <span data-i18n="manager.trustedNow">Verificado desde ahora</span>
+          </label>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="btn-driver-cancel" class="card rounded-lg py-2 text-sm" data-i18n="manager.cancel">Cancelar</button>
+            <button type="submit" class="ev2-button rounded-lg py-2" data-i18n="manager.save">Guardar</button>
+          </div>
+        </form>
+
+        <p id="drivers-empty" class="text-sm text-white/40 text-center py-8" data-i18n="manager.noDrivers" hidden>Todavía no hay conductores registrados.</p>
+        <div id="drivers-list" class="space-y-3"></div>
+      </div>
+
+      <!-- ---------------------------- TAXI ---------------------------- -->
+      <div id="tab-taxi" class="space-y-4" hidden>
+        <div class="card rounded-xl p-4 space-y-3">
+          <label class="flex items-center gap-3 text-sm tap">
+            <input id="taxi-enabled" type="checkbox" class="w-5 h-5 accent-emerald-400">
+            <span data-i18n="manager.taxiEnabled">Servicio de salida segura activo</span>
+          </label>
+          <div><label class="label" for="taxi-pickup" data-i18n="manager.pickupPoint">Punto de encuentro</label><input id="taxi-pickup" class="field" maxlength="120"></div>
+          <button id="btn-taxi-save" class="ev2-button w-full rounded-lg py-2" data-i18n="manager.save">Guardar</button>
+        </div>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="manager.zones">Zonas y tarifas</p>
+          <p id="zones-empty" class="text-sm text-white/40" data-i18n="manager.noZones" hidden>No hay zonas configuradas.</p>
+          <div id="zones-list" class="space-y-2"></div>
+          <div class="grid grid-cols-5 gap-2 pt-2 border-t border-white/10">
+            <input id="zone-name" class="field col-span-3" placeholder="Zona" data-i18n-placeholder="manager.zoneName">
+            <input id="zone-amount" type="number" min="0" step="1" class="field col-span-2" placeholder="Precio" data-i18n-placeholder="manager.zoneAmount">
+          </div>
+          <button id="btn-zone-add" class="ev2-button w-full rounded-lg py-2" data-i18n="manager.newZone">Agregar zona</button>
+        </div>
+      </div>
+
+      <!-- ---------------------------- CAJONES ---------------------------- -->
+      <div id="tab-parking" class="space-y-4" hidden>
+        <div class="grid grid-cols-3 gap-2">
+          <div class="stat-card"><div class="stat-number" id="p-total">—</div><div class="stat-label" data-i18n="manager.parkingTotal">Cajones</div></div>
+          <div class="stat-card"><div class="stat-number" id="p-free">—</div><div class="stat-label" data-i18n="manager.parkingFree">Libres</div></div>
+          <div class="stat-card"><div class="stat-number" id="p-occupied">—</div><div class="stat-label" data-i18n="manager.parkingOccupied">Ocupados</div></div>
+        </div>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <label class="flex items-center gap-3 text-sm tap">
+            <input id="valet-enabled" type="checkbox" class="w-5 h-5 accent-emerald-400">
+            <span data-i18n="manager.valetEnabled">Servicio de valet activo</span>
+          </label>
+          <div><label class="label" for="valet-fee" data-i18n="manager.valetFee">Costo del valet (0 = gratis, solo propina)</label><input id="valet-fee" type="number" min="0" step="1" class="field"></div>
+          <button id="btn-valet-save" class="ev2-button w-full rounded-lg py-2" data-i18n="manager.save">Guardar</button>
+        </div>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs text-white/50" data-i18n="manager.spotsHint">Escribe los cajones separados por coma o salto de línea. Los rangos funcionan: A1-A20.</p>
+          <textarea id="spots-text" class="field" placeholder="A1-A20, B1-B10"></textarea>
+          <input id="spots-zone" class="field" placeholder="Zona (opcional)" data-i18n-placeholder="manager.spotsZone" maxlength="40">
+          <p id="spots-preview" class="text-xs text-white/50"></p>
+          <button id="btn-spots-add" class="ev2-button w-full rounded-lg py-2" data-i18n="manager.addSpots">Dar de alta</button>
+        </div>
+
+        <p id="spots-empty" class="text-sm text-white/40 text-center py-6" data-i18n="manager.noSpots" hidden>Todavía no hay cajones dados de alta.</p>
+        <div id="spots-list" class="flex flex-wrap gap-2"></div>
+      </div>
+    </main>
+  </section>
+
+  <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50" hidden></div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/format.js"></script>
+<script src="js/roles.js"></script>
+<script src="js/password-gate.js"></script>
+<script src="js/manager.js"></script>
+<script src="js/manager-screen.js"></script>
+</body>
+</html>

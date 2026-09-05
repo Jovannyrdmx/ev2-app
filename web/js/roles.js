@@ -58,11 +58,11 @@
       does: { es: 'Aceptar viajes, confirmar inicio y fin, y ver lo cobrado.', en: 'Accept rides, confirm start and end, and see what was charged.' },
     },
     manager: {
-      label: { es: 'Gerente', en: 'Manager' }, home: 'manager.html', ready: false, step: '5.5',
+      label: { es: 'Gerente', en: 'Manager' }, home: 'manager.html', ready: true,
       does: { es: 'Precios, plano, empleados, caja del turno y aprobación de retiros.', en: "Prices, floor plan, staff, the shift's till and payout approvals." },
     },
     admin: {
-      label: { es: 'Administrador', en: 'Administrator' }, home: 'manager.html', ready: false, step: '5.5',
+      label: { es: 'Administrador', en: 'Administrator' }, home: 'manager.html', ready: true,
       does: { es: 'Todo lo del gerente, más conductores, integraciones y cuentas de pago.', en: 'Everything the manager has, plus drivers, integrations and payment accounts.' },
     },
   };
