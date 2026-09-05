@@ -251,6 +251,65 @@
         <div id="orders-list" class="space-y-3"></div>
       </div>
 
+      <!-- ---------------------------- SALIDA SEGURA ---------------------------- -->
+      <div id="view-taxi" class="p-4 space-y-4" hidden>
+        <div id="taxi-headline" class="info-panel">
+          <p id="taxi-headline-text" class="font-display text-lg leading-snug">—</p>
+          <p id="taxi-pickup" class="text-xs text-white/50 mt-2" hidden></p>
+        </div>
+
+        <!-- El viaje en curso: el coche, el conductor y el comprobante. -->
+        <div id="taxi-live" class="card rounded-xl p-4 space-y-3" hidden>
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="taxi.driver">Conductor</p>
+              <p id="taxi-driver-name" class="font-display text-lg">—</p>
+              <p id="taxi-vehicle" class="text-sm text-white/70"></p>
+            </div>
+            <a id="taxi-call" class="ev2-button rounded-lg px-4 flex items-center" hidden>
+              <i class="fa-solid fa-phone mr-2"></i><span data-i18n="taxi.call">Llamar</span>
+            </a>
+          </div>
+          <div class="flex justify-between text-sm border-t border-white/10 pt-3">
+            <span class="text-white/50" data-i18n="taxi.fare">Costo</span>
+            <span id="taxi-fare">—</span>
+          </div>
+          <div id="taxi-certificate" class="rounded-lg p-3" style="background:rgba(0,255,0,.07);border:1px solid rgba(0,255,0,.35)" hidden>
+            <p class="text-xs uppercase tracking-wider" style="color:var(--ev2-lime)" data-i18n="taxi.certificate">Comprobante de salida</p>
+            <p id="taxi-folio" class="font-display text-2xl tracking-widest my-1">—</p>
+            <p class="text-[11px] text-white/50" data-i18n="taxi.certificateNote">Cualquiera puede verificar este folio en la página del club. Vence solo.</p>
+            <p id="taxi-cert-expired" class="text-[11px] text-red-300 mt-1" data-i18n="taxi.certificateExpired" hidden>Este comprobante ya venció.</p>
+          </div>
+          <button id="btn-taxi-cancel" class="w-full py-2 text-sm text-red-300 underline" data-i18n="taxi.cancel" hidden>Cancelar solicitud</button>
+        </div>
+
+        <!-- El formulario: solo aparece cuando no hay viaje vivo. -->
+        <form id="taxi-form" class="space-y-3" hidden>
+          <div>
+            <label class="block text-xs text-white/50 mb-1" for="taxi-zone" data-i18n="taxi.zone">Zona</label>
+            <select id="taxi-zone" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"></select>
+          </div>
+          <div>
+            <label class="block text-xs text-white/50 mb-1" for="taxi-destination" data-i18n="taxi.destination">A dónde vas</label>
+            <input id="taxi-destination" maxlength="300" placeholder="Colonia o referencia" data-i18n-placeholder="taxi.destinationHint"
+                   class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs text-white/50 mb-1" for="taxi-passengers" data-i18n="taxi.passengers">Cuántos van</label>
+            <select id="taxi-passengers" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"></select>
+          </div>
+          <input id="taxi-notes" maxlength="280" placeholder="Algo que el conductor deba saber" data-i18n-placeholder="taxi.notes"
+                 class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+          <button type="submit" id="btn-taxi-request" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="taxi.request">Solicitar taxi</button>
+        </form>
+
+        <div>
+          <p class="text-xs uppercase tracking-wider text-white/40 mb-2" data-i18n="taxi.history">Tus viajes</p>
+          <p id="taxi-empty" class="text-sm text-white/40" data-i18n="taxi.noHistory" hidden>Todavía no has pedido ningún taxi.</p>
+          <div id="taxi-history" class="space-y-2"></div>
+        </div>
+      </div>
+
       <!-- ---------------------------- PERFIL ---------------------------- -->
       <div id="view-profile" class="p-5 space-y-4" hidden>
         <div class="text-center">
@@ -276,10 +335,11 @@
       </button>
     </div>
 
-    <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto grid grid-cols-4 border-t border-white/10 bg-black/95 backdrop-blur z-20">
+    <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto grid grid-cols-5 border-t border-white/10 bg-black/95 backdrop-blur z-20">
       <button data-view="map" class="nav-tab py-3 text-xs tab-active"><i class="fa-solid fa-map-location-dot block text-lg mb-1"></i><span data-i18n="nav.map">Mapa</span></button>
       <button data-view="menu" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-martini-glass block text-lg mb-1"></i><span data-i18n="nav.menu">Menú</span></button>
       <button data-view="orders" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-receipt block text-lg mb-1"></i><span data-i18n="nav.orders">Pedidos</span><span id="orders-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
+      <button data-view="taxi" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-taxi block text-lg mb-1"></i><span data-i18n="taxi.nav">Salida</span><span id="taxi-badge" class="ml-1 px-1.5 rounded-full bg-emerald-500 text-[10px]" hidden></span></button>
       <button data-view="profile" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-user block text-lg mb-1"></i><span data-i18n="nav.profile">Perfil</span></button>
     </nav>
   </section>
@@ -291,6 +351,7 @@
 <script src="js/format.js"></script>
 <script src="js/roles.js"></script>
 <script src="js/floor-map.js"></script>
+<script src="js/taxi-ride.js"></script>
 <script src="js/client.js"></script>
 <script src="js/index-screen.js"></script>
 </body>

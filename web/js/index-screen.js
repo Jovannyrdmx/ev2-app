@@ -5,7 +5,7 @@
  * `EV2Map` (plano) y `EV2Roles` (a dónde va cada rol). Ninguna decisión de negocio vive
  * aquí: si algo hay que probar, va en esos módulos.
  */
-/* global EV2, EV2Format, EV2Client, EV2Map, EV2Roles */
+/* global EV2, EV2Format, EV2Client, EV2Map, EV2Roles, EV2Taxi */
 (function () {
   'use strict';
 
@@ -25,6 +25,7 @@
     club: null, drinks: [], categories: [], category: null,
     tables: [], landmarks: [], canvas: null, floors: [], floor: null,
     selectedId: null, myTable: null, orders: [], realtime: null,
+    taxi: { availability: null, ride: null, rides: [], fares: [], pickup: null },
   };
   const cart = EV2Client.createCart();
 
@@ -137,7 +138,7 @@
     renderMenu();
     renderCart();
     renderOrders();
-    if (!$('screen-app').hidden) renderFloor();
+    if (!$('screen-app').hidden) { renderFloor(); renderTaxi(); }
     if (!$('screen-staff').hidden) renderStaffPending();
     setConnection(lastConnection.on, lastConnection.key);
   }
@@ -194,7 +195,7 @@
     $('profile-email').textContent = user.email || '';
     $('profile-role').textContent = EV2Roles.describe(user.role, lang()).label;
     $('profile-club').textContent = (state.club && state.club.name) || 'EV2 Clandestinoz';
-    await Promise.all([loadFloor(), loadMenu(), loadOrders()]);
+    await Promise.all([loadFloor(), loadMenu(), loadOrders(), loadTaxi()]);
     connectRealtime();
   }
 
@@ -520,9 +521,180 @@
     }).join('');
   }
 
+  // ---------------------------------------------------------------- salida segura
+
+  const PASSENGER_CHOICES = [1, 2, 3, 4, 5, 6, 7, 8];
+
+  /**
+   * Tres llamadas: cómo está el servicio ahora, las zonas con precio, y mis viajes.
+   * `rides/mine` ya devuelve cuál es el vivo, así que no hay que deducirlo aquí.
+   */
+  async function loadTaxi() {
+    try {
+      const [availability, mine] = await Promise.all([
+        api.get(`/nightclubs/${clubId()}/taxi/availability`),
+        api.get(`/nightclubs/${clubId()}/taxi/rides/mine?limit=10`),
+      ]);
+      state.taxi.availability = availability;
+      state.taxi.pickup = availability.pickup_point || null;
+      state.taxi.rides = mine.rides || [];
+      // No solo el vivo: un viaje recién terminado se sigue mostrando mientras su
+      // comprobante valga, que es cuando el cliente lo necesita.
+      state.taxi.ride = EV2Taxi.currentForGuest(mine.live, state.taxi.rides);
+      // Las zonas solo hacen falta para pedir; si el servicio está apagado no se piden.
+      if (availability.enabled && state.taxi.fares.length === 0) {
+        try {
+          const fares = await api.get(`/nightclubs/${clubId()}/taxi-fares`);
+          state.taxi.fares = fares.fares || [];
+        } catch { state.taxi.fares = []; }
+      }
+      renderTaxi();
+    } catch (err) { showError(err); }
+  }
+
+  /** Un aviso por cambio de estado, y vibración cuando toca levantarse a caminar. */
+  function announceTaxi(status) {
+    const head = EV2Taxi.guestHeadline(state.taxi.ride, state.taxi.availability);
+    toast(t(head.key, head.vars), head.urgent ? 'ok' : 'info');
+    if (!head.urgent) return;
+    try {
+      if (navigator.vibrate) navigator.vibrate([200, 80, 200]);
+    } catch { /* algunos navegadores lo bloquean sin interacción previa */ }
+  }
+
+  function renderTaxi() {
+    const ride = state.taxi.ride;
+    const head = EV2Taxi.guestHeadline(ride, state.taxi.availability);
+    const live = Boolean(ride && EV2Taxi.isLive(ride.status));
+    // La tarjeta se muestra también con el viaje ya terminado (por el comprobante);
+    // el formulario reaparece en cuanto deja de estar vivo, para poder pedir otro.
+    const showCard = Boolean(ride);
+
+    $('taxi-headline-text').textContent = t(head.key, head.vars);
+    $('taxi-headline').style.borderColor = head.urgent ? 'var(--ev2-lime)' : 'var(--ev2-cyan)';
+    $('taxi-headline-text').style.color = head.urgent ? 'var(--ev2-lime)' : '';
+
+    // La insignia de la pestaña: se ve el aviso aunque estés en el menú pidiendo.
+    $('taxi-badge').hidden = !head.urgent;
+    $('taxi-badge').textContent = '!';
+
+    const pickup = state.taxi.pickup;
+    $('taxi-pickup').hidden = !pickup;
+    if (pickup) $('taxi-pickup').textContent = `${t('taxi.pickup')}: ${pickup}`;
+
+    $('taxi-live').hidden = !showCard;
+    $('taxi-form').hidden = live || !(state.taxi.availability && state.taxi.availability.enabled);
+
+    if (showCard) renderLiveRide(ride);
+    renderTaxiForm();
+    renderTaxiHistory();
+  }
+
+  function renderLiveRide(ride) {
+    const driver = ride.driver;
+    $('taxi-driver-name').textContent = driver
+      ? [driver.name, driver.company].filter(Boolean).join(' · ') : t('taxi.searching');
+    $('taxi-vehicle').textContent = EV2Taxi.vehicleLabel(ride) || '';
+
+    // El teléfono del conductor solo existe cuando ya aceptó: antes no hay a quién llamar.
+    const call = $('taxi-call');
+    call.hidden = !(driver && driver.phone);
+    if (driver && driver.phone) call.href = `tel:${driver.phone}`;
+
+    const amount = EV2Taxi.fareAmount(ride);
+    $('taxi-fare').textContent = amount === null
+      ? t('taxi.fareOpen') : money(amount, ride.currency);
+
+    const cert = EV2Taxi.certificate(ride);
+    $('taxi-certificate').hidden = !cert;
+    if (cert) {
+      $('taxi-folio').textContent = cert.folio;
+      $('taxi-cert-expired').hidden = !cert.expired;
+    }
+
+    $('btn-taxi-cancel').hidden = !EV2Taxi.canCancel(ride.status);
+  }
+
+  function renderTaxiForm() {
+    const zone = $('taxi-zone');
+    if (zone.dataset.filled !== String(state.taxi.fares.length)) {
+      zone.innerHTML = [`<option value="">${escape(t('taxi.zoneAny'))}</option>`]
+        .concat(state.taxi.fares.map((f) => `<option value="${escape(f.id)}">${escape(f.zone)} · ${escape(EV2Format.money(f.amount, f.currency))}</option>`))
+        .join('');
+      zone.dataset.filled = String(state.taxi.fares.length);
+    }
+    const people = $('taxi-passengers');
+    if (!people.dataset.filled) {
+      people.innerHTML = PASSENGER_CHOICES.map((n) => `<option value="${n}">${n}</option>`).join('');
+      people.dataset.filled = '1';
+    }
+    $('btn-taxi-request').textContent = t('taxi.request');
+  }
+
+  function renderTaxiHistory() {
+    const shown = state.taxi.ride && state.taxi.ride.id;
+    const past = state.taxi.rides.filter((r) => !EV2Taxi.isLive(r.status) && r.id !== shown);
+    $('taxi-empty').hidden = past.length > 0;
+    $('taxi-history').innerHTML = past.map((r) => {
+      const amount = EV2Taxi.fareAmount(r);
+      const head = EV2Taxi.guestHeadline(r, null);
+      return `
+      <div class="card rounded-xl p-3 flex justify-between items-center">
+        <div class="min-w-0">
+          <p class="text-sm">${escape(r.destination || r.destination_zone || t('taxi.zoneAny'))}</p>
+          <p class="text-xs text-white/45">${escape(EV2Format.dateTime(r.created_at))} · ${escape(t(head.key, head.vars))}</p>
+        </div>
+        <p class="text-sm flex-none ml-3">${amount === null ? '—' : escape(money(amount, r.currency))}</p>
+      </div>`;
+    }).join('');
+  }
+
+  $('taxi-form').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const button = $('btn-taxi-request');
+    button.disabled = true;
+    button.textContent = t('taxi.requesting');
+    try {
+      const body = {
+        // Misma clave si el botón se toca dos veces o se cae la señal: el servidor
+        // devuelve la solicitud que ya existe en vez de abrir una segunda.
+        client_request_id: EV2.uuid(),
+        passengers: Number($('taxi-passengers').value) || 1,
+      };
+      const zone = $('taxi-zone').value;
+      if (zone) body.fare_id = zone;
+      const destination = $('taxi-destination').value.trim();
+      if (destination) body.destination = destination;
+      const notes = $('taxi-notes').value.trim();
+      if (notes) body.notes = notes;
+
+      const data = await api.post(`/nightclubs/${clubId()}/taxi/rides`, body);
+      state.taxi.ride = data.ride;
+      if (data.availability) state.taxi.availability = Object.assign(
+        {}, state.taxi.availability, data.availability);
+      if (data.pickup_point) state.taxi.pickup = data.pickup_point;
+      renderTaxi();
+      announceTaxi(data.ride.status);
+    } catch (err) {
+      showError(err);
+    } finally {
+      button.disabled = false;
+      button.textContent = t('taxi.request');
+    }
+  };
+
+  $('btn-taxi-cancel').onclick = async () => {
+    const ride = state.taxi.ride;
+    if (!ride || !window.confirm(t('taxi.confirmCancel'))) return;
+    try {
+      await api.post(`/nightclubs/${clubId()}/taxi/rides/${ride.id}/cancel`, {});
+      await loadTaxi();
+    } catch (err) { showError(err); }
+  };
+
   // ---------------------------------------------------------------- navegación
 
-  const VIEWS = ['map', 'menu', 'orders', 'profile'];
+  const VIEWS = ['map', 'menu', 'orders', 'taxi', 'profile'];
 
   function showView(name) {
     for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
@@ -563,7 +735,7 @@
     // de seguir pintando un estado que ya no corresponde.
     rt.on('resync_required', async () => {
       banner(t('banner.updating'));
-      await Promise.all([loadFloor(), loadOrders()]);
+      await Promise.all([loadFloor(), loadOrders(), loadTaxi()]);
       banner(null);
     });
 
@@ -575,6 +747,19 @@
         if (change.status === 'ready') toast(t('orders.ready'), 'ok');
       }
       if (change.changed === 'floorPlan') await loadFloor();
+    });
+
+    // Los eventos del taxi los interpreta su propio módulo: el mensaje trae el id del
+    // viaje, no el coche ni el teléfono, así que casi siempre hay que volver a pedirlo.
+    rt.on('event', async (message) => {
+      const change = EV2Taxi.applyEvent(state.taxi.ride, message);
+      if (!change.changed) return;
+      const before = state.taxi.ride && state.taxi.ride.status;
+      await loadTaxi();
+      const now = state.taxi.ride && state.taxi.ride.status;
+      // Solo se avisa cuando de verdad cambió algo, para no repetir el mismo aviso si
+      // el socket reproduce eventos al reconectar.
+      if (now && now !== before) announceTaxi(now);
     });
 
     api.on('auth:expired', () => {

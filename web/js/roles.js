@@ -54,7 +54,7 @@
       does: { es: 'Entregar y devolver autos con el boleto, y ver los cajones ocupados.', en: 'Hand over and return cars with the ticket, and see which spots are taken.' },
     },
     driver: {
-      label: { es: 'Conductor', en: 'Driver' }, home: 'driver.html', ready: false, step: '5.6',
+      label: { es: 'Conductor', en: 'Driver' }, home: 'driver.html', ready: true,
       does: { es: 'Aceptar viajes, confirmar inicio y fin, y ver lo cobrado.', en: 'Accept rides, confirm start and end, and see what was charged.' },
     },
     manager: {
