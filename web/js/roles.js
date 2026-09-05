@@ -10,6 +10,10 @@
  * siguen mostrando datos inventados, y mandar a un empleado a una pantalla con números
  * falsos es peor que decirle la verdad. Se le muestra qué falta y de qué paso del plan
  * depende. Conforme cada pantalla se conecte se cambia su `ready` a true.
+
+ * A partir del paso 5.4 todas las pantallas están conectadas, así que hoy no queda
+ * ningún rol en `pending`. El caso sigue existiendo a propósito: es lo que verá un rol
+ * nuevo que se agregue a la base antes de tener pantalla.
  */
 (function (root, factory) {
   'use strict';
@@ -26,7 +30,7 @@
       label: { es: 'Invitado', en: 'Guest' }, home: GUEST_HOME, ready: true,
     },
     waiter: {
-      label: { es: 'Mesero', en: 'Waiter' }, home: 'staff.html', ready: false, step: '5.7',
+      label: { es: 'Mesero', en: 'Waiter' }, home: 'staff.html', ready: true,
       does: { es: 'Recibir los pedidos de sus mesas, marcarlos entregados y ver sus propinas.', en: 'Take orders from their tables, mark them delivered and see their tips.' },
     },
     bartender: {
@@ -34,23 +38,23 @@
       does: { es: 'La cola de pedidos de la barra en tiempo real: preparar, marcar listo.', en: "The bar's live order queue: prepare, mark ready." },
     },
     hostess: {
-      label: { es: 'Hostess', en: 'Hostess' }, home: 'staff.html', ready: false, step: '5.7',
+      label: { es: 'Hostess', en: 'Hostess' }, home: 'staff.html', ready: true,
       does: { es: 'Acomodar gente en las mesas y ver qué zonas están llenas.', en: 'Seat people at tables and see which zones are full.' },
     },
     dancer: {
-      label: { es: 'Bailarina', en: 'Dancer' }, home: 'employee-portal.html', ready: false, step: '5.4',
+      label: { es: 'Bailarina', en: 'Dancer' }, home: 'employee-portal.html', ready: true,
       does: { es: 'Sus propinas, sus ganancias y el registro de su cuenta para el retiro.', en: 'Their tips, their earnings and the bank account for payouts.' },
     },
     dj: {
-      label: { es: 'DJ', en: 'DJ' }, home: 'employee-portal.html', ready: false, step: '5.4',
+      label: { es: 'DJ', en: 'DJ' }, home: 'employee-portal.html', ready: true,
       does: { es: 'Las canciones que le pidieron y lo que lleva ganado por ellas.', en: 'The songs people requested and what they have earned from them.' },
     },
     light_tech: {
-      label: { es: 'Iluminación', en: 'Lighting' }, home: 'employee-portal.html', ready: false, step: '5.4',
+      label: { es: 'Iluminación', en: 'Lighting' }, home: 'employee-portal.html', ready: true,
       does: { es: 'Sus turnos y sus ganancias.', en: 'Their shifts and their earnings.' },
     },
     valet: {
-      label: { es: 'Valet', en: 'Valet' }, home: 'valet.html', ready: false, step: '5.6',
+      label: { es: 'Valet', en: 'Valet' }, home: 'valet.html', ready: true,
       does: { es: 'Entregar y devolver autos con el boleto, y ver los cajones ocupados.', en: 'Hand over and return cars with the ticket, and see which spots are taken.' },
     },
     driver: {

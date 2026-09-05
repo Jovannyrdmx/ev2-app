@@ -292,13 +292,22 @@ describe('A dónde va cada rol al entrar', () => {
     }
   });
 
-  it('mientras su pantalla no esté conectada se le dice, no se le manda a datos falsos', () => {
-    // El mesero sigue esperando la suya (paso 5.7); el bartender ya tiene la de la
-    // barra, así que ese caso lo cubre la prueba de redirección de abajo.
-    const r = Roles.route('waiter', '/index.html');
-    expect(r.action).toBe('pending');
-    expect(r.info.step).toBe('5.7');
-    expect(r.info.does).toMatch(/propinas/i);
+  it('hoy ningún rol del club queda sin pantalla', () => {
+    // Terminado el paso 5.4 todas están conectadas. Si alguna se desconectara, esta
+    // prueba lo diría antes que un empleado parado frente a una pantalla en blanco.
+    const roles = ['guest', 'waiter', 'bartender', 'hostess', 'dancer', 'dj',
+      'light_tech', 'valet', 'driver', 'manager', 'admin'];
+    const sinPantalla = roles.filter((r) => Roles.route(r, '/index.html').action === 'pending');
+    expect(sinPantalla).toEqual([]);
+  });
+
+  it('cada rol va a la pantalla de su puesto, no a la del invitado', () => {
+    expect(Roles.route('waiter', '/index.html')).toMatchObject({ action: 'redirect', to: 'staff.html' });
+    expect(Roles.route('bartender', '/index.html')).toMatchObject({ action: 'redirect', to: 'bartender.html' });
+    expect(Roles.route('valet', '/index.html')).toMatchObject({ action: 'redirect', to: 'valet.html' });
+    expect(Roles.route('driver', '/index.html')).toMatchObject({ action: 'redirect', to: 'driver.html' });
+    expect(Roles.route('manager', '/index.html')).toMatchObject({ action: 'redirect', to: 'manager.html' });
+    expect(Roles.route('dancer', '/index.html')).toMatchObject({ action: 'redirect', to: 'employee-portal.html' });
   });
 
   it('el bartender, cuya pantalla ya está conectada, se redirige a ella', () => {
@@ -322,19 +331,19 @@ describe('A dónde va cada rol al entrar', () => {
       const info = Roles.describe(role);
       expect(info.label).not.toBe('Sin rol asignado');
       expect(info.home).toBeTruthy();
-      if (!info.ready) expect(info.step).toMatch(/^5\.\d$/);
+      expect(info.ready).toBe(true);
     }
   });
 
-  it('cuando una pantalla se conecte, el rol se redirige sin tocar nada más', () => {
-    // Simula el paso 5.6 ya hecho: basta con ready:true en roles.js.
+  it('un rol nuevo sin pantalla se explica, no se deja en blanco', () => {
+    // El caso `pending` sigue existiendo a propósito: es lo que verá un rol que se
+    // agregue a la base antes de tener pantalla.
     const original = Roles.ROLES.valet.ready;
-    Roles.ROLES.valet.ready = true;
+    Roles.ROLES.valet.ready = false;
     try {
-      expect(Roles.route('valet', '/index.html')).toEqual(
-        expect.objectContaining({ action: 'redirect', to: 'valet.html' }),
-      );
-      expect(Roles.route('valet', '/valet.html').action).toBe('stay');
+      const r = Roles.route('valet', '/index.html');
+      expect(r.action).toBe('pending');
+      expect(r.info.does).toMatch(/cajones|autos/i);
     } finally {
       Roles.ROLES.valet.ready = original;
     }

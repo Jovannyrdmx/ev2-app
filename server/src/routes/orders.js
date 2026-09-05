@@ -90,7 +90,13 @@ router.post('/nightclubs/:nightclubId/orders',
 
       await events.publish({
         nightclubId, type: 'order_created', client,
-        audience: { roles: ['bartender', 'manager'], userIds: [req.user.id, b.recipient_id].filter(Boolean) },
+        // El mesero va en la audiencia: es quien lleva la charola a la mesa, y sin esto
+        // su pantalla no se enteraba de nada — se quedaba viendo una lista vacía
+        // mientras los tragos se calentaban en la barra.
+        audience: {
+          roles: ['bartender', 'waiter', 'manager'],
+          userIds: [req.user.id, b.recipient_id].filter(Boolean),
+        },
         payload: { order_id: order.id, table_id: b.table_id || null, subtotal, currency: orderCurrency },
       });
 
@@ -227,7 +233,7 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
 
       await events.publish({
         nightclubId, type: `order_${next}`, client,
-        audience: { roles: ['bartender', 'manager'], userIds: [order.sender_id] },
+        audience: { roles: ['bartender', 'waiter', 'manager'], userIds: [order.sender_id] },
         payload: { order_id: orderId, status: next, reason: req.body.reason || null },
       });
       await client.query('COMMIT');

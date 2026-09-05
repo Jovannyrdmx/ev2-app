@@ -1,0 +1,16 @@
+{
+  "name": "EV2 Clandestinoz",
+  "short_name": "EV2",
+  "description": "Mesas, pedidos y salida segura de EV2 Clandestinoz.",
+  "start_url": "index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a14",
+  "theme_color": "#0a0a14",
+  "lang": "es-MX",
+  "icons": [
+    { "src": "images/favicon-32x32.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "images/ev2-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
