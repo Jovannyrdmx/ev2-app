@@ -47,9 +47,15 @@ function buildCors() {
     .split(',').map((o) => o.trim()).filter(Boolean);
   return cors({
     origin(origin, callback) {
-      // Same-origin/native clients send no Origin header.
+      // Native clients send no Origin header. Browsers DO send it even for same-origin
+      // POST/PUT/DELETE, so the site's own origin has to be in ALLOWED_ORIGINS even when
+      // the API is behind the same proxy as the page.
       if (!origin || origins.includes(origin)) return callback(null, true);
-      return callback(new Error('Origin not allowed by CORS'));
+      // A plain Error here surfaced as `500 Internal server error`, which says nothing
+      // about the actual problem and is exactly what a misconfigured deployment hits on
+      // its first request. It is a configuration mistake, and it now says so.
+      return callback(new ApiError(403, 'origin_not_allowed',
+        `El origen ${origin} no está en ALLOWED_ORIGINS. Agrégalo en .env y reinicia la API.`));
     },
     credentials: true,
     maxAge: 86_400,

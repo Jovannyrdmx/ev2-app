@@ -276,6 +276,31 @@ describe('Socket de tiempo real', () => {
     return { api, rt, ws, setFetch: (fn) => { impl = fn; } };
   }
 
+  it('sin wsUrl asume el mismo origen en /ws, que es lo que reenvia nginx', async () => {
+    const api = EV2.createClient({
+      baseUrl: '/api',
+      fetch: async () => ({ status: 200, json: async () => TOKENS }),
+      storage: fakeStorage(),
+      WebSocket: FakeWS,
+      // sin wsUrl: en Node no hay `location`, asi que cae al respaldo con la ruta
+    });
+    await api.login({ nightclubSlug: 'ev2', email: 'a@b.mx', password: 'x' });
+    const rt = api.createRealtime({ backoff: { baseMs: 10, maxMs: 20, jitterMs: 0 } });
+    rt.connect();
+    expect(FakeWS.instances[0].url).toBe('ws://localhost:4000/ws');
+    rt.close();
+  });
+
+  it('al reconectar cuelga since_id de la ruta, sin duplicar la barra', async () => {
+    const { rt, ws } = await connected();
+    ws.receive({ type: 'welcome', last_event_id: '7' });
+    ws.fire(1006);
+    await new Promise((r) => setTimeout(r, 120));
+    // wsUrl explicito sin ruta: la query se pega directo, no como "//?since_id".
+    expect(FakeWS.instances[1].url).toBe('ws://x?since_id=7');
+    rt.close();
+  });
+
   it('manda el token en el subprotocolo, no en la URL', async () => {
     const { ws } = await connected();
     expect(ws.protocols).toEqual(['bearer', 'access-1']);
@@ -435,5 +460,41 @@ describe('Dinero e idioma', () => {
   it('un idioma que no existe cae a español en vez de quedarse en blanco', () => {
     expect(fmt.setLanguage('fr')).toBe('es');
     expect(fmt.t('error.network')).toMatch(/Sin conexión/);
+  });
+});
+
+// ---------------------------------------------------------------- CORS
+
+describe('Origen no permitido', () => {
+  // El navegador manda `Origin` incluso en peticiones al mismo origen cuando no son GET.
+  // Antes esto salía como "500 Internal server error" y no decía nada del problema real.
+  const { createApp } = require('../src/app');
+  const request = require('supertest');
+
+  it('responde 403 diciendo qué configurar, no un 500 mudo', async () => {
+    const saved = process.env.ALLOWED_ORIGINS;
+    process.env.ALLOWED_ORIGINS = 'http://permitido.mx';
+    const app = createApp();
+    const res = await request(app).post('/api/auth/login')
+      .set('Origin', 'http://otro.mx')
+      .send({ nightclub_slug: 'x', email: 'a@b.mx', password: 'xxxxxxxx' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('origin_not_allowed');
+    expect(res.body.error.message).toMatch(/ALLOWED_ORIGINS/);
+    expect(res.body.error.message).toContain('http://otro.mx');
+    process.env.ALLOWED_ORIGINS = saved;
+  });
+
+  it('un origen permitido pasa, y un cliente nativo sin Origin también', async () => {
+    const saved = process.env.ALLOWED_ORIGINS;
+    process.env.ALLOWED_ORIGINS = 'http://permitido.mx';
+    const app = createApp();
+    // 400 por credenciales inválidas es señal de que CORS lo dejó pasar.
+    const conOrigen = await request(app).post('/api/auth/login')
+      .set('Origin', 'http://permitido.mx').send({});
+    expect(conOrigen.status).toBe(400);
+    const sinOrigen = await request(app).post('/api/auth/login').send({});
+    expect(sinOrigen.status).toBe(400);
+    process.env.ALLOWED_ORIGINS = saved;
   });
 });

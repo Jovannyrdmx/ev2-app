@@ -55,7 +55,7 @@ services:
       DB_NAME: ${DB_NAME:-ev2}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
       SOFTRESTAURANT11_URL: ${SOFTRESTAURANT11_URL:-}
       SOFTRESTAURANT11_API_KEY: ${SOFTRESTAURANT11_API_KEY:-}
       SOFTRESTAURANT11_WEBHOOK_SECRET: ${SOFTRESTAURANT11_WEBHOOK_SECRET:-}
@@ -99,8 +99,11 @@ services:
     container_name: ev2-web
     ports:
       - "${WEB_PORT:-8080}:8080"
+    # nginx resuelve los nombres de los upstream al arrancar: si `ws` no existe todavia,
+    # el contenedor web no levanta.
     depends_on:
       - api
+      - ws
     restart: unless-stopped
     networks: [ev2]
 
