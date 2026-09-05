@@ -277,3 +277,96 @@ describe('La contraseña temporal', () => {
     expect(M.createSecretBox().peek()).toBe(null);
   });
 });
+
+// --------------------------------------------------------------------- noches
+
+describe('Las noches del club', () => {
+  const NOW = '2026-09-05T12:00:00Z';
+  const nights = [
+    { id: 'a', name: 'Sábado', status: 'published', doors_open_at: '2026-09-13T02:00:00Z', reservations_count: 4 },
+    { id: 'b', name: 'Viernes', status: 'draft', doors_open_at: '2026-09-06T02:00:00Z', reservations_count: 0 },
+    { id: 'c', name: 'Pasada', status: 'finished', doors_open_at: '2026-09-01T02:00:00Z', reservations_count: 9 },
+    { id: 'd', name: 'Más vieja', status: 'finished', doors_open_at: '2026-08-25T02:00:00Z', reservations_count: 2 },
+  ];
+
+  it('pone primero lo que viene, y el historial hacia atrás', () => {
+    // La noche que hay que publicar no puede quedar enterrada entre las que ya pasaron.
+    expect(M.sortNights(nights, NOW).map((e) => e.id)).toEqual(['b', 'a', 'c', 'd']);
+  });
+
+  it('ignora filas sin id', () => {
+    expect(M.sortNights([null, {}, nights[0]], NOW)).toHaveLength(1);
+  });
+
+  it('una noche en borrador se publica; una publicada con reservaciones ya no se despublica', () => {
+    expect(M.nightActions(nights[1])).toMatchObject({ canPublish: true, canCancel: true, canDelete: true });
+    expect(M.nightActions(nights[0])).toMatchObject({ canPublish: false, canUnpublish: false, canCancel: true });
+  });
+
+  it('una noche publicada SIN reservaciones sí se puede regresar a borrador', () => {
+    expect(M.nightActions({ status: 'published', reservations_count: 0 }).canUnpublish).toBe(true);
+  });
+
+  it('una noche con reservaciones vivas no se borra: se cancela', () => {
+    // El dinero apartado tiene que seguir teniendo a qué apuntar.
+    expect(M.nightActions(nights[0]).canDelete).toBe(false);
+    expect(M.nightActions(nights[0]).canCancel).toBe(true);
+  });
+
+  it('sin evento no revienta', () => {
+    expect(M.nightActions(null)).toMatchObject({ canPublish: false, booked: 0 });
+  });
+
+  const good = {
+    name: 'Sábado de Halloween', event_date: '2026-10-31',
+    doors_open_at: '2026-11-01T02:00:00Z', closes_at: '2026-11-01T09:00:00Z',
+    ticket_price: 250,
+  };
+
+  it('acepta una noche bien capturada', () => {
+    expect(M.validateNight(good, NOW)).toEqual({});
+  });
+
+  it('no deja abrir una noche que ya pasó', () => {
+    expect(M.validateNight({ ...good, doors_open_at: '2026-09-01T02:00:00Z' }, NOW))
+      .toMatchObject({ doors_open_at: 'night.errPast' });
+  });
+
+  it('cerrar antes de abrir se detiene aquí', () => {
+    // Pasa de verdad: el club cierra a las 4 de la MAÑANA SIGUIENTE y quien captura
+    // pone la misma fecha en las dos casillas.
+    expect(M.validateNight({ ...good, closes_at: '2026-10-31T23:00:00Z' }, NOW))
+      .toMatchObject({ closes_at: 'night.errCloses' });
+  });
+
+  it('pide lo que falta, campo por campo', () => {
+    const errors = M.validateNight({ name: '  ', ticket_price: -5 }, NOW);
+    expect(errors.name).toBe('night.errName');
+    expect(errors.event_date).toBe('night.errDate');
+    expect(errors.doors_open_at).toBe('night.errDoors');
+    expect(errors.ticket_price).toBe('night.errPrice');
+  });
+
+  it('un cover de cero es válido: hay noches sin cover', () => {
+    expect(M.validateNight({ ...good, ticket_price: 0 }, NOW)).toEqual({});
+  });
+
+  it('la noche se crea en BORRADOR, nunca publicada de un solo toque', () => {
+    // Abrir el club por accidente al capturar es peor que pedir un toque de más.
+    const body = M.nightPayload(good);
+    expect(body.status).toBe('draft');
+    expect(body.doors_open_at).toBe('2026-11-01T02:00:00.000Z');
+    expect(body.closes_at).toBe('2026-11-01T09:00:00.000Z');
+    expect(body.ticket_price).toBe(250);
+  });
+
+  it('sin hora de cierre, el campo no viaja', () => {
+    expect(M.nightPayload({ ...good, closes_at: '' }).closes_at).toBeUndefined();
+  });
+
+  it('cada estado tiene su etiqueta', () => {
+    expect(M.nightStatusLabel('published')).toBe('night.stPublished');
+    expect(M.nightStatusLabel('cancelled')).toBe('night.stCancelled');
+    expect(M.nightStatusLabel('lo-que-sea')).toBe('night.stDraft');
+  });
+});

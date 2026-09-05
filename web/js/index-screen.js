@@ -29,6 +29,38 @@
   };
   const cart = EV2Client.createCart();
 
+  /**
+   * El enganche para las pantallas que viven en otro archivo (`show-screen.js`,
+   * `booking-screen.js`).
+   *
+   * Están aparte porque este archivo ya es largo y mezclarlo todo hace que un cambio en
+   * las propinas rompa el plano. Lo que comparten es lo mínimo: la API, el estado, y
+   * tres avisos —entró alguien, cambió de pestaña, llegó un evento del socket—. Nada de
+   * lógica de negocio pasa por aquí; esa vive en EV2Tipping, EV2Songs y EV2Booking.
+   */
+  const hub = (function makeHub() {
+    const handlers = { enter: [], view: [], event: [], language: [] };
+    let entered = null;
+    const call = (fn, arg) => {
+      // Un fallo en una pantalla secundaria no puede tumbar el plano ni los pedidos.
+      try { const r = fn(arg); if (r && r.catch) r.catch(() => {}); } catch { /* seguimos */ }
+    };
+    return {
+      on(name, fn) {
+        (handlers[name] || (handlers[name] = [])).push(fn);
+        // 'enter' se repite al que llegó tarde. Los <script> se cargan en orden, pero la
+        // sesión se recupera con una llamada de red que puede resolverse mientras el
+        // navegador todavía está bajando el archivo siguiente: sin esto, la pantalla de
+        // propinas se quedaría vacía justo en las recargas, que es cuando se nota.
+        if (name === 'enter' && entered) call(fn, entered);
+      },
+      emit(name, arg) {
+        if (name === 'enter') entered = arg;
+        for (const fn of (handlers[name] || [])) call(fn, arg);
+      },
+    };
+  }());
+
   // ---------------------------------------------------------------- utilidades de pantalla
 
   let toastTimer = null;
@@ -141,6 +173,7 @@
     if (!$('screen-app').hidden) { renderFloor(); renderTaxi(); }
     if (!$('screen-staff').hidden) renderStaffPending();
     setConnection(lastConnection.on, lastConnection.key);
+    hub.emit('language', lang());
   }
 
   $('btn-lang').onclick = () => {
@@ -197,6 +230,25 @@
     $('profile-club').textContent = (state.club && state.club.name) || 'EV2 Clandestinoz';
     await Promise.all([loadFloor(), loadMenu(), loadOrders(), loadTaxi()]);
     connectRealtime();
+    hub.emit('enter', context());
+  }
+
+  /** Lo que ven las pantallas de al lado. Se arma al vuelo para que nunca vean copias viejas. */
+  function context() {
+    return {
+      api,
+      clubId,
+      user: () => api.session.user || {},
+      club: () => state.club,
+      drinks: () => state.drinks,
+      myTable: () => state.myTable,
+      t,
+      money,
+      lang,
+      escape,
+      toast,
+      showError,
+    };
   }
 
   /**
@@ -694,15 +746,16 @@
 
   // ---------------------------------------------------------------- navegación
 
-  const VIEWS = ['map', 'menu', 'orders', 'taxi', 'profile'];
+  const VIEWS = ['map', 'menu', 'orders', 'show', 'taxi', 'profile'];
 
   function showView(name) {
     for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
     document.querySelectorAll('.nav-tab').forEach((b) => {
-      b.className = `nav-tab py-3 text-xs ${b.dataset.view === name ? 'tab-active' : 'text-white/50'}`;
+      b.className = `nav-tab py-3 text-[10px] ${b.dataset.view === name ? 'tab-active' : 'text-white/50'}`;
     });
     // El lienzo se mide al mostrarse: dibujarlo mientras estaba oculto lo deja en blanco.
     if (name === 'map') drawMap();
+    hub.emit('view', name);
   }
   document.querySelectorAll('.nav-tab').forEach((b) => { b.onclick = () => showView(b.dataset.view); });
 
@@ -749,6 +802,10 @@
       if (change.changed === 'floorPlan') await loadFloor();
     });
 
+    // Las pantallas de propinas, música y reservación escuchan el MISMO socket: abrir
+    // una segunda conexión haría que el servidor cerrara la primera por sesión repetida.
+    rt.on('event', (message) => hub.emit('event', message));
+
     // Los eventos del taxi los interpreta su propio módulo: el mensaje trae el id del
     // viaje, no el coche ni el teléfono, así que casi siempre hay que volver a pedirlo.
     rt.on('event', async (message) => {
@@ -791,4 +848,8 @@
     const user = await api.resume();
     if (user) await afterSignIn();
   }());
+
+  // Se publica al final, ya con todo armado: un archivo que se cargue antes encontraría
+  // la mitad de las funciones sin definir.
+  window.EV2Screen = { on: hub.on, context };
 }());

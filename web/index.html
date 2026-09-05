@@ -239,6 +239,61 @@
           <button id="btn-sit" class="ev2-button w-full py-3 rounded-lg mt-3 font-display" disabled>Sentarme aquí</button>
           <button id="btn-leave" class="w-full py-2 mt-2 text-sm text-red-300 underline" data-i18n="map.leave" hidden>Dejar mi mesa</button>
         </div>
+
+        <!--
+          Reservar vive aquí y no en una pestaña propia: no es algo que se haga durante
+          la noche, es la decisión de venir. Quien está adentro toca el plano; quien
+          está en su casa abre esto.
+        -->
+        <button id="btn-book-open" class="w-full py-3 rounded-xl card text-sm font-display" data-i18n="book.open">Reservar para otra noche</button>
+
+        <div id="book-panel" class="card rounded-xl p-4 space-y-3" hidden>
+          <h3 class="font-display text-sm" style="color:var(--ev2-cyan)" data-i18n="book.title">Reservar mesa</h3>
+
+          <p id="book-no-events" class="text-sm text-white/50" data-i18n="book.noEvents" hidden>Todavía no hay noches abiertas para reservar.</p>
+
+          <div>
+            <label class="block text-xs text-white/50 mb-1" for="book-event" data-i18n="book.night">Qué noche</label>
+            <select id="book-event" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"></select>
+          </div>
+          <div>
+            <label class="block text-xs text-white/50 mb-1" for="book-guests" data-i18n="book.guests">Cuántos van</label>
+            <select id="book-guests" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"></select>
+          </div>
+
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="book.tables">Mesas libres</p>
+          <p id="book-no-tables" class="text-sm text-white/50" data-i18n="book.noTables" hidden>No queda ninguna mesa para esa cantidad de personas.</p>
+          <div id="book-tables" class="space-y-2"></div>
+
+          <input id="book-notes" maxlength="500" placeholder="Cumpleaños, silla de ruedas, etc." data-i18n-placeholder="book.notesHint"
+                 class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+          <input id="book-code" maxlength="40" placeholder="Código de descuento" data-i18n-placeholder="book.discountCode"
+                 class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+
+          <!-- El desglose: cada renglón que compone lo que se va a cobrar. -->
+          <div id="book-quote" class="rounded-lg p-3 space-y-1 text-sm" style="background:rgba(0,191,255,.07);border:1px solid rgba(0,191,255,.3)" hidden>
+            <div id="book-quote-lines" class="space-y-1"></div>
+            <div class="flex justify-between border-t border-white/10 pt-2 mt-2">
+              <span class="text-white/60" data-i18n="book.total">Total</span><span id="book-total">—</span>
+            </div>
+            <div class="flex justify-between font-display" style="color:var(--ev2-lime)">
+              <span data-i18n="book.deposit">Anticipo hoy</span><span id="book-deposit">—</span>
+            </div>
+            <div class="flex justify-between text-white/60">
+              <span data-i18n="book.rest">El resto esa noche</span><span id="book-rest">—</span>
+            </div>
+            <p class="text-[11px] text-white/40 pt-1" data-i18n="book.depositNote">El cobro del anticipo con tarjeta se conecta en la fase de pagos. Por ahora la mesa queda apartada y el club confirma contigo.</p>
+          </div>
+
+          <p id="book-error" class="text-sm text-red-300" hidden></p>
+          <button id="btn-book-confirm" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="book.confirm" disabled>Reservar</button>
+        </div>
+
+        <div>
+          <p class="text-xs uppercase tracking-wider text-white/40 mb-2" data-i18n="book.mine">Mis reservaciones</p>
+          <p id="book-none" class="text-sm text-white/40" data-i18n="book.noMine" hidden>No tienes ninguna reservación.</p>
+          <div id="book-list" class="space-y-2"></div>
+        </div>
       </div>
 
       <!-- ---------------------------- MENÚ ---------------------------- -->
@@ -251,6 +306,57 @@
       <div id="view-orders" class="p-4 space-y-3" hidden>
         <p id="orders-empty" class="text-sm text-white/50 text-center py-10" data-i18n="orders.empty" hidden>Todavía no has pedido nada.</p>
         <div id="orders-list" class="space-y-3"></div>
+      </div>
+
+      <!-- ---------------------------- SHOW: PERSONAL Y MÚSICA ---------------------------- -->
+      <div id="view-show" class="p-4 space-y-4" hidden>
+        <div class="flex gap-2">
+          <button data-show-tab="staff" class="show-tab flex-1 py-2 rounded-lg text-sm tab-active" data-i18n="tip.tabStaff">Personal</button>
+          <button data-show-tab="music" class="show-tab flex-1 py-2 rounded-lg text-sm text-white/50" data-i18n="tip.tabMusic">Música</button>
+        </div>
+
+        <!-- --------- personal en turno --------- -->
+        <div id="show-staff" class="space-y-4">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tip.onShift">Quién está trabajando ahora</p>
+          <p id="staff-empty" class="text-sm text-white/50" data-i18n="tip.nobody" hidden>Ahora mismo no hay nadie en turno.</p>
+          <div id="staff-groups" class="space-y-4"></div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-white/40 mb-2" data-i18n="tip.myTips">Lo que has dado esta noche</p>
+            <p id="tips-given" class="font-display text-lg" hidden>—</p>
+            <p id="tips-empty" class="text-sm text-white/40" data-i18n="tip.noTips" hidden>Todavía no has dado ninguna propina.</p>
+            <div id="tips-list" class="space-y-2 mt-2"></div>
+          </div>
+        </div>
+
+        <!-- --------- música --------- -->
+        <div id="show-music" class="space-y-4" hidden>
+          <form id="song-form" class="space-y-3">
+            <div>
+              <label class="block text-xs text-white/50 mb-1" for="song-title" data-i18n="song.title">Canción</label>
+              <input id="song-title" maxlength="200" placeholder="Nombre de la canción" data-i18n-placeholder="song.titleHint"
+                     class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs text-white/50 mb-1" for="song-artist" data-i18n="song.artist">Artista (opcional)</label>
+              <input id="song-artist" maxlength="200" placeholder="Quién la canta" data-i18n-placeholder="song.artistHint"
+                     class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs text-white/50 mb-1" for="song-tip" data-i18n="song.tip">Propina al DJ (opcional)</label>
+              <input id="song-tip" type="number" inputmode="decimal" min="0" step="10" placeholder="0"
+                     class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+            </div>
+            <p id="song-error" class="text-sm text-red-300" hidden></p>
+            <button type="submit" id="btn-song" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="song.request">Pedirla</button>
+          </form>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-white/40 mb-2" data-i18n="song.queue">Lo que sigue</p>
+            <p id="song-empty" class="text-sm text-white/40" data-i18n="song.empty" hidden>Nadie ha pedido nada todavía. Estrénala tú.</p>
+            <div id="song-queue" class="space-y-2"></div>
+          </div>
+        </div>
       </div>
 
       <!-- ---------------------------- SALIDA SEGURA ---------------------------- -->
@@ -337,14 +443,56 @@
       </button>
     </div>
 
-    <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto grid grid-cols-5 border-t border-white/10 bg-black/95 backdrop-blur z-20">
-      <button data-view="map" class="nav-tab py-3 text-xs tab-active"><i class="fa-solid fa-map-location-dot block text-lg mb-1"></i><span data-i18n="nav.map">Mapa</span></button>
-      <button data-view="menu" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-martini-glass block text-lg mb-1"></i><span data-i18n="nav.menu">Menú</span></button>
-      <button data-view="orders" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-receipt block text-lg mb-1"></i><span data-i18n="nav.orders">Pedidos</span><span id="orders-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
-      <button data-view="taxi" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-taxi block text-lg mb-1"></i><span data-i18n="taxi.nav">Salida</span><span id="taxi-badge" class="ml-1 px-1.5 rounded-full bg-emerald-500 text-[10px]" hidden></span></button>
-      <button data-view="profile" class="nav-tab py-3 text-xs text-white/50"><i class="fa-solid fa-user block text-lg mb-1"></i><span data-i18n="nav.profile">Perfil</span></button>
+    <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto grid grid-cols-6 border-t border-white/10 bg-black/95 backdrop-blur z-20">
+      <button data-view="map" class="nav-tab py-3 text-[10px] tab-active"><i class="fa-solid fa-map-location-dot block text-lg mb-1"></i><span data-i18n="nav.map">Mapa</span></button>
+      <button data-view="menu" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-martini-glass block text-lg mb-1"></i><span data-i18n="nav.menu">Menú</span></button>
+      <button data-view="orders" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-receipt block text-lg mb-1"></i><span data-i18n="nav.orders">Pedidos</span><span id="orders-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
+      <button data-view="show" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-music block text-lg mb-1"></i><span data-i18n="nav.show">Show</span></button>
+      <button data-view="taxi" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-taxi block text-lg mb-1"></i><span data-i18n="taxi.nav">Salida</span><span id="taxi-badge" class="ml-1 px-1.5 rounded-full bg-emerald-500 text-[10px]" hidden></span></button>
+      <button data-view="profile" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-user block text-lg mb-1"></i><span data-i18n="nav.profile">Perfil</span></button>
     </nav>
   </section>
+
+  <!--
+    La hoja de la propina. Se abre encima de todo porque el cliente la usa mirando a la
+    persona, no a la pantalla: importes grandes, un solo toque, y el nombre de quien la
+    recibe siempre a la vista para que nadie le dé propina a la persona equivocada.
+  -->
+  <div id="tip-sheet" class="fixed inset-0 z-40 flex items-end justify-center bg-black/70" hidden>
+    <div class="w-full max-w-md rounded-t-2xl p-5 space-y-4" style="background:#12121f;border-top:1px solid rgba(255,255,255,.12)">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p id="tip-sheet-title" class="font-display text-lg truncate">—</p>
+          <p id="tip-sheet-role" class="text-xs text-white/50">—</p>
+        </div>
+        <button id="btn-tip-close" class="text-white/50 px-3" aria-label="Cerrar"><i class="fa-solid fa-xmark text-xl"></i></button>
+      </div>
+
+      <div id="tip-mode-amount" class="space-y-3">
+        <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tip.amount">Cuánto</p>
+        <div id="tip-presets" class="grid grid-cols-2 gap-2"></div>
+        <input id="tip-amount" type="number" inputmode="decimal" min="0" step="10" placeholder="Otra cantidad" data-i18n-placeholder="tip.other"
+               class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+        <p id="tip-min" class="text-[11px] text-white/40" hidden>—</p>
+        <input id="tip-message" maxlength="280" placeholder="Se lo enseñamos a esa persona" data-i18n-placeholder="tip.messageHint"
+               class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+        <label class="flex items-center gap-2 text-sm text-white/70">
+          <input id="tip-anonymous" type="checkbox" class="w-5 h-5"><span data-i18n="tip.anonymous">Sin decir quién soy</span>
+        </label>
+        <p class="text-[11px] text-white/40" data-i18n="tip.payNote">El cobro con tarjeta se conecta en la fase de pagos. Por ahora queda registrada y el gerente la confirma.</p>
+        <p id="tip-error" class="text-sm text-red-300" hidden></p>
+        <button id="btn-tip-send" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="tip.send">Enviar propina</button>
+      </div>
+
+      <div id="tip-mode-drink" class="space-y-3" hidden>
+        <select id="tip-drink" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"></select>
+        <input id="tip-drink-message" maxlength="140" placeholder="Se lo enseñamos a esa persona" data-i18n-placeholder="tip.messageHint"
+               class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+        <p id="tip-drink-error" class="text-sm text-red-300" hidden></p>
+        <button id="btn-drink-send" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="tip.drinkSend">Invitar</button>
+      </div>
+    </div>
+  </div>
 
   <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50" hidden></div>
 </div>
@@ -354,8 +502,13 @@
 <script src="js/roles.js"></script>
 <script src="js/floor-map.js"></script>
 <script src="js/taxi-ride.js"></script>
+<script src="js/tipping.js"></script>
+<script src="js/songs.js"></script>
+<script src="js/booking.js"></script>
 <script src="js/client.js"></script>
 <script src="js/index-screen.js"></script>
+<script src="js/show-screen.js"></script>
+<script src="js/booking-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>
 </html>

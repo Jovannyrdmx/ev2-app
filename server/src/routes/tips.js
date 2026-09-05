@@ -524,7 +524,11 @@ router.post('/nightclubs/:nightclubId/staff/:userId/drinks',
       });
       await events.publish({
         nightclubId, type: 'order_created', client,
-        audience: { roles: ['bartender', 'manager'], userIds: [req.user.id, userId] },
+        // El mesero va en la audiencia: un trago invitado a una bailarina es un pedido
+        // real que alguien tiene que llevar a la mesa. Sin esto su pantalla no se
+        // entera, igual que pasaba con los pedidos normales antes de arreglarlo en
+        // routes/orders.js.
+        audience: { roles: ['bartender', 'waiter', 'manager'], userIds: [req.user.id, userId] },
         payload: { order_id: order.id, table_id: table.id, staff_drink: true,
           subtotal: order.subtotal, currency: order.currency },
       });

@@ -1,0 +1,303 @@
+/**
+ * EV2 — reservar mesa para otra noche, desde la pantalla del cliente (paso 5.3).
+ *
+ * Solo conecta el DOM con `EV2Booking`. El precio SIEMPRE viene del servidor: aquí no
+ * se calcula ningún total para cobrarlo, solo se pinta el que la cotización devolvió.
+ * Un número distinto entre pantalla y cargo es lo que hace que un cliente dispute el
+ * pago con su banco.
+ */
+/* global EV2Screen, EV2Booking */
+(function () {
+  'use strict';
+
+  if (!window.EV2Screen) return;
+
+  const $ = (id) => document.getElementById(id);
+  const uuid = () => (window.crypto && window.crypto.randomUUID
+    ? window.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`);
+
+  let ctx = null;
+  const state = {
+    events: [], rules: {}, tables: [], mine: [],
+    event: null, table: null, guests: 2, quote: null,
+    // Se fija al abrir el panel: si el dedo toca dos veces "Reservar", el servidor
+    // reconoce el repetido y devuelve la misma reservación en vez de apartar dos mesas.
+    requestId: null,
+    loading: false,
+  };
+
+  const t = (key, vars) => (vars ? ctx.t(key, vars) : ctx.t(key));
+  const showError = (text) => { const el = $('book-error'); el.textContent = text; el.hidden = false; };
+  const hideError = () => { $('book-error').hidden = true; };
+
+  // ---------------------------------------------------------------- carga
+
+  async function loadEvents() {
+    const club = ctx.clubId();
+    if (!club) return;
+    const [events, rules] = await Promise.all([
+      ctx.api.get(`/nightclubs/${club}/events?upcoming=true&limit=30`),
+      ctx.api.get(`/nightclubs/${club}/reservations/rules`).catch(() => ({ rules: {} })),
+    ]);
+    state.rules = rules.rules || {};
+    state.events = EV2Booking.bookableEvents(events.events, new Date());
+    renderEvents();
+  }
+
+  async function loadMine() {
+    const club = ctx.clubId();
+    if (!club) return;
+    const data = await ctx.api.get(`/nightclubs/${club}/reservations/mine?limit=20`);
+    state.mine = data.reservations || [];
+    renderMine();
+  }
+
+  async function loadTables() {
+    if (!state.event) { state.tables = []; renderTables(); return; }
+    const club = ctx.clubId();
+    const query = `event_id=${encodeURIComponent(state.event.id)}&guests=${state.guests}`;
+    try {
+      const data = await ctx.api.get(`/nightclubs/${club}/reservations/availability?${query}`);
+      state.tables = data.tables || [];
+      hideError();
+    } catch (err) {
+      // Aquí el 422 es información útil ("las reservaciones de esa noche ya cerraron"),
+      // no una falla: se muestra tal cual en vez de dejar la lista vacía sin explicar.
+      state.tables = [];
+      showError(window.EV2Format.errorMessage(err));
+    }
+    state.table = null;
+    state.quote = null;
+    renderTables();
+    renderQuote();
+  }
+
+  // ---------------------------------------------------------------- pintado
+
+  function renderEvents() {
+    const select = $('book-event');
+    select.innerHTML = '';
+    $('book-no-events').hidden = state.events.length > 0;
+
+    for (const event of state.events) {
+      const opt = document.createElement('option');
+      opt.value = event.id;
+      const date = event.doors_open_at || event.event_date;
+      opt.textContent = `${event.name} — ${window.EV2Format.date(date)}`;
+      select.appendChild(opt);
+    }
+    state.event = state.events[0] || null;
+    if (state.event) select.value = state.event.id;
+
+    const guests = $('book-guests');
+    guests.innerHTML = '';
+    const min = Math.max(1, Number(state.rules.min_party_size) || 1);
+    for (let n = min; n <= 30; n += 1) {
+      const opt = document.createElement('option');
+      opt.value = String(n);
+      opt.textContent = String(n);
+      guests.appendChild(opt);
+    }
+    state.guests = Math.max(state.guests, min);
+    guests.value = String(state.guests);
+  }
+
+  function renderTables() {
+    const box = $('book-tables');
+    box.innerHTML = '';
+    $('book-no-tables').hidden = state.tables.length > 0 || !state.event;
+
+    for (const zone of EV2Booking.tablesByZone(state.tables)) {
+      const head = document.createElement('p');
+      head.className = 'text-xs uppercase tracking-wider pt-1';
+      head.style.color = 'var(--ev2-pink)';
+      head.textContent = `${zone.section} · ${t('book.from', { amount: ctx.money(zone.from) })}`;
+      box.appendChild(head);
+
+      for (const table of zone.tables) {
+        const b = document.createElement('button');
+        const chosen = state.table && state.table.id === table.id;
+        b.className = `w-full rounded-xl px-3 py-3 flex justify-between items-center text-sm ${chosen ? 'ev2-button' : 'card'}`;
+        const left = document.createElement('span');
+        left.textContent = `${table.code || table.table_number} · ${table.capacity || '—'}`;
+        const right = document.createElement('span');
+        right.className = 'font-display';
+        right.textContent = ctx.money(table.price, table.currency);
+        b.append(left, right);
+        b.onclick = () => pickTable(table);
+        box.appendChild(b);
+      }
+    }
+  }
+
+  function renderQuote() {
+    const box = $('book-quote');
+    if (!state.quote) { box.hidden = true; $('btn-book-confirm').disabled = true; return; }
+    box.hidden = false;
+
+    const lines = $('book-quote-lines');
+    lines.innerHTML = '';
+    for (const line of EV2Booking.quoteLines(state.quote)) {
+      const row = document.createElement('div');
+      row.className = 'flex justify-between text-white/70';
+      const label = document.createElement('span');
+      label.textContent = line.vars ? t(line.key, line.vars) : t(line.key);
+      const amount = document.createElement('span');
+      amount.textContent = ctx.money(line.amount, state.quote.currency);
+      row.append(label, amount);
+      lines.appendChild(row);
+    }
+
+    const pay = EV2Booking.payNow(state.quote);
+    $('book-total').textContent = ctx.money(pay.total, pay.currency);
+    $('book-deposit').textContent = ctx.money(pay.deposit, pay.currency);
+    $('book-rest').textContent = ctx.money(pay.rest, pay.currency);
+    $('btn-book-confirm').disabled = false;
+  }
+
+  function renderMine() {
+    const list = EV2Booking.upcoming(state.mine, new Date());
+    $('book-none').hidden = list.length > 0;
+    const box = $('book-list');
+    box.innerHTML = '';
+
+    for (const r of list) {
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl p-3 space-y-1';
+
+      const head = document.createElement('div');
+      head.className = 'flex justify-between items-start gap-3';
+      const left = document.createElement('div');
+      left.className = 'min-w-0';
+      const title = document.createElement('p');
+      title.className = 'font-display truncate';
+      title.textContent = `${r.event_name || ''} · ${r.table_code || ''}`;
+      const when = document.createElement('p');
+      when.className = 'text-[11px] text-white/40';
+      when.textContent = window.EV2Format.dateTime(r.doors_open_at);
+      left.append(title, when);
+      const status = document.createElement('span');
+      status.className = 'text-xs shrink-0';
+      status.textContent = t(EV2Booking.statusLabel(r.status));
+      head.append(left, status);
+      card.appendChild(head);
+
+      // La hora de llegada va en la tarjeta, no escondida: pasada esa hora el club
+      // libera la mesa, y el cliente tiene que verlo antes de salir de su casa.
+      const countdown = EV2Booking.arrivalCountdown(r, new Date());
+      if (countdown) {
+        const note = document.createElement('p');
+        note.className = countdown.expired ? 'text-[11px] text-red-300' : 'text-[11px] text-white/50';
+        note.textContent = countdown.expired
+          ? t('book.arriveLate')
+          : t('book.arriveBy', { time: window.EV2Format.time(countdown.deadline) });
+        card.appendChild(note);
+      }
+
+      if (EV2Booking.canCancel(r)) {
+        const cancel = document.createElement('button');
+        cancel.className = 'w-full py-2 text-sm text-red-300 underline';
+        cancel.textContent = t('book.cancel');
+        cancel.onclick = () => cancelReservation(r);
+        card.appendChild(cancel);
+      }
+      box.appendChild(card);
+    }
+  }
+
+  // ---------------------------------------------------------------- acciones
+
+  async function pickTable(table) {
+    state.table = table;
+    renderTables();
+    hideError();
+    try {
+      // La cotización la calcula el SERVIDOR. El precio de la lista de mesas es solo
+      // para escoger; el que se cobra es este.
+      const data = await ctx.api.post(`/nightclubs/${ctx.clubId()}/reservations/quote`, {
+        event_id: state.event.id,
+        table_id: table.id,
+        guest_count: state.guests,
+        addons: [],
+        discount_code: $('book-code').value.trim() || undefined,
+      });
+      state.quote = data.quote;
+    } catch (err) {
+      state.quote = null;
+      showError(window.EV2Format.errorMessage(err));
+    }
+    renderQuote();
+  }
+
+  async function confirm() {
+    const form = {
+      event: state.event, table: state.table, guests: state.guests,
+      notes: $('book-notes').value, discountCode: $('book-code').value,
+    };
+    const blocker = EV2Booking.bookingBlocker(form, state.rules, new Date());
+    if (blocker) {
+      showError(blocker === 'book.errMinParty'
+        ? t(blocker, { min: state.rules.min_party_size })
+        : t(blocker));
+      return;
+    }
+
+    const button = $('btn-book-confirm');
+    button.disabled = true;
+    try {
+      await ctx.api.post(`/nightclubs/${ctx.clubId()}/reservations`,
+        EV2Booking.bookingPayload(form, { clientRequestId: state.requestId || uuid() }));
+      state.requestId = uuid();
+      state.table = null;
+      state.quote = null;
+      $('book-notes').value = '';
+      ctx.toast(t('book.done'), 'ok');
+      await Promise.all([loadMine(), loadTables()]);
+      renderQuote();
+    } catch (err) {
+      showError(window.EV2Format.errorMessage(err));
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function cancelReservation(reservation) {
+    if (!window.confirm(t('book.confirmCancel'))) return;
+    try {
+      await ctx.api.post(
+        `/nightclubs/${ctx.clubId()}/reservations/${reservation.id}/cancel`, {});
+      ctx.toast(t('book.cancelled'), 'ok');
+      await loadMine();
+    } catch (err) { ctx.showError(err); }
+  }
+
+  // ---------------------------------------------------------------- enganche
+
+  $('btn-book-open').onclick = async () => {
+    const panel = $('book-panel');
+    panel.hidden = !panel.hidden;
+    if (panel.hidden || !ctx || state.loading) return;
+    state.loading = true;
+    state.requestId = uuid();
+    try {
+      await loadEvents();
+      await loadTables();
+    } finally {
+      state.loading = false;
+    }
+  };
+
+  $('book-event').onchange = () => {
+    state.event = state.events.find((e) => e.id === $('book-event').value) || null;
+    loadTables();
+  };
+  $('book-guests').onchange = () => {
+    state.guests = Number($('book-guests').value) || 1;
+    loadTables();
+  };
+  $('btn-book-confirm').onclick = confirm;
+
+  EV2Screen.on('enter', (screen) => { ctx = screen; loadMine().catch(() => {}); });
+  EV2Screen.on('language', () => { if (ctx) { renderTables(); renderQuote(); renderMine(); } });
+}());

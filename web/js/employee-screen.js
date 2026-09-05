@@ -5,7 +5,7 @@
  * `EV2Roles`. Aquí un error se paga en confianza: enseñar como disponible un dinero
  * que todavía no lo está, o dejar pedir un retiro que el servidor va a rechazar.
  */
-/* global EV2, EV2Format, EV2Earnings, EV2Roles, EV2PasswordGate */
+/* global EV2, EV2Format, EV2Earnings, EV2Roles, EV2PasswordGate, EV2Songs */
 (function () {
   'use strict';
 
@@ -28,7 +28,11 @@
     tab: 'money', currency: 'MXN',
     employee: null, balances: [], movements: [], byType: [],
     accounts: [], withdrawals: [], openWithdrawal: null,
+    songs: [], realtime: null,
   };
+
+  const isDj = () => (api.session.user && api.session.user.role) === 'dj';
+  const clubId = () => api.session.user && api.session.user.nightclub_id;
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
   const lang = () => EV2Format.getLanguage();
@@ -86,6 +90,7 @@
     $('btn-lang').textContent = EV2Format.otherLanguage().toUpperCase();
     renderAll();
     if (!$('screen-wrong-role').hidden) renderWrongRole();
+    setConnection(lastConnection.on, lastConnection.key, lastConnection.vars);
   };
 
   function showPasswordGate() {
@@ -134,6 +139,7 @@
     $('me-name').textContent = user.display_name || '';
     $('me-role').textContent = EV2Roles.describe(user.role, lang()).label;
     await loadAll();
+    connectRealtime();
   }
 
   function renderWrongRole() {
@@ -162,6 +168,12 @@
       get('/employees/me/earnings', (d) => { state.byType = d.by_type || []; }),
       get('/employees/me/bank-accounts', (d) => { state.accounts = d.bank_accounts || []; }),
       get('/employees/me/withdrawals?limit=20', (d) => { state.withdrawals = d.withdrawals || []; }),
+      // La cola solo se pide si hay un DJ mirando: para cualquier otro rol el servidor
+      // contesta 403, y un error rojo en la pantalla de una bailarina no significa nada.
+      isDj()
+        ? get(`/nightclubs/${clubId()}/dj/song-requests?status=requested&limit=50`,
+          (d) => { state.songs = d.song_requests || []; })
+        : Promise.resolve(),
     ]);
     // El panel trae el retiro abierto, pero el historial es la fuente más fresca.
     state.openWithdrawal = EV2Earnings.openWithdrawal(state.withdrawals) || state.openWithdrawal;
@@ -170,9 +182,15 @@
 
   // ---------------------------------------------------------------- pintar
 
-  const TABS = ['money', 'withdraw', 'account'];
+  const TABS = ['money', 'songs', 'withdraw', 'account'];
 
   function renderAll() {
+    // La pestaña de canciones solo existe para el DJ. Escondida es mejor que
+    // deshabilitada: nadie más tiene por qué preguntarse qué hay ahí.
+    const songsTab = document.querySelector('[data-tab="songs"]');
+    if (songsTab) songsTab.hidden = !isDj();
+    if (state.tab === 'songs' && !isDj()) state.tab = 'money';
+
     for (const tab of TABS) $(`tab-${tab}`).hidden = tab !== state.tab;
     document.querySelectorAll('[data-tab]').forEach((b) => {
       b.classList.toggle('active', b.dataset.tab === state.tab);
@@ -181,6 +199,72 @@
     renderMoney();
     renderWithdraw();
     renderAccounts();
+    if (isDj()) renderSongs();
+  }
+
+  // ---------------------------------------------------------------- la cola del DJ
+
+  function renderSongs() {
+    const summary = EV2Songs.djSummary(state.songs, new Date());
+    $('dj-waiting').textContent = String(summary.waiting);
+    $('dj-oldest').textContent = summary.waiting ? `${summary.oldestMinutes}m` : '—';
+    $('dj-tips').textContent = money(summary.tips, state.currency);
+
+    const list = EV2Songs.pending(state.songs);
+    $('dj-empty').hidden = list.length > 0;
+    const box = $('dj-queue');
+    box.innerHTML = '';
+
+    list.forEach((song, i) => {
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl p-3 flex items-center gap-3';
+
+      const position = document.createElement('div');
+      position.className = 'font-display text-xl w-8 text-center shrink-0';
+      position.style.color = 'var(--ev2-cyan)';
+      position.textContent = String(i + 1);
+      card.appendChild(position);
+
+      const mid = document.createElement('div');
+      mid.className = 'min-w-0 flex-1';
+      const title = document.createElement('p');
+      title.className = 'font-display truncate';
+      title.textContent = song.song_title || '';
+      const sub = document.createElement('p');
+      sub.className = 'text-[11px] text-white/40 truncate';
+      // Los votos y la propina van juntos: son las dos razones por las que el DJ
+      // decide poner una canción antes que otra, y esconder una de las dos le quita
+      // la decisión.
+      const bits = [song.artist, t('song.votes', { count: Number(song.votes) || 0 })];
+      if (EV2Earnings.toCents(song.tips_total) > 0) {
+        bits.push(money(song.tips_total, state.currency));
+      }
+      sub.textContent = bits.filter(Boolean).join(' · ');
+      mid.append(title, sub);
+      card.appendChild(mid);
+
+      const play = document.createElement('button');
+      play.className = 'ev2-button rounded-lg px-3 text-sm shrink-0';
+      play.textContent = t('song.djPlay');
+      play.onclick = () => markPlayed(song, play);
+      card.appendChild(play);
+
+      box.appendChild(card);
+    });
+  }
+
+  async function markPlayed(song, button) {
+    button.disabled = true;
+    try {
+      await api.post(`/nightclubs/${clubId()}/song-requests/${song.id}/play`, {});
+      // Se quita de la lista de inmediato: el DJ ya la puso, y verla seguir ahí lo
+      // hace tocar dos veces y recibir un 409.
+      state.songs = state.songs.filter((s) => s.id !== song.id);
+      renderSongs();
+    } catch (err) {
+      showError(err);
+      button.disabled = false;
+    }
   }
 
   document.querySelectorAll('[data-tab]').forEach((b) => {
@@ -355,6 +439,56 @@
     banner(t('banner.expired'));
     setTimeout(() => location.reload(), 2500);
   });
+
+  // ---------------------------------------------------------------- tiempo real
+
+  const lastConnection = { on: false, key: 'top.offline', vars: null };
+
+  function setConnection(on, key, vars) {
+    lastConnection.on = on;
+    lastConnection.key = key;
+    lastConnection.vars = vars || null;
+    $('rt-dot').className = `dot ${on === true ? 'dot-on' : on === null ? 'dot-wait' : 'dot-off'}`;
+    $('rt-text').textContent = vars && vars.text ? vars.text : t(key);
+  }
+
+  /**
+   * El portal también escucha.
+   *
+   * Para el DJ es lo que hace que la cola sirva: una canción pedida hace diez minutos
+   * que él no ve es un cliente convencido de que lo ignoraron. Para el resto es su
+   * propina apareciendo sola, sin tener que jalar la pantalla hacia abajo.
+   */
+  function connectRealtime() {
+    if (state.realtime) return;
+    const rt = api.createRealtime();
+    state.realtime = rt;
+    rt.on('open', () => { setConnection(true, 'top.live'); banner(null); });
+    rt.on('reconnecting', (i) => setConnection(null, 'realtime.reconnecting',
+      { text: `${t('realtime.reconnecting')} ${Math.round(i.in_ms / 1000)}s` }));
+    rt.on('close', () => setConnection(false, 'top.offline'));
+    rt.on('replaced', () => { setConnection(false, 'top.otherSession'); banner(t('banner.replaced')); });
+    rt.on('resync_required', async () => { banner(t('banner.updating')); await loadAll(); banner(null); });
+
+    rt.on('event', async (message) => {
+      // El tipo real vive en `event_type`; `type` siempre vale 'event'.
+      const kind = message && (message.event_type || message.type);
+      if (EV2Songs.affectsSongs(message)) {
+        await loadAll();
+        if (kind === 'song_requested' || kind === 'song_request_voted') {
+          // En la cabina no se oye nada: el aviso es vibración.
+          try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch { /* bloqueado */ }
+        }
+        return;
+      }
+      if (['tip_received', 'song_tip_received', 'withdrawal_updated'].includes(kind)) {
+        await loadAll();
+        if (kind !== 'withdrawal_updated') toast(t('earn.mTip'), 'ok');
+      }
+    });
+
+    rt.connect();
+  }
 
   // ---------------------------------------------------------------- arranque
 

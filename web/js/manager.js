@@ -218,6 +218,112 @@
     };
   }
 
+  // ---------------------------------------------------------------- noches del club
+
+  /**
+   * Las noches, la más próxima primero, y después el historial hacia atrás.
+   *
+   * El gerente abre esta pestaña para dos cosas distintas: publicar la noche que viene,
+   * y revisar cuánta gente reservó la que pasó. Mezclarlas en orden de fecha deja la
+   * más urgente enterrada entre las viejas.
+   */
+  function sortNights(events, now) {
+    const when = now ? new Date(now) : new Date();
+    const future = [];
+    const past = [];
+    for (const e of (events || [])) {
+      if (!e || !e.id) continue;
+      const at = new Date(e.doors_open_at || e.event_date || 0);
+      (at >= when ? future : past).push(e);
+    }
+    future.sort((a, b) => new Date(a.doors_open_at || a.event_date || 0)
+      - new Date(b.doors_open_at || b.event_date || 0));
+    past.sort((a, b) => new Date(b.doors_open_at || b.event_date || 0)
+      - new Date(a.doors_open_at || a.event_date || 0));
+    return future.concat(past);
+  }
+
+  const NIGHT_STATUS_KEY = {
+    draft: 'night.stDraft',
+    published: 'night.stPublished',
+    cancelled: 'night.stCancelled',
+    finished: 'night.stFinished',
+  };
+
+  const nightStatusLabel = (status) => NIGHT_STATUS_KEY[status] || 'night.stDraft';
+
+  /**
+   * Qué se puede hacer con una noche.
+   *
+   * Una noche en borrador no la ve NADIE: mientras siga así, ningún cliente puede
+   * reservar. Publicar es el acto que abre el club, y por eso es el botón principal.
+   * Una noche con reservaciones vivas se cancela, nunca se borra: el dinero apartado
+   * tiene que seguir teniendo a qué apuntar.
+   */
+  function nightActions(event) {
+    const e = event || {};
+    const booked = Number(e.reservations_count) || 0;
+    return {
+      canPublish: e.status === 'draft',
+      canUnpublish: e.status === 'published' && booked === 0,
+      canCancel: ['draft', 'published'].includes(e.status),
+      canDelete: e.status !== 'cancelled' && booked === 0,
+      booked,
+    };
+  }
+
+  /**
+   * Comprueba la noche antes de mandarla. Devuelve un objeto de errores por campo,
+   * vacío si todo está bien.
+   */
+  function validateNight(form, now) {
+    const errors = {};
+    const f = form || {};
+    const when = now ? new Date(now) : new Date();
+
+    if (!String(f.name || '').trim()) errors.name = 'night.errName';
+    if (!f.event_date) errors.event_date = 'night.errDate';
+
+    const doors = f.doors_open_at ? new Date(f.doors_open_at) : null;
+    if (!doors || Number.isNaN(doors.getTime())) errors.doors_open_at = 'night.errDoors';
+    else if (doors <= when) errors.doors_open_at = 'night.errPast';
+
+    if (f.closes_at) {
+      const closes = new Date(f.closes_at);
+      // Cerrar antes de abrir suena imposible, pero pasa: el club cierra a las 4 de la
+      // MAÑANA SIGUIENTE, y quien captura pone la misma fecha en las dos casillas.
+      if (Number.isNaN(closes.getTime()) || (doors && closes <= doors)) {
+        errors.closes_at = 'night.errCloses';
+      }
+    }
+
+    const price = Number(f.ticket_price);
+    if (!Number.isFinite(price) || price < 0) errors.ticket_price = 'night.errPrice';
+
+    return errors;
+  }
+
+  /** Lo que se manda al crear una noche. Las fechas viajan en ISO, con zona. */
+  function nightPayload(form) {
+    const body = {
+      name: String(form.name || '').trim().slice(0, 150),
+      event_date: form.event_date,
+      doors_open_at: new Date(form.doors_open_at).toISOString(),
+      ticket_price: Number(Number(form.ticket_price || 0).toFixed(2)),
+      currency: form.currency || 'MXN',
+      // Se crea en borrador siempre: publicar es un segundo toque, a propósito. Abrir
+      // el club por accidente al capturar es peor que un toque de más.
+      status: 'draft',
+    };
+    if (form.closes_at) body.closes_at = new Date(form.closes_at).toISOString();
+    if (form.arrival_deadline_minutes) {
+      body.arrival_deadline_minutes = Number(form.arrival_deadline_minutes);
+    }
+    const description = String(form.description || '').trim();
+    if (description) body.description = description.slice(0, 2000);
+    return body;
+  }
+
   return {
     revenueFor,
     currenciesIn,
@@ -231,5 +337,10 @@
     parseSpots,
     occupancy,
     createSecretBox,
+    sortNights,
+    nightStatusLabel,
+    nightActions,
+    validateNight,
+    nightPayload,
   };
 }));

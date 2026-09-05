@@ -129,6 +129,9 @@
         <p class="text-xs text-white/50"><span id="me-name">—</span> · <span id="me-role"></span></p>
       </div>
       <div class="flex items-center gap-3">
+        <span class="text-xs text-white/50 flex items-center gap-1">
+          <span id="rt-dot" class="dot dot-off"></span><span id="rt-text">—</span>
+        </span>
         <button id="btn-refresh" class="text-xs text-white/60 px-2" data-i18n-title="manager.refresh" title="Actualizar"><i class="fa-solid fa-rotate"></i></button>
         <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
         <button id="btn-logout" class="text-xs text-white/60 px-2" data-i18n-title="top.signOut" title="Salir"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
@@ -152,11 +155,27 @@
 
     <nav class="flex px-2 border-b border-white/10">
       <button data-tab="money" class="tab active flex-1 py-3 text-sm" data-i18n="earn.tabMoney">Saldo</button>
+      <!-- Solo para el DJ: su cola de canciones es su trabajo Y su fuente de propinas. -->
+      <button data-tab="songs" class="tab flex-1 py-3 text-sm" data-i18n="song.djQueue" hidden>Cola de canciones</button>
       <button data-tab="withdraw" class="tab flex-1 py-3 text-sm" data-i18n="earn.tabWithdraw">Retiros</button>
       <button data-tab="account" class="tab flex-1 py-3 text-sm" data-i18n="earn.tabAccount">Cuenta</button>
     </nav>
 
     <main class="flex-1 overflow-y-auto p-4 space-y-4">
+      <!--
+        La cola del DJ. Va en su portal y no en una página aparte porque el DJ entra una
+        vez en la noche: partirlo en dos accesos significa que uno de los dos no se abre.
+      -->
+      <div id="tab-songs" class="space-y-4" hidden>
+        <div class="card rounded-xl p-4 grid grid-cols-3 gap-2 text-center">
+          <div><p id="dj-waiting" class="font-display text-2xl" style="color:var(--ev2-lime)">—</p><p class="text-[11px] text-white/40" data-i18n="song.queue">Lo que sigue</p></div>
+          <div><p id="dj-oldest" class="font-display text-2xl">—</p><p class="text-[11px] text-white/40" data-i18n="earn.recent">Espera</p></div>
+          <div><p id="dj-tips" class="font-display text-2xl" style="color:var(--ev2-gold)">—</p><p class="text-[11px] text-white/40" data-i18n="earn.mTip">Propinas</p></div>
+        </div>
+        <p id="dj-empty" class="text-sm text-white/40 text-center py-6" data-i18n="song.djEmpty" hidden>Nadie ha pedido nada. Disfruta la calma.</p>
+        <div id="dj-queue" class="space-y-2"></div>
+      </div>
+
       <div id="tab-money" class="space-y-4">
         <div class="card rounded-xl p-4 space-y-2">
           <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="earn.sources">De dónde viene</p>
@@ -220,6 +239,7 @@
 <script src="js/roles.js"></script>
 <script src="js/password-gate.js"></script>
 <script src="js/earnings.js"></script>
+<script src="js/songs.js"></script>
 <script src="js/employee-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

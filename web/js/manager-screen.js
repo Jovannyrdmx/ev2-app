@@ -26,6 +26,7 @@
     tab: 'summary', currency: 'MXN',
     dashboard: null, drivers: [], taxiSettings: null, fares: [],
     valetSettings: null, spots: [], occupancy: null,
+    nights: [],
     realtime: null, busy: false,
   };
   const secret = EV2Manager.createSecretBox();
@@ -187,13 +188,16 @@
         state.spots = d.spots || [];
         state.occupancy = d.occupancy || null;
       }),
+      // Sin filtro de estado: el gerente TIENE que ver sus borradores, que son
+      // justamente las noches que todavía nadie puede reservar.
+      get(`/nightclubs/${club}/events?limit=60`, (d) => { state.nights = d.events || []; }),
     ]);
     renderAll();
   }
 
   // ---------------------------------------------------------------- pintar
 
-  const TABS = ['summary', 'drivers', 'taxi', 'parking'];
+  const TABS = ['summary', 'nights', 'drivers', 'taxi', 'parking'];
 
   function renderAll() {
     for (const tab of TABS) $(`tab-${tab}`).hidden = tab !== state.tab;
@@ -201,11 +205,171 @@
       b.classList.toggle('active', b.dataset.tab === state.tab);
     });
     renderSummary();
+    renderNights();
     renderDrivers();
     renderTaxi();
     renderParking();
     renderSecret();
   }
+
+  // ---------------------------------------------------------------- noches
+
+  function renderNights() {
+    const list = EV2Manager.sortNights(state.nights, new Date());
+    $('nights-empty').hidden = list.length > 0;
+    const box = $('nights-list');
+    box.innerHTML = '';
+
+    for (const night of list) {
+      const actions = EV2Manager.nightActions(night);
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl p-3 space-y-2';
+
+      const head = document.createElement('div');
+      head.className = 'flex justify-between items-start gap-3';
+      const left = document.createElement('div');
+      left.className = 'min-w-0';
+      const name = document.createElement('p');
+      name.className = 'font-display truncate';
+      name.textContent = night.name || '';
+      const when = document.createElement('p');
+      when.className = 'text-[11px] text-white/40';
+      when.textContent = `${EV2Format.dateTime(night.doors_open_at)} · ${money(night.ticket_price, night.currency)}`;
+      left.append(name, when);
+
+      const status = document.createElement('span');
+      status.className = 'text-xs shrink-0';
+      // La noche publicada se marca en verde: es la única que de verdad está abierta,
+      // y de un vistazo el gerente tiene que ver si ya abrió la del sábado.
+      status.style.color = night.status === 'published' ? 'var(--ev2-lime)'
+        : night.status === 'cancelled' ? 'var(--ev2-red)' : 'rgba(255,255,255,.5)';
+      status.textContent = t(EV2Manager.nightStatusLabel(night.status));
+      head.append(left, status);
+      card.appendChild(head);
+
+      const count = document.createElement('p');
+      count.className = 'text-[11px] text-white/50';
+      count.textContent = t('night.reservations', { count: actions.booked });
+      card.appendChild(count);
+
+      const row = document.createElement('div');
+      row.className = 'flex gap-2 flex-wrap';
+      const add = (label, className, fn) => {
+        const b = document.createElement('button');
+        b.className = className;
+        b.textContent = t(label);
+        b.onclick = () => fn(b);
+        row.appendChild(b);
+      };
+      if (actions.canPublish) {
+        add('night.publish', 'ev2-button rounded-lg px-3 py-2 text-sm flex-1',
+          (b) => setNightStatus(night, 'published', 'night.published', b));
+      }
+      if (actions.canUnpublish) {
+        add('night.unpublish', 'card rounded-lg px-3 py-2 text-sm flex-1',
+          (b) => setNightStatus(night, 'draft', 'night.created', b));
+      }
+      if (actions.canCancel) {
+        add('night.cancelNight', 'card rounded-lg px-3 py-2 text-sm text-red-300 flex-1', (b) => {
+          if (!window.confirm(t('night.confirmCancel'))) return;
+          setNightStatus(night, 'cancelled', 'night.cancelled', b);
+        });
+      }
+      if (actions.canDelete) {
+        add('night.delete', 'card rounded-lg px-3 py-2 text-sm text-red-300', (b) => deleteNight(night, b));
+      }
+      if (row.children.length) card.appendChild(row);
+      box.appendChild(card);
+    }
+  }
+
+  async function setNightStatus(night, status, message, button) {
+    button.disabled = true;
+    try {
+      await api.patch(`/nightclubs/${clubId()}/events/${night.id}`, { status });
+      toast(t(message), 'ok');
+      await loadAll();
+    } catch (err) {
+      showError(err);
+      button.disabled = false;
+    }
+  }
+
+  async function deleteNight(night, button) {
+    if (!window.confirm(t('night.confirmDelete'))) return;
+    button.disabled = true;
+    try {
+      await api.del(`/nightclubs/${clubId()}/events/${night.id}`);
+      toast(t('night.deleted'), 'ok');
+      await loadAll();
+    } catch (err) {
+      // El servidor contesta 409 si la noche tiene reservaciones vivas: ese texto
+      // explica mejor que cualquier genérico por qué hay que cancelarla en vez de
+      // borrarla.
+      showError(err);
+      button.disabled = false;
+    }
+  }
+
+  $('btn-new-night').onclick = () => {
+    const form = $('night-form');
+    form.hidden = !form.hidden;
+    clearNightErrors();
+  };
+  $('btn-night-cancel').onclick = () => { $('night-form').hidden = true; clearNightErrors(); };
+
+  const NIGHT_FIELDS = {
+    name: 'n-name', event_date: 'n-date', doors_open_at: 'n-doors',
+    closes_at: 'n-closes', ticket_price: 'n-price',
+  };
+
+  function clearNightErrors() {
+    for (const [field, id] of Object.entries(NIGHT_FIELDS)) {
+      const p = document.querySelector(`#night-form [data-error="${field}"]`);
+      if (p) { p.hidden = true; p.textContent = ''; }
+      const input = $(id);
+      if (input) input.classList.remove('bad');
+    }
+  }
+
+  function showNightErrors(errors) {
+    clearNightErrors();
+    for (const [field, key] of Object.entries(errors)) {
+      const p = document.querySelector(`#night-form [data-error="${field}"]`);
+      if (p) { p.textContent = t(key); p.hidden = false; }
+      const input = $(NIGHT_FIELDS[field]);
+      if (input) input.classList.add('bad');
+    }
+  }
+
+  $('night-form').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const form = {
+      name: $('n-name').value,
+      event_date: $('n-date').value,
+      // `datetime-local` da una hora SIN zona: `new Date()` la lee en la del teléfono,
+      // que es la del club. Es lo correcto aquí — el gerente captura la hora local a
+      // la que abre la puerta— y `nightPayload` la manda en ISO con zona.
+      doors_open_at: $('n-doors').value,
+      closes_at: $('n-closes').value,
+      ticket_price: $('n-price').value,
+      arrival_deadline_minutes: $('n-deadline').value,
+      currency: state.currency,
+    };
+    const errors = EV2Manager.validateNight(form, new Date());
+    if (Object.keys(errors).length) { showNightErrors(errors); return; }
+    clearNightErrors();
+
+    try {
+      await api.post(`/nightclubs/${clubId()}/events`, EV2Manager.nightPayload(form));
+      $('night-form').reset();
+      $('n-deadline').value = '180';
+      $('n-price').value = '0';
+      $('night-form').hidden = true;
+      toast(t('night.created'), 'ok');
+      await loadAll();
+    } catch (err) { showError(err); }
+  };
 
   document.querySelectorAll('[data-tab]').forEach((b) => {
     b.onclick = () => { state.tab = b.dataset.tab; renderAll(); };

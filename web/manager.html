@@ -143,6 +143,7 @@
 
     <nav class="flex px-2 border-b border-white/10 overflow-x-auto">
       <button data-tab="summary" class="tab active flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabSummary">Turno</button>
+      <button data-tab="nights" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="night.tab">Noches</button>
       <button data-tab="drivers" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabDrivers">Conductores</button>
       <button data-tab="taxi" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabTaxi">Taxi</button>
       <button data-tab="parking" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabParking">Cajones</button>
@@ -172,6 +173,59 @@
           <p class="text-[11px] text-white/40 pt-1" data-i18n="manager.revenueNote">Las propinas y los viajes pasan por el sistema pero no son ingreso del club.</p>
           <div id="currency-switch" class="flex gap-2 pt-1"></div>
         </div>
+      </div>
+
+      <!--
+        ---------------------------- NOCHES ----------------------------
+        Sin una noche publicada NADIE puede reservar. Es lo primero que hace el gerente
+        de la semana, y hasta ahora no había forma de hacerlo desde ninguna pantalla.
+      -->
+      <div id="tab-nights" class="space-y-3" hidden>
+        <button id="btn-new-night" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="night.new">Abrir una noche</button>
+
+        <form id="night-form" class="card rounded-xl p-4 space-y-3" hidden>
+          <div>
+            <label class="label" for="n-name" data-i18n="night.name">Cómo se llama</label>
+            <input id="n-name" class="field" maxlength="150" placeholder="Sábado de Halloween" data-i18n-placeholder="night.nameHint">
+            <p class="field-error" data-error="name" hidden></p>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label" for="n-date" data-i18n="night.date">Qué día</label>
+              <input id="n-date" type="date" class="field">
+              <p class="field-error" data-error="event_date" hidden></p>
+            </div>
+            <div>
+              <label class="label" for="n-price" data-i18n="night.price">Cover por persona</label>
+              <input id="n-price" type="number" min="0" step="10" class="field" value="0">
+              <p class="field-error" data-error="ticket_price" hidden></p>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label" for="n-doors" data-i18n="night.doors">A qué hora abren las puertas</label>
+              <input id="n-doors" type="datetime-local" class="field">
+              <p class="field-error" data-error="doors_open_at" hidden></p>
+            </div>
+            <div>
+              <label class="label" for="n-closes" data-i18n="night.closes">A qué hora cierra (opcional)</label>
+              <input id="n-closes" type="datetime-local" class="field">
+              <p class="field-error" data-error="closes_at" hidden></p>
+            </div>
+          </div>
+          <div>
+            <label class="label" for="n-deadline" data-i18n="night.deadline">Minutos para llegar antes de soltar la mesa</label>
+            <input id="n-deadline" type="number" min="15" max="720" step="15" class="field" value="180">
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="btn-night-cancel" class="card rounded-lg py-2 text-sm" data-i18n="manager.cancel">Cancelar</button>
+            <button type="submit" class="ev2-button rounded-lg py-2" data-i18n="night.create">Guardar como borrador</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="night.draftNote">Mientras esté en borrador, nadie puede reservar.</p>
+        </form>
+
+        <p id="nights-empty" class="text-sm text-white/40 text-center py-6" data-i18n="night.empty" hidden>Todavía no hay ninguna noche. Abre la primera.</p>
+        <div id="nights-list" class="space-y-2"></div>
       </div>
 
       <!-- ---------------------------- CONDUCTORES ---------------------------- -->
