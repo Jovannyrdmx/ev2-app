@@ -1,0 +1,52 @@
+# EV2 Clandestinoz — TLS y puerta de entrada al servidor (Fase 7).
+#
+# Caddy pide y renueva el certificado de Let's Encrypt solo. No hay certbot, no hay
+# cron, no hay nada que se venza un sábado a las 3 de la mañana sin que nadie lo note.
+#
+# Para que funcione, ANTES de levantarlo:
+#   1. El dominio de EV2_DOMAIN tiene que apuntar con un registro A a la IP del servidor.
+#   2. Los puertos 80 y 443 tienen que estar abiertos desde internet. El 80 no es
+#      opcional: Let's Encrypt lo usa para comprobar que el dominio es tuyo.
+
+{
+	email {$ACME_EMAIL}
+	# Descomenta esta línea para probar el despliegue sin gastar intentos contra el
+	# límite de Let's Encrypt. El navegador va a desconfiar del certificado, y está
+	# bien: solo sirve para confirmar que el flujo completo llega hasta el final.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$EV2_DOMAIN} {
+	encode zstd gzip
+
+	# Todo pasa por el contenedor `web`, que ya sirve los archivos y reenvía /api y /ws
+	# a la API y al socket. Un solo destino a propósito: así producción usa exactamente
+	# la misma configuración de mismo-origen que ya está probada en local, en vez de una
+	# distinta que hay que volver a depurar.
+	#
+	# Sin bloque `transport`, a propósito. Caddy detecta la actualización a WebSocket y
+	# la convierte en un túnel bidireccional SIN límite de tiempo por omisión, que es
+	# justo lo que queremos: ponerle `read_timeout` aquí no protegería de nada y en
+	# cambio cortaría la conexión al cumplirse el plazo. Y de todos modos el socket
+	# nunca se queda callado: `src/ws.js` manda un latido cada 30 segundos.
+	reverse_proxy web:8080
+
+	header {
+		# El navegador recuerda que este sitio es solo HTTPS. Un año, subdominios
+		# incluidos: la app pide la cámara para el QR del valet y varias funciones del
+		# navegador solo existen en un contexto seguro.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# El navegador no tiene por qué anunciar la versión del servidor.
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+		# Las peticiones sanas no aportan nada y llenan el disco; los errores sí.
+		level ERROR
+	}
+}

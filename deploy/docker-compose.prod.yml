@@ -1,0 +1,208 @@
+# EV2 Clandestinoz — pila de PRODUCCIÓN (Fase 7).
+#
+# Uso, desde la raíz del repositorio:
+#     docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d --build
+#
+# ---------------------------------------------------------------------------
+# Por qué este archivo es completo y no un "override" del de desarrollo
+# ---------------------------------------------------------------------------
+# Docker Compose FUSIONA las listas al combinar archivos: un `ports:` en un override se
+# SUMA al del archivo base, no lo reemplaza. Si esto fuera un override, los puertos
+# 3000, 4000 y 8080 del archivo de desarrollo seguirían publicados en el servidor, y la
+# API quedaría accesible por HTTP sin cifrar saltándose Caddy. Un archivo completo se
+# lee de arriba abajo y dice exactamente lo que hace: para algo cuyo error silencioso
+# es exponer la API a internet, explícito le gana a ingenioso.
+#
+# ---------------------------------------------------------------------------
+# Diferencias con el archivo de desarrollo
+# ---------------------------------------------------------------------------
+#   - NADIE publica puertos salvo Caddy (80/443). Postgres, Redis, la API y el socket
+#     solo se hablan por la red interna de Docker.
+#   - Caddy termina TLS y saca el certificado de Let's Encrypt solo, sin certbot ni cron.
+#   - `restart: always`, no `unless-stopped`: tras reiniciar el servidor debe levantar
+#     sin que nadie entre por SSH.
+#   - Sin SEED_PASSWORD: el seed de desarrollo no debe poder correr aquí ni por error.
+#   - Límites de memoria y rotación de logs, para que una fuga no tire la máquina y los
+#     registros no llenen el disco un mes después, cuando ya nadie se acuerda.
+name: ev2
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: ev2-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD es obligatorio en .env}
+      POSTGRES_DB: ${DB_NAME:-ev2}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Sin `ports`. Es deliberado y es la regla del proyecto: la base NUNCA se expone a
+    # internet. Para conectarte con un cliente SQL desde tu máquina, haz un túnel SSH
+    # (viene en docs/DESPLIEGUE.md); no abras el puerto.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-ev2}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    networks: [ev2]
+
+  redis:
+    image: redis:7-alpine
+    container_name: ev2-redis
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    # noeviction a propósito: Redis lleva el canal de eventos en vivo. Si se llena,
+    # preferimos que falle ruidosamente a que descarte eventos en silencio y el mesero
+    # nunca se entere de una charola lista.
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: always
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+    networks: [ev2]
+
+  api:
+    build:
+      context: ../server
+      dockerfile: ../deploy/Dockerfile.api
+    container_name: ev2-api
+    command: ["sh", "-c", "node src/db/migrate.js && node src/index.js"]
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET es obligatorio en .env}
+      BANK_ENCRYPTION_KEY: ${BANK_ENCRYPTION_KEY:?BANK_ENCRYPTION_KEY es obligatorio en .env}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD es obligatorio en .env}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-ev2}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # Tiene que ser el dominio real, con https. Un origen equivocado aquí se ve en la
+      # pantalla como "Sin conexión", no como un error de configuración.
+      # Entre comillas: el mensaje lleva dos puntos y sin comillas rompe el YAML.
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:?ALLOWED_ORIGINS es obligatorio: pon https://tudominio.com}"
+      # Caddy es el único salto delante de la API.
+      TRUST_PROXY_HOPS: 1
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # SEED_PASSWORD NO se pasa: el seed de desarrollo crea cuentas con contraseña
+      # conocida y aquí no debe poder correr ni por accidente.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLIC_KEY: ${STRIPE_PUBLIC_KEY:-}
+      MERCADOPAGO_ACCESS_TOKEN: ${MERCADOPAGO_ACCESS_TOKEN:-}
+      MERCADOPAGO_PUBLIC_KEY: ${MERCADOPAGO_PUBLIC_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    networks: [ev2]
+
+  ws:
+    build:
+      context: ../server
+      dockerfile: ../deploy/Dockerfile.ws
+    container_name: ev2-ws
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      API_URL: http://api:3000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET es obligatorio en .env}
+      # ws.js valida cada conexión contra la tabla users, así que necesita la base
+      # igual que la API. Sin esto arranca, falla el SELECT 1 y se reinicia en bucle.
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD es obligatorio en .env}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-ev2}
+    depends_on:
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+    networks: [ev2]
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    container_name: ev2-web
+    # Sirve los archivos y reenvía /api y /ws a los contenedores de al lado, igual que
+    # en local. Mantener este salto significa que producción usa exactamente la misma
+    # configuración de mismo-origen que ya está probada, en vez de una distinta.
+    depends_on:
+      - api
+      - ws
+    restart: always
+    logging: *logging
+    networks: [ev2]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: ev2-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # El dominio que Caddy va a certificar. Sin esto no sabe para qué nombre pedir el
+      # certificado y sirve un certificado interno que el navegador rechaza.
+      EV2_DOMAIN: "${EV2_DOMAIN:?EV2_DOMAIN es obligatorio: el dominio, sin https://}"
+      # Let's Encrypt avisa aquí si un certificado está por vencer y algo falló.
+      ACME_EMAIL: "${ACME_EMAIL:?ACME_EMAIL es obligatorio: un correo que leas}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Los certificados viven en un volumen: sin él, cada `up` vuelve a pedirlos y
+      # Let's Encrypt corta por límite de peticiones justo cuando urge desplegar.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    restart: always
+    logging: *logging
+    networks: [ev2]
+
+networks:
+  ev2:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
