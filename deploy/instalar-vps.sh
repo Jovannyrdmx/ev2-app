@@ -139,13 +139,37 @@ fi
 # ------------------------------------------------------------------ el .env
 
 titulo "Secretos"
-if [[ -f .env ]]; then
-  gris "  Ya existe un .env; no lo toco."
-  gris "  Si quieres empezar de cero: mv .env .env.viejo y vuelve a correr esto."
+# Un .env vacio o a medias es peor que ninguno: compose falla con nueve lineas de
+# "required variable is missing" y no dice que el archivo esta incompleto. Por eso
+# aqui no basta con que exista; tiene que traer TODO lo que hace falta.
+FALTANTES=""
+if [[ -s .env ]]; then
   # shellcheck disable=SC1091
   set -a; . ./.env; set +a
+  for V in DB_PASSWORD JWT_SECRET BANK_ENCRYPTION_KEY EV2_DOMAIN ACME_EMAIL ALLOWED_ORIGINS; do
+    [[ -n "${!V:-}" ]] || FALTANTES="$FALTANTES $V"
+  done
+fi
+
+if [[ -s .env && -z "$FALTANTES" ]]; then
+  gris "  Ya existe un .env completo; no lo toco."
   BANK_KEY="${BANK_ENCRYPTION_KEY:-}"
+elif [[ -e .env ]]; then
+  if [[ -s .env ]]; then
+    rojo "  El .env que hay esta incompleto. Le falta:$FALTANTES"
+  else
+    rojo "  El .env que hay esta VACIO."
+  fi
+  read -r -p "  ¿Lo reemplazo por uno nuevo? El viejo se guarda como .env.viejo (S/n): " REHACER || true
+  [[ "${REHACER:-s}" =~ ^[nN]$ ]] && morir \
+    "Completa esas variables a mano en .env y vuelve a correr el script."
+  mv .env ".env.viejo.$(date +%s)"
+  ESCRIBIR_ENV=true
 else
+  ESCRIBIR_ENV=true
+fi
+
+if [[ "${ESCRIBIR_ENV:-false}" == true ]]; then
   BANK_KEY=$(openssl rand -base64 48 | tr -d '/+=')
   cat > .env <<FIN
 ENVIRONMENT=production
@@ -163,6 +187,13 @@ FIN
   chmod 600 .env
   verde "  Generados. Nadie los tecleó, así que nadie los puede equivocar."
 fi
+
+# Ultima red: si por lo que sea algo quedo vacio, se dice AQUI y no en nueve lineas
+# de error de compose diez segundos despues.
+set -a; . ./.env; set +a
+for V in DB_PASSWORD JWT_SECRET BANK_ENCRYPTION_KEY EV2_DOMAIN ACME_EMAIL ALLOWED_ORIGINS; do
+  [[ -n "${!V:-}" ]] || morir "El .env quedo sin $V. Borralo (rm .env) y vuelve a correr el script."
+done
 
 # ------------------------------------------------------------------ puerta cerrada
 
