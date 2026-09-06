@@ -95,34 +95,49 @@ git clone <la-url-de-tu-repositorio> ~/ev2
 cd ~/ev2
 ```
 
-Genera **secretos nuevos**. Los de tu `.env` de desarrollo no sirven aquí: son de
-desarrollo y ya circularon.
+El `.env` **no viene en el repositorio** y nunca vendrá: lleva secretos y está en
+`.gitignore`. Después de clonar no existe, y ese es exactamente el error
+`no such file or directory: .env`. Hay que crearlo aquí.
+
+Los secretos tienen que ser **nuevos**: los de tu `.env` de desarrollo no sirven aquí,
+son de desarrollo y ya circularon.
+
+Lo más rápido y sin errores de dedo es dejar que el propio servidor lo escriba, con
+los secretos ya generados. Cambia las dos primeras líneas por lo tuyo y pega el bloque
+completo:
 
 ```bash
-echo "DB_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=')"
-echo "JWT_SECRET=$(openssl rand -base64 48 | tr -d '/+=')"
-echo "BANK_ENCRYPTION_KEY=$(openssl rand -base64 48 | tr -d '/+=')"
-```
+DOMINIO=tudominio.com
+CORREO=un-correo-que-leas@ejemplo.com
 
-Crea `~/ev2/.env` con esto (sin comentarios en la misma línea que un valor — Compose
-corta en el ` #` y el contenedor arranca con un secreto truncado):
-
-```
-DB_PASSWORD=lo-que-salio-arriba
-JWT_SECRET=lo-que-salio-arriba
-BANK_ENCRYPTION_KEY=lo-que-salio-arriba
-
-EV2_DOMAIN=tudominio.com
-ACME_EMAIL=un-correo-que-leas@ejemplo.com
-ALLOWED_ORIGINS=https://tudominio.com
-
+cat > ~/ev2/.env <<EOF
+ENVIRONMENT=production
+DB_USER=postgres
+DB_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=')
 DB_NAME=ev2
+JWT_SECRET=$(openssl rand -base64 48 | tr -d '/+=')
+BANK_ENCRYPTION_KEY=$(openssl rand -base64 48 | tr -d '/+=')
+EV2_DOMAIN=$DOMINIO
+ACME_EMAIL=$CORREO
+ALLOWED_ORIGINS=https://$DOMINIO
 LOG_LEVEL=info
+EOF
+
+chmod 600 ~/ev2/.env
+cat ~/ev2/.env
 ```
 
-```bash
-chmod 600 .env
-```
+Ese último `cat` es para que **copies `BANK_ENCRYPTION_KEY` a tu gestor de contraseñas
+ahora mismo**, antes de seguir. Más abajo se explica por qué.
+
+Si prefieres partir de la plantilla, `cp .env.example .env` y llena a mano
+`DB_PASSWORD`, `JWT_SECRET`, `BANK_ENCRYPTION_KEY`, `EV2_DOMAIN`, `ACME_EMAIL` y
+`ALLOWED_ORIGINS`. Dos cuidados: pon `ENVIRONMENT=production`, y **deja
+`SEED_PASSWORD` vacío** — el seed de desarrollo no debe poder correr en un servidor.
+
+> Un comentario NUNCA va en la misma línea que un valor. Docker Compose y dotenv cortan
+> el valor en el ` #`, y el contenedor arranca con un secreto truncado. Ya pasó una vez
+> en este proyecto y costó un rato entenderlo.
 
 > ### `BANK_ENCRYPTION_KEY` se pone UNA vez y no se cambia
 >
