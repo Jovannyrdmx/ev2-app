@@ -5,7 +5,7 @@
  * y `EV2Roles`. Cubre lo que el dueño dejó para configurar después: conductores, zonas y
  * tarifas del taxi, y los cajones del estacionamiento — más el resumen del turno.
  */
-/* global EV2, EV2Format, EV2Manager, EV2Roles, EV2PasswordGate */
+/* global EV2, EV2Format, EV2Manager, EV2Roles, EV2PasswordGate, EV2StaffAdmin, EV2Payouts */
 (function () {
   'use strict';
 
@@ -26,7 +26,7 @@
     tab: 'summary', currency: 'MXN',
     dashboard: null, drivers: [], taxiSettings: null, fares: [],
     valetSettings: null, spots: [], occupancy: null,
-    nights: [],
+    nights: [], staff: [], withdrawals: [], accounts: [],
     realtime: null, busy: false,
   };
   const secret = EV2Manager.createSecretBox();
@@ -191,13 +191,42 @@
       // Sin filtro de estado: el gerente TIENE que ver sus borradores, que son
       // justamente las noches que todavía nadie puede reservar.
       get(`/nightclubs/${club}/events?limit=60`, (d) => { state.nights = d.events || []; }),
+      get(`/nightclubs/${club}/employees?include_inactive=true&limit=200`,
+        (d) => { state.staff = d.employees || []; }),
+      get(`/nightclubs/${club}/withdrawals?limit=100`, (d) => { state.withdrawals = d.withdrawals || []; }),
     ]);
+    // Las cuentas por verificar se piden por empleado: no hay un listado del club, y
+    // sin verificar una cuenta esa persona no puede cobrar nunca.
+    await loadAccounts();
     renderAll();
+  }
+
+  /**
+   * Las cuentas bancarias de quienes todavía no tienen ninguna verificada.
+   *
+   * Se pregunta empleado por empleado a propósito: la API no expone un listado del club
+   * entero, y con razón — son datos bancarios y cada consulta queda ligada a la persona
+   * a la que pertenecen.
+   */
+  async function loadAccounts() {
+    const club = clubId();
+    const activos = (state.staff || []).filter((p) => p.active !== false);
+    const results = await Promise.all(activos.map(async (person) => {
+      try {
+        const d = await api.get(`/nightclubs/${club}/employees/${person.id}/bank-accounts`);
+        return (d.bank_accounts || []).map((a) => ({ ...a, employee: person }));
+      } catch {
+        // Un empleado sin cuentas contesta vacío; cualquier otro fallo no debe tumbar
+        // la pestaña entera de pagos.
+        return [];
+      }
+    }));
+    state.accounts = results.flat();
   }
 
   // ---------------------------------------------------------------- pintar
 
-  const TABS = ['summary', 'nights', 'drivers', 'taxi', 'parking'];
+  const TABS = ['summary', 'nights', 'staff', 'payouts', 'drivers', 'taxi', 'parking'];
 
   function renderAll() {
     for (const tab of TABS) $(`tab-${tab}`).hidden = tab !== state.tab;
@@ -206,10 +235,325 @@
     });
     renderSummary();
     renderNights();
+    renderStaff();
+    renderPayouts();
     renderDrivers();
     renderTaxi();
     renderParking();
     renderSecret();
+  }
+
+  // ---------------------------------------------------------------- personal
+
+  function renderStaff() {
+    const counts = EV2StaffAdmin.counts(state.staff);
+    $('st-onshift').textContent = String(counts.onShift);
+    $('st-active').textContent = String(counts.active);
+    $('st-inactive').textContent = String(counts.inactive);
+
+    const list = EV2StaffAdmin.sortStaff(state.staff);
+    $('staff-empty').hidden = list.length > 0;
+    const box = $('staff-list');
+    box.innerHTML = '';
+
+    for (const person of list) {
+      const actions = EV2StaffAdmin.actionsFor(person);
+      const names = EV2StaffAdmin.displayFor(person);
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl p-3 space-y-2';
+      if (person.active === false) card.style.opacity = '.55';
+
+      const head = document.createElement('div');
+      head.className = 'flex justify-between items-start gap-3';
+      const left = document.createElement('div');
+      left.className = 'min-w-0';
+      const name = document.createElement('p');
+      name.className = 'font-display truncate';
+      name.textContent = names.primary;
+      left.appendChild(name);
+      const sub = document.createElement('p');
+      sub.className = 'text-[11px] text-white/40 truncate';
+      // El nombre legal se enseña junto al artístico: la nómina lo necesita.
+      sub.textContent = [names.secondary, EV2Roles.describe(person.role, lang()).label, person.email]
+        .filter(Boolean).join(' · ');
+      left.appendChild(sub);
+
+      const status = document.createElement('span');
+      status.className = 'text-xs shrink-0';
+      status.style.color = person.on_shift ? 'var(--ev2-lime)'
+        : person.active === false ? 'rgba(255,255,255,.4)' : 'rgba(255,255,255,.6)';
+      status.textContent = t(EV2StaffAdmin.statusOf(person));
+      head.append(left, status);
+      card.appendChild(head);
+
+      const row = document.createElement('div');
+      row.className = 'flex gap-2 flex-wrap';
+      const add = (label, cls, fn) => {
+        const b = document.createElement('button');
+        b.className = cls;
+        b.textContent = t(label);
+        b.onclick = () => fn(b);
+        row.appendChild(b);
+      };
+      if (actions.canResetPassword) {
+        add('staff.resetPassword', 'card rounded-lg px-3 py-2 text-sm flex-1', (b) => {
+          if (!window.confirm(t('staff.confirmReset'))) return;
+          patchEmployee(person, { reset_password: true }, 'staff.tempPassword', b);
+        });
+      }
+      if (actions.canDeactivate) {
+        add('staff.deactivate', 'card rounded-lg px-3 py-2 text-sm text-red-300', (b) => {
+          if (!window.confirm(t('staff.confirmDeactivate'))) return;
+          patchEmployee(person, { active: false }, 'staff.deactivated', b);
+        });
+      }
+      if (actions.canReactivate) {
+        add('staff.reactivate', 'ev2-button rounded-lg px-3 py-2 text-sm flex-1',
+          (b) => patchEmployee(person, { active: true }, 'staff.reactivated', b));
+      }
+      if (row.children.length) card.appendChild(row);
+      box.appendChild(card);
+    }
+  }
+
+  async function patchEmployee(person, body, message, button) {
+    button.disabled = true;
+    try {
+      const data = await api.patch(`/nightclubs/${clubId()}/employees/${person.id}`, body);
+      // La contraseña temporal viaja UNA vez, en esta respuesta. Si la pantalla la
+      // pierde, no hay forma de recuperarla y hay que volver a reiniciarla.
+      if (data.temporary_password) {
+        secret.hold(EV2StaffAdmin.displayFor(person).primary, data.temporary_password);
+      } else {
+        toast(t(message), 'ok');
+      }
+      await loadAll();
+    } catch (err) {
+      showError(err);
+      button.disabled = false;
+    }
+  }
+
+  $('btn-new-staff').onclick = () => {
+    const form = $('staff-form');
+    form.hidden = !form.hidden;
+    clearStaffErrors();
+    if (!form.hidden) fillRoleOptions();
+  };
+  $('btn-staff-cancel').onclick = () => { $('staff-form').hidden = true; clearStaffErrors(); };
+
+  function fillRoleOptions() {
+    const select = $('s-role');
+    if (select.options.length) return;
+    for (const role of EV2StaffAdmin.EMPLOYEE_ROLES) {
+      const opt = document.createElement('option');
+      opt.value = role;
+      opt.textContent = EV2Roles.describe(role, lang()).label;
+      select.appendChild(opt);
+    }
+  }
+
+  const STAFF_FIELDS = {
+    first_name: 's-first', last_name: 's-last', email: 's-email',
+    phone: 's-phone', role: 's-role', birth_date: 's-birth',
+  };
+
+  function clearStaffErrors() {
+    for (const [field, id] of Object.entries(STAFF_FIELDS)) {
+      const p = document.querySelector(`#staff-form [data-error="${field}"]`);
+      if (p) { p.hidden = true; p.textContent = ''; }
+      const input = $(id);
+      if (input) input.classList.remove('bad');
+    }
+  }
+
+  function showStaffErrors(errors) {
+    clearStaffErrors();
+    for (const [field, key] of Object.entries(errors)) {
+      const p = document.querySelector(`#staff-form [data-error="${field}"]`);
+      if (p) { p.textContent = t(key); p.hidden = false; }
+      const input = $(STAFF_FIELDS[field]);
+      if (input) input.classList.add('bad');
+    }
+  }
+
+  $('staff-form').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const form = {
+      first_name: $('s-first').value,
+      last_name: $('s-last').value,
+      stage_name: $('s-stage').value,
+      email: $('s-email').value,
+      phone: $('s-phone').value,
+      role: $('s-role').value,
+      birth_date: $('s-birth').value,
+    };
+    // La edad se comprueba aquí y en el servidor. No es redundancia: dar de alta a un
+    // menor como personal de un centro nocturno es el peor error de esta pantalla.
+    const errors = EV2StaffAdmin.validateEmployee(form, new Date());
+    if (Object.keys(errors).length) { showStaffErrors(errors); return; }
+    clearStaffErrors();
+
+    try {
+      const data = await api.post(`/nightclubs/${clubId()}/employees`,
+        EV2StaffAdmin.employeePayload(form));
+      $('staff-form').reset();
+      $('staff-form').hidden = true;
+      secret.hold(EV2StaffAdmin.displayFor(data.employee || form).primary, data.temporary_password);
+      await loadAll();
+    } catch (err) { showError(err); }
+  };
+
+  // ---------------------------------------------------------------- pagos
+
+  function renderPayouts() {
+    const box = EV2Payouts.inbox(state.withdrawals, new Date());
+    $('p-owed').textContent = box.owed.length
+      ? box.owed.map((o) => money(o.amount, o.currency)).join(' · ')
+      : money('0.00', state.currency);
+    $('p-inbox').textContent = `${t('pay.pending', { count: box.pending })} · ${t('pay.approved', { count: box.approved })}`;
+    const oldest = $('p-oldest');
+    oldest.hidden = box.oldestDays < 1;
+    oldest.textContent = t('pay.oldest', { days: box.oldestDays });
+
+    renderAccounts();
+    renderWithdrawals();
+  }
+
+  function renderAccounts() {
+    // Solo lo que espera decisión: una cuenta ya verificada no necesita mirarse otra vez.
+    const pendientes = EV2Payouts.sortAccounts(state.accounts).filter((a) => !EV2Payouts.isVerified(a));
+    $('acc-empty').hidden = pendientes.length > 0;
+    const box = $('acc-list');
+    box.innerHTML = '';
+
+    for (const account of pendientes) {
+      const label = EV2Payouts.accountLabel(account);
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl p-3 space-y-2';
+
+      const who = document.createElement('p');
+      who.className = 'font-display truncate';
+      who.textContent = (account.employee && account.employee.display_name) || '';
+      const detail = document.createElement('p');
+      detail.className = 'text-sm text-white/70';
+      detail.textContent = `${label.bank} · ${label.masked}`;
+      const holder = document.createElement('p');
+      holder.className = 'text-[11px] text-white/40';
+      holder.textContent = label.holder;
+      card.append(who, detail, holder);
+
+      const note = document.createElement('p');
+      note.className = 'text-[11px]';
+      note.style.color = 'var(--ev2-gold)';
+      note.textContent = t(EV2Payouts.verifyWarning());
+      card.appendChild(note);
+
+      const verify = document.createElement('button');
+      verify.className = 'ev2-button w-full rounded-lg py-2 text-sm';
+      verify.textContent = t('pay.verify');
+      verify.onclick = async () => {
+        if (!window.confirm(t('pay.confirmVerify'))) return;
+        verify.disabled = true;
+        try {
+          await api.post(
+            `/nightclubs/${clubId()}/employees/${account.employee.id}/bank-accounts/${account.id}/verify`,
+            { verified: true });
+          toast(t('pay.verified1'), 'ok');
+          await loadAll();
+        } catch (err) { showError(err); verify.disabled = false; }
+      };
+      card.appendChild(verify);
+      box.appendChild(card);
+    }
+  }
+
+  function renderWithdrawals() {
+    const list = EV2Payouts.sortWithdrawals(state.withdrawals);
+    $('pay-empty').hidden = list.length > 0;
+    const box = $('pay-list');
+    box.innerHTML = '';
+
+    for (const w of list) {
+      const actions = EV2Payouts.actionsFor(w);
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl p-3 space-y-2';
+      if (actions.isClosed) card.style.opacity = '.6';
+
+      const head = document.createElement('div');
+      head.className = 'flex justify-between items-start gap-3';
+      const left = document.createElement('div');
+      left.className = 'min-w-0';
+      const who = document.createElement('p');
+      who.className = 'font-display truncate';
+      who.textContent = w.employee_name || '';
+      const detail = document.createElement('p');
+      detail.className = 'text-[11px] text-white/40 truncate';
+      detail.textContent = [w.bank_name, EV2Format.dateTime(w.created_at)].filter(Boolean).join(' · ');
+      left.append(who, detail);
+
+      const amount = document.createElement('span');
+      amount.className = 'font-display shrink-0';
+      amount.textContent = money(w.amount_paid || w.amount, w.payout_currency || w.currency);
+      head.append(left, amount);
+      card.appendChild(head);
+
+      const status = document.createElement('p');
+      status.className = 'text-xs text-white/50';
+      status.textContent = t(EV2Payouts.statusLabel(w.status));
+      card.appendChild(status);
+
+      const row = document.createElement('div');
+      row.className = 'flex gap-2 flex-wrap';
+      if (actions.canApprove) {
+        const b = document.createElement('button');
+        b.className = 'ev2-button rounded-lg px-3 py-2 text-sm flex-1';
+        b.textContent = t('pay.approve');
+        b.onclick = () => withdrawalAction(w, 'approve', {}, 'pay.approved1', b);
+        row.appendChild(b);
+      }
+      if (actions.canReject) {
+        const b = document.createElement('button');
+        b.className = 'card rounded-lg px-3 py-2 text-sm text-red-300';
+        b.textContent = t('pay.reject');
+        b.onclick = () => {
+          const reason = window.prompt(t('pay.reason'));
+          if (reason === null) return;
+          const problem = EV2Payouts.validateRejection(reason);
+          if (problem) { toast(t(problem), 'error'); return; }
+          withdrawalAction(w, 'reject', { reason: reason.trim() }, 'pay.rejected1', b);
+        };
+        row.appendChild(b);
+      }
+      if (actions.canPay) {
+        const b = document.createElement('button');
+        b.className = 'ev2-button rounded-lg px-3 py-2 text-sm flex-1';
+        b.textContent = t('pay.markPaid');
+        b.onclick = () => {
+          const reference = window.prompt(t('pay.reference')) || '';
+          // Sin referencia no se puede conciliar tres semanas después, cuando el
+          // empleado dice que nunca le llegó. Se advierte, no se impone.
+          const warn = EV2Payouts.payWarning(w, reference);
+          if (warn && !window.confirm(t(warn))) return;
+          withdrawalAction(w, 'paid', { reference: reference.trim() || undefined }, 'pay.paid1', b);
+        };
+        row.appendChild(b);
+      }
+      if (row.children.length) card.appendChild(row);
+      box.appendChild(card);
+    }
+  }
+
+  async function withdrawalAction(withdrawal, action, body, message, button) {
+    button.disabled = true;
+    try {
+      await api.post(`/nightclubs/${clubId()}/withdrawals/${withdrawal.id}/${action}`, body);
+      toast(t(message), 'ok');
+      await loadAll();
+    } catch (err) {
+      showError(err);
+      button.disabled = false;
+    }
   }
 
   // ---------------------------------------------------------------- noches

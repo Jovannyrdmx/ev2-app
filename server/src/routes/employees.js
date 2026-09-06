@@ -27,7 +27,11 @@ const EMPLOYEE_SELECT = `
          u.preferred_currency, u.must_change_password, u.last_login_at, u.created_at,
          p.employee_code, p.country, p.stage_name, p.avatar_url, p.hire_date, p.active,
          p.preferred_payout_currency, p.deactivated_at,
-         (s.id IS NOT NULL) AS on_shift
+         (s.id IS NOT NULL) AS on_shift,
+         -- Desde cuando, no solo si. El portal le dice al empleado cuanto lleva
+         -- trabajando, y sin esta columna tendria que pedir la lista de turnos, que
+         -- solo pueden leer el gerente y la anfitriona.
+         s.started_at AS shift_started_at
     FROM users u
     JOIN employee_profiles p ON p.user_id = u.id
     LEFT JOIN staff_shifts s ON s.user_id = u.id AND s.ended_at IS NULL`;

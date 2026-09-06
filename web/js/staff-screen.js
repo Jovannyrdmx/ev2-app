@@ -4,7 +4,7 @@
  * Conecta el DOM con `EV2` (API y socket), `EV2Staff` (charolas, ocupación, propinas)
  * y `EV2Roles`. Las decisiones viven en `staff-floor.js` y están probadas ahí.
  */
-/* global EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate */
+/* global EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door */
 (function () {
   'use strict';
 
@@ -25,6 +25,7 @@
   const state = {
     tab: 'trays', orders: [], tables: [], stats: null, tips: [],
     employee: null, currency: 'MXN', realtime: null, busy: new Set(), arrived: new Set(),
+    reservations: [], doorSearch: '',
   };
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
@@ -162,6 +163,12 @@
       get(`/nightclubs/${club}/staff/me/tips?limit=50`, (d) => { state.tips = d.tips || []; }),
       // `on_shift` viene aquí y no en /auth/me: es lo que decide el botón del turno.
       get('/employees/me', (d) => { state.employee = d.employee; }),
+      // La puerta es de la anfitriona y del gerente; a un mesero el servidor le
+      // contesta 403 y un error rojo en su pantalla no significa nada para él.
+      isDoorRole()
+        ? get(`/nightclubs/${club}/reservations?limit=200`,
+          (d) => { state.reservations = d.reservations || []; })
+        : Promise.resolve(),
     ]);
     renderAll();
   }
@@ -189,17 +196,157 @@
 
   // ---------------------------------------------------------------- pintar
 
-  const TABS = ['trays', 'tables', 'me'];
+  const TABS = ['trays', 'tables', 'door', 'me'];
+
+  const DOOR_ROLES = ['hostess', 'manager', 'admin'];
+  const isDoorRole = () => DOOR_ROLES.includes(api.session.user && api.session.user.role);
 
   function renderAll() {
+    // La pestaña de la puerta solo existe para quien recibe en la entrada. Escondida
+    // es mejor que deshabilitada: un mesero no tiene por qué preguntarse qué hay ahí.
+    const doorTab = document.querySelector('[data-tab="door"]');
+    if (doorTab) doorTab.hidden = !isDoorRole();
+    if (state.tab === 'door' && !isDoorRole()) state.tab = 'trays';
+
     for (const tab of TABS) $(`tab-${tab}`).hidden = tab !== state.tab;
     document.querySelectorAll('[data-tab]').forEach((b) => {
       b.classList.toggle('active', b.dataset.tab === state.tab);
     });
     renderTrays();
     renderTables();
+    if (isDoorRole()) renderDoor();
     renderMe();
   }
+
+  // ---------------------------------------------------------------- la puerta
+
+  function renderDoor() {
+    const now = new Date();
+    const summary = EV2Door.summary(state.reservations, now);
+    $('d-expected').textContent = String(summary.expected);
+    $('d-seated').textContent = String(summary.seated);
+    $('d-late').textContent = String(summary.late);
+    $('d-guests').textContent = String(summary.guestsInside);
+
+    const visible = EV2Door.sortForDoor(
+      EV2Door.search(state.reservations, state.doorSearch), now);
+    $('door-empty').hidden = visible.length > 0;
+    // Liberar mesas vencidas solo se ofrece si de verdad hay alguna: un botón que no
+    // hace nada enseña a ignorarlo.
+    $('btn-release').hidden = summary.late === 0;
+
+    const box = $('door-list');
+    box.innerHTML = '';
+
+    for (const r of visible) {
+      const urgency = EV2Door.urgency(r, now);
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl p-3 space-y-2';
+      if (urgency === 'late') {
+        card.style.borderColor = 'var(--ev2-red)';
+        card.style.background = 'rgba(255,68,68,.08)';
+      } else if (urgency === 'soon') {
+        card.style.borderColor = 'var(--ev2-gold)';
+      }
+
+      const head = document.createElement('div');
+      head.className = 'flex justify-between items-start gap-3';
+      const left = document.createElement('div');
+      left.className = 'min-w-0';
+      const who = document.createElement('p');
+      who.className = 'font-display text-lg truncate';
+      who.textContent = r.user_name || '—';
+      const detail = document.createElement('p');
+      detail.className = 'text-xs text-white/50';
+      detail.textContent = [
+        r.table_code || r.table_number,
+        r.section,
+        t('door.party', { count: Number(r.guest_count) || 0 }),
+      ].filter(Boolean).join(' · ');
+      left.append(who, detail);
+
+      const status = document.createElement('span');
+      status.className = 'text-xs shrink-0';
+      status.textContent = t(EV2Door.statusLabel(r.status));
+      head.append(left, status);
+      card.appendChild(head);
+
+      // El tiempo que le queda va grande y con color: es lo que decide si la
+      // anfitriona espera o libera la mesa.
+      const countdown = EV2Door.countdown(r, now);
+      if (countdown && r.status !== 'seated') {
+        const note = document.createElement('p');
+        note.className = 'text-sm';
+        note.style.color = urgency === 'late' ? 'var(--ev2-red)'
+          : urgency === 'soon' ? 'var(--ev2-gold)' : 'rgba(255,255,255,.6)';
+        note.textContent = countdown.expired
+          ? t('door.overdue')
+          : t('door.minutesLeft', { minutes: countdown.minutes });
+        card.appendChild(note);
+      }
+
+      if (r.special_requests) {
+        const req = document.createElement('p');
+        req.className = 'text-sm text-white/80 italic';
+        req.textContent = `“${r.special_requests}”`;
+        card.appendChild(req);
+      }
+
+      const actions = EV2Door.actionsFor(r);
+      if (actions.length) {
+        const row = document.createElement('div');
+        row.className = 'flex gap-2';
+        for (const action of actions) {
+          const b = document.createElement('button');
+          b.className = action.primary
+            ? 'ev2-button rounded-lg px-4 py-3 font-display flex-1'
+            : 'card rounded-lg px-3 py-3 text-sm text-red-300';
+          b.textContent = t(action.key);
+          b.onclick = () => {
+            // Marcar que no llegó libera una mesa que alguien pagó: se confirma.
+            if (action.confirm && !window.confirm(t('door.confirmNoShow'))) return;
+            setReservation(r, action.status, b);
+          };
+          row.appendChild(b);
+        }
+        card.appendChild(row);
+      }
+      box.appendChild(card);
+    }
+  }
+
+  async function setReservation(reservation, status, button) {
+    button.disabled = true;
+    try {
+      await api.post(`/nightclubs/${clubId()}/reservations/${reservation.id}/status`, { status });
+      if (status === 'seated') toast(t('door.seated1'), 'ok');
+      if (status === 'no_show') toast(t('door.noShow1'), 'ok');
+      await loadAll();
+    } catch (err) {
+      showError(err);
+      button.disabled = false;
+    }
+  }
+
+  $('door-search').oninput = (ev) => {
+    state.doorSearch = ev.target.value;
+    if (isDoorRole()) renderDoor();
+  };
+
+  $('btn-release').onclick = async () => {
+    // Por id, no por `ev.currentTarget`: el navegador lo pone en null en cuanto el
+    // manejador regresa, y con un `await` de por medio el `finally` revienta.
+    $('btn-release').disabled = true;
+    try {
+      const data = await api.post(`/nightclubs/${clubId()}/reservations/release-no-shows`, {});
+      toast(t('door.released', { count: (data.released || []).length || data.count || 0 }), 'ok');
+      await loadAll();
+    } catch (err) {
+      showError(err);
+    } finally {
+      $('btn-release').disabled = false;
+    }
+  };
 
   document.querySelectorAll('[data-tab]').forEach((b) => {
     b.onclick = () => { state.tab = b.dataset.tab; renderAll(); };
@@ -372,6 +519,12 @@
     rt.on('resync_required', async () => { banner(t('banner.updating')); await loadAll(); banner(null); });
 
     rt.on('event', async (message) => {
+      // La puerta escucha el mismo socket: una reservación nueva o un cambio de
+      // estado tiene que aparecer sin que la anfitriona jale la pantalla.
+      if (EV2Door.affectsDoor(message)) {
+        if (isDoorRole()) await loadAll();
+        return;
+      }
       const change = EV2Staff.applyEvent(message);
       if (!change.changed) return;
       if (change.reloadTables) { await loadTables(); return; }

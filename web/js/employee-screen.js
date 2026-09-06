@@ -5,7 +5,7 @@
  * `EV2Roles`. Aquí un error se paga en confianza: enseñar como disponible un dinero
  * que todavía no lo está, o dejar pedir un retiro que el servidor va a rechazar.
  */
-/* global EV2, EV2Format, EV2Earnings, EV2Roles, EV2PasswordGate, EV2Songs */
+/* global EV2, EV2Format, EV2Earnings, EV2Roles, EV2PasswordGate, EV2Songs, EV2Shift */
 (function () {
   'use strict';
 
@@ -28,7 +28,7 @@
     tab: 'money', currency: 'MXN',
     employee: null, balances: [], movements: [], byType: [],
     accounts: [], withdrawals: [], openWithdrawal: null,
-    songs: [], realtime: null,
+    songs: [], shifts: [], drinks: [], realtime: null,
   };
 
   const isDj = () => (api.session.user && api.session.user.role) === 'dj';
@@ -174,6 +174,8 @@
         ? get(`/nightclubs/${clubId()}/dj/song-requests?status=requested&limit=50`,
           (d) => { state.songs = d.song_requests || []; })
         : Promise.resolve(),
+      get(`/nightclubs/${clubId()}/staff/me/drinks?limit=30`,
+        (d) => { state.drinks = d.staff_drinks || []; }),
     ]);
     // El panel trae el retiro abierto, pero el historial es la fuente más fresca.
     state.openWithdrawal = EV2Earnings.openWithdrawal(state.withdrawals) || state.openWithdrawal;
@@ -196,10 +198,123 @@
       b.classList.toggle('active', b.dataset.tab === state.tab);
     });
     renderBalance();
+    renderShift();
+    renderDrinks();
     renderMoney();
     renderWithdraw();
     renderAccounts();
     if (isDj()) renderSongs();
+  }
+
+  // ---------------------------------------------------------------- turno
+
+  function renderShift() {
+    // El turno sale de la propia fila del empleado: `/staff/shifts` es del gerente y
+    // de la anfitriona, y este rol recibiría un 403.
+    const open = EV2Shift.isOpen(state.employee);
+    const button = EV2Shift.shiftButton(state.employee);
+    const head = EV2Shift.headline(state.employee, new Date());
+
+    $('btn-shift').textContent = t(button.key);
+    $('btn-shift').className = open
+      ? 'card w-full py-3 rounded-xl font-display text-red-300'
+      : 'ev2-button w-full py-3 rounded-xl font-display';
+    $('btn-shift').dataset.action = button.path;
+
+    const state_ = $('shift-state');
+    state_.textContent = t(open ? 'staff.stOnShift' : 'staff.stOffShift');
+    state_.style.color = open ? 'var(--ev2-lime)' : 'rgba(255,255,255,.5)';
+
+    // Cuando NO hay turno se explica la consecuencia, no el estado: es la única razón
+    // por la que puede pasar una noche entera sin una sola propina.
+    $('shift-note').textContent = head.vars ? t(head.key, head.vars) : t(head.key);
+    $('shift-note').style.color = open ? 'rgba(255,255,255,.5)' : 'var(--ev2-gold)';
+  }
+
+  $('btn-shift').onclick = async () => {
+    // Se toma el elemento por id, no de `ev.currentTarget`: el navegador lo pone en
+    // null en cuanto el manejador regresa, y como aquí hay un `await` en medio, el
+    // `finally` reventaba con "Cannot set properties of null".
+    const button = $('btn-shift');
+    const action = button.dataset.action || 'start';
+    button.disabled = true;
+    try {
+      await api.post(`/nightclubs/${clubId()}/staff/shifts/${action}`, {});
+      toast(t(action === 'start' ? 'shift.started' : 'shift.ended'), 'ok');
+      await loadAll();
+    } catch (err) {
+      showError(err);
+    } finally {
+      $('btn-shift').disabled = false;
+    }
+  };
+
+  // ---------------------------------------------------------------- tragos invitados
+
+  function renderDrinks() {
+    const pending = EV2Shift.pendingDrinks(state.drinks);
+    $('drinks-box').hidden = pending.length === 0;
+    const box = $('drinks-list');
+    box.innerHTML = '';
+
+    for (const drink of pending) {
+      const card = document.createElement('div');
+      card.className = 'rounded-lg p-3 space-y-2';
+      card.style.background = 'rgba(255,20,147,.08)';
+      card.style.border = '1px solid rgba(255,20,147,.35)';
+
+      const title = document.createElement('p');
+      title.className = 'font-display';
+      title.textContent = drink.drink_name || '';
+      const from = document.createElement('p');
+      from.className = 'text-[11px] text-white/60';
+      from.textContent = t('drink.from', {
+        name: drink.from_name || '', table: drink.from_table_code || '—',
+      });
+      card.append(title, from);
+
+      if (drink.message) {
+        const message = document.createElement('p');
+        message.className = 'text-sm text-white/80 italic';
+        message.textContent = `“${drink.message}”`;
+        card.appendChild(message);
+      }
+
+      const row = document.createElement('div');
+      row.className = 'grid grid-cols-2 gap-2 pt-1';
+
+      const accept = document.createElement('button');
+      accept.className = 'ev2-button rounded-lg py-2 text-sm';
+      accept.textContent = t('drink.accept');
+      accept.onclick = () => answerDrink(drink, 'accept', 'drink.accepted', accept);
+      row.appendChild(accept);
+
+      const decline = document.createElement('button');
+      decline.className = 'card rounded-lg py-2 text-sm text-red-300';
+      decline.textContent = t('drink.decline');
+      decline.onclick = () => {
+        // Rechazar NO lo cancela: ya se le cobró al cliente y vuelve a su mesa (D20).
+        // Quien rechaza tiene derecho a hacerlo, pero debe saber qué pasa del otro lado.
+        if (!window.confirm(`${t('drink.declineNote')}\n\n${t('drink.confirmDecline')}`)) return;
+        answerDrink(drink, 'decline', 'drink.declined', decline);
+      };
+      row.appendChild(decline);
+
+      card.appendChild(row);
+      box.appendChild(card);
+    }
+  }
+
+  async function answerDrink(drink, action, message, button) {
+    button.disabled = true;
+    try {
+      await api.post(`/nightclubs/${clubId()}/staff-drinks/${drink.id}/${action}`, {});
+      toast(t(message), 'ok');
+      await loadAll();
+    } catch (err) {
+      showError(err);
+      button.disabled = false;
+    }
   }
 
   // ---------------------------------------------------------------- la cola del DJ
@@ -478,6 +593,16 @@
         if (kind === 'song_requested' || kind === 'song_request_voted') {
           // En la cabina no se oye nada: el aviso es vibración.
           try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch { /* bloqueado */ }
+        }
+        return;
+      }
+      if (EV2Shift.affectsShift(message)) {
+        await loadAll();
+        if (kind === 'staff_drink_received') {
+          // En un antro no se oye nada: el aviso es vibración. Del otro lado alguien
+          // está esperando en una mesa a ver si acepta.
+          try { if (navigator.vibrate) navigator.vibrate([150, 60, 150]); } catch { /* bloqueado */ }
+          toast(t('drink.title'), 'ok');
         }
         return;
       }

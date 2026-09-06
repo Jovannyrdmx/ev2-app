@@ -144,6 +144,8 @@
     <nav class="flex px-2 border-b border-white/10 overflow-x-auto">
       <button data-tab="summary" class="tab active flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabSummary">Turno</button>
       <button data-tab="nights" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="night.tab">Noches</button>
+      <button data-tab="staff" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="staff.tab">Personal</button>
+      <button data-tab="payouts" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="pay.tab">Pagos</button>
       <button data-tab="drivers" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabDrivers">Conductores</button>
       <button data-tab="taxi" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabTaxi">Taxi</button>
       <button data-tab="parking" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabParking">Cajones</button>
@@ -226,6 +228,94 @@
 
         <p id="nights-empty" class="text-sm text-white/40 text-center py-6" data-i18n="night.empty" hidden>Todavía no hay ninguna noche. Abre la primera.</p>
         <div id="nights-list" class="space-y-2"></div>
+      </div>
+
+      <!--
+        ---------------------------- PERSONAL ----------------------------
+        Un servidor recién instalado tiene un gerente y nadie más. Sin esta pestaña no
+        hay mesero que lleve una charola ni cantinero que la prepare.
+      -->
+      <div id="tab-staff" class="space-y-3" hidden>
+        <div class="grid grid-cols-3 gap-2">
+          <div class="stat-card"><div class="stat-number" id="st-onshift">—</div><div class="stat-label" data-i18n="staff.stOnShift">En turno</div></div>
+          <div class="stat-card"><div class="stat-number" id="st-active">—</div><div class="stat-label" data-i18n="manager.tabSummary">Activos</div></div>
+          <div class="stat-card"><div class="stat-number" id="st-inactive">—</div><div class="stat-label" data-i18n="staff.stInactive">De baja</div></div>
+        </div>
+
+        <button id="btn-new-staff" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="staff.new">Dar de alta a alguien</button>
+
+        <form id="staff-form" class="card rounded-xl p-4 space-y-3" hidden>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label" for="s-first" data-i18n="staff.firstName">Nombre(s)</label>
+              <input id="s-first" class="field" maxlength="100">
+              <p class="field-error" data-error="first_name" hidden></p>
+            </div>
+            <div>
+              <label class="label" for="s-last" data-i18n="staff.lastName">Apellidos</label>
+              <input id="s-last" class="field" maxlength="100">
+              <p class="field-error" data-error="last_name" hidden></p>
+            </div>
+          </div>
+          <div>
+            <label class="label" for="s-role" data-i18n="staff.role">Qué hace</label>
+            <select id="s-role" class="field"></select>
+            <p class="field-error" data-error="role" hidden></p>
+          </div>
+          <div>
+            <label class="label" for="s-stage" data-i18n="staff.stageName">Nombre artístico (opcional)</label>
+            <input id="s-stage" class="field" maxlength="80">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label" for="s-email" data-i18n="staff.email">Correo</label>
+              <input id="s-email" type="email" class="field" maxlength="255">
+              <p class="field-error" data-error="email" hidden></p>
+            </div>
+            <div>
+              <label class="label" for="s-phone" data-i18n="staff.phone">Teléfono</label>
+              <input id="s-phone" type="tel" class="field" maxlength="30">
+              <p class="field-error" data-error="phone" hidden></p>
+            </div>
+          </div>
+          <div>
+            <label class="label" for="s-birth" data-i18n="staff.birthDate">Fecha de nacimiento</label>
+            <input id="s-birth" type="date" class="field">
+            <p class="field-error" data-error="birth_date" hidden></p>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="btn-staff-cancel" class="card rounded-lg py-2 text-sm" data-i18n="manager.cancel">Cancelar</button>
+            <button type="submit" class="ev2-button rounded-lg py-2" data-i18n="staff.create">Crear la cuenta</button>
+          </div>
+        </form>
+
+        <p id="staff-empty" class="text-sm text-white/40 text-center py-6" data-i18n="staff.empty" hidden>Todavía no has dado de alta a nadie.</p>
+        <div id="staff-list" class="space-y-2"></div>
+      </div>
+
+      <!--
+        ---------------------------- PAGOS ----------------------------
+        El final del camino de una propina. Sin esto el dinero entra y nunca sale:
+        nadie verifica una cuenta, y sin verificación el servidor rechaza el primer
+        retiro para siempre.
+      -->
+      <div id="tab-payouts" class="space-y-3" hidden>
+        <div class="card rounded-xl p-4 space-y-2">
+          <div class="flex justify-between items-baseline">
+            <span class="text-sm text-white/60" data-i18n="pay.owed">Se debe</span>
+            <span id="p-owed" class="font-display text-2xl" style="color:var(--ev2-gold)">—</span>
+          </div>
+          <div class="flex justify-between text-sm"><span class="text-white/50" data-i18n="pay.inbox">Por resolver</span><span id="p-inbox">—</span></div>
+          <p id="p-oldest" class="text-[11px] text-white/40" hidden></p>
+        </div>
+
+        <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="pay.accounts">Cuentas por verificar</p>
+        <p id="acc-empty" class="text-sm text-white/40" data-i18n="pay.noAccounts" hidden>No hay cuentas esperando verificación.</p>
+        <div id="acc-list" class="space-y-2"></div>
+
+        <p class="text-xs uppercase tracking-wider text-white/40 pt-2" data-i18n="pay.tab">Retiros</p>
+        <p id="pay-empty" class="text-sm text-white/40" data-i18n="pay.none" hidden>No hay retiros pendientes.</p>
+        <div id="pay-list" class="space-y-2"></div>
       </div>
 
       <!-- ---------------------------- CONDUCTORES ---------------------------- -->
@@ -327,6 +417,8 @@
 <script src="js/roles.js"></script>
 <script src="js/password-gate.js"></script>
 <script src="js/manager.js"></script>
+<script src="js/staff-admin.js"></script>
+<script src="js/payouts.js"></script>
 <script src="js/manager-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

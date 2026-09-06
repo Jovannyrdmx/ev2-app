@@ -148,6 +148,8 @@
     <nav class="flex px-2 pt-3 border-b border-white/10">
       <button data-tab="trays" class="tab active flex-1 py-3 text-sm"><span data-i18n="floor.tabTrays">Por llevar</span><span class="tab-count" id="count-trays">0</span></button>
       <button data-tab="tables" class="tab flex-1 py-3 text-sm" data-i18n="floor.tabTables">Mesas</button>
+      <!-- Solo para la anfitriona y el gerente: es quien recibe en la entrada. -->
+      <button data-tab="door" class="tab flex-1 py-3 text-sm" data-i18n="door.tab" hidden>Puerta</button>
       <button data-tab="me" class="tab flex-1 py-3 text-sm" data-i18n="floor.tabMe">Lo mío</button>
     </nav>
 
@@ -165,6 +167,29 @@
         </div>
         <p class="text-[11px] text-white/40" data-i18n="floor.seatNote">El cliente se sienta desde su propia app.</p>
         <div id="tables-list" class="space-y-2"></div>
+      </div>
+
+      <!--
+        ---------------------------- LA PUERTA ----------------------------
+        Ya se puede reservar desde el teléfono; esta es la mitad que faltaba. Se usa de
+        pie, con gente enfrente y ruido: por eso el botón de "Llegó" es el grande y la
+        búsqueda ignora acentos.
+      -->
+      <div id="tab-door" class="space-y-3" hidden>
+        <div class="grid grid-cols-4 gap-2">
+          <div class="stat-card"><div class="stat-number" id="d-expected">—</div><div class="stat-label" data-i18n="door.expected">Por llegar</div></div>
+          <div class="stat-card"><div class="stat-number" id="d-seated">—</div><div class="stat-label" data-i18n="door.seated">Ya adentro</div></div>
+          <div class="stat-card"><div class="stat-number" id="d-late">—</div><div class="stat-label" data-i18n="door.late">Se les pasó</div></div>
+          <div class="stat-card"><div class="stat-number" id="d-guests">—</div><div class="stat-label" data-i18n="door.guests">Personas</div></div>
+        </div>
+
+        <input id="door-search" type="search" placeholder="Buscar por nombre o mesa" data-i18n-placeholder="door.search"
+               class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+
+        <p id="door-empty" class="text-center text-white/40 text-sm py-16" data-i18n="door.none" hidden>No hay reservaciones para esta noche.</p>
+        <div id="door-list" class="space-y-3"></div>
+
+        <button id="btn-release" class="w-full py-2 text-sm text-white/50 underline" data-i18n="door.releaseNoShows" hidden>Liberar las mesas vencidas</button>
       </div>
 
       <div id="tab-me" class="space-y-4" hidden>
@@ -193,6 +218,7 @@
 <script src="js/roles.js"></script>
 <script src="js/password-gate.js"></script>
 <script src="js/staff-floor.js"></script>
+<script src="js/door.js"></script>
 <script src="js/staff-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

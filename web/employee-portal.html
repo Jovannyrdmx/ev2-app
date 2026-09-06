@@ -151,6 +151,26 @@
         </div>
         <p class="text-[11px] text-white/40 mt-3" data-i18n="earn.reservedNote">Lo que está en retiro ya está comprometido.</p>
       </div>
+
+      <!--
+        El turno. Va aquí arriba, no escondido en una pestaña: sin turno abierto esta
+        persona NO aparece para los clientes, y esa es la única explicación de por qué
+        puede pasar una noche entera sin una sola propina.
+      -->
+      <div class="card rounded-xl p-4 mt-3 space-y-3">
+        <div class="flex justify-between items-center gap-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="shift.title">Mi turno</p>
+          <span id="shift-state" class="text-xs"></span>
+        </div>
+        <p id="shift-note" class="text-[11px] text-white/50 leading-snug">—</p>
+        <button id="btn-shift" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="shift.start">Abrir turno</button>
+      </div>
+
+      <!-- Tragos invitados: alguien está esperando una respuesta en una mesa. -->
+      <div id="drinks-box" class="card rounded-xl p-4 mt-3 space-y-2" hidden>
+        <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="drink.title">Tragos que te invitaron</p>
+        <div id="drinks-list" class="space-y-2"></div>
+      </div>
     </div>
 
     <nav class="flex px-2 border-b border-white/10">
@@ -240,6 +260,7 @@
 <script src="js/password-gate.js"></script>
 <script src="js/earnings.js"></script>
 <script src="js/songs.js"></script>
+<script src="js/shift.js"></script>
 <script src="js/employee-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>
