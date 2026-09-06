@@ -359,6 +359,50 @@
         </div>
       </div>
 
+      <!-- ---------------------------- CONECTA ---------------------------- -->
+      <!--
+        Todo lo de esta pestaña está apagado hasta que la persona lo enciende, y el
+        interruptor está aquí mismo: quien no quiere esto no debería tener que ir a
+        buscar cómo apagarlo en un menú.
+      -->
+      <div id="view-flirt" class="p-4 space-y-4" hidden>
+        <div id="flirt-optout" class="card rounded-xl p-5 space-y-3" hidden>
+          <p class="font-display text-lg" data-i18n="flirt.offTitle">Conecta está apagado</p>
+          <p class="text-sm text-white/60" data-i18n="flirt.offBody">Nadie puede mandarte nada y no apareces en ninguna lista. Si lo enciendes, la gente que esté sentada esta noche puede mandarte un saludo, y tú a ellos.</p>
+          <button id="btn-flirt-optin" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="flirt.turnOn">Activar</button>
+          <p class="text-[11px] text-white/40" data-i18n="flirt.offNote">Se apaga cuando quieras desde tu perfil. Bloquear a alguien lo esconde de ti y a ti de esa persona, para siempre.</p>
+        </div>
+
+        <div id="flirt-main" class="space-y-4" hidden>
+          <div class="flex gap-2">
+            <button data-flirt-tab="people" class="flirt-tab flex-1 py-2 rounded-lg text-sm tab-active" data-i18n="flirt.tabPeople">Esta noche</button>
+            <button data-flirt-tab="inbox" class="flirt-tab flex-1 py-2 rounded-lg text-sm text-white/50"><span data-i18n="flirt.tabInbox">Recibidos</span><span id="flirt-inbox-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
+            <button data-flirt-tab="sent" class="flirt-tab flex-1 py-2 rounded-lg text-sm text-white/50" data-i18n="flirt.tabSent">Enviados</button>
+          </div>
+
+          <!-- --------- quién está esta noche --------- -->
+          <div id="flirt-people" class="space-y-4">
+            <p id="flirt-need-table" class="card rounded-xl p-4 text-sm text-white/60" data-i18n="flirt.needTable" hidden>Siéntate en una mesa para ver quién está esta noche. Es a propósito: esto es el club, no una app de citas.</p>
+            <div id="flirt-sections" class="flex gap-2 overflow-x-auto pb-1"></div>
+            <p id="flirt-people-empty" class="text-sm text-white/50" data-i18n="flirt.nobody" hidden>Ahora mismo no hay nadie más en la lista.</p>
+            <div id="flirt-people-groups" class="space-y-4"></div>
+            <p class="text-[11px] text-white/40" data-i18n="flirt.listNote">Solo aparece quien pidió aparecer. Nombre y mesa: nada más sale de aquí.</p>
+          </div>
+
+          <!-- --------- lo que te llegó --------- -->
+          <div id="flirt-inbox" class="space-y-3" hidden>
+            <p id="flirt-inbox-empty" class="text-sm text-white/50" data-i18n="flirt.inboxEmpty" hidden>Todavía no te llega nada esta noche.</p>
+            <div id="flirt-inbox-list" class="space-y-3"></div>
+          </div>
+
+          <!-- --------- lo que mandaste --------- -->
+          <div id="flirt-sent" class="space-y-3" hidden>
+            <p id="flirt-sent-empty" class="text-sm text-white/50" data-i18n="flirt.sentEmpty" hidden>No has mandado nada esta noche.</p>
+            <div id="flirt-sent-list" class="space-y-3"></div>
+          </div>
+        </div>
+      </div>
+
       <!-- ---------------------------- SALIDA SEGURA ---------------------------- -->
       <div id="view-taxi" class="p-4 space-y-4" hidden>
         <div id="taxi-headline" class="info-panel">
@@ -431,6 +475,35 @@
           <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50" data-i18n="profile.club">Club</span><span id="profile-club">—</span></div>
           <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50" data-i18n="profile.account">Cuenta</span><span id="profile-role">—</span></div>
         </div>
+        <!--
+          Los tres interruptores viven en el perfil, juntos y en palabras llanas. Un
+          permiso que solo se puede encender es una trampa: los tres se apagan aquí, y
+          apagarlos surte efecto en la misma noche.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="privacy.title">Privacidad</p>
+          <label class="flex items-start gap-3 text-sm cursor-pointer">
+            <input id="pref-accept" type="checkbox" class="w-5 h-5 mt-0.5 shrink-0">
+            <span><span data-i18n="privacy.accept">Aceptar invitaciones</span><br><span class="text-[11px] text-white/40" data-i18n="privacy.acceptNote">Sin esto no recibes nada de nadie.</span></span>
+          </label>
+          <label class="flex items-start gap-3 text-sm cursor-pointer">
+            <input id="pref-discoverable" type="checkbox" class="w-5 h-5 mt-0.5 shrink-0">
+            <span><span data-i18n="privacy.listed">Aparecer en la lista</span><br><span class="text-[11px] text-white/40" data-i18n="privacy.listedNote">Solo tu nombre y tu mesa, solo mientras estés sentado.</span></span>
+          </label>
+          <label class="flex items-start gap-3 text-sm cursor-pointer">
+            <input id="pref-map" type="checkbox" class="w-5 h-5 mt-0.5 shrink-0">
+            <span><span data-i18n="privacy.map">Verme en el plano</span><br><span class="text-[11px] text-white/40" data-i18n="privacy.mapNote">Que mi mesa se vea ocupada por mí en el mapa del club.</span></span>
+          </label>
+          <p id="pref-saved" class="text-[11px] text-emerald-300" data-i18n="privacy.saved" hidden>Guardado.</p>
+          <p id="pref-error" class="text-sm text-red-300" hidden></p>
+
+          <div class="pt-2 border-t border-white/5">
+            <p class="text-xs uppercase tracking-wider text-white/40 mb-2" data-i18n="privacy.blocked">Bloqueados</p>
+            <p id="blocks-empty" class="text-sm text-white/40" data-i18n="privacy.noBlocks" hidden>No has bloqueado a nadie.</p>
+            <div id="blocks-list" class="space-y-2"></div>
+          </div>
+        </div>
+
         <button id="btn-profile-logout" class="w-full py-3 rounded-xl card text-sm text-red-300" data-i18n="profile.signOut">Cerrar sesión</button>
       </div>
     </main>
@@ -443,11 +516,12 @@
       </button>
     </div>
 
-    <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto grid grid-cols-6 border-t border-white/10 bg-black/95 backdrop-blur z-20">
+    <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto grid grid-cols-7 border-t border-white/10 bg-black/95 backdrop-blur z-20">
       <button data-view="map" class="nav-tab py-3 text-[10px] tab-active"><i class="fa-solid fa-map-location-dot block text-lg mb-1"></i><span data-i18n="nav.map">Mapa</span></button>
       <button data-view="menu" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-martini-glass block text-lg mb-1"></i><span data-i18n="nav.menu">Menú</span></button>
       <button data-view="orders" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-receipt block text-lg mb-1"></i><span data-i18n="nav.orders">Pedidos</span><span id="orders-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
       <button data-view="show" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-music block text-lg mb-1"></i><span data-i18n="nav.show">Show</span></button>
+      <button data-view="flirt" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-heart block text-lg mb-1"></i><span data-i18n="nav.flirt">Conecta</span><span id="flirt-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
       <button data-view="taxi" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-taxi block text-lg mb-1"></i><span data-i18n="taxi.nav">Salida</span><span id="taxi-badge" class="ml-1 px-1.5 rounded-full bg-emerald-500 text-[10px]" hidden></span></button>
       <button data-view="profile" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-user block text-lg mb-1"></i><span data-i18n="nav.profile">Perfil</span></button>
     </nav>
@@ -494,6 +568,74 @@
     </div>
   </div>
 
+  <!--
+    La hoja para mandar. El nombre de quien lo va a recibir se queda arriba, fijo,
+    mientras se elige: en la oscuridad, con la lista moviéndose por debajo, mandarle
+    algo a la persona equivocada es el error que más caro sale aquí.
+  -->
+  <div id="flirt-sheet" class="fixed inset-0 z-40 flex items-end justify-center bg-black/70" hidden>
+    <div class="w-full max-w-md rounded-t-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto" style="background:#12121f;border-top:1px solid rgba(255,255,255,.12)">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p id="flirt-sheet-title" class="font-display text-lg truncate">—</p>
+          <p id="flirt-sheet-where" class="text-xs text-white/50">—</p>
+        </div>
+        <button id="btn-flirt-close" class="text-white/50 px-3" aria-label="Cerrar"><i class="fa-solid fa-xmark text-xl"></i></button>
+      </div>
+
+      <div class="grid grid-cols-4 gap-2">
+        <button data-flirt-mode="emoji" class="flirt-mode py-2 rounded-lg text-xs tab-active" data-i18n="flirt.tyEmoji">Señal</button>
+        <button data-flirt-mode="meet" class="flirt-mode py-2 rounded-lg text-xs text-white/50" data-i18n="flirt.tyMeet">Conocerte</button>
+        <button data-flirt-mode="drink" class="flirt-mode py-2 rounded-lg text-xs text-white/50" data-i18n="flirt.tyDrink">Un trago</button>
+        <button data-flirt-mode="bottle" class="flirt-mode py-2 rounded-lg text-xs text-white/50" data-i18n="flirt.tyBottle">Botella</button>
+      </div>
+
+      <div id="flirt-mode-emoji" class="space-y-2">
+        <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="flirt.pickEmoji">Qué le mandas</p>
+        <div id="flirt-emojis" class="grid grid-cols-4 gap-2"></div>
+      </div>
+
+      <div id="flirt-mode-gift" class="space-y-2" hidden>
+        <select id="flirt-drink" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"></select>
+        <div class="flex items-center gap-3">
+          <label class="text-xs text-white/50" for="flirt-quantity" data-i18n="flirt.quantity">Cuántos</label>
+          <input id="flirt-quantity" type="number" min="1" max="10" step="1" value="1"
+                 class="w-20 px-3 py-2 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+        </div>
+        <p id="flirt-warn" class="text-[12px] text-amber-300 leading-snug"></p>
+      </div>
+
+      <input id="flirt-message" maxlength="140" placeholder="Una línea, si quieres" data-i18n-placeholder="flirt.messageHint"
+             class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+      <p id="flirt-error" class="text-sm text-red-300" hidden></p>
+      <button id="btn-flirt-send" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="flirt.send">Mandar</button>
+      <p id="flirt-limits" class="text-[11px] text-white/40 text-center">—</p>
+    </div>
+  </div>
+
+  <!--
+    Reportar. Se separa de bloquear a propósito: bloquear es cosa de dos y surte efecto
+    solo, reportar lo lee el gerente. El gerente ve quién, por qué y cuándo — nunca el
+    mensaje.
+  -->
+  <div id="report-sheet" class="fixed inset-0 z-40 flex items-end justify-center bg-black/70" hidden>
+    <div class="w-full max-w-md rounded-t-2xl p-5 space-y-4" style="background:#12121f;border-top:1px solid rgba(255,255,255,.12)">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="font-display text-lg" data-i18n="report.title">Reportar</p>
+          <p id="report-who" class="text-xs text-white/50 truncate">—</p>
+        </div>
+        <button id="btn-report-close" class="text-white/50 px-3" aria-label="Cerrar"><i class="fa-solid fa-xmark text-xl"></i></button>
+      </div>
+      <select id="report-reason" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"></select>
+      <textarea id="report-details" maxlength="500" rows="3" placeholder="Qué pasó (opcional)" data-i18n-placeholder="report.detailsHint"
+                class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"></textarea>
+      <p class="text-[11px] text-white/40" data-i18n="report.note">Lo revisa el gerente del club. Si es una emergencia, busca al personal: están para eso.</p>
+      <p id="report-error" class="text-sm text-red-300" hidden></p>
+      <button id="btn-report-send" class="w-full py-3 rounded-xl font-display bg-red-500/90" data-i18n="report.send">Enviar reporte</button>
+    </div>
+  </div>
+
   <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50" hidden></div>
 </div>
 
@@ -505,10 +647,12 @@
 <script src="js/tipping.js"></script>
 <script src="js/songs.js"></script>
 <script src="js/booking.js"></script>
+<script src="js/flirt.js"></script>
 <script src="js/client.js"></script>
 <script src="js/index-screen.js"></script>
 <script src="js/show-screen.js"></script>
 <script src="js/booking-screen.js"></script>
+<script src="js/flirt-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>
 </html>

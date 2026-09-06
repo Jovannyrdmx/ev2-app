@@ -26,6 +26,7 @@
     tab: 'summary', currency: 'MXN',
     dashboard: null, drivers: [], taxiSettings: null, fares: [],
     valetSettings: null, spots: [], occupancy: null,
+    reports: [], reportFilter: null,
     nights: [], staff: [], withdrawals: [], accounts: [],
     realtime: null, busy: false,
   };
@@ -194,6 +195,7 @@
       get(`/nightclubs/${club}/employees?include_inactive=true&limit=200`,
         (d) => { state.staff = d.employees || []; }),
       get(`/nightclubs/${club}/withdrawals?limit=100`, (d) => { state.withdrawals = d.withdrawals || []; }),
+      loadReports(),
     ]);
     // Las cuentas por verificar se piden por empleado: no hay un listado del club, y
     // sin verificar una cuenta esa persona no puede cobrar nunca.
@@ -226,7 +228,7 @@
 
   // ---------------------------------------------------------------- pintar
 
-  const TABS = ['summary', 'nights', 'staff', 'payouts', 'drivers', 'taxi', 'parking'];
+  const TABS = ['summary', 'nights', 'staff', 'payouts', 'reports', 'drivers', 'taxi', 'parking'];
 
   function renderAll() {
     for (const tab of TABS) $(`tab-${tab}`).hidden = tab !== state.tab;
@@ -237,10 +239,138 @@
     renderNights();
     renderStaff();
     renderPayouts();
+    renderReports();
     renderDrivers();
     renderTaxi();
     renderParking();
     renderSecret();
+  }
+
+  // ---------------------------------------------------------------- reportes
+
+  /**
+   * La bandeja de moderación. Lo que se ve aquí es deliberadamente poco: quién reportó
+   * a quién, por qué y cuándo. El mensaje del flirt NO viaja al gerente ni existe una
+   * ruta para pedirlo — leer conversaciones ajenas no es moderar.
+   */
+  function renderReports() {
+    const summary = EV2Manager.moderationSummary(state.reports);
+    $('mod-open').textContent = String(summary.open);
+    $('mod-urgent').textContent = String(summary.urgent);
+    $('mod-actioned').textContent = String(summary.actioned);
+
+    renderReportFilters();
+
+    const list = EV2Manager.sortReports(state.reports);
+    $('mod-empty').hidden = list.length > 0;
+    const box = $('mod-list');
+    box.innerHTML = '';
+
+    for (const report of list) {
+      const severity = EV2Manager.reportSeverity(report);
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl p-3 space-y-2';
+      if (severity === 'urgent') card.style.borderColor = 'rgba(248,113,113,.5)';
+      if (report.status !== 'open') card.style.opacity = '.7';
+
+      const against = Number(report.reports_against) || 0;
+      card.innerHTML = `
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <p class="font-semibold truncate">${escape(report.reported_name || '')}</p>
+            <p class="text-[11px] text-white/40">${escape(t('mod.reportedBy', { name: report.reporter_name || '' }))}</p>
+          </div>
+          <span class="text-[11px] shrink-0 ${report.status === 'open' ? 'text-amber-300' : 'text-white/40'}">${escape(t(EV2Manager.reportStatusKey(report.status)))}</span>
+        </div>
+        <p class="text-sm">${escape(t(EV2Manager.reportReasonKey(report.reason)))}</p>
+        ${report.details ? `<p class="text-sm text-white/70">${escape(report.details)}</p>` : ''}
+        ${against > 1 ? `<p class="text-[11px] text-red-300">${escape(t('mod.against', { count: against }))}</p>` : ''}
+        ${report.flirt_id ? `<p class="text-[11px] text-white/30">${escape(t('mod.flirtAttached'))}</p>` : ''}
+        <p class="text-[11px] text-white/30">${escape(EV2Format.dateTime(report.created_at))}</p>
+        ${report.resolution_note ? `<p class="text-[11px] text-white/50">${escape(report.resolution_note)}</p>` : ''}
+        ${report.reviewed_by_name ? `<p class="text-[11px] text-white/30">${escape(t('mod.reviewedBy', { name: report.reviewed_by_name }))}</p>` : ''}`;
+
+      const actions = EV2Manager.reportActions(report);
+      if (actions.length) {
+        const note = document.createElement('input');
+        note.className = 'w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 focus:border-cyan-400 outline-none text-sm';
+        note.maxLength = 500;
+        note.placeholder = t('mod.noteHint');
+        card.appendChild(note);
+
+        const err = document.createElement('p');
+        err.className = 'text-sm text-red-300';
+        err.hidden = true;
+        card.appendChild(err);
+
+        const row = document.createElement('div');
+        row.className = 'grid gap-2';
+        row.style.gridTemplateColumns = `repeat(${actions.length}, minmax(0, 1fr))`;
+        for (const action of actions) {
+          const b = document.createElement('button');
+          b.className = `py-2 rounded-lg text-xs ${action === 'actioned' ? 'bg-red-500/90' : 'card'}`;
+          b.textContent = t(`mod.ac${action.charAt(0).toUpperCase()}${action.slice(1)}`);
+          b.onclick = () => resolveReport(report.id, action, note.value, err, b);
+          row.appendChild(b);
+        }
+        card.appendChild(row);
+      }
+      box.appendChild(card);
+    }
+  }
+
+  /** Los filtros por estado. 'Todos' primero, y el que está puesto se ve puesto. */
+  function renderReportFilters() {
+    const bar = $('mod-filters');
+    bar.innerHTML = '';
+    const make = (value, label) => {
+      const b = document.createElement('button');
+      const on = state.reportFilter === value;
+      b.className = `px-3 py-1 rounded-full text-xs shrink-0 ${on ? 'bg-white/20' : 'card text-white/60'}`;
+      b.textContent = label;
+      b.onclick = async () => { state.reportFilter = value; await loadReports(); renderReports(); };
+      return b;
+    };
+    bar.appendChild(make(null, t('mod.filterAll')));
+    for (const status of ['open', 'reviewed', 'actioned', 'dismissed']) {
+      bar.appendChild(make(status, t(EV2Manager.reportStatusKey(status))));
+    }
+  }
+
+  async function loadReports() {
+    const club = clubId();
+    if (!club) return;
+    const q = state.reportFilter ? `?status=${state.reportFilter}&limit=100` : '?limit=100';
+    try {
+      const data = await api.get(`/nightclubs/${club}/reports${q}`);
+      state.reports = data.reports || [];
+    } catch (err) { showError(err); }
+  }
+
+  /**
+   * Resolver un reporte. "Bloquear la cuenta" pide nota y confirmación: cierra la
+   * sesión de una persona real, la saca de su mesa y no se deshace desde aquí.
+   */
+  async function resolveReport(reportId, status, note, errorEl, button) {
+    errorEl.hidden = true;
+    const problem = EV2Manager.validateResolution(status, note);
+    if (problem) {
+      errorEl.textContent = t(problem);
+      errorEl.hidden = false;
+      return;
+    }
+    if (status === 'actioned' && !window.confirm(t('mod.confirmActioned'))) return;
+    button.disabled = true;
+    try {
+      await api.patch(`/nightclubs/${clubId()}/reports/${reportId}`,
+        EV2Manager.resolutionPayload(status, note));
+      await loadReports();
+      renderReports();
+      toast(t('mod.resolved'), 'ok');
+    } catch (err) {
+      showError(err);
+      button.disabled = false;
+    }
   }
 
   // ---------------------------------------------------------------- personal
@@ -1011,6 +1141,15 @@
     // El panel se refresca solo con casi cualquier evento del club, pero no en cada uno:
     // sería una consulta por trago servido. Se agrupan en una recarga cada pocos segundos.
     let pending = null;
+    // Un reporte no espera al refresco general de cuatro segundos: puede ser "parece
+    // menor de edad", que es lo único de esta lista capaz de cerrarle el club.
+    rt.on('event', async (message) => {
+      if (!EV2Manager.affectsModeration(message)) return;
+      await loadReports();
+      renderReports();
+      toast(t('mod.arrived'), 'error');
+    });
+
     rt.on('event', () => {
       if (pending) return;
       pending = setTimeout(async () => { pending = null; await loadAll(); }, 4000);

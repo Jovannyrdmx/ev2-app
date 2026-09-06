@@ -324,6 +324,117 @@
     return body;
   }
 
+  // ------------------------------------------------------- moderación de reportes
+
+  /**
+   * Los reportes de una persona sobre otra (acoso, menor de edad, perfil falso).
+   *
+   * Aquí no se decide nada sobre el contenido de un flirt: el gerente NUNCA ve el
+   * mensaje, solo quién reportó a quién, por qué y cuándo. Lo que se decide es el
+   * orden en que se atienden y qué se le deja hacer al gerente en cada estado.
+   */
+
+  const REPORT_REASON_KEY = {
+    harassment: 'mod.rsHarassment',
+    underage: 'mod.rsUnderage',
+    fake_profile: 'mod.rsFake',
+    other: 'mod.rsOther',
+  };
+  const REPORT_STATUS_KEY = {
+    open: 'mod.stOpen',
+    reviewed: 'mod.stReviewed',
+    actioned: 'mod.stActioned',
+    dismissed: 'mod.stDismissed',
+  };
+  const reportReasonKey = (reason) => REPORT_REASON_KEY[reason] || 'mod.rsOther';
+  const reportStatusKey = (status) => REPORT_STATUS_KEY[status] || 'mod.stOpen';
+
+  /**
+   * Qué tan urgente es. "Menor de edad" sube solo: es lo único de esta lista que puede
+   * cerrar el club. Y la segunda queja contra la misma persona importa más que la
+   * primera, porque el servidor ya la esconde de la lista a partir de dos.
+   */
+  function reportSeverity(report) {
+    const r = report || {};
+    if (r.reason === 'underage') return 'urgent';
+    if ((Number(r.reports_against) || 0) >= 2) return 'urgent';
+    if (r.reason === 'harassment') return 'high';
+    return 'normal';
+  }
+
+  const SEVERITY_RANK = { urgent: 0, high: 1, normal: 2 };
+
+  /**
+   * El orden de la bandeja: lo abierto primero, dentro de eso lo grave primero, y a
+   * igualdad lo más viejo primero.
+   *
+   * Lo más VIEJO y no lo más nuevo a propósito: una queja de acoso que lleva dos horas
+   * sin mirarse es peor que una de hace dos minutos, y ordenar por novedad la hunde.
+   */
+  function sortReports(reports) {
+    return (reports || []).slice().sort((a, b) => {
+      const oa = a.status === 'open' ? 0 : 1;
+      const ob = b.status === 'open' ? 0 : 1;
+      if (oa !== ob) return oa - ob;
+      const sa = SEVERITY_RANK[reportSeverity(a)];
+      const sb = SEVERITY_RANK[reportSeverity(b)];
+      if (sa !== sb) return sa - sb;
+      return new Date(a.created_at || 0) - new Date(b.created_at || 0);
+    });
+  }
+
+  /**
+   * Qué botones se le enseñan al gerente. Un reporte ya resuelto no se re-resuelve: el
+   * servidor lo aceptaría, pero volver a "revisado" algo que ya bloqueó una cuenta deja
+   * al gerente creyendo que la desbloqueó, y no es así.
+   */
+  function reportActions(report) {
+    const status = (report || {}).status;
+    if (status === 'open') return ['reviewed', 'actioned', 'dismissed'];
+    if (status === 'reviewed') return ['actioned', 'dismissed'];
+    return [];
+  }
+
+  /**
+   * Comprueba la resolución antes de mandarla. Devuelve la clave del error o null.
+   *
+   * "Bloquear la cuenta" exige una nota escrita, y no por burocracia: bloquea a una
+   * persona de verdad, le cierra la sesión y la saca de su mesa. Si dentro de un mes
+   * esa persona reclama, la nota es lo único que el club tiene para explicar por qué.
+   */
+  function validateResolution(status, note) {
+    if (['reviewed', 'actioned', 'dismissed'].indexOf(status) === -1) return 'mod.errStatus';
+    const text = String(note == null ? '' : note).trim();
+    if (status === 'actioned' && text.length < 10) return 'mod.errNote';
+    if (text.length > 500) return 'mod.errNoteLong';
+    return null;
+  }
+
+  /** Lo que se manda al resolver un reporte. */
+  function resolutionPayload(status, note) {
+    const body = { status };
+    const text = String(note == null ? '' : note).trim().slice(0, 500);
+    if (text) body.resolution_note = text;
+    return body;
+  }
+
+  /** El resumen de arriba: cuántos esperan y cuántos se resolvieron. */
+  function moderationSummary(reports) {
+    const list = reports || [];
+    return {
+      open: list.filter((r) => r.status === 'open').length,
+      urgent: list.filter((r) => r.status === 'open' && reportSeverity(r) === 'urgent').length,
+      actioned: list.filter((r) => r.status === 'actioned').length,
+      total: list.length,
+    };
+  }
+
+  /**
+   * Un evento del socket que toca la bandeja de moderación. El marco real trae el tipo
+   * en `event_type`; `type` siempre vale 'event'.
+   */
+  const affectsModeration = (message) => (message && (message.event_type || message.type)) === 'user_reported';
+
   return {
     revenueFor,
     currenciesIn,
@@ -342,5 +453,14 @@
     nightActions,
     validateNight,
     nightPayload,
+    reportReasonKey,
+    reportStatusKey,
+    reportSeverity,
+    sortReports,
+    reportActions,
+    validateResolution,
+    resolutionPayload,
+    moderationSummary,
+    affectsModeration,
   };
 }));

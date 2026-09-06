@@ -746,7 +746,7 @@
 
   // ---------------------------------------------------------------- navegación
 
-  const VIEWS = ['map', 'menu', 'orders', 'show', 'taxi', 'profile'];
+  const VIEWS = ['map', 'menu', 'orders', 'show', 'flirt', 'taxi', 'profile'];
 
   function showView(name) {
     for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
