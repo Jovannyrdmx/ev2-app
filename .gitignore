@@ -6,9 +6,6 @@ node_modules/
 .env.*
 !.env.example
 ssl/
-# La configuracion de Caddy con contrasena de puerta: lleva el hash escrito dentro,
-# porque Docker Compose destroza cualquier "$" que pase por el .env. Nunca se versiona.
-deploy/Caddyfile.privado
 
 # Build output
 dist/

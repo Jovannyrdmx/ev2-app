@@ -151,65 +151,59 @@ Si prefieres partir de la plantilla, `cp .env.example .env` y llena a mano
 ## 3.5 Probar sin que entre nadie
 
 Poner el dominio deja el sistema abierto a internet desde el primer minuto, y adentro
-hay datos reales de tu gente. Mientras pruebas conviene dejarlo **cerrado con una
-contraseña de puerta**: nadie ve una sola pantalla sin ella, ni la de acceso, ni la API.
+hay datos reales de tu gente. Mientras pruebas conviene dejar el sitio **cerrado a tu
+propia IP**: el puerto 443 se abre únicamente para ti, y para el resto del mundo el
+dominio simplemente no responde.
 
-No es la seguridad del sistema —esa es el login de cada quien— es una cortina para que
-el club no esté abierto mientras lo pruebas.
+> ### Por qué NO una contraseña de puerta
+>
+> La idea obvia —una contraseña de "basic auth" en Caddy, delante de todo— **no
+> funciona con esta aplicación**, y conviene dejarlo escrito para que nadie la vuelva a
+> intentar. Basic auth viaja en la cabecera `Authorization`, y esta app usa **esa misma
+> cabecera** para el token de sesión de cada quien (`Authorization: Bearer …`). En
+> cuanto alguien entra, el navegador manda el Bearer, se pierde la credencial de la
+> puerta, y Caddy rechaza todo: la pantalla de acceso carga, pero el primer paso con
+> sesión —cambiar la contraseña temporal— falla con *"No connection"*. No es un
+> candado con un detalle: es un candado que deja la aplicación inservible.
 
-**1. Genera el hash de la contraseña que quieras usar en la puerta:**
+**1. Averigua tu IP pública.** En tu computadora (NO en el servidor), abre
+[ifconfig.me](https://ifconfig.me) y copia lo que salga.
 
-```bash
-docker run --rm caddy:2-alpine caddy hash-password --plaintext 'la-que-tu-quieras'
-```
-
-Imprime algo que empieza con `$2a$`. Cópialo completo.
-
-**2. Haz tu copia privada de la configuración y mete ahí el usuario y el hash:**
-
-```bash
-cp deploy/Caddyfile.pruebas deploy/Caddyfile.privado
-nano deploy/Caddyfile.privado
-```
-
-Dentro, en el bloque `basic_auth`, cambia la línea `USUARIO REEMPLAZA_CON_EL_HASH` por
-tu usuario y el hash, separados por un espacio. Queda así:
-
-```
-	basic_auth {
-		jovanny $2a$14$Zkx19XLiW6VYouLHR5NmfOFU0z2GTNmpkT/5qqR7hx4IjWJPDhjvG
-	}
-```
-
-**3. En tu `.env`, agrega una línea:**
-
-```
-CADDYFILE=./Caddyfile.privado
-```
-
-Levanta como siempre. El navegador va a pedir usuario y contraseña antes de enseñar
-nada, y desde el celular igual.
-
-> **Por qué el hash va en un archivo y no en el `.env`.** Los hashes llevan `$`, y
-> Docker Compose interpreta ese carácter: `$2a$14$Zkx9...` le llega a Caddy como
-> `$2a$14` y el resto desaparece. El resultado sería una puerta que nunca abre y una
-> tarde perdida entendiendo por qué. `deploy/Caddyfile.privado` está en `.gitignore`,
-> así que el hash tampoco acaba en el repositorio.
-
-**El día del estreno**, borra esa línea del `.env` y vuelve a levantar:
+**2. En el servidor, cierra el 443 a esa IP:**
 
 ```bash
-sed -i '/^CADDYFILE=/d' .env
-docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d
+ufw allow from TU_IP_PUBLICA to any port 443 proto tcp
+ufw delete allow 443/tcp
 ```
 
-El certificado vive en un volumen, así que no se vuelve a pedir ni se gastan intentos
-contra el límite de Let's Encrypt.
+El **puerto 80 se queda abierto a todos** y así tiene que ser: Let's Encrypt lo necesita
+para emitir y renovar el certificado. Ahí no hay nada que ver — Caddy solo responde el
+reto y redirige a HTTPS.
 
-La contraseña de puerta **no estorba al certificado**: Caddy resuelve el reto de Let's
-Encrypt en el puerto 80 antes de llegar a esas reglas. Si por lo que sea el certificado
-no saliera, levanta una vez sin la línea `CADDYFILE`, deja que lo emita, y vuelve a
-ponerla.
+Comprueba que quedó como querías:
+
+```bash
+ufw status
+```
+
+Debe aparecer `443/tcp  ALLOW  TU_IP_PUBLICA` y **no** un `443/tcp ALLOW Anywhere`.
+
+> **Desde el celular.** Entra si está en el mismo WiFi que tu computadora, porque sale
+> por la misma IP pública. Con datos móviles no: esa es otra IP. Si quieres probar con
+> datos, agrega también esa IP con el mismo comando, y bórrala al terminar.
+
+> **Tu IP puede cambiar.** Muchos proveedores la rotan cada cierto tiempo. Si un día el
+> sitio deja de abrir y todo lo demás está bien, vuelve a mirar ifconfig.me y agrega la
+> nueva.
+
+**El día del estreno**, ábrelo a todo el mundo:
+
+```bash
+ufw allow 443/tcp
+ufw delete allow from TU_IP_PUBLICA to any port 443 proto tcp
+```
+
+No hay que volver a levantar nada ni se toca el certificado: es solo el cortafuegos.
 
 ---
 

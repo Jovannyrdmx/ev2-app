@@ -68,21 +68,26 @@ preguntar CLUB       "Nombre del club" "EV2 Clandestinoz"
 [[ "$GER_NACIM" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || morir \
   "La fecha va como AAAA-MM-DD. Ejemplo: 1985-04-23"
 
-titulo "Contraseña de puerta"
+titulo "¿Abierto o cerrado mientras pruebas?"
 cat <<'FIN'
-Mientras pruebas, el sitio queda CERRADO: el navegador va a pedir esta contraseña
-antes de enseñar nada, ni la pantalla de acceso. No es la seguridad del sistema
-(esa es el login de cada quien): es una cortina para que no entre nadie todavía.
+Si vas a probar antes del estreno, conviene que solo TÚ puedas llegar. Se cierra
+con el cortafuegos: el puerto 443 queda abierto únicamente para tu IP.
+
+  - Es la forma que SÍ funciona con esta app. Una contraseña de puerta en el
+    servidor web (basic auth) NO sirve aquí: usa la misma cabecera Authorization
+    que la app usa para su token de sesión, y rompe todas las llamadas con sesión.
+  - El puerto 80 se queda abierto: Let's Encrypt lo necesita para el certificado.
+  - Desde el celular funciona si está en el mismo WiFi que tu computadora
+    (misma IP pública). Con datos móviles no: esa es otra IP.
 FIN
-PUERTA_USUARIO=""
-PUERTA_CLAVE=""
-read -r -p "Usuario de puerta [admin]: " PUERTA_USUARIO || true
-PUERTA_USUARIO=${PUERTA_USUARIO:-admin}
-while [[ ${#PUERTA_CLAVE} -lt 8 ]]; do
-  read -rs -p "Contraseña de puerta (mínimo 8): " PUERTA_CLAVE || true
-  echo
-  [[ ${#PUERTA_CLAVE} -lt 8 ]] && rojo "  Muy corta."
-done
+CERRAR=""
+read -r -p "¿Cerrar el sitio a tu IP mientras pruebas? (S/n): " CERRAR || true
+MI_IP_PUBLICA=""
+if [[ ! "${CERRAR:-s}" =~ ^[nN]$ ]]; then
+  gris "  Dime desde qué IP vas a probar. Si no la sabes, abre ifconfig.me en tu"
+  gris "  navegador (en tu computadora, NO en el servidor) y copia lo que salga."
+  preguntar MI_IP_PUBLICA "Tu IP pública"
+fi
 
 # ------------------------------------------------------------------ el DNS manda
 
@@ -181,7 +186,6 @@ BANK_ENCRYPTION_KEY=$BANK_KEY
 EV2_DOMAIN=$DOMINIO
 ACME_EMAIL=$CORREO
 ALLOWED_ORIGINS=https://$DOMINIO
-CADDYFILE=./Caddyfile.privado
 LOG_LEVEL=info
 FIN
   chmod 600 .env
@@ -195,22 +199,18 @@ for V in DB_PASSWORD JWT_SECRET BANK_ENCRYPTION_KEY EV2_DOMAIN ACME_EMAIL ALLOWE
   [[ -n "${!V:-}" ]] || morir "El .env quedo sin $V. Borralo (rm .env) y vuelve a correr el script."
 done
 
-# ------------------------------------------------------------------ puerta cerrada
+# ------------------------------------------------------------------ candado
 
-titulo "Contraseña de puerta"
-# El hash NO puede ir en el .env: Docker Compose interpreta el "$" y lo destroza.
-# Por eso se escribe dentro del archivo que Caddy lee directo, que git ignora.
-HASH=$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "$PUERTA_CLAVE")
-[[ -n "$HASH" ]] || morir "No se pudo generar el hash de la contraseña."
-sed -e "s|USUARIO REEMPLAZA_CON_EL_HASH|$PUERTA_USUARIO $HASH|" \
-    deploy/Caddyfile.pruebas > deploy/Caddyfile.privado
-chmod 600 deploy/Caddyfile.privado
-# `if` explícito y no `grep && morir`: bajo `set -e` esa forma se comporta distinto
-# entre versiones de bash, y el fallo sería dejar el sitio ABIERTO creyéndolo cerrado.
-if grep -q "REEMPLAZA_CON_EL_HASH" deploy/Caddyfile.privado; then
-  morir "No se pudo poner la contraseña en deploy/Caddyfile.privado."
+if [[ -n "$MI_IP_PUBLICA" ]]; then
+  titulo "Cerrando el sitio a tu IP"
+  # Se cierra con el cortafuegos y NO con una contraseña en el servidor web: basic
+  # auth usa la cabecera Authorization, la misma que la app usa para su token, y
+  # dejaria la aplicacion inservible aunque el candado "funcionara".
+  ufw delete allow 443/tcp >/dev/null 2>&1 || true
+  ufw allow from "$MI_IP_PUBLICA" to any port 443 proto tcp >/dev/null 2>&1 || true
+  verde "  Solo $MI_IP_PUBLICA puede abrir https://$DOMINIO"
+  gris  "  Para abrirlo a todos: ufw allow 443/tcp && ufw delete allow from $MI_IP_PUBLICA to any port 443 proto tcp"
 fi
-verde "  El sitio va a quedar cerrado con usuario '$PUERTA_USUARIO'."
 
 # ------------------------------------------------------------------ levantar
 
@@ -275,14 +275,13 @@ $(printf '\033[1;32m')================== LISTO ==================$(printf '\033[
 
   Entra a:   https://$DOMINIO
 
-  1) El navegador pide primero la puerta:
-       usuario:    $PUERTA_USUARIO
-       contraseña: la que acabas de escribir
-
-  2) Después entras al sistema:
+  Entras con:
        correo:     $GER_CORREO
        contraseña: ${TEMPORAL:-(la que ya tenías)}
      Te va a pedir cambiarla. Hazlo.
+${MI_IP_PUBLICA:+
+  El sitio está CERRADO: solo abre desde $MI_IP_PUBLICA.
+  Desde el celular funciona si está en el mismo WiFi.}
 
 $(printf '\033[1;33m')ANOTA ESTO EN TU GESTOR DE CONTRASEÑAS, AHORA:$(printf '\033[0m')
 
@@ -301,8 +300,7 @@ $(printf '\033[1;33m')ANOTA ESTO EN TU GESTOR DE CONTRASEÑAS, AHORA:$(printf '\
       nadie puede reservar; publicar es un segundo toque a propósito.
 
   El día del estreno, para abrirlo a todo el mundo:
-      sed -i '/^CADDYFILE=/d' .env
-      $COMPOSE up -d
+      ufw allow 443/tcp${MI_IP_PUBLICA:+ && ufw delete allow from $MI_IP_PUBLICA to any port 443 proto tcp}
 
   Si algo se ve raro:
       $COMPOSE logs --tail=40

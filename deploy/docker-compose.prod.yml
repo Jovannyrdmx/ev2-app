@@ -186,12 +186,11 @@ services:
       # Let's Encrypt avisa aquí si un certificado está por vencer y algo falló.
       ACME_EMAIL: "${ACME_EMAIL:?ACME_EMAIL es obligatorio: un correo que leas}"
     volumes:
-      # Cuál configuración se usa lo decide UNA línea del .env:
-      #   sin CADDYFILE                 -> ./Caddyfile          (abierto: el estreno)
-      #   CADDYFILE=./Caddyfile.privado -> cerrado con contraseña de puerta, para probar
-      # Cambiar de uno a otro es editar esa línea y volver a levantar. El certificado
-      # vive en el volumen, así que no se vuelve a pedir ni se gastan intentos.
-      - ${CADDYFILE:-./Caddyfile}:/etc/caddy/Caddyfile:ro
+      # Una sola configuración, siempre la misma. Para probar sin que entre nadie NO se
+      # pone una contraseña de puerta aquí: basic auth usa la cabecera Authorization,
+      # la misma que la app usa para el token de sesión, y deja la aplicación
+      # inservible. Se cierra el 443 a tu IP con el cortafuegos (docs/DESPLIEGUE.md 3.5).
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # Los certificados viven en un volumen: sin él, cada `up` vuelve a pedirlos y
       # Let's Encrypt corta por límite de peticiones justo cuando urge desplegar.
       - caddy_data:/data
