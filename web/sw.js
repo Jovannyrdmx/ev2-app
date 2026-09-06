@@ -11,10 +11,13 @@
  */
 'use strict';
 
-const VERSION = 'ev2-v2';
+const VERSION = 'ev2-v3';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'manifest.json',
+  // La página pública de verificación: la abre alguien SIN cuenta, en la calle,
+  // posiblemente con mala señal. Es justo donde una caché sirve.
+  'verificar.html', 'js/verify-screen.js',
   'js/api.js', 'js/format.js', 'js/roles.js', 'js/password-gate.js', 'js/client.js',
   'js/floor-map.js', 'js/index-screen.js', 'js/bar-queue.js', 'js/bartender-screen.js',
   'js/taxi-ride.js', 'js/driver-screen.js', 'js/manager.js', 'js/manager-screen.js',

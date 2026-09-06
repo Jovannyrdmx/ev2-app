@@ -426,13 +426,46 @@
             <span class="text-white/50" data-i18n="taxi.fare">Costo</span>
             <span id="taxi-fare">—</span>
           </div>
-          <div id="taxi-certificate" class="rounded-lg p-3" style="background:rgba(0,255,0,.07);border:1px solid rgba(0,255,0,.35)" hidden>
-            <p class="text-xs uppercase tracking-wider" style="color:var(--ev2-lime)" data-i18n="taxi.certificate">Comprobante de salida</p>
-            <p id="taxi-folio" class="font-display text-2xl tracking-widest my-1">—</p>
-            <p class="text-[11px] text-white/50" data-i18n="taxi.certificateNote">Cualquiera puede verificar este folio en la página del club. Vence solo.</p>
-            <p id="taxi-cert-expired" class="text-[11px] text-red-300 mt-1" data-i18n="taxi.certificateExpired" hidden>Este comprobante ya venció.</p>
+          <!--
+            La constancia. Es lo único de toda la app que alguien va a enseñarle a un
+            desconocido en la calle, así que se lee en ese orden: primero si vale,
+            luego el folio grande, luego lo que se puede comparar con lo que se tiene
+            enfrente —la placa, el color, el nombre— y al final de dónde salió y hasta
+            cuándo. El descargo va escrito, no implícito.
+          -->
+          <div id="taxi-certificate" class="rounded-lg p-3 space-y-3" style="background:rgba(0,255,0,.07);border:1px solid rgba(0,255,0,.35)" hidden>
+            <div class="text-center">
+              <p class="text-[11px] uppercase tracking-wider" style="color:var(--ev2-lime)" data-i18n="taxi.certificate">Comprobante de salida</p>
+              <p id="taxi-cert-state" class="font-display text-sm">—</p>
+              <p id="taxi-folio" class="font-display text-2xl tracking-widest my-1">—</p>
+            </div>
+            <dl id="taxi-cert-rows" class="divide-y divide-white/5"></dl>
+            <div class="text-[11px] text-white/50 space-y-1">
+              <p id="taxi-cert-club"></p>
+              <p id="taxi-cert-issued"></p>
+              <p id="taxi-cert-expires"></p>
+            </div>
+            <a id="taxi-cert-link" href="verificar.html" target="_blank" rel="noopener"
+               class="block text-center text-xs underline" style="color:var(--ev2-cyan)"
+               data-i18n="cert.verifyHere">Verificar este folio</a>
+            <p id="taxi-cert-disclaimer" class="text-[11px] text-white/40 leading-snug border-t border-white/10 pt-2"></p>
+            <p id="taxi-cert-expired" class="text-[11px] text-red-300" data-i18n="taxi.certificateExpired" hidden>Este comprobante ya venció.</p>
           </div>
           <button id="btn-taxi-cancel" class="w-full py-2 text-sm text-red-300 underline" data-i18n="taxi.cancel" hidden>Cancelar solicitud</button>
+        </div>
+
+        <!--
+          El código de conducta del club. Va ANTES del formulario y hay que aceptarlo
+          para poder pedir: aceptarlo después de subirse al coche no serviría de nada.
+          El servidor lo vuelve a comprobar y guarda la hora.
+        -->
+        <div id="taxi-conduct" class="card rounded-xl p-4 space-y-3" hidden>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="taxi.conduct">Código de conducta</p>
+          <p id="taxi-conduct-text" class="text-sm text-white/70 leading-snug whitespace-pre-line"></p>
+          <label class="flex items-start gap-3 text-sm cursor-pointer">
+            <input id="taxi-conduct-accept" type="checkbox" class="w-5 h-5 mt-0.5 shrink-0">
+            <span data-i18n="taxi.conductAccept">Lo leí y lo acepto</span>
+          </label>
         </div>
 
         <!-- El formulario: solo aparece cuando no hay viaje vivo. -->
@@ -460,6 +493,15 @@
           <p id="taxi-empty" class="text-sm text-white/40" data-i18n="taxi.noHistory" hidden>Todavía no has pedido ningún taxi.</p>
           <div id="taxi-history" class="space-y-2"></div>
         </div>
+        <!--
+          A quién llamar si algo pasa. Van al final de esta pantalla y no en un menú:
+          es donde va a estar mirando quien se está yendo del club.
+        -->
+        <div id="taxi-emergency" class="card rounded-xl p-4 space-y-2" hidden>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="taxi.emergency">Si necesitas ayuda</p>
+          <div id="emergency-list" class="space-y-2"></div>
+        </div>
+
       </div>
 
       <!-- ---------------------------- PERFIL ---------------------------- -->

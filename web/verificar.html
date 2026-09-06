@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Verificar constancia de salida — EV2 Clandestinoz</title>
+    <meta name="theme-color" content="#0a0a14">
+    <link rel="icon" href="images/favicon-32x32.png" type="image/png" sizes="32x32">
+    <!-- Configuración: se cambia aquí sin tocar el código. -->
+    <meta name="ev2:api" content="/api">
+    <!--
+      Esta página es PÚBLICA a propósito: no pide cuenta, no guarda sesión y no lleva
+      el service worker. La abre quien tiene el folio en la mano —un policía, un
+      familiar, el propio cliente— y tiene que funcionar en un teléfono prestado, en la
+      calle, sin haber instalado nada.
+
+      Por eso tampoco se indexa: el folio es de quien lo trae, no de un buscador.
+    -->
+    <meta name="robots" content="noindex, nofollow">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
+        :root { --ev2-cyan: #00BFFF; --ev2-pink: #FF1493; --ev2-lime: #00FF00; }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%);
+            min-height: 100vh;
+        }
+        .font-display { font-family: 'Poppins', sans-serif; font-weight: 700; }
+        .ev2-button {
+            background: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink));
+            color: #000; font-weight: 600;
+        }
+        .ev2-button:disabled { filter: grayscale(1) brightness(.55); cursor: not-allowed; }
+        button, .tap { min-height: 44px; }
+        .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
+        .field {
+            width: 100%; padding: .75rem 1rem; border-radius: .75rem;
+            background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+            color: #fff; outline: none;
+        }
+        .field:focus { border-color: var(--ev2-cyan); }
+    </style>
+</head>
+<body class="text-white">
+<main class="max-w-md mx-auto px-5 py-10 space-y-5">
+
+    <header class="text-center space-y-1">
+        <p class="font-display text-2xl">EV2 Clandestinoz</p>
+        <h1 class="text-sm text-white/60" data-i18n="verify.title">Verificar una constancia de salida</h1>
+    </header>
+
+    <form id="verify-form" class="card rounded-xl p-4 space-y-3">
+        <label class="block text-xs text-white/50" for="verify-folio" data-i18n="verify.folioLabel">Folio de la constancia</label>
+        <input id="verify-folio" class="field font-display text-xl tracking-widest text-center"
+               maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false"
+               placeholder="EV2-XXXX-XXXX" aria-describedby="verify-help">
+        <p id="verify-help" class="text-[11px] text-white/40" data-i18n="verify.help">Está impreso o en la pantalla de quien salió del club. No hace falta cuenta.</p>
+        <p id="verify-error" class="text-sm text-red-300" hidden></p>
+        <button type="submit" id="btn-verify" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="verify.check">Verificar</button>
+    </form>
+
+    <!-- El resultado. Lo primero que se ve es si vale o no; el detalle viene después. -->
+    <section id="verify-result" class="card rounded-xl p-5 space-y-4" hidden>
+        <div class="text-center space-y-1">
+            <p id="verify-state" class="font-display text-xl">—</p>
+            <p id="verify-club" class="text-sm text-white/60">—</p>
+        </div>
+
+        <div class="rounded-lg p-3 text-center" style="background:rgba(0,255,0,.07);border:1px solid rgba(0,255,0,.35)">
+            <p class="text-[11px] uppercase tracking-wider" style="color:var(--ev2-lime)" data-i18n="cert.folio">Folio</p>
+            <p id="verify-folio-out" class="font-display text-2xl tracking-widest">—</p>
+        </div>
+
+        <dl id="verify-rows" class="divide-y divide-white/5"></dl>
+
+        <div class="text-[11px] text-white/40 space-y-1">
+            <p id="verify-issued">—</p>
+            <p id="verify-expires">—</p>
+        </div>
+
+        <p id="verify-disclaimer" class="text-[11px] text-white/50 leading-snug border-t border-white/10 pt-3"></p>
+    </section>
+
+    <p class="text-[11px] text-white/30 text-center leading-snug" data-i18n="verify.footer">
+        Esta constancia acredita únicamente que la persona salió del establecimiento a la hora indicada,
+        en un viaje coordinado por el club. No es una identificación oficial ni otorga permiso alguno.
+    </p>
+</main>
+
+<script src="js/format.js"></script>
+<script src="js/taxi-ride.js"></script>
+<script src="js/verify-screen.js"></script>
+</body>
+</html>

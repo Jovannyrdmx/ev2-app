@@ -6926,6 +6926,10 @@ components:
         cancel_reason: { type: [string, 'null'] }
         certificate_folio: { type: [string, 'null'] }
         certificate_expires_at: { type: [string, 'null'], format: date-time }
+        conduct_accepted_at:
+          type: [string, 'null']
+          format: date-time
+          description: Cuándo aceptó el cliente el código de conducta. `null` = el club no tenía texto publicado.
         transaction_id: { type: [string, 'null'], format: uuid }
         driver:
           oneOf:
@@ -6952,6 +6956,12 @@ components:
         destination: { type: string, maxLength: 300 }
         passengers: { type: integer, minimum: 1, maximum: 8, default: 1 }
         notes: { type: string, maxLength: 280 }
+        conduct_accepted:
+          type: boolean
+          description: |
+            Aceptación explícita del código de conducta del club. **Obligatoria** (y solo
+            vale `true`) cuando el club publicó un texto en `taxi_settings.conduct_terms`;
+            sin ella la solicitud responde 422. Se guarda con su hora en el viaje.
 
     DepartureCertificate:
       type: object

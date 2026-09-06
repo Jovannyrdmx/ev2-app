@@ -456,6 +456,58 @@ describe('Solicitud del cliente', () => {
     const res = await api().post(url('/taxi/rides')).set(auth(guest)).send({});
     expect(res.status).toBe(422);
   });
+
+  // El código de conducta: si el club publicó reglas, no hay viaje sin aceptarlas, y la
+  // aceptación se guarda con su hora. Es la mitad que protege al club — la constancia
+  // protege al cliente, esto respalda al club la noche que algo pasa en un coche.
+  describe('código de conducta', () => {
+    const REGLAS = 'No se permite fumar ni consumir alcohol dentro del vehículo.';
+
+    it('sin reglas publicadas no se pide nada y no se guarda aceptación', async () => {
+      const res = await api().post(url('/taxi/rides')).set(auth(guest)).send({ fare_id: fare.id });
+      expect(res.status).toBe(201);
+      expect(res.body.ride.conduct_accepted_at).toBeNull();
+    });
+
+    it('con reglas publicadas, pedir sin aceptar responde 422 y NO crea el viaje', async () => {
+      await api().put(url('/taxi-settings')).set(auth(manager)).send({ conduct_terms: REGLAS });
+      const res = await api().post(url('/taxi/rides')).set(auth(guest)).send({ fare_id: fare.id });
+      expect(res.status).toBe(422);
+      const { rows } = await pool.query('SELECT count(*)::int AS n FROM taxi_requests');
+      expect(rows[0].n).toBe(0);
+    });
+
+    it('aceptando, el viaje se crea y queda la hora en que se aceptó', async () => {
+      await api().put(url('/taxi-settings')).set(auth(manager)).send({ conduct_terms: REGLAS });
+      const res = await api().post(url('/taxi/rides')).set(auth(guest))
+        .send({ fare_id: fare.id, conduct_accepted: true });
+      expect(res.status).toBe(201);
+      expect(res.body.ride.conduct_accepted_at).toEqual(expect.any(String));
+      const { rows } = await pool.query('SELECT conduct_accepted_at FROM taxi_requests');
+      expect(rows[0].conduct_accepted_at).toBeInstanceOf(Date);
+    });
+
+    it('`false` no es aceptar', async () => {
+      await api().put(url('/taxi-settings')).set(auth(manager)).send({ conduct_terms: REGLAS });
+      const res = await api().post(url('/taxi/rides')).set(auth(guest))
+        .send({ fare_id: fare.id, conduct_accepted: false });
+      expect(res.status).toBe(422);
+    });
+
+    it('el club puede quitar las reglas, y entonces deja de pedirse', async () => {
+      await api().put(url('/taxi-settings')).set(auth(manager)).send({ conduct_terms: REGLAS });
+      await api().put(url('/taxi-settings')).set(auth(manager)).send({ conduct_terms: null });
+      const res = await api().post(url('/taxi/rides')).set(auth(guest)).send({ fare_id: fare.id });
+      expect(res.status).toBe(201);
+    });
+
+    it('el texto llega al cliente para que pueda leerlo antes de aceptar', async () => {
+      await api().put(url('/taxi-settings')).set(auth(manager)).send({ conduct_terms: REGLAS });
+      const res = await api().get(url('/taxi-settings')).set(auth(guest));
+      expect(res.status).toBe(200);
+      expect(res.body.settings.conduct_terms).toBe(REGLAS);
+    });
+  });
 });
 
 // ---------------------------------------------------------------- asignación

@@ -25,7 +25,8 @@
     club: null, drinks: [], categories: [], category: null,
     tables: [], landmarks: [], canvas: null, floors: [], floor: null,
     selectedId: null, myTable: null, orders: [], realtime: null,
-    taxi: { availability: null, ride: null, rides: [], fares: [], pickup: null },
+    taxi: { availability: null, ride: null, rides: [], fares: [], pickup: null,
+      settings: null, contacts: [], certificate: null, certificateFor: null },
   };
   const cart = EV2Client.createCart();
 
@@ -593,6 +594,21 @@
       // No solo el vivo: un viaje recién terminado se sigue mostrando mientras su
       // comprobante valga, que es cuando el cliente lo necesita.
       state.taxi.ride = EV2Taxi.currentForGuest(mine.live, state.taxi.rides);
+      // El texto del código de conducta y a quién llamar viven en el club, no en el
+      // viaje: se piden una vez y se quedan.
+      if (!state.taxi.settings) {
+        try {
+          const cfg = await api.get(`/nightclubs/${clubId()}/taxi-settings`);
+          state.taxi.settings = cfg.settings || null;
+        } catch { state.taxi.settings = null; }
+      }
+      if (!state.taxi.contacts.length) {
+        try {
+          const contacts = await api.get(`/nightclubs/${clubId()}/emergency-contacts`);
+          state.taxi.contacts = contacts.contacts || [];
+        } catch { state.taxi.contacts = []; }
+      }
+      await loadCertificate();
       // Las zonas solo hacen falta para pedir; si el servicio está apagado no se piden.
       if (availability.enabled && state.taxi.fares.length === 0) {
         try {
@@ -604,8 +620,36 @@
     } catch (err) { showError(err); }
   }
 
+  /**
+   * La constancia completa. El viaje solo trae el folio y su vencimiento; el nombre del
+   * club, el del pasajero, el del conductor, la placa y el descargo viven en su propia
+   * ruta. Se pide una sola vez por viaje: no cambia una vez emitida.
+   *
+   * Un fallo aquí no puede dejar la pantalla del taxi en blanco: sin constancia se
+   * enseña el resto igual, que es lo que el cliente necesita para subirse al coche.
+   */
+  async function loadCertificate() {
+    const ride = state.taxi.ride;
+    if (!ride || !ride.certificate_folio) {
+      state.taxi.certificate = null;
+      state.taxi.certificateFor = null;
+      return;
+    }
+    if (state.taxi.certificateFor === ride.id && state.taxi.certificate) return;
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/taxi/rides/${ride.id}/certificate`);
+      state.taxi.certificate = data.certificate || null;
+      state.taxi.certificateFor = ride.id;
+    } catch {
+      // Todavía no se emite (el viaje no ha arrancado) o no se pudo pedir: se cae al
+      // folio que ya trae el viaje, que es mejor que nada.
+      state.taxi.certificate = null;
+      state.taxi.certificateFor = null;
+    }
+  }
+
   /** Un aviso por cambio de estado, y vibración cuando toca levantarse a caminar. */
-  function announceTaxi(status) {
+  function announceTaxi() {
     const head = EV2Taxi.guestHeadline(state.taxi.ride, state.taxi.availability);
     toast(t(head.key, head.vars), head.urgent ? 'ok' : 'info');
     if (!head.urgent) return;
@@ -639,6 +683,8 @@
 
     if (showCard) renderLiveRide(ride);
     renderTaxiForm();
+    renderConduct();
+    renderEmergency();
     renderTaxiHistory();
   }
 
@@ -657,14 +703,78 @@
     $('taxi-fare').textContent = amount === null
       ? t('taxi.fareOpen') : money(amount, ride.currency);
 
-    const cert = EV2Taxi.certificate(ride);
-    $('taxi-certificate').hidden = !cert;
-    if (cert) {
-      $('taxi-folio').textContent = cert.folio;
-      $('taxi-cert-expired').hidden = !cert.expired;
-    }
+    renderCertificate(ride);
 
     $('btn-taxi-cancel').hidden = !EV2Taxi.canCancel(ride.status);
+  }
+
+  /**
+   * La constancia en pantalla. Se arma con la ficha completa cuando ya llegó, y si no
+   * con el folio que trae el viaje: nunca se deja al cliente sin el número, que es lo
+   * único que prueba a qué hora y con quién salió del club.
+   */
+  function renderCertificate(ride) {
+    const short = EV2Taxi.certificate(ride);
+    const full = state.taxi.certificate;
+    const view = EV2Taxi.certificateView(full) || (short ? {
+      folio: short.folio, nightclub: null, issuedAt: null, expiresAt: short.expires_at,
+      expired: short.expired, valid: !short.expired, rows: [], disclaimer: null,
+    } : null);
+
+    $('taxi-certificate').hidden = !view;
+    if (!view) return;
+
+    $('taxi-folio').textContent = view.folio;
+    const stateEl = $('taxi-cert-state');
+    stateEl.textContent = t(view.valid ? 'verify.valid' : 'verify.expired');
+    stateEl.style.color = view.valid ? 'var(--ev2-lime)' : '#fca5a5';
+
+    $('taxi-cert-rows').innerHTML = view.rows.map((row) => `
+      <div class="flex justify-between gap-3 py-1.5 text-sm">
+        <dt class="text-white/50">${escape(t(row.labelKey))}</dt>
+        <dd class="text-right">${escape(row.value)}</dd>
+      </div>`).join('');
+
+    $('taxi-cert-club').textContent = view.nightclub || '';
+    $('taxi-cert-issued').textContent = view.issuedAt
+      ? t('cert.issuedAt', { when: EV2Format.dateTime(view.issuedAt) }) : '';
+    $('taxi-cert-expires').textContent = view.expiresAt
+      ? t(view.expired ? 'cert.expiredAt' : 'cert.expiresAt',
+        { when: EV2Format.dateTime(view.expiresAt) }) : '';
+    $('taxi-cert-disclaimer').textContent = view.disclaimer || '';
+    // El enlace lleva el folio puesto: quien lo abra no tiene que teclearlo.
+    $('taxi-cert-link').href = `verificar.html?folio=${encodeURIComponent(view.folio)}`;
+    $('taxi-cert-expired').hidden = !view.expired;
+  }
+
+  /**
+   * El código de conducta y la casilla. Sin club que publique reglas, ni el panel ni el
+   * bloqueo existen: no se le pide a nadie que acepte una hoja en blanco.
+   */
+  function renderConduct() {
+    const terms = EV2Taxi.conductTerms(state.taxi.settings);
+    $('taxi-conduct').hidden = !terms;
+    if (terms) $('taxi-conduct-text').textContent = terms;
+    $('btn-taxi-request').disabled = !!EV2Taxi.requestBlocker(
+      state.taxi.settings, $('taxi-conduct-accept').checked);
+  }
+
+  $('taxi-conduct-accept').onchange = renderConduct;
+
+  /** A quién llamar. Cada renglón marca de verdad: es un enlace tel:, no un texto. */
+  function renderEmergency() {
+    const list = state.taxi.contacts;
+    $('taxi-emergency').hidden = list.length === 0;
+    const box = $('emergency-list');
+    box.innerHTML = '';
+    for (const contact of list) {
+      const row = document.createElement('a');
+      row.href = `tel:${contact.phone}`;
+      row.className = 'flex items-center justify-between gap-3 card rounded-lg px-3 py-2 tap';
+      row.innerHTML = `<span class="text-sm truncate">${escape(contact.name)}</span>`
+        + `<span class="text-sm" style="color:var(--ev2-cyan)">${escape(contact.phone)}</span>`;
+      box.appendChild(row);
+    }
   }
 
   function renderTaxiForm() {
@@ -703,6 +813,9 @@
 
   $('taxi-form').onsubmit = async (ev) => {
     ev.preventDefault();
+    const blocker = EV2Taxi.requestBlocker(
+      state.taxi.settings, $('taxi-conduct-accept').checked);
+    if (blocker) { toast(t(blocker), 'error'); return; }
     const button = $('btn-taxi-request');
     button.disabled = true;
     button.textContent = t('taxi.requesting');
@@ -719,6 +832,8 @@
       if (destination) body.destination = destination;
       const notes = $('taxi-notes').value.trim();
       if (notes) body.notes = notes;
+      // Solo `true` cuenta como aceptación, y el servidor lo vuelve a comprobar.
+      if (EV2Taxi.conductTerms(state.taxi.settings)) body.conduct_accepted = true;
 
       const data = await api.post(`/nightclubs/${clubId()}/taxi/rides`, body);
       state.taxi.ride = data.ride;
@@ -726,12 +841,14 @@
         {}, state.taxi.availability, data.availability);
       if (data.pickup_point) state.taxi.pickup = data.pickup_point;
       renderTaxi();
-      announceTaxi(data.ride.status);
+      announceTaxi();
     } catch (err) {
       showError(err);
     } finally {
-      button.disabled = false;
       button.textContent = t('taxi.request');
+      // No se reactiva a ciegas: si el club exige el código y la casilla está sin
+      // marcar, el botón tiene que seguir apagado.
+      renderConduct();
     }
   };
 
@@ -816,7 +933,7 @@
       const now = state.taxi.ride && state.taxi.ride.status;
       // Solo se avisa cuando de verdad cambió algo, para no repetir el mismo aviso si
       // el socket reproduce eventos al reconectar.
-      if (now && now !== before) announceTaxi(now);
+      if (now && now !== before) announceTaxi();
     });
 
     api.on('auth:expired', () => {

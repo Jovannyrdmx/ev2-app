@@ -130,6 +130,83 @@
     return { folio: ride.certificate_folio, expires_at: ride.certificate_expires_at, expired };
   }
 
+
+  // ------------------------------------------------------- la constancia completa
+
+  /**
+   * La constancia de salida, tal como se le enseña a quien la pide en la calle.
+   *
+   * Un folio pelón no le sirve a nadie: quien lo mira tiene que poder comparar lo que
+   * dice el papel con lo que tiene enfrente —la placa, el color, el nombre del
+   * conductor— y saber si sigue vigente. Esto arma exactamente esas filas, en el orden
+   * en que se leen, y nunca inventa una que el servidor no mandó.
+   *
+   * Devuelve null cuando no hay constancia: se emite al ARRANCAR el viaje, no al
+   * pedirlo, porque antes de subirse no hay nada que acreditar.
+   */
+  function certificateView(cert, now) {
+    if (!cert || !cert.folio) return null;
+    const expires = toTime(cert.expires_at);
+    const stamp = now || Date.now();
+    // `valid` lo calcula el servidor, pero el reloj del teléfono es el que ve la
+    // persona: si ya venció aquí, aquí se dice, sin esperar a recargar.
+    const expired = expires !== null && expires <= stamp;
+    const vehicle = cert.vehicle || null;
+    const rows = [];
+    if (cert.guest) rows.push({ labelKey: 'cert.guest', value: cert.guest });
+    if (cert.driver) rows.push({ labelKey: 'cert.driver', value: cert.driver });
+    if (vehicle && vehicle.plate) rows.push({ labelKey: 'cert.plate', value: vehicle.plate });
+    const car = vehicle ? [vehicle.color, vehicle.description].filter(Boolean).join(' ') : '';
+    if (car) rows.push({ labelKey: 'cert.vehicle', value: car });
+    return {
+      folio: cert.folio,
+      nightclub: cert.nightclub || null,
+      issuedAt: cert.issued_at || null,
+      expiresAt: cert.expires_at || null,
+      expired,
+      valid: !expired && cert.valid !== false,
+      rows,
+      disclaimer: cert.disclaimer || null,
+    };
+  }
+
+  /**
+   * Limpia lo que alguien teclea en la página de verificación.
+   *
+   * Se teclea de un papel, a oscuras y a veces de prisa: se aceptan minúsculas, espacios
+   * y guiones de más. Lo único que no se toca es qué caracteres son válidos — eso lo
+   * decide el servidor, y adivinarlo aquí solo serviría para rechazar folios buenos.
+   */
+  function normalizeFolio(text) {
+    return String(text == null ? '' : text).trim().toUpperCase().replace(/\s+/g, '');
+  }
+
+  /** Si vale la pena mandar ese folio al servidor. El límite lo pone la ruta pública. */
+  const folioLooksUsable = (text) => {
+    const f = normalizeFolio(text);
+    return f.length >= 4 && f.length <= 20;
+  };
+
+  // ------------------------------------------------------- código de conducta
+
+  /**
+   * Si el club publicó reglas, aceptarlas es obligatorio para pedir el viaje.
+   *
+   * Un club sin texto no molesta a nadie con una casilla vacía; uno que sí lo tiene no
+   * deja pedir sin marcarla, y el servidor vuelve a comprobarlo — que es donde cuenta.
+   */
+  function conductTerms(settings) {
+    const text = String((settings && settings.conduct_terms) || '').trim();
+    return text ? text : null;
+  }
+
+  /** Por qué NO se puede pedir el viaje todavía. Devuelve la clave del motivo o null. */
+  function requestBlocker(settings, accepted) {
+    if (settings && settings.enabled === false) return 'taxi.errDisabled';
+    if (conductTerms(settings) && accepted !== true) return 'taxi.errConduct';
+    return null;
+  }
+
   /**
    * Qué viaje enseñarle al cliente. Si hay uno vivo, ese. Si no, el último cerrado
    * MIENTRAS su comprobante siga vigente: en cuanto el conductor marca "terminado" el
@@ -233,6 +310,11 @@
     vehicleLabel,
     fareAmount,
     certificate,
+    certificateView,
+    normalizeFolio,
+    folioLooksUsable,
+    conductTerms,
+    requestBlocker,
     currentForGuest,
     driverAction,
     driverView,

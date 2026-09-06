@@ -918,6 +918,12 @@
     const s = state.taxiSettings || {};
     $('taxi-enabled').checked = Boolean(s.enabled);
     if (document.activeElement !== $('taxi-pickup')) $('taxi-pickup').value = s.pickup_point || '';
+    // Nunca se pisa lo que el gerente está escribiendo: un refresco del socket mientras
+    // redacta el código de conducta le borraría el párrafo a medias.
+    if (document.activeElement !== $('taxi-ttl')) $('taxi-ttl').value = s.certificate_ttl_minutes || '';
+    if (document.activeElement !== $('taxi-conduct-terms')) {
+      $('taxi-conduct-terms').value = s.conduct_terms || '';
+    }
 
     $('zones-empty').hidden = state.fares.length > 0;
     $('zones-list').innerHTML = state.fares.map((f) => `
@@ -1043,6 +1049,11 @@
       const body = { enabled: $('taxi-enabled').checked };
       const pickup = $('taxi-pickup').value.trim();
       if (pickup) body.pickup_point = pickup;
+      const ttl = Number($('taxi-ttl').value);
+      if (Number.isFinite(ttl) && ttl > 0) body.certificate_ttl_minutes = Math.round(ttl);
+      // Se manda SIEMPRE, incluso vacío: es la única forma de borrar el texto, y sin
+      // eso un club no podría quitar unas reglas que ya no aplica.
+      body.conduct_terms = $('taxi-conduct-terms').value.trim() || null;
       const data = await api.put(`/nightclubs/${clubId()}/taxi-settings`, body);
       state.taxiSettings = data.settings;
       renderTaxi();

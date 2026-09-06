@@ -530,6 +530,7 @@ const RIDE_SELECT = `
          r.currency, r.payment_method, r.eta_minutes, r.notes, r.rating, r.rating_comment,
          r.created_at, r.accepted_at, r.arrived_at, r.started_at, r.ended_at, r.cancelled_at,
          r.cancel_reason, r.conduct_code, r.code_expires_at, r.certificate_issued_at,
+         r.conduct_accepted_at,
          r.transaction_id, r.fare_id, r.declined_by,
          r.user_id, gu.first_name AS guest_first_name, gu.last_name AS guest_last_name,
          gu.display_name AS guest_name, gu.phone AS guest_phone,
@@ -598,6 +599,7 @@ function presentRide(row, viewer) {
       driver,
       certificate_folio: row.conduct_code,
       certificate_expires_at: row.code_expires_at,
+      conduct_accepted_at: row.conduct_accepted_at,
     };
   }
   if (viewer === 'driver') {
@@ -618,6 +620,9 @@ function presentRide(row, viewer) {
     transaction_id: row.transaction_id,
     certificate_folio: row.conduct_code,
     certificate_expires_at: row.code_expires_at,
+    // El gerente necesita poder responder "¿aceptó las reglas?" con una hora, no con
+    // un sí de memoria.
+    conduct_accepted_at: row.conduct_accepted_at,
   };
 }
 
@@ -650,6 +655,9 @@ router.post('/nightclubs/:nightclubId/taxi/rides',
       destination: z.string().trim().max(300).optional(),
       passengers: z.number().int().min(1).max(8).default(1),
       notes: z.string().trim().max(280).optional(),
+      // Sólo cuenta como aceptación explícita: `true`. Cualquier otra cosa —ausente,
+      // false, "on"— es no haberla dado.
+      conduct_accepted: z.boolean().optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
@@ -660,6 +668,15 @@ router.post('/nightclubs/:nightclubId/taxi/rides',
     if (req.user.role === 'driver') {
       throw ApiError.forbidden('Un conductor no solicita viajes desde esta cuenta');
     }
+
+    // Si el club publicó un código de conducta, no hay viaje sin aceptarlo. La
+    // aceptación se guarda con su hora: "aceptó las reglas" sin fecha ni viaje al que
+    // atarla no le sirve a nadie la noche que algo pasa dentro de un coche.
+    const terms = (settings.conduct_terms || '').trim();
+    if (terms && b.conduct_accepted !== true) {
+      throw ApiError.unprocessable('Tienes que aceptar el código de conducta para pedir el viaje');
+    }
+    const acceptedAt = terms ? new Date() : null;
 
     if (b.client_request_id) {
       const existing = await pool.query(`${RIDE_SELECT} WHERE r.client_request_id = $1`,
@@ -677,12 +694,12 @@ router.post('/nightclubs/:nightclubId/taxi/rides',
       const { rows } = await pool.query(
         `INSERT INTO taxi_requests (nightclub_id, user_id, pickup_location, destination,
                                     destination_zone, fare_id, quoted_amount, currency,
-                                    passengers, notes, client_request_id, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'requested')
+                                    passengers, notes, client_request_id, conduct_accepted_at, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'requested')
          RETURNING id`,
         [nightclubId, req.user.id, settings.pickup_point, b.destination || null,
           quoted.zone, quoted.fare_id, quoted.quoted_amount, quoted.currency,
-          b.passengers, b.notes || null, b.client_request_id || null]);
+          b.passengers, b.notes || null, b.client_request_id || null, acceptedAt]);
       ride = rows[0];
     } catch (err) {
       if (err.code === '23505') {

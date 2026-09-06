@@ -386,6 +386,16 @@
             <span data-i18n="manager.taxiEnabled">Servicio de salida segura activo</span>
           </label>
           <div><label class="label" for="taxi-pickup" data-i18n="manager.pickupPoint">Punto de encuentro</label><input id="taxi-pickup" class="field" maxlength="120"></div>
+          <div>
+            <label class="label" for="taxi-ttl" data-i18n="manager.certTtl">La constancia vale (minutos)</label>
+            <input id="taxi-ttl" type="number" min="15" max="720" step="15" class="field">
+            <p class="text-[11px] text-white/40 mt-1" data-i18n="manager.certTtlNote">Cuánto tiempo se puede verificar el folio después de que arranca el viaje. Entre 15 minutos y 12 horas.</p>
+          </div>
+          <div>
+            <label class="label" for="taxi-conduct-terms" data-i18n="manager.conductTerms">Código de conducta</label>
+            <textarea id="taxi-conduct-terms" class="field" rows="5" maxlength="4000"></textarea>
+            <p class="text-[11px] text-white/40 mt-1" data-i18n="manager.conductNote">Si escribes algo aquí, el cliente TIENE que aceptarlo para poder pedir un viaje, y queda registrada la hora en que lo aceptó. Si lo dejas vacío, no se le pide nada.</p>
+          </div>
           <button id="btn-taxi-save" class="ev2-button w-full rounded-lg py-2" data-i18n="manager.save">Guardar</button>
         </div>
 
