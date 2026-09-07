@@ -22,7 +22,11 @@
 
   let ctx = null;
   const state = {
-    staff: [], tips: [], songs: [], djs: [],
+    staff: [], tips: [], songs: [], djs: [], board: [],
+    // Qué pestaña se ve: la clave de un rol ('dancer', 'dj'…), 'music' o 'board'.
+    active: null,
+    // Periodo del reconocimiento: 'night' o 'month'.
+    boardPeriod: 'night',
     // El destinatario de la hoja abierta, y en qué modo está: propina o trago.
     target: null, mode: 'tip',
     // El id de petición se fija AL ABRIR la hoja, no al tocar enviar: si el dedo toca
@@ -42,6 +46,16 @@
     state.staff = data.staff || [];
     state.djs = state.staff.filter((p) => p.role === 'dj');
     renderStaff();
+    renderDjPicker();
+  }
+
+  async function loadBoard() {
+    const club = ctx.clubId();
+    if (!club) return;
+    const data = await ctx.api.get(
+      `/nightclubs/${club}/leaderboard?period=${state.boardPeriod}&limit=20`);
+    state.board = EV2Tipping.boardRows(data);
+    renderBoard();
   }
 
   async function loadTips() {
@@ -60,28 +74,115 @@
     renderSongs();
   }
 
-  const loadAll = () => Promise.all([loadStaff(), loadTips(), loadSongs()]).catch(() => {});
+  const loadAll = () => Promise.all([loadStaff(), loadTips(), loadSongs(), loadBoard()])
+    .catch(() => {});
 
   // ---------------------------------------------------------------- personal
 
+  /**
+   * La tira de pestañas: una por rol con gente en turno (en el orden de EV2Tipping),
+   * más Música y Reconocimiento, que están siempre. Si la pestaña activa dejó de
+   * existir —el último DJ cerró turno— se cae a la primera.
+   */
+  function renderTabs() {
+    const tabs = EV2Tipping.roleTabs(state.staff)
+      .concat([{ key: 'music', label: t('tip.tabMusic') },
+        { key: 'board', label: t('tip.tabBoard') }]);
+    if (!tabs.some((x) => x.key === state.active)) state.active = tabs[0].key;
+
+    const box = $('show-tabs');
+    box.innerHTML = '';
+    for (const tab of tabs) {
+      const b = document.createElement('button');
+      b.className = `show-tab whitespace-nowrap px-3 py-2 rounded-lg text-sm ${
+        tab.key === state.active ? 'tab-active' : 'text-white/50'}`;
+      b.dataset.showTab = tab.key;
+      b.textContent = tab.label;
+      b.onclick = () => showTab(tab.key);
+      box.appendChild(b);
+    }
+    syncPanels();
+  }
+
+  /** Enseña el panel de la pestaña activa y esconde los otros dos. Idempotente. */
+  function syncPanels() {
+    const staffView = state.active !== 'music' && state.active !== 'board';
+    $('show-staff').hidden = !staffView;
+    $('show-music').hidden = state.active !== 'music';
+    $('show-board').hidden = state.active !== 'board';
+  }
+
   function renderStaff() {
+    renderTabs();
     const groups = EV2Tipping.byRole(state.staff);
+    const active = groups.find((g) => g.role === state.active);
     $('staff-empty').hidden = groups.length > 0;
+
     const box = $('staff-groups');
     box.innerHTML = '';
+    if (!active) return;
 
-    for (const group of groups) {
-      const section = document.createElement('div');
-      const head = document.createElement('p');
-      head.className = 'text-xs uppercase tracking-wider mb-2';
-      head.style.color = 'var(--ev2-pink)';
-      head.textContent = group.label;
-      section.appendChild(head);
+    const head = document.createElement('p');
+    head.className = 'text-xs uppercase tracking-wider mb-2';
+    head.style.color = 'var(--ev2-pink)';
+    head.textContent = active.label;
+    box.appendChild(head);
+    for (const person of active.people) box.appendChild(personCard(person));
+  }
 
-      for (const person of group.people) {
-        section.appendChild(personCard(person));
-      }
-      box.appendChild(section);
+  /**
+   * El selector de DJ solo aparece cuando hay más de uno en turno: con uno solo el
+   * servidor ya sabe a quién va la canción y un desplegable de una opción estorba.
+   */
+  function renderDjPicker() {
+    const wrap = $('song-dj-wrap');
+    const select = $('song-dj');
+    select.innerHTML = '';
+    if (state.djs.length <= 1) { wrap.hidden = true; return; }
+    for (const dj of state.djs) {
+      const opt = document.createElement('option');
+      opt.value = dj.id;
+      opt.textContent = dj.display_name || dj.role_label || 'DJ';
+      select.appendChild(opt);
+    }
+    wrap.hidden = false;
+  }
+
+  /**
+   * El reconocimiento de la noche o del mes. A un cliente la API no le manda montos
+   * (decidido en 2.5): se enseña el puesto, el nombre, el rol y cuánta gente lo
+   * reconoció.
+   */
+  function renderBoard() {
+    const lang = window.EV2Format.getLanguage();
+    $('board-empty').hidden = state.board.length > 0;
+    const box = $('board-list');
+    box.innerHTML = '';
+
+    for (const row of state.board) {
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl p-3 flex items-center gap-3';
+
+      const rank = document.createElement('div');
+      rank.className = 'font-display text-lg w-8 text-center shrink-0';
+      rank.style.color = 'var(--ev2-gold)';
+      rank.textContent = row.rank <= 3 ? ['🥇', '🥈', '🥉'][row.rank - 1] : `#${row.rank}`;
+      card.appendChild(rank);
+
+      const mid = document.createElement('div');
+      mid.className = 'min-w-0 flex-1';
+      const name = document.createElement('p');
+      name.className = 'font-display truncate';
+      name.textContent = row.name;
+      const sub = document.createElement('p');
+      sub.className = 'text-[11px] text-white/40 truncate';
+      const roleLabel = row.role ? window.EV2Roles.describe(row.role, lang).label : '';
+      sub.textContent = [roleLabel, t('tip.boardFans', { count: row.fans })]
+        .filter(Boolean).join(' · ');
+      mid.append(name, sub);
+      card.appendChild(mid);
+
+      box.appendChild(card);
     }
   }
 
@@ -335,15 +436,24 @@
     // lista de propinas dadas no se refrescaba tras pedir una canción con propina.
     const tipped = Number($('song-tip').value) > 0;
     try {
-      const body = EV2Songs.requestPayload(title, artist, {
+      // El DJ elegido y la dedicatoria solo viajan en una canción NUEVA: en un voto a
+      // una que ya está en la cola, mandar otro DJ la abriría como fila aparte.
+      const extra = plan.action === 'request'
+        ? {
+          djUserId: (!$('song-dj-wrap').hidden && $('song-dj').value) || undefined,
+          message: $('song-message').value,
+        }
+        : {};
+      const body = EV2Songs.requestPayload(title, artist, Object.assign({
         clientRequestId: uuid(),
         tipAmount: $('song-tip').value,
         currency: (state.djs[0] && state.djs[0].currency) || 'MXN',
-      });
+      }, extra));
       const data = await ctx.api.post(`/nightclubs/${ctx.clubId()}/song-requests`, body);
       $('song-title').value = '';
       $('song-artist').value = '';
       $('song-tip').value = '';
+      $('song-message').value = '';
       await loadSongs();
 
       // Se le dice su lugar en la cola, no solo "listo": lo que quiere saber es cuándo
@@ -364,14 +474,23 @@
   // ---------------------------------------------------------------- pestañas y eventos
 
   function showTab(name) {
-    $('show-staff').hidden = name !== 'staff';
-    $('show-music').hidden = name !== 'music';
-    document.querySelectorAll('.show-tab').forEach((b) => {
-      b.className = `show-tab flex-1 py-2 rounded-lg text-sm ${b.dataset.showTab === name ? 'tab-active' : 'text-white/50'}`;
-    });
+    state.active = name;
+    if (name === 'music' || name === 'board') renderTabs();
+    else renderStaff();
+    if (name === 'board') loadBoard().catch(() => {});
   }
 
-  document.querySelectorAll('.show-tab').forEach((b) => { b.onclick = () => showTab(b.dataset.showTab); });
+  document.querySelectorAll('.board-period').forEach((b) => {
+    b.onclick = () => {
+      if (state.boardPeriod === b.dataset.boardPeriod) return;
+      state.boardPeriod = b.dataset.boardPeriod;
+      document.querySelectorAll('.board-period').forEach((x) => {
+        x.className = `board-period flex-1 py-2 rounded-lg text-sm ${
+          x.dataset.boardPeriod === state.boardPeriod ? 'tab-active' : 'text-white/50'}`;
+      });
+      loadBoard().catch(() => {});
+    };
+  });
   $('btn-tip-close').onclick = closeSheet;
   $('tip-sheet').onclick = (e) => { if (e.target === $('tip-sheet')) closeSheet(); };
   $('btn-tip-send').onclick = () => sendTip($('tip-amount').value);
@@ -395,7 +514,9 @@
   EV2Screen.on('language', () => {
     if (!ctx) return;
     renderStaff();
+    renderDjPicker();
     renderTips();
     renderSongs();
+    renderBoard();
   });
 }());

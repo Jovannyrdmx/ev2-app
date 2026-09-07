@@ -135,6 +135,43 @@
     return body;
   }
 
+  // ------------------------------------------------------- pestañas por rol
+
+  /**
+   * Las pestañas de la pantalla, una por rol con gente en turno, en el orden de
+   * ROLE_ORDER (primero quien el cliente tiene enfrente). La pantalla añade "Música" y
+   * "Reconocimiento" al final; esas dos no dependen de quién esté trabajando.
+   *
+   * Se expone aparte de `byRole` para que el controlador no tenga que conocer el orden
+   * ni cómo se saca la etiqueta de cada rol.
+   */
+  function roleTabs(staff) {
+    return byRole(staff).map((g) => ({ key: g.role, label: g.label, count: g.people.length }));
+  }
+
+  // ------------------------------------------------------- reconocimiento
+
+  /**
+   * Normaliza la respuesta de `GET /leaderboard` para la pantalla del cliente.
+   *
+   * A un invitado la API le entrega solo `rank`, `display_name`, `role` y `fans`
+   * (cuántas personas distintas le dieron propina) — nunca montos, decidido en el paso
+   * 2.5. Si llegara la forma del personal (con `total_mxn`, etc.) esos campos se
+   * ignoran aquí a propósito: esta es la vista del cliente.
+   */
+  function boardRows(payload) {
+    const list = (payload && payload.leaderboard) || [];
+    return list
+      .filter((r) => r && r.user_id)
+      .map((r, i) => ({
+        rank: Number(r.rank) > 0 ? Number(r.rank) : i + 1,
+        userId: r.user_id,
+        name: r.display_name || '',
+        role: r.role || null,
+        fans: Number(r.fans) > 0 ? Number(r.fans) : 0,
+      }));
+  }
+
   // ------------------------------------------------------- lo ya dado
 
   /** Suma lo que el cliente lleva dado esta noche, por moneda. La mayor primero. */
@@ -175,6 +212,8 @@
     money,
     roleRank,
     byRole,
+    roleTabs,
+    boardRows,
     presetAmounts,
     validateTip,
     tipPayload,

@@ -138,6 +138,69 @@ describe('propinas al personal', () => {
     expect(Tip.affectsTips({ type: 'event' })).toBe(false);
     expect(Tip.affectsTips(null)).toBe(false);
   });
+
+  // ------------------------------------------------------------------ pestañas
+
+  it('una pestaña por rol con gente en turno, en el orden de la lista', () => {
+    const tabs = Tip.roleTabs([waiter, dancer, { id: 'b1', role: 'bartender', display_name: 'Ana' }]);
+    expect(tabs).toEqual([
+      { key: 'dancer', label: 'Bailarina', count: 1 },
+      { key: 'waiter', label: 'Mesero', count: 1 },
+      { key: 'bartender', label: 'bartender', count: 1 },
+    ]);
+  });
+
+  it('cuenta cuánta gente hay de cada rol', () => {
+    const tabs = Tip.roleTabs([
+      { id: '1', role: 'dancer', display_name: 'Ana' },
+      { id: '2', role: 'dancer', display_name: 'Zoe' },
+      { id: '3', role: 'dj', display_name: 'Beto' },
+    ]);
+    expect(tabs).toEqual([
+      { key: 'dancer', label: 'dancer', count: 2 },
+      { key: 'dj', label: 'dj', count: 1 },
+    ]);
+  });
+
+  it('sin nadie en turno no hay ninguna pestaña de rol', () => {
+    expect(Tip.roleTabs([])).toEqual([]);
+    expect(Tip.roleTabs([{ role: 'dancer' }, null])).toEqual([]);
+  });
+
+  // ------------------------------------------------------------------ reconocimiento
+
+  it('normaliza el leaderboard del cliente: puesto, nombre, rol y cuántos lo reconocieron', () => {
+    const rows = Tip.boardRows({
+      leaderboard: [
+        { rank: 1, user_id: 'u1', display_name: 'Sofía', role: 'dancer', fans: 8 },
+        { rank: 2, user_id: 'u2', display_name: 'Beto', role: 'dj', fans: 3 },
+      ],
+    });
+    expect(rows).toEqual([
+      { rank: 1, userId: 'u1', name: 'Sofía', role: 'dancer', fans: 8 },
+      { rank: 2, userId: 'u2', name: 'Beto', role: 'dj', fans: 3 },
+    ]);
+  });
+
+  it('si no viene el puesto, lo deduce de la posición', () => {
+    const rows = Tip.boardRows({ leaderboard: [{ user_id: 'u1' }, { user_id: 'u2' }] });
+    expect(rows.map((r) => r.rank)).toEqual([1, 2]);
+    expect(rows[0]).toEqual({ rank: 1, userId: 'u1', name: '', role: null, fans: 0 });
+  });
+
+  it('descarta filas sin persona y aguanta una respuesta vacía', () => {
+    expect(Tip.boardRows({ leaderboard: [{ display_name: 'nadie' }, null] })).toEqual([]);
+    expect(Tip.boardRows({})).toEqual([]);
+    expect(Tip.boardRows(null)).toEqual([]);
+  });
+
+  it('ignora los montos aunque lleguen: esta es la vista del cliente', () => {
+    const rows = Tip.boardRows({
+      leaderboard: [{ rank: 1, user_id: 'u1', display_name: 'Sofía', role: 'dancer', fans: 8, total_mxn: '9999.00', tips_count: 40 }],
+    });
+    expect(rows[0]).not.toHaveProperty('total_mxn');
+    expect(rows[0]).not.toHaveProperty('tips_count');
+  });
 });
 
 // --------------------------------------------------------------------- canciones
