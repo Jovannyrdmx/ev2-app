@@ -4,6 +4,8 @@
 'use strict';
 
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
 const bcrypt = require('bcryptjs');
 const { pool } = require('../src/db/pool');
 
@@ -16,20 +18,12 @@ const SECTIONS = {
   patio: { count: 2, type: 'booth', capacity: 8, x0: 520, y0: 460, dx: 120, dy: 0, cols: 2, radius: 42 },
 };
 
-const DRINKS = [
-  ['beer', 'Cerveza nacional', 60], ['beer', 'Cerveza importada', 85], ['beer', 'Cubeta 5 cervezas', 280],
-  ['beer', 'Michelada', 90], ['beer', 'Clamato preparado', 110],
-  ['shot', 'Shot de tequila', 70], ['shot', 'Shot de mezcal', 85], ['shot', 'Shot de whisky', 95],
-  ['shot', 'Shot de vodka', 70], ['shot', 'Jägerbomb', 120],
-  ['cocktail', 'Margarita', 130], ['cocktail', 'Paloma', 120], ['cocktail', 'Mojito', 130],
-  ['cocktail', 'Piña colada', 140], ['cocktail', 'Gin tonic', 150], ['cocktail', 'Cuba libre', 110],
-  ['cocktail', 'Vodka tonic', 130], ['cocktail', 'Whisky sour', 150],
-  ['premium', 'Whisky 12 años', 220], ['premium', 'Tequila reposado premium', 200], ['premium', 'Mezcal artesanal', 210],
-  ['premium', 'Cognac', 260],
-  ['bottle', 'Botella tequila blanco', 1800], ['bottle', 'Botella whisky', 2400], ['bottle', 'Botella vodka', 1900],
-  ['bottle', 'Botella champagne', 3200], ['bottle', 'Botella ron', 1500],
-  ['soft', 'Agua mineral', 40], ['soft', 'Refresco', 45], ['soft', 'Red Bull', 80],
-];
+// El menú de desarrollo es el MISMO catálogo real de la caja. Antes eran treinta
+// bebidas inventadas a precios inventados, y eso hacía que cada prueba a mano se
+// corriera contra números que nunca iban a ser los del club.
+const MENU = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'data/ev2-menu.json'), 'utf8'));
+const DRINKS = MENU.items.map((i) => [i.category, i.name, i.price, i.pos_id]);
+
 
 const USERS = [
   ['admin', 'Erick', 'Lopez', 'erick.x.lopez@gmail.com'],
@@ -87,8 +81,7 @@ async function seed() {
 
     // Drinks + inventory (pos_product_id is a stable dev key; real ids come from the POS sync)
     for (let i = 0; i < DRINKS.length; i++) {
-      const [category, name, price] = DRINKS[i];
-      const posId = `DEV-${String(i + 1).padStart(3, '0')}`;
+      const [category, name, price, posId] = DRINKS[i];
       const { rows } = await client.query(
         `INSERT INTO drinks (nightclub_id, name, category, price, currency, pos_product_id, sort_order)
          VALUES ($1,$2,$3,$4,'MXN',$5,$6)
@@ -101,7 +94,7 @@ async function seed() {
         `INSERT INTO inventory (drink_id, quantity, unit, low_stock_threshold)
          VALUES ($1, $2, 'unit', 5)
          ON CONFLICT (drink_id) DO NOTHING`,
-        [rows[0].id, category === 'bottle' ? 12 : 100],
+        [rows[0].id, category === 'Botellas' ? 12 : 100],
       );
     }
 

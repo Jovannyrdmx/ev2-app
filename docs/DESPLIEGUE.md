@@ -278,10 +278,18 @@ con sus propios comandos:
 ```bash
 docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api npm run seed:floor
 docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api npm run seed:prices
+docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api npm run seed:menu
 ```
 
-`seed:prices` no es opcional: sin él ninguna mesa tiene precio y la pantalla de
-reservación sale vacía sin explicar por qué.
+Ninguno de los tres es opcional. Sin `seed:prices` ninguna mesa tiene precio y la
+pantalla de reservación sale vacía sin explicar por qué; sin `seed:menu` el cliente
+abre el menú y no hay nada que pedir.
+
+**Cuando cambien los precios en la caja**, se vuelve a exportar la tabla `productos` de
+SoftRestaurant, se regenera `server/seeds/data/ev2-menu.json` y se corre `seed:menu` otra
+vez. Es idempotente: actualiza lo que cambió, agrega lo nuevo y **desactiva** —nunca
+borra— lo que ya no está en la lista, porque los tickets de noches pasadas apuntan a
+esos productos.
 
 ---
 
@@ -394,4 +402,5 @@ propia gente, avisada, no es problema.
 | `ev2-api` reiniciándose en bucle | Un secreto vacío o truncado en `.env`. Revisa que ningún valor lleve un `#` en la misma línea. |
 | La app dice "Conectando…" para siempre | El contenedor `ws` no levantó: `logs ws`. |
 | La pantalla de reservación sale vacía | Falta `npm run seed:prices`. |
+| El menú del cliente sale vacío | Falta `npm run seed:menu`. |
 | `bootstrap` dice "ya tiene gerente" | Correcto y a propósito. Entra con el gerente que ya existe. |

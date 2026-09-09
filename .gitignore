@@ -23,3 +23,6 @@ deploy/docker-compose.override.yml
 
 # Archivos que la app de Claude guarda automáticamente al enviarlos al chat
 Claude outputs/
+
+# Carpetas de los editores (Visual Studio, VS Code de escritorio)
+.vs/

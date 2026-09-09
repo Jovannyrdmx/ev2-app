@@ -254,7 +254,7 @@ else
   verde "  Creada."
 fi
 
-titulo "Mesas y precios del club"
+titulo "Mesas, precios y carta del club"
 if $COMPOSE exec -T api npm run seed:floor >/dev/null 2>&1; then
   verde "  Mesas cargadas."
 else
@@ -265,6 +265,12 @@ if $COMPOSE exec -T api npm run seed:prices >/dev/null 2>&1; then
 else
   gris "  Los precios NO se cargaron, y sin ellos la reservación sale vacía."
   gris "  Después: $COMPOSE exec api npm run seed:prices"
+fi
+if $COMPOSE exec -T api npm run seed:menu >/dev/null 2>&1; then
+  verde "  Carta cargada (los productos y precios de tu caja)."
+else
+  gris "  La carta NO se cargó, y sin ella el cliente abre el menú vacío."
+  gris "  Después: $COMPOSE exec api npm run seed:menu"
 fi
 
 # ------------------------------------------------------------------ resumen

@@ -1,5 +1,9 @@
 #!/usr/bin/env node
-// Loads the club's official price list: zone tariffs, bottles and add-ons.
+// Loads the club's official price list: the zone tariffs, and only those.
+//
+// Bottles and add-ons used to be invented here. They now come from the register's real
+// catalogue (`npm run seed:menu`, seeds/data/ev2-menu.json), which is the only place
+// that knows what the club actually charges.
 //
 //   npm run seed:prices -- --slug ev2
 //
@@ -54,23 +58,6 @@ async function loadPriceList({ slug = 'ev2', listPath = LIST_PATH } = {}) {
       [nightclubId, sections],
     );
 
-    for (const kind of ['bottle', 'addon']) {
-      const items = kind === 'bottle' ? list.bottles : list.addons;
-      for (const [i, item] of (items || []).entries()) {
-        await client.query(
-          `INSERT INTO reservation_products (nightclub_id, kind, code, name, price, currency,
-                                             servings, description, sort_order, active)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true)
-           ON CONFLICT (nightclub_id, code) DO UPDATE SET
-             kind = EXCLUDED.kind, name = EXCLUDED.name, price = EXCLUDED.price,
-             currency = EXCLUDED.currency, servings = EXCLUDED.servings,
-             sort_order = EXCLUDED.sort_order, active = true`,
-          [nightclubId, kind, item.code, item.name, item.price, list.currency || 'MXN',
-            item.servings || null, item.description || null, i],
-        );
-      }
-    }
-
     await client.query('COMMIT');
 
     const summary = await pool.query(
@@ -81,8 +68,6 @@ async function loadPriceList({ slug = 'ev2', listPath = LIST_PATH } = {}) {
     return {
       nightclub: club.rows[0].name,
       zones: summary.rows,
-      bottles: (list.bottles || []).length,
-      addons: (list.addons || []).length,
       retired: retired.rows.map((r) => r.section),
     };
   } catch (err) {
@@ -96,8 +81,7 @@ async function loadPriceList({ slug = 'ev2', listPath = LIST_PATH } = {}) {
 if (require.main === module) {
   loadPriceList(parseArgs(process.argv))
     .then((r) => {
-      console.log(`Price list loaded into "${r.nightclub}": ${r.zones.length} zones, ` +
-        `${r.bottles} bottles, ${r.addons} add-ons.`);
+      console.log(`Price list loaded into "${r.nightclub}": ${r.zones.length} zones.`);
       for (const z of r.zones) {
         const extras = Number(z.max_extras) === 0 ? 'sin extras' : `${z.max_extras} extras`;
         const flag = z.reservable ? '' : '  (no reservable)';

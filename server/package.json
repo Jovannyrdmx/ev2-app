@@ -19,6 +19,7 @@
     "test:coverage": "jest --runInBand --coverage",
     "seed:floor": "node seeds/floor-plan.js",
     "seed:prices": "node seeds/price-list.js",
+    "seed:menu": "node seeds/menu.js",
     "bootstrap": "node scripts/bootstrap.js"
   },
   "jest": {

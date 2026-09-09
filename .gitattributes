@@ -1,0 +1,18 @@
+# Los finales de linea se guardan SIEMPRE como LF en el repositorio.
+#
+# Sin esto, un editor de Windows que guarde un archivo con CRLF hace que git vea el
+# archivo entero como cambiado: ya pasó una vez y dejó ocho archivos con miles de
+# lineas "modificadas" sin que hubiera un solo cambio real, lo que esconde los cambios
+# de verdad en la revision.
+* text=auto eol=lf
+
+# Binarios: que git no los toque nunca.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.xls  binary
+*.xlsx binary
+*.tgz  binary

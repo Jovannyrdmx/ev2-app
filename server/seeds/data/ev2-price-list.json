@@ -1,5 +1,5 @@
 {
-  "$comment": "Lista de precios oficial de EV2 Clandestinoz, vigente desde enero de 2026, tomada de la imagen 'VIP PRECIOS' entregada por el dueño el 2026-09-03. 'included_tickets' son las personas que cubre el precio base; 'max_extras' son las personas adicionales permitidas, cada una paga el boleto del evento. Las mesas GENERAL no aparecen en la lista de precios.",
+  "$comment": "Lista de precios oficial de EV2 Clandestinoz, vigente desde enero de 2026, tomada de la imagen 'VIP PRECIOS' entregada por el dueño el 2026-09-03. 'included_tickets' son las personas que cubre el precio base; 'max_extras' son las personas adicionales permitidas, cada una paga el boleto del evento. Las mesas GENERAL no aparecen en la lista de precios. Las botellas y los extras YA NO viven aqui: los que habia eran inventados, y ahora salen del catalogo real de la caja (seeds/data/ev2-menu.json, `npm run seed:menu`).",
   "version": 1,
   "effective_from": "2026-01-01",
   "currency": "MXN",
@@ -15,23 +15,5 @@
   ],
   "zone_overrides_by_table": [
     { "code": "VIP46", "base_price": 8000, "included_tickets": 10, "max_extras": 2, "note": "VIP 46 de Zona Doble Diamante: 8,000 con 10 personas segun la lista oficial" }
-  ],
-  "bottles": [
-    { "code": "house_wine", "name": "Vino de la Casa", "price": 400, "servings": 4 },
-    { "code": "premium_wine", "name": "Vino Premium", "price": 700, "servings": 4 },
-    { "code": "champagne", "name": "Champagne", "price": 1200, "servings": 4 },
-    { "code": "vodka_bottle", "name": "Vodka Botella", "price": 1400, "servings": 8 },
-    { "code": "tequila_bottle", "name": "Tequila Botella", "price": 1100, "servings": 8 },
-    { "code": "rum_bottle", "name": "Ron Botella", "price": 1200, "servings": 8 }
-  ],
-  "addons": [
-    { "code": "sparklers", "name": "Sparklers (Bengalas)", "price": 300 },
-    { "code": "decor_upgrade", "name": "Upgrade Decoracion", "price": 500 },
-    { "code": "premium_bottle_service", "name": "Premium Bottle Service", "price": 800 },
-    { "code": "vip_wristband", "name": "Pulsera VIP", "price": 100 },
-    { "code": "photo_booth", "name": "Photo Booth", "price": 600 },
-    { "code": "dj_shoutout", "name": "DJ Shout-out", "price": 400 },
-    { "code": "vip_parking", "name": "Estacionamiento VIP", "price": 150 },
-    { "code": "coat_check", "name": "Coat Check VIP", "price": 50 }
   ]
 }

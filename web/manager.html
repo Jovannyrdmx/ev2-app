@@ -201,6 +201,12 @@
             <div>
               <label class="label" for="n-price" data-i18n="night.price">Cover por persona</label>
               <input id="n-price" type="number" min="0" step="10" class="field" value="0">
+              <!--
+                Los covers que cobra la caja, de un toque. Se teclean mal muy fácil a la
+                una de la mañana, y un cover equivocado se le cobra a todo el que entre
+                esa noche.
+              -->
+              <div id="n-price-quick" class="flex flex-wrap gap-1 mt-1"></div>
               <p class="field-error" data-error="ticket_price" hidden></p>
             </div>
           </div>

@@ -5,6 +5,7 @@ const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
 const { loadPriceList } = require('../seeds/price-list');
+const { loadMenu } = require('../seeds/menu');
 
 let club; let guest; let other; let hostess; let manager; let bartender;
 let roja; let azul; let general;
@@ -22,6 +23,8 @@ beforeEach(async () => {
   bartender = await f.createUser(club.id, { role: 'bartender' });
 
   await loadPriceList({ slug: 'ev2' });
+  // Las botellas y los extras salen del catalogo real de la caja, no de la lista de zonas.
+  await loadMenu({ slug: 'ev2' });
   await pool.query(
     `INSERT INTO reservation_rules (nightclub_id, min_party_size, max_party_size, deposit_pct,
                                     currency, min_advance_hours)
@@ -220,9 +223,11 @@ describe('Precios por zona y por evento', () => {
     expect(res.status).toBe(200);
     const bottles = res.body.products.filter((p) => p.kind === 'bottle');
     const addons = res.body.products.filter((p) => p.kind === 'addon');
-    expect(bottles).toHaveLength(6);
-    expect(addons).toHaveLength(8);
-    expect(bottles.find((b) => b.code === 'champagne').price).toBe('1200.00');
+    // Las 48 botellas de la carta real y los tres extras que el club cobra de verdad.
+    expect(bottles).toHaveLength(48);
+    expect(addons).toHaveLength(3);
+    expect(bottles.find((b) => b.code === 'pos-03022').name).toBe('MOET');
+    expect(addons.find((a) => a.code === 'vip_wristband').price).toBe('100.00');
   });
 });
 
@@ -364,12 +369,13 @@ describe('Reservación por noche', () => {
   it('suma botellas y extras del catálogo por su código', async () => {
     const ev = await makeEvent({ ticket_price: 250 });
     const res = await book(ev.body.event.id, roja.id, 8, guest, {
-      addons: [{ code: 'champagne', quantity: 2 }, { code: 'sparklers', quantity: 1 }],
+      // Codigos de la carta real: MOET ($3,500) y la pulsera extra VIP ($100).
+      addons: [{ code: 'pos-03022', quantity: 2 }, { code: 'vip_wristband', quantity: 1 }],
     });
 
-    // 5,000 + 2 x 1,200 + 300 = 7,700
+    // 5,000 + 2 x 3,500 + 100 = 12,100
     expect(res.status).toBe(201);
-    expect(res.body.reservation.total_estimated).toBe('7700.00');
+    expect(res.body.reservation.total_estimated).toBe('12100.00');
   });
 
   it('rechaza un producto inexistente', async () => {

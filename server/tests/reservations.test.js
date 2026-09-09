@@ -9,6 +9,7 @@ const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
 const { loadPriceList } = require('../seeds/price-list');
+const { loadMenu } = require('../seeds/menu');
 
 let club; let guest; let other; let hostess; let manager; let bartender;
 let azul; let roja; let general; let event;
@@ -26,6 +27,7 @@ beforeEach(async () => {
   bartender = await f.createUser(club.id, { role: 'bartender' });
 
   await loadPriceList({ slug: 'ev2-res' });
+  await loadMenu({ slug: 'ev2-res' });
   await f.createReservationRules(club.id, { deposit_pct: 30, min_party_size: 2, max_party_size: 20 });
 
   azul = await f.createTable(club.id, { code: 'AZ13', section: 'ZONA AZUL', capacity: 10, type: 'vip' });
@@ -127,17 +129,17 @@ describe('Disponibilidad y cotización', () => {
       event_id: event.id,
       table_id: azul.id,
       guest_count: 10,
-      addons: [{ code: 'champagne', quantity: 1 }],
+      addons: [{ code: 'pos-03022', quantity: 1 }], // MOET, $3,500 de la carta real
       discount_code: 'PROMO10',
     });
 
     const q = res.body.quote;
     expect(q.zone.base_price).toBe(4500);
-    expect(q.addons_total).toBe(1200);
-    expect(q.subtotal).toBe(5700);
-    expect(q.discount.amount).toBe(570);
-    expect(q.total).toBe(5130);
-    expect(q.deposit).toBe(1539); // 30% de 5130
+    expect(q.addons_total).toBe(3500);
+    expect(q.subtotal).toBe(8000);
+    expect(q.discount.amount).toBe(800);
+    expect(q.total).toBe(7200);
+    expect(q.deposit).toBe(2160); // 30% de 7200
   });
 
   it('aplica descuento de monto fijo', async () => {

@@ -240,10 +240,35 @@
     renderStaff();
     renderPayouts();
     renderReports();
+    renderCoverQuick();
     renderDrivers();
     renderTaxi();
     renderParking();
     renderSecret();
+  }
+
+
+  /**
+   * Los covers que cobra la caja, de un toque.
+   *
+   * Salen del catálogo real (seeds/data/ev2-menu.json). Están aquí y no pedidos al
+   * servidor porque son tres números que cambian una vez al año, y porque el formulario
+   * tiene que servir aunque la pantalla se abra sin señal.
+   */
+  const COVERS = [{"name": "COVER", "price": 150.0}, {"name": "COVER S", "price": 100.0}, {"name": "COVER 50", "price": 50.0}];
+
+  function renderCoverQuick() {
+    const box = $('n-price-quick');
+    if (!box || box.dataset.filled === '1') return;
+    for (const cover of COVERS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'px-2 py-1 rounded-lg text-[11px] card';
+      b.textContent = `${cover.name} · ${EV2Format.money(cover.price, 'MXN')}`;
+      b.onclick = () => { $('n-price').value = String(cover.price); };
+      box.appendChild(b);
+    }
+    box.dataset.filled = '1';
   }
 
   // ---------------------------------------------------------------- reportes
