@@ -7,6 +7,7 @@ const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const events = require('../services/events');
+const seating = require('../services/seating');
 
 const router = express.Router({ mergeParams: true });
 
@@ -150,10 +151,26 @@ router.get('/nightclubs/:nightclubId/tables/stats',
     });
   }));
 
+/**
+ * Sentar a alguien en una mesa.
+ *
+ * SOLO el personal. Un cliente ya no se sienta tocando el mapa: en este club se
+ * entra por la puerta, y es el escaneo del pase —o el personal, a mano— lo que
+ * sienta a una mesa. Cuando cualquiera podía sentarse solo, una mesa VIP se
+ * podía "ocupar" desde la banqueta y el plano dejaba de decir la verdad.
+ *
+ * Esta ruta es la salida manual para lo que el escaneo no cubre: mover a alguien
+ * de mesa, o sentar a quien llegó sin pase y el gerente decidió acomodar.
+ */
 router.post('/nightclubs/:nightclubId/tables/:tableId/seat',
-  validate({ params: z.object({ nightclubId: uuid, tableId: uuid }) }),
+  requireRole('waiter', 'hostess', 'manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid, tableId: uuid }),
+    body: z.object({ user_id: uuid }),
+  }),
   asyncHandler(async (req, res) => {
     const { nightclubId, tableId } = req.params;
+    const targetUserId = req.body.user_id;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -167,40 +184,25 @@ router.post('/nightclubs/:nightclubId/tables/:tableId/seat',
         throw ApiError.conflict(`Table is ${table.rows[0].status}`);
       }
 
+      const persona = await client.query(
+        'SELECT id FROM users WHERE id = $1 AND nightclub_id = $2',
+        [targetUserId, nightclubId]);
+      if (persona.rowCount === 0) throw ApiError.notFound('User not found');
+
       const seated = await client.query(
         'SELECT count(*)::int AS n FROM table_occupants WHERE table_id = $1 AND left_at IS NULL',
         [tableId],
       );
       if (seated.rows[0].n >= table.rows[0].capacity) throw ApiError.conflict('Table is full');
 
-      // Leave any other table first (one open occupancy per user), and release that
-      // table if nobody is left at it — otherwise the floor map shows ghost tables.
-      const left = await client.query(
-        `UPDATE table_occupants SET left_at = now()
-          WHERE user_id = $1 AND left_at IS NULL
-          RETURNING table_id`,
-        [req.user.id],
-      );
-      for (const row of left.rows) {
-        if (row.table_id === tableId) continue;
-        await client.query(
-          `UPDATE tables t SET status = 'available'
-            WHERE t.id = $1 AND t.status = 'occupied'
-              AND NOT EXISTS (
-                SELECT 1 FROM table_occupants o WHERE o.table_id = t.id AND o.left_at IS NULL
-              )`,
-          [row.table_id],
-        );
-      }
-      await client.query('INSERT INTO table_occupants (table_id, user_id) VALUES ($1,$2)', [tableId, req.user.id]);
-      await client.query(`UPDATE tables SET status = 'occupied' WHERE id = $1 AND status = 'available'`, [tableId]);
+      await seating.seatUser(client, { tableId, userId: targetUserId });
 
       await events.publish({
         nightclubId, type: 'table_updated', client,
-        payload: { table_id: tableId, code: table.rows[0].code, action: 'seated', user_id: req.user.id },
+        payload: { table_id: tableId, code: table.rows[0].code, action: 'seated', user_id: targetUserId },
       });
       await client.query('COMMIT');
-      res.status(201).json({ seated: true, table_id: tableId });
+      res.status(201).json({ seated: true, table_id: tableId, user_id: targetUserId });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       throw err;
@@ -209,18 +211,16 @@ router.post('/nightclubs/:nightclubId/tables/:tableId/seat',
     }
   }));
 
+// Levantar a alguien de una mesa. También solo el personal: quien sienta, levanta.
 router.post('/nightclubs/:nightclubId/tables/:tableId/release',
+  requireRole('waiter', 'hostess', 'manager', 'admin'),
   validate({
     params: z.object({ nightclubId: uuid, tableId: uuid }),
     body: z.object({ user_id: uuid.optional() }).default({}),
   }),
   asyncHandler(async (req, res) => {
     const { nightclubId, tableId } = req.params;
-    // Only staff may release someone else.
     const targetUserId = req.body.user_id || req.user.id;
-    if (targetUserId !== req.user.id && !['waiter', 'hostess', 'manager', 'admin'].includes(req.user.role)) {
-      throw ApiError.forbidden('Only staff can release another guest');
-    }
 
     const client = await pool.connect();
     try {

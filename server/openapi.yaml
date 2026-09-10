@@ -99,6 +99,10 @@ tags:
     description: |
       Calendario de noches, precio del boleto, lista de precios por zona y ajustes de
       precio para un evento concreto. Todo lo edita el gerente desde la aplicación.
+  - name: Puerta
+    description: |
+      Escanear el pase de una reservación y vender la entrada. Todo esto lo hace el
+      personal de la puerta con un teléfono y una fila enfrente.
   - name: Reservaciones
     description: Reglas, disponibilidad, cotización, reserva, llegada tardía y cancelación.
   - name: Flirt
@@ -1617,6 +1621,126 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+
+  # ---------------------------------------------------------------- la puerta
+  /api/nightclubs/{nightclubId}/door/pass/{code}:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - name: code
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: peekDoorPass
+      tags: [Puerta]
+      summary: Mirar un pase sin gastarlo (hostess)
+      description: |
+        Comprueba un pase sin dejar entrar. Sirve para contestar «¿a qué hora es mi
+        reservación?» o revisar uno dudoso. **No** cambia nada.
+      responses:
+        '200':
+          description: El pase, o `null` si no existe
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pass: { $ref: '#/components/schemas/DoorPass' }
+                  result: { type: string }
+                  ok: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/door/check-in:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    post:
+      operationId: doorCheckIn
+      tags: [Puerta]
+      summary: Escanear el pase y sentar la mesa (hostess)
+      description: |
+        El escaneo de la entrada. Sienta **de verdad**: además de marcar la mesa como
+        ocupada, mete a la persona en la mesa, que es lo que la habilita para pedir
+        desde su teléfono.
+
+        Un pase que no abre responde **200 con el motivo**, no un error: la puerta
+        necesita leer «ya entraron a las 11:40» o «es de mañana» para resolverlo
+        hablando. Los motivos son `not_found`, `already_in`, `not_tonight`,
+        `cancelled` y `unpaid`.
+
+        `code` acepta el código tecleado (con o sin guiones, en minúsculas) o el
+        contenido completo del QR, incluida una dirección.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, minLength: 4, maxLength: 200 }
+      responses:
+        '200':
+          description: Resultado del escaneo. `seated` solo viene cuando sí abrió.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pass: { $ref: '#/components/schemas/DoorPass' }
+                  seated: { type: boolean }
+                  result: { type: string }
+                  ok: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/door/admissions:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    post:
+      operationId: sellDoorAdmission
+      tags: [Puerta]
+      summary: Vender un acceso general o un extra VIP (hostess)
+      description: |
+        Registra lo que se cobra en la entrada y lo asienta en `transactions`, que es
+        el único libro del club. Un `vip_extra` **exige** `reservation_id`: es lo que
+        permite responder «reservó 8, entraron 10, pagó 2 extras». Una cortesía se
+        registra como acceso pero no genera renglón de cobro.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DoorAdmissionCreate' }
+      responses:
+        '201':
+          description: Acceso registrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  admission: { $ref: '#/components/schemas/DoorAdmission' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/door/summary:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: doorSummary
+      tags: [Puerta]
+      summary: El aforo de la noche (hostess)
+      description: |
+        Lo reservado y lo vendido en la puerta se cuentan por separado a propósito:
+        una noche puede ir floja de mesas y llena de general, y un solo número
+        escondería eso. `inside` es la suma.
+      responses:
+        '200':
+          description: Aforo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DoorSummary' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /api/nightclubs/{nightclubId}/reservations/{reservationId}/status:
     post:
@@ -6250,6 +6374,95 @@ components:
           items: { $ref: '#/components/schemas/AddonInput' }
         discount_code: { type: string, maxLength: 40 }
 
+    DoorPass:
+      type: object
+      description: Lo que la puerta ve de un pase. Nunca el correo ni el teléfono del cliente.
+      properties:
+        reservation_id: { type: string, format: uuid }
+        status: { type: string }
+        pass_code: { type: string, examples: ['EV2-4K7M-2P4X'] }
+        guest:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+        table:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            code: { type: string }
+            section: { type: string }
+            floor: { type: string }
+            capacity: { type: integer }
+        guest_count: { type: integer }
+        extras_bought: { type: integer, description: Accesos extra comprados en la puerta. }
+        starts_at: { type: string, format: date-time }
+        checked_in_at: { type: [string, 'null'], format: date-time }
+        special_requests: { type: [string, 'null'] }
+        result:
+          type: string
+          enum: [ok, not_found, already_in, not_tonight, cancelled, unpaid]
+        ok: { type: boolean }
+
+    DoorAdmissionCreate:
+      type: object
+      required: [kind, unit_price]
+      properties:
+        kind:
+          type: string
+          enum: [general, vip_extra]
+        reservation_id:
+          type: string
+          format: uuid
+          description: Obligatorio para `vip_extra`; prohibido para `general`.
+        quantity: { type: integer, minimum: 1, maximum: 50, default: 1 }
+        unit_price: { type: number, minimum: 0, maximum: 100000 }
+        currency: { type: string, enum: [MXN, USD], default: MXN }
+        payment_method:
+          type: string
+          enum: [cash, card, transfer, courtesy]
+          default: cash
+        notes: { type: string, maxLength: 200 }
+        event_id: { type: string, format: uuid }
+
+    DoorAdmission:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [general, vip_extra] }
+        quantity: { type: integer }
+        unit_price: { type: string }
+        total: { type: string }
+        currency: { type: string }
+        payment_method: { type: string }
+        reservation_id: { type: [string, 'null'], format: uuid }
+        created_at: { type: string, format: date-time }
+
+    DoorSummary:
+      type: object
+      properties:
+        reservations:
+          type: object
+          properties:
+            esperadas: { type: integer }
+            adentro: { type: integer }
+            no_llegaron: { type: integer }
+            personas_vip: { type: integer }
+        door:
+          type: object
+          properties:
+            generales: { type: integer }
+            extras_vip: { type: integer }
+            cobrado: { type: string }
+            currency: { type: string }
+        tables:
+          type: object
+          properties:
+            total: { type: integer }
+            ocupadas: { type: integer }
+        inside: { type: integer, description: Personas adentro ahora mismo. }
+        generated_at: { type: string, format: date-time }
+
     Reservation:
       type: object
       properties:
@@ -6257,6 +6470,13 @@ components:
         status:
           type: string
           enum: [pending_payment, confirmed, seated, completed, cancelled, no_show]
+        pass_code:
+          type: [string, 'null']
+          description: El pase que se enseña en la puerta. Solo lo ve su dueño y el personal.
+        checked_in_at:
+          type: [string, 'null']
+          format: date-time
+          description: Cuándo se escaneó el pase en la entrada.
         starts_at: { type: string, format: date-time, description: Apertura de puertas del evento. }
         ends_at: { type: string, format: date-time, description: Cierre del club esa noche. }
         guest_count: { type: integer }

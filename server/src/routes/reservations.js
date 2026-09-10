@@ -17,6 +17,8 @@ const { validate, z, uuid, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const eventPricing = require('../services/event-pricing');
 const events = require('../services/events');
+const door = require('../services/door');
+const seating = require('../services/seating');
 
 const router = express.Router({ mergeParams: true });
 
@@ -69,6 +71,7 @@ const RESERVATION_SELECT = `
          r.cancelled_at, r.cancel_reason, r.refund_amount, r.created_at,
          r.arrival_deadline, r.included_tickets, r.extra_guests,
          r.zone_base_at_booking, r.ticket_at_booking,
+         r.pass_code, r.checked_in_at,
          r.event_id, ev.name AS event_name, ev.event_date, ev.doors_open_at,
          ev.status AS event_status,
          r.table_id, t.code AS table_code, t.table_number, t.section, t.floor,
@@ -414,14 +417,17 @@ router.post('/nightclubs/:nightclubId/reservations',
                                      duration_minutes, guest_count, status, currency,
                                      total_estimated, deposit_amount, discount_id, special_requests,
                                      arrival_deadline, included_tickets, extra_guests,
-                                     zone_base_at_booking, ticket_at_booking)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,'pending_payment',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+                                     zone_base_at_booking, ticket_at_booking, pass_code)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'pending_payment',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
            RETURNING id`,
           [nightclubId, req.user.id, b.event_id, b.table_id, startsAt, durationMinutes,
             b.guest_count, quote.currency, quote.total, quote.deposit,
             quote.discount ? quote.discount.id : null, b.special_requests || null,
             quote.arrival_deadline, quote.zone.included_tickets, quote.extra_guests,
-            quote.zone.base_price, quote.ticket_price],
+            quote.zone.base_price, quote.ticket_price,
+            // El pase se emite al reservar, no al confirmar: el cliente tiene que
+            // poder enseñarlo aunque el depósito se pague después.
+            door.generatePassCode()],
         );
         reservation = created.rows[0];
       } catch (err) {
@@ -715,11 +721,15 @@ router.post('/nightclubs/:nightclubId/reservations/:reservationId/status',
         await client.query(`UPDATE tables SET status = 'reserved' WHERE id = $1 AND status = 'available'`,
           [r.table_id]);
       } else if (next === 'seated') {
-        await client.query(`UPDATE tables SET status = 'occupied' WHERE id = $1`, [r.table_id]);
+        // Sentar de verdad, no solo pintar la mesa: sin esto el cliente queda
+        // "sentado" para el mapa y sin poder pedir un trago desde su teléfono.
+        await client.query('UPDATE reservations SET checked_in_at = COALESCE(checked_in_at, now()), checked_in_by = $2 WHERE id = $1',
+          [reservationId, req.user.id]);
+        await seating.seatUser(client, { tableId: r.table_id, userId: r.user_id });
       } else if (['completed', 'no_show'].includes(next)) {
-        await client.query(
-          `UPDATE tables SET status = 'available' WHERE id = $1 AND status IN ('reserved','occupied')`,
-          [r.table_id]);
+        // Y levantar a todos al cerrar: una mesa que se queda con gente adentro
+        // sigue recibiendo pedidos de quien ya se fue.
+        await seating.clearTable(client, { tableId: r.table_id });
       }
 
       await events.publish({

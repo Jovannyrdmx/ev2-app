@@ -29,6 +29,7 @@ const taxiRoutes = require('./routes/taxi');
 const valetRoutes = require('./routes/valet');
 const posRoutes = require('./routes/pos');
 const paymentRoutes = require('./routes/payments');
+const doorRoutes = require('./routes/door');
 
 // The OpenAPI contract is the agreement between backend, web and mobile.
 // It is served at /api/docs; a missing file must not stop the API from starting.
@@ -115,6 +116,7 @@ function createApp() {
   app.use('/api', orderRoutes);
   app.use('/api', tableRoutes);
   app.use('/api', reservationRoutes);
+  app.use('/api', doorRoutes);
   app.use('/api', eventRoutes);
   app.use('/api', flirtRoutes);
   app.use('/api', employeeRoutes);
