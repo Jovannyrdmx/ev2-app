@@ -5,7 +5,7 @@
  * `EV2Map` (plano) y `EV2Roles` (a dónde va cada rol). Ninguna decisión de negocio vive
  * aquí: si algo hay que probar, va en esos módulos.
  */
-/* global EV2, EV2Format, EV2Client, EV2Map, EV2Roles, EV2Taxi */
+/* global EV2, EV2Format, EV2Client, EV2Map, EV2Roles, EV2Taxi, EV2DrinkArt */
 (function () {
   'use strict';
 
@@ -465,6 +465,25 @@
 
   // ---------------------------------------------------------------- menú y carrito
 
+  /**
+   * El cuadrito de cada renglón de la carta.
+   *
+   * Si el producto tiene foto, la foto: nadie prefiere un dibujo cuando existe la cosa
+   * real. Si no, la ilustración que le toca por su nombre. La decisión vive en
+   * `EV2DrinkArt`, que sí se prueba; aquí solo se arma el HTML.
+   *
+   * El SVG entra sin escapar porque lo generamos nosotros, no viene de la base. La
+   * dirección de la foto SÍ viene de la base y por eso va escapada.
+   */
+  function thumb(drink) {
+    const art = EV2DrinkArt.artFor(drink);
+    const caja = 'w-14 h-14 rounded-lg shrink-0 flex items-center justify-center overflow-hidden';
+    if (art.type === 'photo') {
+      return `<img src="${escape(art.url)}" alt="" loading="lazy" class="${caja} object-cover">`;
+    }
+    return `<div class="${caja}" style="background:rgba(255,255,255,.05)">${EV2DrinkArt.svgFor(drink, 40)}</div>`;
+  }
+
   function renderMenu() {
     const cats = $('menu-categories');
     cats.innerHTML = [null, ...state.categories].map((c) => `
@@ -482,7 +501,8 @@
       const out = d.available === false || Number(d.stock) <= 0;
       return `
       <div class="card rounded-xl p-3 flex items-center gap-3 ${out ? 'opacity-50' : ''}">
-        <div class="flex-1">
+        ${thumb(d)}
+        <div class="flex-1 min-w-0">
           <p class="font-semibold">${escape(d.name)}</p>
           <p class="text-xs text-white/50">${escape(d.category || '')}${out ? ` · ${escape(t('menu.soldOut'))}` : ''}</p>
           <p class="text-sm mt-1">${money(d.price, d.currency)}</p>
