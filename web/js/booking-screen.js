@@ -156,6 +156,47 @@
     $('btn-book-confirm').disabled = false;
   }
 
+  /**
+   * El pase a pantalla completa.
+   *
+   * El QR se pide al servidor una vez y se guarda en el teléfono: adentro del club
+   * casi no hay señal, y el pase tiene que abrir igual cuando el cliente ya está
+   * en la fila. Si no se puede pedir y no hay copia guardada, se enseña el código
+   * escrito, que es con lo que la puerta puede teclear igual.
+   */
+  async function openPass(reservation) {
+    const guardado = `ev2.pass.${reservation.id}`;
+    $('pass-where').textContent = [reservation.event_name, reservation.table_code]
+      .filter(Boolean).join(' · ');
+    $('pass-when').textContent = reservation.doors_open_at
+      ? window.EV2Format.dateTime(reservation.doors_open_at) : '';
+    $('pass-code').textContent = reservation.pass_code || '—';
+    $('pass-used').hidden = !reservation.checked_in_at;
+    if (reservation.checked_in_at) {
+      $('pass-used').textContent = t('pass.usedAt',
+        { time: window.EV2Format.time(reservation.checked_in_at) });
+    }
+    $('pass-error').hidden = true;
+    $('pass-qr').innerHTML = '';
+    $('pass-sheet').hidden = false;
+
+    let svg = null;
+    try { svg = window.localStorage.getItem(guardado); } catch { svg = null; }
+    if (svg) { $('pass-qr').innerHTML = svg; return; }
+
+    try {
+      const data = await ctx.api.get(
+        `/nightclubs/${ctx.clubId()}/reservations/${reservation.id}/pass`);
+      // El SVG lo genera nuestro servidor, no viene de un tercero.
+      $('pass-qr').innerHTML = data.pass.qr_svg;
+      try { window.localStorage.setItem(guardado, data.pass.qr_svg); } catch { /* sin espacio */ }
+    } catch {
+      // Sin QR, el código escrito basta: la puerta lo teclea.
+      $('pass-error').textContent = t('pass.noQr');
+      $('pass-error').hidden = false;
+    }
+  }
+
   function renderMine() {
     const list = EV2Booking.upcoming(state.mine, new Date());
     $('book-none').hidden = list.length > 0;
@@ -193,6 +234,16 @@
           ? t('book.arriveLate')
           : t('book.arriveBy', { time: window.EV2Format.time(countdown.deadline) });
         card.appendChild(note);
+      }
+
+      // El pase, en la tarjeta. Es lo primero que el cliente busca al llegar al club,
+      // así que no se esconde detrás de un "ver detalle".
+      if (r.pass_code && ['confirmed', 'pending_payment', 'seated'].includes(r.status)) {
+        const pase = document.createElement('button');
+        pase.className = 'ev2-button w-full py-2 rounded-lg text-sm font-display';
+        pase.textContent = r.checked_in_at ? t('pass.seeUsed') : t('pass.see');
+        pase.onclick = () => openPass(r);
+        card.appendChild(pase);
       }
 
       if (EV2Booking.canCancel(r)) {
@@ -297,6 +348,10 @@
     loadTables();
   };
   $('btn-book-confirm').onclick = confirm;
+
+  const closePass = () => { $('pass-sheet').hidden = true; };
+  $('btn-pass-close').onclick = closePass;
+  $('pass-sheet').onclick = (e) => { if (e.target === $('pass-sheet')) closePass(); };
 
   EV2Screen.on('enter', (screen) => { ctx = screen; loadMine().catch(() => {}); });
   EV2Screen.on('language', () => { if (ctx) { renderTables(); renderQuote(); renderMine(); } });

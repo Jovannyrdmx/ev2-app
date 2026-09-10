@@ -18,6 +18,7 @@ const { validate, z, uuid } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const events = require('../services/events');
 const door = require('../services/door');
+const QRCode = require('qrcode');
 const seating = require('../services/seating');
 
 const router = express.Router({ mergeParams: true });
@@ -60,6 +61,58 @@ function presentPass(row, check) {
     ok: check.ok,
   };
 }
+
+// ------------------------------------------------------------------ el pase del cliente
+
+/**
+ * El pase que el cliente enseña en la puerta: su código y el QR.
+ *
+ * El QR se dibuja aquí y no en el teléfono a propósito. Un generador en el
+ * navegador serían doscientas líneas de aritmética de Reed-Solomon que nadie va a
+ * revisar, y un QR mal generado no falla: se ve bien y no lee. Aquí lo hace una
+ * librería probada, y el cliente recibe un SVG que puede guardar, imprimir o
+ * enseñar en pantalla.
+ *
+ * Lo puede pedir el dueño de la reservación y el personal de la puerta. Nadie más:
+ * un pase ajeno es una entrada ajena.
+ */
+router.get('/nightclubs/:nightclubId/reservations/:reservationId/pass',
+  validate({ params: z.object({ nightclubId: uuid, reservationId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, reservationId } = req.params;
+    const { rows } = await pool.query(
+      `${PASS_SELECT} WHERE r.id = $1 AND r.nightclub_id = $2`,
+      [reservationId, nightclubId]);
+    if (rows.length === 0) throw ApiError.notFound('Reservación no encontrada');
+    const row = rows[0];
+
+    const esSuyo = row.user_id === req.user.id;
+    const esPersonal = DOOR_ROLES.includes(req.user.role);
+    if (!esSuyo && !esPersonal) throw ApiError.notFound('Reservación no encontrada');
+
+    if (!row.pass_code) throw ApiError.conflict('Esta reservación todavía no tiene pase');
+
+    // El QR lleva el código pelón, no una dirección: así lo lee cualquier lector,
+    // y si el cliente enseña la pantalla apagada el código sigue debajo, escrito.
+    const qr = await QRCode.toString(row.pass_code, {
+      type: 'svg', errorCorrectionLevel: 'M', margin: 1, width: 320,
+      color: { dark: '#000000', light: '#ffffff' },
+    });
+
+    res.json({
+      pass: {
+        code: row.pass_code,
+        qr_svg: qr,
+        guest_name: row.guest_name,
+        table_code: row.table_code,
+        section: row.section,
+        guest_count: row.guest_count,
+        starts_at: row.starts_at,
+        status: row.status,
+        checked_in_at: row.checked_in_at,
+      },
+    });
+  }));
 
 // ------------------------------------------------------------------ leer un pase
 

@@ -4,7 +4,7 @@
  * Conecta el DOM con `EV2` (API y socket), `EV2Staff` (charolas, ocupación, propinas)
  * y `EV2Roles`. Las decisiones viven en `staff-floor.js` y están probadas ahí.
  */
-/* global EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door */
+/* global EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan */
 (function () {
   'use strict';
 
@@ -22,10 +22,20 @@
   const FLOOR_ROLES = ['waiter', 'hostess', 'manager', 'admin'];
   const PASSWORD_GATE_HIDES = ['screen-auth', 'screen-wrong-role', 'screen-floor'];
 
+  // Los covers reales del club (seeds/data/ev2-menu.json). Van aquí y no pedidos al
+  // servidor porque son tres números que cambian una vez al año, y la puerta tiene
+  // que funcionar aunque la pantalla se abra sin señal.
+  const COVERS = [
+    { name: 'COVER', price: 150 },
+    { name: 'COVER S', price: 100 },
+    { name: 'COVER 50', price: 50 },
+  ];
+
   const state = {
     tab: 'trays', orders: [], tables: [], stats: null, tips: [],
     employee: null, currency: 'MXN', realtime: null, busy: new Set(), arrived: new Set(),
     reservations: [], doorSearch: '',
+    doorSummary: null,
   };
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
@@ -169,7 +179,13 @@
         ? get(`/nightclubs/${club}/reservations?limit=200`,
           (d) => { state.reservations = d.reservations || []; })
         : Promise.resolve(),
+      isDoorRole() ? loadDoorSummary() : Promise.resolve(),
     ]);
+    // El botón de la cámara solo aparece si este teléfono de verdad puede leer un
+    // QR. Enseñarlo y que falle al tocarlo es peor que no enseñarlo: en la puerta
+    // eso son diez segundos perdidos con alguien esperando.
+    const camara = $('btn-scan-toggle');
+    if (camara) camara.hidden = !camaraDisponible();
     renderAll();
   }
 
@@ -201,6 +217,216 @@
   const DOOR_ROLES = ['hostess', 'manager', 'admin'];
   const isDoorRole = () => DOOR_ROLES.includes(api.session.user && api.session.user.role);
 
+
+  // ---------------------------------------------------------------- la puerta: leer un pase
+
+  /**
+   * El escáner y la venta de la entrada.
+   *
+   * La cámara es un lujo, no un requisito: `BarcodeDetector` no existe en Safari, y
+   * en la puerta no hay tiempo para descubrirlo. Por eso el botón de la cámara solo
+   * aparece cuando de verdad se puede usar, y el campo del código está siempre
+   * disponible.
+   */
+  const scan = { stream: null, timer: null, last: null };
+
+  const camaraDisponible = () => (
+    typeof window.BarcodeDetector === 'function'
+    && navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function'
+  );
+
+  function pintarResultado(respuesta) {
+    const v = EV2DoorScan.view(respuesta);
+    scan.last = v;
+
+    const caja = $('scan-result');
+    caja.hidden = false;
+    caja.style.background = v.colors.bg;
+    caja.style.border = `1px solid ${v.colors.border}`;
+
+    const titulo = $('scan-headline');
+    titulo.textContent = t(v.headlineKey);
+    titulo.style.color = v.colors.text;
+
+    $('scan-who').textContent = v.guest
+      ? [v.guest, v.table ? t('scan.atTable', { table: v.table }) : null].filter(Boolean).join(' · ')
+      : '';
+
+    const detalle = [];
+    if (v.guestCount) detalle.push(t('scan.people', { count: v.guestCount }));
+    if (v.extras) detalle.push(t('scan.extras', { count: v.extras }));
+    if (v.result === 'already_in' && v.checkedInAt) {
+      detalle.push(t('scan.since', { time: EV2Format.time(v.checkedInAt) }));
+    }
+    if (v.result === 'not_tonight' && v.startsAt) {
+      detalle.push(EV2Format.dateTime(v.startsAt));
+    }
+    // Lo que el cliente pidió al reservar se lee AQUÍ, que es cuando sirve: un
+    // cumpleaños o una silla de ruedas se resuelven en la puerta, no después.
+    if (v.notes) detalle.push(v.notes);
+    $('scan-detail').textContent = detalle.join(' · ');
+
+    // Los extras se cobran contra un pase concreto, así que el botón solo se
+    // enciende cuando hay uno leído.
+    $('btn-sell-extra').disabled = !EV2DoorScan.canSellExtra(v);
+    renderVenta();
+
+    if (v.ok) {
+      toast(t('scan.letIn', { name: v.guest || '' }), 'ok');
+      try { if (navigator.vibrate) navigator.vibrate(120); } catch { /* algunos lo bloquean */ }
+      loadDoorSummary().catch(() => {});
+      loadAll().catch(() => {});
+    }
+  }
+
+  async function leerPase(code) {
+    const limpio = String(code || '').trim();
+    if (limpio.length < 4) return;
+    $('btn-scan-code').disabled = true;
+    try {
+      const data = await api.post(`/nightclubs/${clubId()}/door/check-in`, { code: limpio });
+      pintarResultado(data);
+      $('scan-code').value = '';
+    } catch (err) {
+      showError(err);
+    } finally {
+      $('btn-scan-code').disabled = false;
+    }
+  }
+
+  async function pararCamara() {
+    clearInterval(scan.timer);
+    scan.timer = null;
+    if (scan.stream) {
+      for (const track of scan.stream.getTracks()) track.stop();
+      scan.stream = null;
+    }
+    $('scan-camera').hidden = true;
+    $('btn-scan-toggle').textContent = t('scan.start');
+  }
+
+  async function arrancarCamara() {
+    try {
+      scan.stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }, audio: false,
+      });
+      const video = $('scan-video');
+      video.srcObject = scan.stream;
+      await video.play();
+      $('scan-camera').hidden = false;
+      $('btn-scan-toggle').textContent = t('scan.stop');
+
+      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      let ocupado = false;
+      scan.timer = setInterval(async () => {
+        if (ocupado) return;
+        ocupado = true;
+        try {
+          const codes = await detector.detect(video);
+          if (codes && codes.length) {
+            const valor = codes[0].rawValue;
+            await pararCamara();
+            await leerPase(valor);
+          }
+        } catch { /* un cuadro ilegible no es un error: viene otro en 300ms */ } finally {
+          ocupado = false;
+        }
+      }, 300);
+    } catch {
+      // Permiso negado, sin cámara, o el navegador no deja. Se dice y se sigue
+      // tecleando, que es lo que de verdad no falla.
+      await pararCamara();
+      toast(t('scan.noCamera'), 'error');
+      $('scan-code').focus();
+    }
+  }
+
+  // ---------------------------------------------------------------- vender la entrada
+
+  function renderVenta() {
+    const cantidad = $('sell-qty').value;
+    const precio = $('sell-price').value;
+    $('sell-total').textContent = precio === '' ? '—'
+      : money(EV2DoorScan.total(cantidad, precio), 'MXN');
+  }
+
+  function renderMetodos() {
+    const select = $('sell-method');
+    if (select.dataset.filled === '1') return;
+    for (const m of EV2DoorScan.METHODS) {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = t(EV2DoorScan.methodKey(m));
+      select.appendChild(opt);
+    }
+    select.dataset.filled = '1';
+  }
+
+  /** Los covers reales del club, de un toque: en la puerta nadie teclea 150. */
+  function renderCoversRapidos() {
+    const box = $('sell-quick');
+    if (!box || box.dataset.filled === '1') return;
+    for (const cover of COVERS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'px-2 py-1 rounded-lg text-[11px] card';
+      b.textContent = `${cover.name} · ${EV2Format.money(cover.price, 'MXN')}`;
+      b.onclick = () => { $('sell-price').value = String(cover.price); renderVenta(); };
+      box.appendChild(b);
+    }
+    box.dataset.filled = '1';
+  }
+
+  async function vender(kind) {
+    const error = $('sell-error');
+    error.hidden = true;
+    const reservationId = scan.last ? scan.last.reservationId : null;
+    const problema = EV2DoorScan.sellBlocker(kind, {
+      unitPrice: $('sell-price').value, reservationId,
+    });
+    if (problema) { error.textContent = t(problema); error.hidden = false; return; }
+
+    const body = EV2DoorScan.admissionPayload(kind, {
+      quantity: $('sell-qty').value,
+      unitPrice: $('sell-price').value,
+      method: $('sell-method').value,
+      reservationId,
+    });
+    const boton = kind === 'general' ? $('btn-sell-general') : $('btn-sell-extra');
+    boton.disabled = true;
+    try {
+      const data = await api.post(`/nightclubs/${clubId()}/door/admissions`, body);
+      toast(t('sell.done', { total: money(data.admission.total, data.admission.currency) }), 'ok');
+      $('sell-qty').value = '1';
+      renderVenta();
+      await loadDoorSummary();
+    } catch (err) {
+      error.textContent = EV2Format.errorMessage(err);
+      error.hidden = false;
+    } finally {
+      boton.disabled = kind === 'vip_extra' && !EV2DoorScan.canSellExtra(scan.last);
+    }
+  }
+
+  // ---------------------------------------------------------------- el aforo
+
+  async function loadDoorSummary() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/door/summary`);
+      state.doorSummary = data;
+      renderDoorSummary();
+    } catch { /* el aforo es informativo: si falla, la puerta sigue funcionando */ }
+  }
+
+  function renderDoorSummary() {
+    const s = state.doorSummary;
+    if (!s) return;
+    $('d-inside').textContent = String(s.inside);
+    $('d-general').textContent = String(s.door.generales);
+    $('d-extras').textContent = String(s.door.extras_vip);
+    $('d-taken').textContent = money(s.door.cobrado, s.door.currency);
+  }
+
   function renderAll() {
     // La pestaña de la puerta solo existe para quien recibe en la entrada. Escondida
     // es mejor que deshabilitada: un mesero no tiene por qué preguntarse qué hay ahí.
@@ -214,7 +440,16 @@
     });
     renderTrays();
     renderTables();
-    if (isDoorRole()) renderDoor();
+    if (isDoorRole()) {
+      renderDoor();
+      renderMetodos();
+      renderCoversRapidos();
+      renderVenta();
+      renderDoorSummary();
+    }
+    // La cámara se apaga al salir de la puerta: dejarla prendida en otra pestaña
+    // gasta batería toda la noche y enciende una luz que nadie está mirando.
+    if (state.tab !== 'door' && scan.stream) pararCamara();
     renderMe();
   }
 
@@ -351,6 +586,24 @@
   document.querySelectorAll('[data-tab]').forEach((b) => {
     b.onclick = () => { state.tab = b.dataset.tab; renderAll(); };
   });
+
+  // ---------------------------------------------------------------- puerta: enganches
+
+  $('scan-form').onsubmit = (ev) => {
+    ev.preventDefault();
+    leerPase($('scan-code').value);
+  };
+  // Lo que se teclea se normaliza mientras se escribe: lo que se ve es lo que se manda.
+  $('scan-code').oninput = (ev) => {
+    const input = ev.currentTarget;
+    const limpio = input.value.toUpperCase();
+    if (limpio !== input.value) input.value = limpio;
+  };
+  $('btn-scan-toggle').onclick = () => (scan.stream ? pararCamara() : arrancarCamara());
+  $('btn-sell-general').onclick = () => vender('general');
+  $('btn-sell-extra').onclick = () => vender('vip_extra');
+  $('sell-qty').oninput = renderVenta;
+  $('sell-price').oninput = renderVenta;
 
   function renderTrays() {
     const now = Date.now();

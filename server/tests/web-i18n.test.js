@@ -178,9 +178,9 @@ describe('Qué idioma se usa', () => {
 describe('Traducción de textos', () => {
   it('cambia el texto de verdad al cambiar de idioma', () => {
     const { F } = loadFormat({ stored: 'es' });
-    expect(F.t('map.sit')).toBe('Sentarme aquí');
+    expect(F.t('nav.map')).toBe('Mapa');
     F.setLanguage('en');
-    expect(F.t('map.sit')).toBe('Sit here');
+    expect(F.t('nav.map')).toBe('Map');
   });
 
   it('una clave que no existe no imprime la clave en pantalla', () => {
@@ -190,12 +190,12 @@ describe('Traducción de textos', () => {
 
   it('si al inglés le faltara una clave, cae al español y no al nombre de la clave', () => {
     const { F } = loadFormat({ stored: 'en' });
-    const guardado = F.STRINGS.en['map.sit'];
-    delete F.STRINGS.en['map.sit'];
+    const guardado = F.STRINGS.en['nav.map'];
+    delete F.STRINGS.en['nav.map'];
     try {
-      expect(F.t('map.sit')).toBe('Sentarme aquí');
+      expect(F.t('nav.map')).toBe('Mapa');
     } finally {
-      F.STRINGS.en['map.sit'] = guardado;
+      F.STRINGS.en['nav.map'] = guardado;
     }
   });
 

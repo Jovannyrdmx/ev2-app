@@ -183,6 +183,69 @@
           <div class="stat-card"><div class="stat-number" id="d-guests">—</div><div class="stat-label" data-i18n="door.guests">Personas</div></div>
         </div>
 
+        <!--
+          El escáner. Va arriba de todo porque es lo primero y casi lo único que se
+          usa en la puerta: llega alguien, se lee su pase, entra.
+
+          La cámara puede no estar (un iPhone con Safari no lee QR dentro de una
+          página, y un teléfono viejo tampoco), así que el campo para teclear el
+          código NO es un respaldo escondido: está siempre a la vista. La fila no
+          se puede detener porque un lector no enfocó.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="scan.title">Leer un pase</p>
+            <button id="btn-scan-toggle" class="text-xs px-3 py-1 rounded-full card" data-i18n="scan.start" hidden>Usar la cámara</button>
+          </div>
+
+          <div id="scan-camera" class="rounded-xl overflow-hidden bg-black/60" hidden>
+            <video id="scan-video" class="w-full block" style="max-height:220px;object-fit:cover" muted playsinline></video>
+          </div>
+
+          <form id="scan-form" class="flex gap-2">
+            <input id="scan-code" class="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none font-display tracking-widest uppercase"
+                   maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                   placeholder="EV2-XXXX-XXXX" aria-label="Código del pase">
+            <button type="submit" id="btn-scan-code" class="ev2-button px-5 rounded-xl font-display" data-i18n="scan.check">Entrar</button>
+          </form>
+
+          <!-- El resultado del último pase. Grande: se lee de reojo, con la fila enfrente. -->
+          <div id="scan-result" class="rounded-xl p-3 space-y-1" hidden>
+            <p id="scan-headline" class="font-display text-lg">—</p>
+            <p id="scan-who" class="text-sm">—</p>
+            <p id="scan-detail" class="text-xs text-white/60">—</p>
+          </div>
+        </div>
+
+        <!--
+          Lo que se vende en la entrada. Dos botones y un importe: a esta hora nadie
+          va a llenar un formulario.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="sell.title">Vender entrada</p>
+          <div class="grid grid-cols-3 gap-2">
+            <input id="sell-qty" type="number" min="1" max="50" value="1" class="px-3 py-2 rounded-xl bg-white/5 border border-white/10 outline-none text-center" aria-label="Cuántos">
+            <input id="sell-price" type="number" min="0" step="10" class="px-3 py-2 rounded-xl bg-white/5 border border-white/10 outline-none text-center col-span-2" aria-label="Precio por persona">
+          </div>
+          <div id="sell-quick" class="flex flex-wrap gap-1"></div>
+          <select id="sell-method" class="w-full px-4 py-2 rounded-xl bg-white/5 border border-white/10 outline-none"></select>
+          <div class="grid grid-cols-2 gap-2">
+            <button id="btn-sell-general" class="ev2-button py-3 rounded-xl font-display text-sm" data-i18n="sell.general">Acceso general</button>
+            <button id="btn-sell-extra" class="py-3 rounded-xl font-display text-sm card" data-i18n="sell.extra" disabled>Extra del pase</button>
+          </div>
+          <p id="sell-total" class="text-center font-display text-lg">—</p>
+          <p id="sell-note" class="text-[11px] text-white/40" data-i18n="sell.extraNote">El extra se cobra al pase que acabas de leer.</p>
+          <p id="sell-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
+        <!-- El aforo: cuánta gente hay adentro, separando lo reservado de lo vendido. -->
+        <div class="grid grid-cols-4 gap-2">
+          <div class="stat-card"><div class="stat-number" id="d-inside">—</div><div class="stat-label" data-i18n="door.inside">Adentro</div></div>
+          <div class="stat-card"><div class="stat-number" id="d-general">—</div><div class="stat-label" data-i18n="door.general">General</div></div>
+          <div class="stat-card"><div class="stat-number" id="d-extras">—</div><div class="stat-label" data-i18n="door.extras">Extras</div></div>
+          <div class="stat-card"><div class="stat-number" id="d-taken">—</div><div class="stat-label" data-i18n="door.taken">Cobrado</div></div>
+        </div>
+
         <input id="door-search" type="search" placeholder="Buscar por nombre o mesa" data-i18n-placeholder="door.search"
                class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
 
@@ -219,6 +282,7 @@
 <script src="js/password-gate.js"></script>
 <script src="js/staff-floor.js"></script>
 <script src="js/door.js"></script>
+<script src="js/door-scan.js"></script>
 <script src="js/staff-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

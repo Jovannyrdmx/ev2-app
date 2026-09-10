@@ -236,8 +236,13 @@
             <div class="info-item"><div class="info-label" data-i18n="map.type">Tipo</div><div class="info-value" id="sel-type">—</div></div>
           </div>
           <p id="sel-note" class="text-xs text-white/50 mt-3" hidden></p>
-          <button id="btn-sit" class="ev2-button w-full py-3 rounded-lg mt-3 font-display" disabled>Sentarme aquí</button>
-          <button id="btn-leave" class="w-full py-2 mt-2 text-sm text-red-300 underline" data-i18n="map.leave" hidden>Dejar mi mesa</button>
+          <!--
+            Aquí había un botón para sentarse. Ya no: en este club se entra por la
+            puerta, y es el escaneo del pase lo que sienta a la mesa. El plano
+            quedó para mirar, que es para lo que sirve.
+          -->
+          <p id="sel-hint" class="text-xs text-white/50 mt-3" data-i18n="map.doorOnly">Tu mesa se activa cuando escanean tu pase en la entrada.</p>
+
         </div>
 
         <!--
@@ -696,6 +701,37 @@
       <p class="text-[11px] text-white/40" data-i18n="report.note">Lo revisa el gerente del club. Si es una emergencia, busca al personal: están para eso.</p>
       <p id="report-error" class="text-sm text-red-300" hidden></p>
       <button id="btn-report-send" class="w-full py-3 rounded-xl font-display bg-red-500/90" data-i18n="report.send">Enviar reporte</button>
+    </div>
+  </div>
+
+
+  <!--
+    El pase. Se abre a pantalla completa porque es lo que el cliente le enseña a
+    una persona en la puerta, de noche y con prisa: el QR grande y, debajo, el
+    código escrito para cuando la pantalla está estrellada o el lector no enfoca.
+  -->
+  <div id="pass-sheet" class="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-5" hidden>
+    <div class="w-full max-w-sm rounded-2xl p-5 space-y-4 text-center" style="background:#12121f;border:1px solid rgba(255,255,255,.12)">
+      <div class="flex items-start justify-between gap-3 text-left">
+        <div class="min-w-0">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="pass.title">Tu pase</p>
+          <p id="pass-where" class="font-display text-lg truncate">—</p>
+          <p id="pass-when" class="text-xs text-white/50">—</p>
+        </div>
+        <button id="btn-pass-close" class="text-white/50 px-3" aria-label="Cerrar"><i class="fa-solid fa-xmark text-xl"></i></button>
+      </div>
+
+      <!-- El QR va sobre blanco SIEMPRE: sobre el fondo oscuro del club ningún lector lo lee. -->
+      <div id="pass-qr" class="mx-auto rounded-xl bg-white p-3 w-56 h-56 flex items-center justify-center"></div>
+
+      <div>
+        <p class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="pass.code">Código</p>
+        <p id="pass-code" class="font-display text-2xl tracking-widest select-all">—</p>
+      </div>
+
+      <p id="pass-used" class="text-sm" style="color:var(--ev2-lime)" hidden></p>
+      <p class="text-[11px] text-white/40 leading-snug" data-i18n="pass.note">Enséñalo en la entrada. Sirve una sola vez y solo para esta noche.</p>
+      <p id="pass-error" class="text-sm text-red-300" hidden></p>
     </div>
   </div>
 

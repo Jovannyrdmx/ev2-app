@@ -393,15 +393,20 @@
   const floorName = (floor) => (FLOOR_KEYS[floor]
     ? t(FLOOR_KEYS[floor]) : EV2Map.floorLabel(floor));
 
+  /**
+   * La ficha de la mesa seleccionada. Solo informa.
+   *
+   * Antes esto decidía si se habilitaba el botón de sentarse. Ese botón ya no
+   * existe: en este club se entra por la puerta y es el escaneo del pase lo que
+   * sienta a la mesa. Lo que queda es lo que el cliente sí necesita mirar — cuál
+   * es su mesa, cuántos caben, cuántos hay — y una línea que explique por qué no
+   * puede tocarla.
+   */
   function renderSelection() {
     const table = selectedTable();
-    const sit = $('btn-sit');
-    const leave = $('btn-leave');
     const note = $('sel-note');
-    const mine = Boolean(state.myTable);
+    const hint = $('sel-hint');
     const isMine = Boolean(table && state.myTable && table.id === state.myTable.id);
-
-    leave.hidden = !mine;
 
     if (!table) {
       $('sel-number').textContent = '—';
@@ -409,8 +414,7 @@
       $('sel-capacity').textContent = '—';
       $('sel-type').textContent = '—';
       note.hidden = true;
-      sit.disabled = true;
-      sit.textContent = t('map.sit');
+      hint.hidden = Boolean(state.myTable);
       return;
     }
 
@@ -422,46 +426,19 @@
     if (isMine) {
       note.textContent = t('map.youAreHere');
       note.hidden = false;
-      sit.disabled = true;
-      sit.textContent = t('map.alreadyHere');
+      hint.hidden = true;
       return;
     }
     if (!EV2Map.isFree(table)) {
       note.textContent = t('map.full');
       note.hidden = false;
-      sit.disabled = true;
-      sit.textContent = t('map.unavailable');
+      hint.hidden = true;
       return;
     }
     note.hidden = true;
-    sit.disabled = false;
-    sit.textContent = mine ? t('map.move') : t('map.sit');
+    // Sin mesa propia, se explica cómo se consigue una. Con mesa propia, ya lo sabe.
+    hint.hidden = Boolean(state.myTable);
   }
-
-  $('btn-sit').onclick = async () => {
-    const table = selectedTable();
-    if (!table) return;
-    const button = $('btn-sit');
-    button.disabled = true;
-    try {
-      await api.post(`/nightclubs/${clubId()}/tables/${table.id}/seat`, {});
-      await loadFloor();
-      toast(t('map.seated'), 'ok');
-    } catch (err) {
-      showError(err);
-      renderSelection();
-    }
-  };
-
-  $('btn-leave').onclick = async () => {
-    if (!state.myTable) return;
-    try {
-      await api.post(`/nightclubs/${clubId()}/tables/${state.myTable.id}/release`, {});
-      state.myTable = null;
-      state.selectedId = null;
-      await loadFloor();
-    } catch (err) { showError(err); }
-  };
 
   // ---------------------------------------------------------------- menú y carrito
 

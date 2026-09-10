@@ -11,7 +11,7 @@
  */
 'use strict';
 
-const VERSION = 'ev2-v4';
+const VERSION = 'ev2-v5';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'manifest.json',
@@ -28,6 +28,7 @@ const SHELL = [
   'js/tipping.js', 'js/songs.js', 'js/booking.js', 'js/show-screen.js', 'js/booking-screen.js',
   'js/staff-admin.js', 'js/payouts.js', 'js/shift.js', 'js/door.js',
   'js/flirt.js', 'js/flirt-screen.js', 'js/drink-art.js',
+  'js/door-scan.js',
   'images/favicon-32x32.png', 'images/ev2-logo.svg',
 ];
 
