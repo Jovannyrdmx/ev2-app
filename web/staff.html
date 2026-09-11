@@ -147,7 +147,7 @@
 
     <nav class="flex px-2 pt-3 border-b border-white/10">
       <button data-tab="trays" class="tab active flex-1 py-3 text-sm"><span data-i18n="floor.tabTrays">Por llevar</span><span class="tab-count" id="count-trays">0</span></button>
-      <button data-tab="tables" class="tab flex-1 py-3 text-sm" data-i18n="floor.tabTables">Mesas</button>
+      <button data-tab="tables" class="tab flex-1 py-3 text-sm"><span data-i18n="floor.tabTables">Mesas</span><span class="tab-count" id="count-unpaid" hidden>0</span></button>
       <!-- Solo para la anfitriona y el gerente: es quien recibe en la entrada. -->
       <button data-tab="door" class="tab flex-1 py-3 text-sm" data-i18n="door.tab" hidden>Puerta</button>
       <button data-tab="me" class="tab flex-1 py-3 text-sm" data-i18n="floor.tabMe">Lo mío</button>
@@ -165,7 +165,18 @@
           <div class="stat-card"><div class="stat-number" id="o-free">—</div><div class="stat-label" data-i18n="floor.free">Libres</div></div>
           <div class="stat-card"><div class="stat-number" id="o-guests">—</div><div class="stat-label" data-i18n="floor.guests">Personas</div></div>
         </div>
-        <p class="text-[11px] text-white/40" data-i18n="floor.seatNote">El cliente se sienta desde su propia app.</p>
+        <p class="text-[11px] text-white/40" data-i18n="floor.seatNote">Se entra por la puerta: el pase se lee ahí y la mesa queda ocupada sola.</p>
+
+        <!--
+          Lo que alguien pidió desde su teléfono y todavía no paga. Va arriba de las
+          mesas porque es lo único de esta pestaña que corre prisa: la barra no lo va
+          a preparar hasta que se cobre, y el cliente está esperando su trago.
+        -->
+        <div id="unpaid-block" class="card rounded-xl p-3 space-y-2 border border-amber-400/30" hidden>
+          <p class="text-xs uppercase tracking-wider text-amber-300" data-i18n="take.unpaidTitle">Por cobrar en la mesa</p>
+          <div id="unpaid-list" class="space-y-2"></div>
+        </div>
+
         <div id="tables-list" class="space-y-2"></div>
       </div>
 
@@ -274,6 +285,59 @@
   </section>
 
   <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50" hidden></div>
+
+  <!--
+    ------------------------ LEVANTAR UN PEDIDO ------------------------
+    Se abre desde una mesa. Ocupa toda la pantalla porque se usa de pie, con una mano,
+    en penumbra: la carta arriba, lo que va pidiendo abajo, y el cobro al final sin
+    cambiar de pantalla — si el cobro estuviera en otro lado, alguien lo dejaría para
+    después y ese trago se va sin pagar.
+  -->
+  <div id="take-sheet" class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur flex flex-col" hidden>
+    <header class="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10">
+      <div class="min-w-0">
+        <p id="take-title" class="font-display text-lg truncate">—</p>
+        <p id="take-guest" class="text-xs text-white/50 truncate">—</p>
+      </div>
+      <button id="btn-take-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="take.close">Cerrar</button>
+    </header>
+
+    <!-- A nombre de quién. Solo aparece si hay alguien registrado en esa mesa. -->
+    <div id="take-who" class="px-4 pt-3" hidden>
+      <label class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="take.forWhom">¿De quién es?</label>
+      <select id="take-guest-select" class="w-full mt-1 px-4 py-2 rounded-xl bg-white/5 border border-white/10 outline-none"></select>
+    </div>
+
+    <div class="px-4 pt-3">
+      <input id="take-search" type="search" data-i18n-placeholder="take.search" placeholder="Buscar en la carta"
+             class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+    </div>
+
+    <div id="take-menu" class="flex-1 overflow-y-auto px-4 py-3 space-y-2"></div>
+
+    <!-- El pie: lo pedido, el total y el cobro. Siempre visible. -->
+    <footer class="border-t border-white/10 px-4 py-3 space-y-3 bg-slate-950/95">
+      <div id="take-cart" class="space-y-1 max-h-32 overflow-y-auto"></div>
+      <div class="flex items-center justify-between">
+        <span class="text-sm text-white/60" data-i18n="take.total">Total</span>
+        <span id="take-total" class="font-display text-2xl">—</span>
+      </div>
+
+      <!-- Paso 1: mandar el pedido. Nace debiendo. -->
+      <button id="btn-take-send" class="ev2-button w-full py-4 rounded-xl font-display" data-i18n="take.send" disabled>Levantar pedido</button>
+
+      <!-- Paso 2: cobrarlo. Aparece cuando el pedido ya existe. -->
+      <div id="take-charge" class="space-y-2" hidden>
+        <p class="text-xs text-amber-300" data-i18n="take.mustCharge">El pedido no entra a la barra hasta que se cobre.</p>
+        <select id="take-method" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 outline-none"></select>
+        <input id="take-reference" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 outline-none uppercase"
+               maxlength="60" autocomplete="off" data-i18n-placeholder="take.voucher" placeholder="Folio del voucher" hidden>
+        <button id="btn-take-charge" class="ev2-button w-full py-4 rounded-xl font-display" data-i18n="take.charge">Cobrar</button>
+      </div>
+
+      <p id="take-error" class="text-sm text-red-300" hidden></p>
+    </footer>
+  </div>
 </div>
 
 <script src="js/api.js"></script>
@@ -283,6 +347,9 @@
 <script src="js/staff-floor.js"></script>
 <script src="js/door.js"></script>
 <script src="js/door-scan.js"></script>
+<script src="js/client.js"></script>
+<script src="js/drink-art.js"></script>
+<script src="js/order-taking.js"></script>
 <script src="js/staff-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

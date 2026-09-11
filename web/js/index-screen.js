@@ -555,12 +555,16 @@
     $('orders-list').innerHTML = state.orders.map((o) => {
       const pct = Math.round(EV2Client.orderProgress(o.status) * 100);
       const items = (o.items || []).map((i) => `${i.quantity}× ${escape(i.name || i.drink_name || '')}`).join(', ');
+      // Un pedido sin pagar no lo está preparando nadie. Decirlo aquí evita la espera
+      // más frustrante que hay: la de un trago que nunca se empezó a servir.
+      const porPagar = o.payment_status === 'pending' || o.payment_status === 'pending_manual';
       return `
       <div class="card rounded-xl p-3">
         <div class="flex justify-between items-start">
           <div>
             <p class="font-semibold">${EV2Client.orderLabel(o.status, lang)}</p>
             <p class="text-xs text-white/50">${items}</p>
+            ${porPagar ? `<p class="text-xs text-amber-300 mt-1">${escape(t('orders.awaitingPayment'))}</p>` : ''}
           </div>
           <p class="text-sm">${money(o.total, o.currency)}</p>
         </div>

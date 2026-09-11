@@ -4,7 +4,8 @@
  * Conecta el DOM con `EV2` (API y socket), `EV2Staff` (charolas, ocupación, propinas)
  * y `EV2Roles`. Las decisiones viven en `staff-floor.js` y están probadas ahí.
  */
-/* global EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan */
+/* global EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan,
+          EV2Client, EV2DrinkArt, EV2OrderTaking */
 (function () {
   'use strict';
 
@@ -36,6 +37,11 @@
     employee: null, currency: 'MXN', realtime: null, busy: new Set(), arrived: new Set(),
     reservations: [], doorSearch: '',
     doorSummary: null,
+    drinks: [],
+    // Lo que el mesero está levantando ahora mismo. `order` se llena cuando el pedido
+    // ya existe en el servidor y solo falta cobrarlo: mientras esté ahí, cerrar la hoja
+    // no borra el cobro pendiente, queda en la lista de "por cobrar".
+    take: { open: false, table: null, guestId: null, cart: null, order: null, search: '', sending: false },
   };
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
@@ -587,6 +593,18 @@
     b.onclick = () => { state.tab = b.dataset.tab; renderAll(); };
   });
 
+  // ------------------------------------------------- levantar pedido: enganches
+
+  $('btn-take-close').onclick = closeTake;
+  $('btn-take-send').onclick = sendTake;
+  $('btn-take-charge').onclick = chargeTake;
+  $('take-method').onchange = onMethodChange;
+  $('take-search').oninput = (ev) => { state.take.search = ev.target.value; renderTake(); };
+  $('take-guest-select').onchange = (ev) => {
+    state.take.guestId = ev.target.value || null;
+    renderTake();
+  };
+
   // ---------------------------------------------------------------- puerta: enganches
 
   $('scan-form').onsubmit = (ev) => {
@@ -675,30 +693,284 @@
     $('o-free').textContent = o.free;
     $('o-guests').textContent = o.guests;
 
-    const seated = state.tables.filter((table) => (table.occupants || []).length > 0);
-    $('tables-list').innerHTML = seated.map((table) => `
+    renderUnpaid();
+
+    // TODAS las mesas que se pueden atender, no solo las que tienen gente registrada:
+    // el cliente de general no está en la app y aun así hay que poder pedirle.
+    const mesas = EV2OrderTaking.servableTables(state.tables);
+    $('tables-list').innerHTML = mesas.map((table) => `
       <div class="card rounded-xl p-3" data-table="${escape(table.id)}">
         <div class="flex justify-between items-center gap-2">
           <div class="min-w-0">
-            <p class="font-display">${escape(t('floor.tableShort'))} ${escape(table.table_number || table.code)}
-              <span class="text-xs text-white/40">${escape(table.section || '')}</span></p>
-            <p class="text-xs text-white/60">${escape((table.occupants || []).map((g) => g.display_name || '—').join(', '))}</p>
+            <p class="font-display">${escape(t('floor.tableShort'))} ${escape(table.code)}
+              <span class="text-xs text-white/40">${escape(table.section)}</span></p>
+            <p class="text-xs text-white/60">${table.guests.length
+    ? escape(table.guests.map((g) => g.name || '—').join(', '))
+    : escape(t('take.noGuests'))}</p>
           </div>
-          <span class="pill pill-wait flex-none">${(table.occupants || []).length}/${table.capacity}</span>
+          <span class="pill ${table.guests.length ? 'pill-wait' : ''} flex-none">${table.guests.length}/${table.capacity}</span>
         </div>
         <div class="flex flex-wrap gap-2 mt-2">
-          ${(table.occupants || []).map((g) => `
-            <button class="card rounded-lg px-3 py-2 text-xs text-red-300" data-release="${escape(g.user_id)}">
-              ${escape(t('floor.release'))}: ${escape(g.display_name || '—')}
+          <button class="ev2-button rounded-lg px-3 py-2 text-xs font-display" data-take="1">
+            ${escape(t('take.open'))}
+          </button>
+          ${table.guests.map((g) => `
+            <button class="card rounded-lg px-3 py-2 text-xs text-red-300" data-release="${escape(g.id)}">
+              ${escape(t('floor.release'))}: ${escape(g.name || '—')}
             </button>`).join('')}
         </div>
       </div>`).join('');
 
     $('tables-list').querySelectorAll('[data-table]').forEach((el) => {
+      const mesa = mesas.find((m) => m.id === el.dataset.table);
       el.querySelectorAll('[data-release]').forEach((b) => {
         b.onclick = () => releaseGuest(el.dataset.table, b.dataset.release);
       });
+      const abrir = el.querySelector('[data-take]');
+      if (abrir) abrir.onclick = () => openTake(mesa);
     });
+  }
+
+  /**
+   * Lo que alguien pidió desde su teléfono y sigue sin pagar. La barra no lo va a
+   * preparar, así que si nadie lo cobra, el cliente espera un trago que nunca se hizo.
+   */
+  function renderUnpaid() {
+    const pendientes = EV2OrderTaking.awaitingPayment(state.orders);
+    $('unpaid-block').hidden = pendientes.length === 0;
+    // También en la pestaña: si no se ve desde "Por llevar", nadie va a cobrarlo.
+    $('count-unpaid').textContent = String(pendientes.length);
+    $('count-unpaid').hidden = pendientes.length === 0;
+    $('unpaid-list').innerHTML = pendientes.map((order) => `
+      <div class="flex items-center justify-between gap-2" data-unpaid="${escape(order.id)}">
+        <div class="min-w-0">
+          <p class="text-sm truncate">${escape(order.sender_name || '—')}
+            <span class="text-white/40">${order.table_code ? escape(`· ${t('floor.tableShort')} ${order.table_code}`) : ''}</span></p>
+          <p class="text-xs text-white/50 truncate">${escape((order.items || []).map((i) => `${i.quantity}× ${i.name}`).join(', '))}</p>
+        </div>
+        <button class="ev2-button rounded-lg px-3 py-2 text-xs font-display flex-none">
+          ${escape(money(order.subtotal, order.currency))}
+        </button>
+      </div>`).join('');
+
+    $('unpaid-list').querySelectorAll('[data-unpaid]').forEach((el) => {
+      const order = pendientes.find((o) => o.id === el.dataset.unpaid);
+      el.querySelector('button').onclick = () => openCharge(order);
+    });
+  }
+
+
+  // ---------------------------------------------------------------------------
+  // Levantar el pedido en la mesa y cobrarlo ahí mismo.
+  //
+  // Son dos pasos y en ese orden a propósito: primero existe el pedido (con su cobro
+  // pendiente), después se cobra. Si se hiciera al revés —cobrar y luego crear— un
+  // fallo de red dejaría dinero recibido sin nada que lo respalde.
+  // ---------------------------------------------------------------------------
+
+  async function loadDrinks() {
+    if (state.drinks.length > 0) return;
+    try {
+      const d = await api.get(`/nightclubs/${clubId()}/drinks`);
+      state.drinks = d.drinks || [];
+    } catch (err) { showError(err); }
+  }
+
+  async function openTake(table) {
+    if (!table) return;
+    state.take = {
+      open: true, table, guestId: table.guests.length === 1 ? table.guests[0].id : null,
+      cart: EV2Client.createCart(), order: null, search: '', sending: false,
+    };
+    $('take-sheet').hidden = false;
+    $('take-search').value = '';
+    $('take-reference').value = '';
+    renderTakeMethods();
+    renderTake();
+    await loadDrinks();
+    renderTake();
+  }
+
+  /** Abre la hoja directamente en el cobro, para un pedido que ya existe. */
+  function openCharge(order) {
+    if (!order) return;
+    const table = EV2OrderTaking.servableTables(state.tables)
+      .find((m) => m.id === order.table_id) || null;
+    state.take = {
+      open: true, table, guestId: order.sender_id || null,
+      cart: EV2Client.createCart(), order, search: '', sending: false,
+    };
+    $('take-sheet').hidden = false;
+    $('take-reference').value = '';
+    renderTakeMethods();
+    renderTake();
+  }
+
+  function closeTake() {
+    state.take.open = false;
+    $('take-sheet').hidden = true;
+    $('take-error').hidden = true;
+  }
+
+  function renderTakeMethods() {
+    const sel = $('take-method');
+    sel.innerHTML = EV2OrderTaking.methodKeys()
+      .map((k) => `<option value="${escape(k)}">${escape(t(`take.method.${k}`))}</option>`).join('');
+    onMethodChange();
+  }
+
+  function onMethodChange() {
+    const method = EV2OrderTaking.methodFor($('take-method').value);
+    $('take-reference').hidden = !(method && method.requiresReference);
+  }
+
+  function takeMenu() {
+    const q = clave(state.take.search);
+    return state.drinks
+      .filter((d) => d.available !== false)
+      .filter((d) => !q || clave(d.name).includes(q) || clave(d.category || '').includes(q))
+      .slice(0, 60);
+  }
+
+  /** Sin acentos y en mayúsculas: en la carta real hay "Piña" y nadie teclea la tilde. */
+  function clave(texto) {
+    return String(texto == null ? '' : texto)
+      .normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().trim();
+  }
+
+  function takeThumb(drink) {
+    const art = EV2DrinkArt.artFor(drink);
+    const caja = 'w-10 h-10 rounded-lg shrink-0 flex items-center justify-center overflow-hidden';
+    if (art.type === 'photo') {
+      return `<img src="${escape(art.url)}" alt="" loading="lazy" class="${caja} object-cover">`;
+    }
+    return `<div class="${caja}" style="background:rgba(255,255,255,.05)">${EV2DrinkArt.svgFor(drink, 28)}</div>`;
+  }
+
+  function renderTake() {
+    const take = state.take;
+    if (!take.open) return;
+    const mesa = take.table;
+    $('take-title').textContent = mesa
+      ? `${t('floor.tableShort')} ${mesa.code}` : t('take.noTable');
+
+    // A nombre de quién. Con nadie registrado en la mesa el cobro queda a nombre del
+    // mesero, y la pantalla lo dice en lugar de dejarlo en blanco.
+    const guests = (mesa && mesa.guests) || [];
+    $('take-who').hidden = guests.length === 0;
+    if (guests.length > 0) {
+      const sel = $('take-guest-select');
+      sel.innerHTML = [`<option value="">${escape(t('take.onMyName'))}</option>`]
+        .concat(guests.map((g) => `<option value="${escape(g.id)}"${g.id === take.guestId ? ' selected' : ''}>${escape(g.name || '—')}</option>`))
+        .join('');
+    }
+    $('take-guest').textContent = take.guestId
+      ? (guests.find((g) => g.id === take.guestId) || {}).name || ''
+      : t('take.onMyNameNote');
+
+    // Con el pedido ya creado, la carta deja de importar: lo que falta es cobrar.
+    const cobrando = Boolean(take.order);
+    $('take-menu').hidden = cobrando;
+    $('take-search').parentElement.hidden = cobrando;
+    $('btn-take-send').hidden = cobrando;
+    $('take-charge').hidden = !cobrando;
+
+    if (!cobrando) {
+      $('take-menu').innerHTML = takeMenu().map((drink) => `
+        <div class="card rounded-xl p-2 flex items-center gap-3" data-drink="${escape(drink.id)}">
+          ${takeThumb(drink)}
+          <div class="min-w-0 flex-1">
+            <p class="text-sm truncate">${escape(drink.name)}</p>
+            <p class="text-xs text-white/50">${escape(money(drink.price, drink.currency))}</p>
+          </div>
+          <div class="flex items-center gap-2 flex-none">
+            <button class="card rounded-lg w-9 h-9 text-lg" data-minus="1" aria-label="-">−</button>
+            <span class="w-5 text-center text-sm">${take.cart.quantityOf(drink.id)}</span>
+            <button class="ev2-button rounded-lg w-9 h-9 text-lg font-display" data-plus="1" aria-label="+">+</button>
+          </div>
+        </div>`).join('');
+
+      $('take-menu').querySelectorAll('[data-drink]').forEach((el) => {
+        const drink = state.drinks.find((d) => d.id === el.dataset.drink);
+        el.querySelector('[data-plus]').onclick = () => { take.cart.add(drink); renderTake(); };
+        el.querySelector('[data-minus]').onclick = () => { take.cart.remove(drink.id); renderTake(); };
+      });
+    }
+
+    const lines = cobrando ? (take.order.items || []).map((i) => ({
+      name: i.name, quantity: i.quantity, subtotal: null,
+    })) : take.cart.lines.map((l) => ({
+      name: l.drink.name, quantity: l.quantity, subtotal: l.subtotal,
+    }));
+    $('take-cart').innerHTML = lines.map((l) => `
+      <div class="flex justify-between text-xs">
+        <span class="truncate">${l.quantity}× ${escape(l.name)}</span>
+        ${l.subtotal === null ? '' : `<span class="text-white/60">${escape(money(l.subtotal))}</span>`}
+      </div>`).join('');
+
+    $('take-total').textContent = cobrando
+      ? money(take.order.subtotal, take.order.currency)
+      : money(take.cart.total, take.cart.currency);
+
+    $('btn-take-send').disabled = take.sending
+      || EV2OrderTaking.orderBlocker({ tableId: mesa && mesa.id, cart: take.cart.lines }) !== null;
+  }
+
+  function takeError(key) {
+    const el = $('take-error');
+    if (!key) { el.hidden = true; return; }
+    el.textContent = t(key);
+    el.hidden = false;
+  }
+
+  async function sendTake() {
+    const take = state.take;
+    const mesa = take.table;
+    const blocker = EV2OrderTaking.orderBlocker({ tableId: mesa && mesa.id, cart: take.cart.lines });
+    if (blocker) { takeError(`take.blocked.${blocker}`); return; }
+
+    take.sending = true;
+    renderTake();
+    try {
+      const body = EV2OrderTaking.orderPayload({
+        tableId: mesa.id,
+        guestId: take.guestId,
+        cart: take.cart.lines,
+        // La misma clave si hay que reintentar: el servidor devuelve el mismo pedido
+        // en vez de crear otro. Regenerarla en el catch es como se cobra dos veces.
+        requestId: take.cart.requestKey(EV2.uuid),
+      });
+      const res = await api.post(`/nightclubs/${clubId()}/orders`, body);
+      take.order = res.order;
+      takeError(null);
+      await loadOrders();
+    } catch (err) {
+      showError(err);
+    } finally {
+      take.sending = false;
+      renderTake();
+    }
+  }
+
+  async function chargeTake() {
+    const take = state.take;
+    const method = $('take-method').value;
+    const reference = $('take-reference').value;
+    const blocker = EV2OrderTaking.chargeBlocker({ order: take.order, method, reference });
+    if (blocker) { takeError(`take.blocked.${blocker}`); return; }
+
+    take.sending = true;
+    try {
+      await api.post(`/nightclubs/${clubId()}/manual-payments/register`,
+        EV2OrderTaking.chargePayload({ order: take.order, method, reference }));
+      toast(t('take.charged'), 'ok');
+      closeTake();
+      await Promise.all([loadOrders(), loadTables()]);
+    } catch (err) {
+      showError(err);
+    } finally {
+      take.sending = false;
+    }
   }
 
   async function releaseGuest(tableId, userId) {
