@@ -60,7 +60,7 @@ describe('Carga del plano real', () => {
     await loadFloorPlan({ slug: 'ev2' });
     const table = await pool.query(
       `SELECT id FROM tables WHERE nightclub_id = $1 AND code = 'VE16'`, [club.id]);
-    await api().post(url(`/tables/${table.rows[0].id}/seat`)).set(auth(guest));
+    await api().post(url(`/tables/${table.rows[0].id}/seat`)).set(auth(manager)).send({ user_id: guest.id });
 
     await loadFloorPlan({ slug: 'ev2' });
 
@@ -127,7 +127,7 @@ describe('GET /floor-plan', () => {
 
   it('refleja quién está sentado', async () => {
     const table = await pool.query(`SELECT id FROM tables WHERE code = '39' AND nightclub_id = $1`, [club.id]);
-    await api().post(url(`/tables/${table.rows[0].id}/seat`)).set(auth(guest));
+    await api().post(url(`/tables/${table.rows[0].id}/seat`)).set(auth(manager)).send({ user_id: guest.id });
 
     const res = await api().get(url('/floor-plan')).set(auth(guest));
     const t39 = res.body.tables.find((t) => t.code === '39');
@@ -164,7 +164,7 @@ describe('GET /tables/stats', () => {
     const vip = await pool.query(
       `SELECT id FROM tables WHERE nightclub_id = $1 AND section = 'VIP ELEVADO' ORDER BY code LIMIT 1`,
       [club.id]);
-    await api().post(url(`/tables/${vip.rows[0].id}/seat`)).set(auth(guest));
+    await api().post(url(`/tables/${vip.rows[0].id}/seat`)).set(auth(manager)).send({ user_id: guest.id });
 
     const res = await api().get(url('/tables/stats')).set(auth(manager));
     const zona = res.body.floors.find((f2) => f2.floor === 'baja')

@@ -18,7 +18,10 @@ const paymentConfig = require('../config/payments');
 const router = express.Router({ mergeParams: true });
 
 const method = z.enum(payments.METHODS);
-const STAFF_ROLES = ['hostess', 'manager'];
+// Who may take money for the club. The waiter is on this list because the table is
+// where most of it is taken: an order is charged the moment it is placed, and he is
+// the one standing there with the terminal.
+const STAFF_ROLES = ['hostess', 'waiter', 'bartender', 'manager'];
 
 function isManager(user) {
   return user.role === 'manager' || user.role === 'admin';
@@ -382,7 +385,7 @@ router.post('/nightclubs/:nightclubId/manual-payments/:paymentId/confirm',
         throw ApiError.conflict(`El pago ya está '${payment.status}'`);
       }
 
-      const { tx, reservation } = await payments.settle(client, {
+      const { tx, reservation, order } = await payments.settle(client, {
         payment, reviewerId: req.user.id, nightclubId,
       });
       await client.query(
@@ -390,7 +393,7 @@ router.post('/nightclubs/:nightclubId/manual-payments/:paymentId/confirm',
                 updated_at = now()
           WHERE id = $1`, [payment.id, req.user.id]);
       await client.query('COMMIT');
-      outcome = { payment, tx, reservation };
+      outcome = { payment, tx, reservation, order };
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       throw err;
@@ -465,8 +468,18 @@ router.post('/nightclubs/:nightclubId/manual-payments/register',
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
     const b = req.body;
+    // This route confirms in one step, with no second pair of eyes, so it only accepts
+    // what is settled on the spot: money in hand, or a voucher the bank already
+    // approved. A transfer still goes through the manager, who has the statement in
+    // front of him -- otherwise anyone on shift could clear a payment nobody sent.
+    if (!payments.ON_THE_SPOT_METHODS.includes(b.method)) {
+      throw ApiError.unprocessable(
+        'Aquí solo se registra lo que ya está cobrado: efectivo o terminal. '
+        + 'Una transferencia la confirma el gerente contra el estado de cuenta.',
+        { allowed: payments.ON_THE_SPOT_METHODS });
+    }
     if (!payments.CASH_METHODS.includes(b.method) && !b.reference) {
-      throw ApiError.unprocessable('Captura el folio o la referencia de la transferencia');
+      throw ApiError.unprocessable('Captura el folio del voucher de la terminal');
     }
 
     const client = await pool.connect();

@@ -25,10 +25,16 @@ const TRANSITIONS = {
 
 const { createOrder, ORDER_SELECT } = require('../services/orders');
 
+const STAFF_ROLES = ['bartender', 'waiter', 'manager', 'admin'];
+const TAKING_ROLES = ['waiter', 'bartender', 'manager', 'admin'];
+
 const createSchema = z.object({
   client_request_id: uuid,
   table_id: uuid.optional(),
   recipient_id: uuid.optional(),
+  // Only staff may send this: the waiter standing at the table says who he is serving,
+  // so the charge lands on the guest and not on the waiter's own name.
+  on_behalf_of: uuid.optional(),
   message: z.string().trim().max(280).optional(),
   items: z.array(z.object({
     drink_id: uuid,
@@ -36,6 +42,45 @@ const createSchema = z.object({
     notes: z.string().trim().max(120).optional(),
   })).min(1).max(20),
 });
+
+/**
+ * Who the order is for, and who took it.
+ *
+ * A guest ordering from their own phone is both. A waiter is neither: he is the one
+ * holding the tray. When he names the guest he is serving, the charge is the guest's;
+ * when the guest is not registered in the app -- most of general admission -- the
+ * charge stays on the waiter, because he is the one who took the money and the one the
+ * cut at closing will ask about. What is never true is that nobody owes it.
+ */
+async function resolveParties(client, { req, nightclubId, tableId }) {
+  const isStaff = STAFF_ROLES.includes(req.user.role);
+  const onBehalfOf = req.body.on_behalf_of;
+
+  if (!isStaff) {
+    if (onBehalfOf) throw ApiError.forbidden('Solo el personal levanta pedidos para otra persona');
+    return { senderId: req.user.id, takenBy: null };
+  }
+  if (!TAKING_ROLES.includes(req.user.role)) {
+    throw ApiError.forbidden('Este rol no levanta pedidos');
+  }
+  if (!onBehalfOf) return { senderId: req.user.id, takenBy: req.user.id };
+
+  const guest = await client.query(
+    `SELECT u.id FROM users u WHERE u.id = $1 AND u.nightclub_id = $2 AND u.status = 'active'`,
+    [onBehalfOf, nightclubId]);
+  if (guest.rowCount === 0) throw ApiError.notFound('Esa persona no existe en el club');
+
+  // The guest has to actually be at the table the waiter says he is serving. Without
+  // this, a mistyped id charges a drink to somebody sitting across the room.
+  if (tableId) {
+    const seated = await client.query(
+      `SELECT 1 FROM table_occupants
+        WHERE table_id = $1 AND user_id = $2 AND left_at IS NULL`,
+      [tableId, onBehalfOf]);
+    if (seated.rowCount === 0) throw ApiError.unprocessable('Esa persona no está en esa mesa');
+  }
+  return { senderId: onBehalfOf, takenBy: req.user.id };
+}
 
 router.post('/nightclubs/:nightclubId/orders',
   validate({ params: z.object({ nightclubId: uuid }), body: createSchema }),
@@ -68,11 +113,14 @@ router.post('/nightclubs/:nightclubId/orders',
         if (blocked.rowCount > 0) throw ApiError.forbidden('You cannot send drinks to this user');
       }
 
+      const parties = await resolveParties(client, { req, nightclubId, tableId: b.table_id });
+
       let order;
       try {
         order = await createOrder({
-          client, nightclubId, senderId: req.user.id, recipientId: b.recipient_id,
-          tableId: b.table_id, message: b.message, items: b.items, clientRequestId: b.client_request_id,
+          client, nightclubId, senderId: parties.senderId, recipientId: b.recipient_id,
+          tableId: b.table_id, takenBy: parties.takenBy, message: b.message, items: b.items,
+          clientRequestId: b.client_request_id,
         });
       } catch (err) {
         // Concurrent request with the same idempotency key.
@@ -95,9 +143,12 @@ router.post('/nightclubs/:nightclubId/orders',
         // mientras los tragos se calentaban en la barra.
         audience: {
           roles: ['bartender', 'waiter', 'manager'],
-          userIds: [req.user.id, b.recipient_id].filter(Boolean),
+          userIds: [req.user.id, parties.senderId, b.recipient_id].filter(Boolean),
         },
-        payload: { order_id: order.id, table_id: b.table_id || null, subtotal, currency: orderCurrency },
+        payload: {
+          order_id: order.id, table_id: b.table_id || null, subtotal, currency: orderCurrency,
+          transaction_id: order.transactionId, awaiting_payment: Boolean(order.transactionId),
+        },
       });
 
       await client.query('COMMIT');
@@ -182,10 +233,17 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
     const staffRoles = ['bartender', 'waiter', 'manager', 'admin'];
 
     const client = await pool.connect();
+    let refundDue = false;
     try {
       await client.query('BEGIN');
       const cur = await client.query(
-        'SELECT id, status, sender_id, recipient_id FROM drink_orders WHERE id = $1 AND nightclub_id = $2 FOR UPDATE',
+        `SELECT o.id, o.status, o.sender_id, o.recipient_id,
+                tx.id AS transaction_id, tx.status AS payment_status
+           FROM drink_orders o
+           LEFT JOIN transactions tx
+                  ON tx.reference_type = 'drink_order' AND tx.reference_id = o.id
+          WHERE o.id = $1 AND o.nightclub_id = $2
+          FOR UPDATE OF o`,
         [orderId, nightclubId],
       );
       if (cur.rowCount === 0) throw ApiError.notFound('Order not found');
@@ -206,6 +264,16 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
       if (!TRANSITIONS[order.status].includes(next)) {
         throw ApiError.conflict(`Cannot go from '${order.status}' to '${next}'`,
           { allowed: TRANSITIONS[order.status] });
+      }
+
+      // The bar does not pour on credit. Confirming is what sends the ticket to the
+      // bar, so that is where the charge is checked -- once, in the one place every
+      // path goes through, instead of trusting each screen to remember.
+      if (next === 'confirmed' && order.transaction_id && order.payment_status !== 'paid') {
+        throw ApiError.conflict('Ese pedido todavía no está pagado', {
+          transaction_id: order.transaction_id,
+          payment_status: order.payment_status,
+        });
       }
 
       const stamp = TIMESTAMP_FOR[next];
@@ -229,12 +297,31 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
             WHERE i.drink_id = s.drink_id`,
           [orderId],
         );
+        // ...and closes the charge, but only while it is still unpaid. Money already
+        // received is never erased from the ledger: that is a refund, with its own
+        // entry and its own signature (step 3.7), not a row quietly turned off.
+        //
+        // A paid order still cancels -- the bar ran out, the bottle broke, and refusing
+        // would leave the staff stuck with a drink they cannot serve. What it does not
+        // do is pretend the money came back. The charge stays `paid` and the event says
+        // a refund is owed, so it lands in front of the manager instead of evaporating.
+        if (order.transaction_id) {
+          await client.query(
+            `UPDATE transactions SET status = 'cancelled', updated_at = now()
+              WHERE id = $1 AND status IN ('pending','pending_manual')`,
+            [order.transaction_id]);
+        }
+        refundDue = order.payment_status === 'paid';
       }
 
       await events.publish({
         nightclubId, type: `order_${next}`, client,
         audience: { roles: ['bartender', 'waiter', 'manager'], userIds: [order.sender_id] },
-        payload: { order_id: orderId, status: next, reason: req.body.reason || null },
+        payload: {
+          order_id: orderId, status: next, reason: req.body.reason || null,
+          transaction_id: order.transaction_id || null,
+          refund_due: refundDue,
+        },
       });
       await client.query('COMMIT');
       res.json({ order: rows[0] });

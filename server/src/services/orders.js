@@ -14,12 +14,20 @@ const ORDER_SELECT = `
          o.table_id, t.code AS table_code,
          o.sender_id, su.display_name AS sender_name,
          o.recipient_id, ru.display_name AS recipient_name,
+         o.taken_by, wu.display_name AS taken_by_name,
          o.bartender_id, o.returned_to_sender, o.returned_at,
+         tx.id AS transaction_id,
+         -- 'not_required' is not a ledger status: it is the honest answer for an order
+         -- that costs nothing (a zero-price item), which has no charge to wait for.
+         COALESCE(tx.status, 'not_required') AS payment_status,
          COALESCE(items.items, '[]'::json) AS items
     FROM drink_orders o
     LEFT JOIN tables t ON t.id = o.table_id
     LEFT JOIN users su ON su.id = o.sender_id
     LEFT JOIN users ru ON ru.id = o.recipient_id
+    LEFT JOIN users wu ON wu.id = o.taken_by
+    LEFT JOIN transactions tx
+           ON tx.reference_type = 'drink_order' AND tx.reference_id = o.id
     LEFT JOIN LATERAL (
       SELECT json_agg(json_build_object(
                'drink_id', oi.drink_id, 'name', d.name, 'quantity', oi.quantity,
@@ -37,12 +45,16 @@ const ORDER_SELECT = `
  * @param {string} p.senderId      who pays
  * @param {string} [p.recipientId] who receives (gifts)
  * @param {string} [p.tableId]     where it is delivered
+ * @param {string} [p.takenBy]     the waiter who took it; absent when the guest ordered
  * @param {string} [p.message]
  * @param {Array}  p.items         [{ drink_id, quantity, notes? }]
  * @param {string} p.clientRequestId
- * @returns {{ id, subtotal: number, currency: string }}
+ * @param {string} [p.chargeType]     ledger type; 'drink_order' unless it is a bottle
+ * @param {object} [p.chargeMetadata] extra ledger context (a gift, who it is for)
+ * @returns {{ id, subtotal: number, currency: string, transactionId: string|null }}
  */
-async function createOrder({ client, nightclubId, senderId, recipientId, tableId, message, items, clientRequestId }) {
+async function createOrder({ client, nightclubId, senderId, recipientId, tableId, takenBy,
+  message, items, clientRequestId, chargeType, chargeMetadata }) {
   if (tableId) {
     const t = await client.query('SELECT id FROM tables WHERE id = $1 AND nightclub_id = $2 AND active',
       [tableId, nightclubId]);
@@ -89,10 +101,10 @@ async function createOrder({ client, nightclubId, senderId, recipientId, tableId
   subtotal = Number(subtotal.toFixed(2));
 
   const created = await client.query(
-    `INSERT INTO drink_orders (nightclub_id, sender_id, recipient_id, table_id, message,
+    `INSERT INTO drink_orders (nightclub_id, sender_id, recipient_id, table_id, taken_by, message,
                                subtotal, currency, client_request_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-    [nightclubId, senderId, recipientId || null, tableId || null, message || null,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+    [nightclubId, senderId, recipientId || null, tableId || null, takenBy || null, message || null,
       subtotal.toFixed(2), currency, clientRequestId],
   );
   const order = created.rows[0];
@@ -109,7 +121,28 @@ async function createOrder({ client, nightclubId, senderId, recipientId, tableId
       [id, qty]);
   }
 
-  return { id: order.id, subtotal, currency, drinks: drinks.rows };
+  // The charge. An order that nobody has paid for is not a ticket for the bar: it is a
+  // debt, and it stays one until someone hands over money. Creating it here, inside the
+  // caller's transaction, is what makes "the order exists but the charge does not"
+  // impossible -- the state that let drinks walk out unpaid.
+  //
+  // `client_request_id` is the order's own: the ledger rejects a duplicate before the
+  // same order can grow a second charge.
+  let transactionId = null;
+  if (subtotal > 0) {
+    const charge = await client.query(
+      `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status,
+                                 payer_user_id, provider, reference_type, reference_id,
+                                 client_request_id, metadata)
+       VALUES ($1,$2,'in',$3,$4,'pending',$5,'manual','drink_order',$6,$7,$8)
+       RETURNING id`,
+      [nightclubId, chargeType || 'drink_order', subtotal.toFixed(2), currency, senderId,
+        order.id, clientRequestId, JSON.stringify(chargeMetadata || {})],
+    );
+    transactionId = charge.rows[0].id;
+  }
+
+  return { id: order.id, subtotal, currency, drinks: drinks.rows, transactionId };
 }
 
 module.exports = { createOrder, ORDER_SELECT };

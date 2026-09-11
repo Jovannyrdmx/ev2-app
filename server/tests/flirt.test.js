@@ -37,7 +37,26 @@ beforeEach(async () => {
 });
 
 const url = (p) => `/api/nightclubs/${club.id}${p}`;
-const seat = (user, table) => api().post(url(`/tables/${table.id}/seat`)).set(auth(user));
+// Sentar es cosa del personal desde que la entrada se controla en la puerta: el
+// cliente ya no se sienta solo. Conecta sigue dependiendo de estar sentado.
+const seat = (user, table) => api().post(url(`/tables/${table.id}/seat`))
+  .set(auth(manager)).send({ user_id: user.id });
+
+/**
+ * Cobra el pedido de una invitación. Desde que cada pedido nace con su cobro, la barra
+ * no lo prepara hasta que alguien paga — y en una invitación paga quien la manda.
+ */
+async function payOrder(orderId) {
+  const { rows } = await pool.query(
+    `SELECT id, amount::text AS amount, currency FROM transactions
+      WHERE reference_type = 'drink_order' AND reference_id = $1`, [orderId]);
+  return api().post(url('/manual-payments/register')).set(auth(waiter)).send({
+    transaction_id: rows[0].id,
+    method: 'cash',
+    amount: Number(rows[0].amount),
+    currency: rows[0].currency,
+  });
+}
 const prefs = (user, body) => api().put('/api/me/preferences').set(auth(user)).send(body);
 
 const send = (from, to, over = {}) => api().post(url('/flirts')).set(auth(from)).send({
@@ -251,7 +270,8 @@ describe('Invitar trago o botella', () => {
 
   it('si el receptor lo rechaza, el pedido vuelve a la mesa del emisor y no se reembolsa', async () => {
     const res = await gift();
-    await api().post(url(`/orders/${res.body.flirt.drink_order_id}/status`)).set(auth(bartender)).send({ status: 'confirmed' });
+    // Pagarlo es lo que lo manda a la barra.
+    expect((await payOrder(res.body.flirt.drink_order_id)).status).toBe(201);
 
     const declined = await react(res.body.flirt.id, beto, 'not_interested');
     expect(declined.status).toBe(200);
@@ -262,8 +282,9 @@ describe('Invitar trago o botella', () => {
     expect(order.returned_at).toBeTruthy();
     expect(order.message).toMatch(/devolver a mesa 5/);
 
-    const ledger = await pool.query('SELECT status FROM transactions');
-    expect(ledger.rows).toEqual([{ status: 'pending' }]); // ni cancelado ni reembolsado
+    const ledger = await pool.query(
+      `SELECT status FROM transactions WHERE reference_type = 'drink_order'`);
+    expect(ledger.rows).toEqual([{ status: 'paid' }]); // ni cancelado ni reembolsado
     const stock = await pool.query('SELECT quantity FROM inventory WHERE drink_id = $1', [cerveza.id]);
     expect(Number(stock.rows[0].quantity)).toBe(9); // el trago sigue preparándose
 
@@ -274,7 +295,8 @@ describe('Invitar trago o botella', () => {
   it('un rechazo después de entregado no mueve nada', async () => {
     const res = await gift();
     const id = res.body.flirt.drink_order_id;
-    for (const status of ['confirmed', 'preparing', 'ready', 'delivered']) {
+    await payOrder(id);
+    for (const status of ['preparing', 'ready', 'delivered']) {
       await api().post(url(`/orders/${id}/status`)).set(auth(bartender)).send({ status });
     }
     await react(res.body.flirt.id, beto, 'not_interested');

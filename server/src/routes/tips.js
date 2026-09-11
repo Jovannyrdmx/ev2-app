@@ -500,18 +500,15 @@ router.post('/nightclubs/:nightclubId/staff/:userId/drinks',
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // El cobro lo crea createOrder junto con el pedido: un solo renglón en el libro
+      // por un solo trago, pase por donde pase.
       const order = await createOrder({
         client, nightclubId, senderId: req.user.id, recipientId: userId, tableId: table.id,
         clientRequestId: b.client_request_id,
         message: `Para ${staff.display_name} (${preset.display_name}) de ${req.user.display_name}, mesa ${table.code}`,
         items: [{ drink_id: b.drink_id, quantity: b.quantity }],
+        chargeMetadata: { staff_drink: true, to_user_id: userId, non_refundable: true },
       });
-      await client.query(
-        `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status,
-                                   payer_user_id, provider, reference_type, reference_id, metadata)
-         VALUES ($1,'drink_order','in',$2,$3,'pending',$4,'manual','drink_order',$5,$6)`,
-        [nightclubId, order.subtotal, order.currency, req.user.id, order.id,
-          JSON.stringify({ staff_drink: true, to_user_id: userId, non_refundable: true })]);
       const sd = await client.query(
         `INSERT INTO staff_drinks (nightclub_id, from_user_id, to_user_id, drink_id, drink_order_id,
                                    client_request_id, message, from_table_id)

@@ -207,7 +207,7 @@ describe('Tragos al personal', () => {
   beforeEach(async () => {
     mesa = await f.createTable(club.id, { code: '5', section: 'GENERAL' });
     shot = await f.createDrink(club.id, { name: 'Tequila shot', price: 100, stock: 10 });
-    await api().post(url(`/tables/${mesa.id}/seat`)).set(auth(guest));
+    await api().post(url(`/tables/${mesa.id}/seat`)).set(auth(manager)).send({ user_id: guest.id });
     await startShift(dancer);
     await startShift(waiter);
   });

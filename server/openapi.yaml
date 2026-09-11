@@ -799,19 +799,21 @@ paths:
     post:
       operationId: postNightclubsByNightclubIdTablesByTableIdRelease
       tags: [Mesas]
-      summary: Levantarse de una mesa
+      summary: Levantar a alguien de una mesa
       description: |
-        Sin cuerpo, libera al propio usuario. Con `user_id`, libera a otra persona: eso
-        requiere rol `waiter`, `hostess` o `manager`.
+        Solo personal (`waiter`, `hostess`, `manager`, `admin`), y `user_id` es
+        obligatorio: dice a quién se levanta. El cliente no se sienta ni se levanta solo
+        desde que la entrada se controla en la puerta.
       parameters:
         - { $ref: '#/components/parameters/NightclubId' }
         - { $ref: '#/components/parameters/TableId' }
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [user_id]
               properties:
                 user_id: { type: string, format: uuid }
       responses:
@@ -840,6 +842,17 @@ paths:
 
         Si `recipient_id` está presente, el pedido es una invitación a otra persona; se
         rechaza si esa persona bloqueó al remitente.
+
+        **El pedido nace con su cobro.** Junto con el pedido se crea un asiento en
+        `transactions` (`reference_type: drink_order`) en estado `pending`, y la barra no
+        puede confirmarlo mientras no esté `paid`. El cobro se registra en la mesa con
+        `POST /manual-payments/register` (efectivo o terminal del club), y pagarlo
+        confirma el pedido solo: nadie tiene que apretar un segundo botón.
+
+        **El mesero levanta el pedido de la mesa que atiende** enviando `table_id` y,
+        cuando el cliente está registrado y sentado ahí, `on_behalf_of`. Sin
+        `on_behalf_of` el cobro queda a nombre del mesero, que es quien recibió el
+        dinero. `taken_by` en la respuesta dice quién lo levantó.
       parameters: [{ $ref: '#/components/parameters/NightclubId' }]
       requestBody:
         required: true
@@ -5290,7 +5303,7 @@ paths:
           schema: { type: string, enum: [declared, confirmed, rejected, cancelled] }
         - name: method
           in: query
-          schema: { type: string, enum: [cash, zelle, cash_app, bank_transfer, spei] }
+          schema: { type: string, enum: [cash, card_terminal, zelle, cash_app, bank_transfer, spei] }
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
       responses:
@@ -6012,6 +6025,12 @@ components:
           type: string
           format: uuid
           description: Para invitar una bebida a otra persona.
+        on_behalf_of:
+          type: string
+          format: uuid
+          description: >
+            Solo personal. El cliente sentado en `table_id` para quien se levanta el
+            pedido: el cobro queda a su nombre. Si la persona no está en esa mesa: 422.
         message: { type: string, maxLength: 280 }
         items:
           type: array
@@ -6036,6 +6055,21 @@ components:
         recipient_id: { type: [string, 'null'], format: uuid }
         recipient_name: { type: [string, 'null'] }
         bartender_id: { type: [string, 'null'], format: uuid }
+        taken_by:
+          type: [string, 'null']
+          format: uuid
+          description: Mesero que levantó el pedido. Nulo cuando el cliente lo pidió desde su propio teléfono.
+        taken_by_name: { type: [string, 'null'] }
+        transaction_id:
+          type: [string, 'null']
+          format: uuid
+          description: El cobro del pedido. Nulo solo si el pedido no cuesta nada.
+        payment_status:
+          type: string
+          enum: [not_required, pending, pending_manual, paid, failed, refunded, cancelled]
+          description: >
+            Estado del cobro. La barra no puede confirmar el pedido mientras no sea `paid`;
+            pagarlo lo confirma solo. `not_required` es un pedido sin costo.
         returned_to_sender:
           type: boolean
           description: Invitación rechazada por el receptor y devuelta a la mesa del emisor (nunca cancelada ni reembolsada).
@@ -7497,7 +7531,7 @@ components:
 
     ManualPaymentMethod:
       type: string
-      enum: [cash, zelle, cash_app, bank_transfer, spei]
+      enum: [cash, card_terminal, zelle, cash_app, bank_transfer, spei]
 
     ManualPaymentOption:
       type: object

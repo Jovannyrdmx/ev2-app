@@ -284,20 +284,17 @@ router.post('/nightclubs/:nightclubId/flirts',
       // A gift is a real order for the recipient's table, paid by the sender (D18).
       let order = null;
       if (isGift) {
+        // The ledger entry is created by createOrder, together with the order, so a gift
+        // cannot end up with two charges or none -- which is what happened while this
+        // route inserted its own alongside the one the order already had.
         order = await createOrder({
           client, nightclubId, senderId: req.user.id, recipientId: b.recipient_id,
           tableId: recipientTable.id, clientRequestId: b.client_request_id,
           message: `Invitación de ${req.user.display_name} (mesa ${senderTable.code})`,
           items: [{ drink_id: b.drink_id, quantity: b.quantity }],
+          chargeType: b.type === 'bottle' ? 'bottle_service' : 'drink_order',
+          chargeMetadata: { gift: true, recipient_id: b.recipient_id, non_refundable: true },
         });
-        await client.query(
-          `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status,
-                                     payer_user_id, provider, reference_type, reference_id, metadata)
-           VALUES ($1,$2,'in',$3,$4,'pending',$5,'manual','drink_order',$6,$7)`,
-          [nightclubId, b.type === 'bottle' ? 'bottle_service' : 'drink_order', order.subtotal,
-            order.currency, req.user.id, order.id,
-            JSON.stringify({ gift: true, recipient_id: b.recipient_id, non_refundable: true })],
-        );
       }
 
       const created = await client.query(

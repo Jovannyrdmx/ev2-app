@@ -208,7 +208,7 @@ describe('Club', () => {
 
   it('entrega los eventos dirigidos al usuario', async () => {
     const table = await f.createTable(club.id);
-    await api().post(url(`/tables/${table.id}/seat`)).set(auth(guest));
+    await api().post(url(`/tables/${table.id}/seat`)).set(auth(manager)).send({ user_id: guest.id });
 
     const res = await api().get(url('/sync/events?since_id=0')).set(auth(guest));
     expect(res.status).toBe(200);

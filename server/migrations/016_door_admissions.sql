@@ -71,7 +71,9 @@ COMMENT ON COLUMN reservations.checked_in_at IS
 CREATE TABLE IF NOT EXISTS door_admissions (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   nightclub_id   UUID NOT NULL REFERENCES nightclubs(id) ON DELETE CASCADE,
-  event_id       UUID REFERENCES events(id) ON DELETE SET NULL,
+  -- The club's calendar (migration 004), NOT the outbox table also called `events`,
+  -- whose id is a BIGSERIAL: pointing at that one made the whole migration unrunnable.
+  event_id       UUID REFERENCES events_calendar(id) ON DELETE SET NULL,
   kind           VARCHAR(20) NOT NULL CHECK (kind IN ('general', 'vip_extra')),
   reservation_id UUID REFERENCES reservations(id) ON DELETE SET NULL,
   quantity       INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 50),

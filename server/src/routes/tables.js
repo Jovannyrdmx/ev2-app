@@ -216,11 +216,14 @@ router.post('/nightclubs/:nightclubId/tables/:tableId/release',
   requireRole('waiter', 'hostess', 'manager', 'admin'),
   validate({
     params: z.object({ nightclubId: uuid, tableId: uuid }),
-    body: z.object({ user_id: uuid.optional() }).default({}),
+    // Required, not optional-defaulting-to-the-caller: since only staff can do this,
+    // a missing user_id used to mean "the waiter lifts himself from the table", which
+    // is not a thing that happens. Now it has to say who is leaving.
+    body: z.object({ user_id: uuid }),
   }),
   asyncHandler(async (req, res) => {
     const { nightclubId, tableId } = req.params;
-    const targetUserId = req.body.user_id || req.user.id;
+    const targetUserId = req.body.user_id;
 
     const client = await pool.connect();
     try {

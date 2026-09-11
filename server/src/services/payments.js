@@ -9,10 +9,17 @@
 const { ApiError } = require('../middleware/errors');
 const events = require('./events');
 
-const METHODS = ['cash', 'zelle', 'cash_app', 'bank_transfer', 'spei'];
+const METHODS = ['cash', 'card_terminal', 'zelle', 'cash_app', 'bank_transfer', 'spei'];
 // Cash is handed over in person; the rest leave a folio in a statement, which is the
 // only thing that lets a manager tell a real transfer from a story.
+//
+// `card_terminal` is the club's own bank terminal at the table: the bank charges the
+// card, the app only records that it happened and the voucher folio. It is not cash --
+// it has a folio to match at closing -- but it is settled on the spot, like cash.
 const CASH_METHODS = ['cash'];
+// Settled the moment they are taken: the money, or an approved voucher, is already in
+// hand, so there is nothing for a manager to confirm against a statement later.
+const ON_THE_SPOT_METHODS = ['cash', 'card_terminal'];
 const OPEN_TX_STATUSES = ['pending', 'pending_manual'];
 
 const PAYMENT_SELECT = `
@@ -69,13 +76,32 @@ function present(row, viewer) {
  * deposit is what turns it into a table that will be there when they arrive.
  */
 async function applySideEffects(client, tx, nightclubId) {
-  if (tx.reference_type !== 'reservation' || tx.type !== 'reservation_deposit') return null;
-  const { rows } = await client.query(
-    `UPDATE reservations SET status = 'confirmed', updated_at = now()
-      WHERE id = $1 AND nightclub_id = $2 AND status = 'pending_payment'
-      RETURNING id, user_id, table_id, event_id`,
-    [tx.reference_id, nightclubId]);
-  return rows[0] || null;
+  if (tx.reference_type === 'reservation' && tx.type === 'reservation_deposit') {
+    const { rows } = await client.query(
+      `UPDATE reservations SET status = 'confirmed', updated_at = now()
+        WHERE id = $1 AND nightclub_id = $2 AND status = 'pending_payment'
+        RETURNING id, user_id, table_id, event_id`,
+      [tx.reference_id, nightclubId]);
+    return { reservation: rows[0] || null, order: null };
+  }
+
+  // A paid drink order is a ticket for the bar. Sending it there here, and nowhere
+  // else, is what keeps "paid" and "the bar knows about it" from ever coming apart:
+  // whoever took the money -- the waiter at the table, the manager confirming a
+  // transfer -- does not have to remember a second step.
+  // 'bottle_service' is the same object with a bigger price tag: a gifted bottle is
+  // still a drink order, and it has to reach the bar the same way.
+  if (tx.reference_type === 'drink_order' && ['drink_order', 'bottle_service'].includes(tx.type)) {
+    const { rows } = await client.query(
+      `UPDATE drink_orders
+          SET status = 'confirmed', confirmed_at = now(), updated_at = now()
+        WHERE id = $1 AND nightclub_id = $2 AND status = 'pending'
+        RETURNING id, sender_id, table_id`,
+      [tx.reference_id, nightclubId]);
+    return { reservation: null, order: rows[0] || null };
+  }
+
+  return { reservation: null, order: null };
 }
 
 /**
@@ -117,11 +143,11 @@ async function settle(client, { payment, reviewerId, nightclubId }) {
       WHERE id = $1`,
     [tx.id, CASH_METHODS.includes(payment.method) ? 'cash' : 'manual', reviewerId]);
 
-  const reservation = await applySideEffects(client, tx, nightclubId);
-  return { tx, reservation };
+  const { reservation, order } = await applySideEffects(client, tx, nightclubId);
+  return { tx, reservation, order };
 }
 
-async function publishConfirmed({ nightclubId, payment, tx, reservation }) {
+async function publishConfirmed({ nightclubId, payment, tx, reservation, order }) {
   await events.publish({
     nightclubId,
     type: 'payment_confirmed',
@@ -146,9 +172,22 @@ async function publishConfirmed({ nightclubId, payment, tx, reservation }) {
       payload: { reservation_id: reservation.id, table_id: reservation.table_id },
     });
   }
+  // Same shape the status route publishes, so the bar's screen has one thing to listen
+  // for and does not care whether a waiter took cash or a manager cleared a transfer.
+  if (order) {
+    await events.publish({
+      nightclubId,
+      type: 'order_confirmed',
+      audience: { roles: ['bartender', 'waiter', 'manager'], userIds: [order.sender_id] },
+      payload: {
+        order_id: order.id, status: 'confirmed', reason: null,
+        transaction_id: tx.id, refund_due: false,
+      },
+    });
+  }
 }
 
 module.exports = {
-  METHODS, CASH_METHODS, OPEN_TX_STATUSES, PAYMENT_SELECT,
+  METHODS, CASH_METHODS, ON_THE_SPOT_METHODS, OPEN_TX_STATUSES, PAYMENT_SELECT,
   present, settle, applySideEffects, publishConfirmed,
 };

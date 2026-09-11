@@ -20,9 +20,12 @@ beforeEach(async () => {
 });
 
 const url = (p) => `/api/nightclubs/${club.id}${p}`;
-const seat = (tableId, user) => api().post(url(`/tables/${tableId}/seat`)).set(auth(user));
-const release = (tableId, user, body) => api().post(url(`/tables/${tableId}/release`))
-  .set(auth(user)).send(body || {});
+// Sentar y levantar es cosa del personal desde que se entra por la puerta: el cliente
+// ya no se sienta solo tocando el mapa. `by` es quien lo hace; `user` es quien se sienta.
+const seat = (tableId, user, by) => api().post(url(`/tables/${tableId}/seat`))
+  .set(auth(by || waiter)).send({ user_id: user.id });
+const release = (tableId, user, by) => api().post(url(`/tables/${tableId}/release`))
+  .set(auth(by || waiter)).send({ user_id: user.id });
 
 describe('GET /tables', () => {
   it('lista las mesas con su plano y sin ocupantes', async () => {
@@ -109,11 +112,11 @@ describe('Ocupación', () => {
   });
 
   it('devuelve 404 para una mesa inexistente', async () => {
-    const res = await seat('00000000-0000-4000-8000-000000000999', guest);
+    const res = await seat({ id: '00000000-0000-4000-8000-000000000999' }.id, guest);
     expect(res.status).toBe(404);
   });
 
-  it('permite levantarse y libera la mesa si queda vacía', async () => {
+  it('levantar al último libera la mesa', async () => {
     await seat(small.id, guest);
     const res = await release(small.id, guest);
     expect(res.status).toBe(200);
@@ -133,15 +136,15 @@ describe('Ocupación', () => {
     expect(list.body.tables[0].status).toBe('occupied');
   });
 
-  it('un cliente no puede levantar a otra persona', async () => {
+  it('un cliente no puede sentar ni levantar a nadie, ni a sí mismo', async () => {
+    expect((await seat(small.id, guest, guest)).status).toBe(403);
     await seat(small.id, other);
-    const res = await release(small.id, guest, { user_id: other.id });
-    expect(res.status).toBe(403);
+    expect((await release(small.id, other, guest)).status).toBe(403);
   });
 
   it('el mesero sí puede levantar a un cliente', async () => {
     await seat(small.id, other);
-    const res = await release(small.id, waiter, { user_id: other.id });
+    const res = await release(small.id, other);
     expect(res.status).toBe(200);
   });
 
