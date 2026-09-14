@@ -199,4 +199,5 @@ Y a mano, que es la prueba que de verdad cuenta:
 | **Primer conteo físico** en el almacén y las dos barras, desde `almacen.html`. Todo está en cero a propósito | Almacén |
 | Revisar **tres precios** que subieron al unificar barras: `CAPITAN MORGAN - COCA COLA` 120→240, `VODKA CON AGUA MINERAL (1L)` 120→220, `BUCHANANS 18 - SPRITE` 250→260 | Erick |
 | Cuentas de **Stripe y Mercado Pago**. Sin ellas ningún cobro con tarjeta funciona (`docs/PAGOS_SETUP.md`) | Erick |
+| Alta de la **app de Meta** para el botón de Facebook: dos valores en el `.env` y la URI de retorno dada de alta. Paso a paso en `docs/FACEBOOK_LOGIN_SETUP.md`. Mientras no esté, el botón no se pinta y el correo y la contraseña funcionan igual. **Instagram no se puede**: el login de cuentas personales ya no existe (ver esa misma guía) | Erick |
 | El usuario del servidor es **root**. `docs/DESPLIEGUE.md` §1 pide uno sin privilegios con permiso de Docker. No urge para probar; sí antes de abrirle al público | Jovanny |
