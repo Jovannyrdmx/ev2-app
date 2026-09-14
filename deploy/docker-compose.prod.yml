@@ -123,6 +123,10 @@ services:
       STRIPE_PUBLIC_KEY: ${STRIPE_PUBLIC_KEY:-}
       MERCADOPAGO_ACCESS_TOKEN: ${MERCADOPAGO_ACCESS_TOKEN:-}
       MERCADOPAGO_PUBLIC_KEY: ${MERCADOPAGO_PUBLIC_KEY:-}
+      # Entrar con Facebook. Vacías = el botón no se pinta y la ruta contesta 501
+      # diciendo qué falta; correo y contraseña siguen funcionando igual.
+      FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
+      FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy

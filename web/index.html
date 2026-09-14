@@ -163,6 +163,42 @@
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.create">Crear cuenta</button>
     </form>
 
+    <!-- Entrar con una cuenta de otro.
+         Nace vacío y oculto a propósito: los botones los pinta `social-login.js` con
+         lo que contesta el servidor, así que solo aparece el proveedor que de verdad
+         está configurado. Un botón de Facebook sin credenciales manda a la persona a
+         una pantalla de Meta que la rechaza, y eso es peor que no tener el botón. -->
+    <div id="social-block" hidden>
+      <div class="flex items-center gap-3 my-5">
+        <span class="flex-1 h-px bg-white/10"></span>
+        <span class="text-xs uppercase tracking-widest text-white/35" data-i18n="social.or">o entra con</span>
+        <span class="flex-1 h-px bg-white/10"></span>
+      </div>
+      <div id="social-buttons" class="space-y-2"></div>
+    </div>
+
+    <!-- Terminar el registro que empezó con una cuenta social.
+         Facebook no entrega fecha de nacimiento fiable, y de ese dato depende dejar
+         entrar a alguien a un negocio de alcohol: inventarla sería inventar la edad
+         de un cliente. Así que se pide aquí, igual que en el registro normal. -->
+    <form id="social-finish" class="space-y-3 mt-2" hidden>
+      <div class="info-panel text-left">
+        <p class="font-display text-lg ev2-gradient" data-i18n="social.finishTitle">Falta un dato</p>
+        <p id="social-finish-note" class="text-xs text-white/60 mt-1"></p>
+      </div>
+      <input id="social-email" type="email" autocomplete="email" placeholder="Correo" data-i18n-placeholder="auth.email"
+             class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+      <label class="block text-xs text-white/50 pt-1" data-i18n="auth.birthDate">Fecha de nacimiento</label>
+      <input id="social-birth" type="date" required
+             class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+      <label class="flex items-start gap-3 text-sm text-white/70 tap">
+        <input id="social-terms" type="checkbox" required class="mt-1 w-5 h-5 accent-cyan-400">
+        <span data-i18n="auth.terms">Tengo 18 años o más y acepto los términos y el código de conducta.</span>
+      </label>
+      <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="social.finish">Terminar y entrar</button>
+      <button type="button" id="social-finish-cancel" class="w-full text-sm text-white/50 underline" data-i18n="social.cancel">Cancelar</button>
+    </form>
+
     <p id="auth-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
     <p class="mt-8 text-center text-xs text-white/30" data-i18n="auth.adults">Solo +18 · EV2 Clandestinoz</p>
   </section>
@@ -572,6 +608,18 @@
           </div>
         </div>
 
+        <!-- Cuentas ligadas. El botón de quitar solo aparece cuando queda otra manera
+             de entrar: dejar a alguien sin contraseña y sin cuenta ligada es dejarlo
+             fuera de su propia cuenta, con sus reservaciones adentro. -->
+        <div id="social-panel" class="card rounded-xl p-4 space-y-3" hidden>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="social.linkedAccounts">Cuentas ligadas</p>
+          <p id="social-panel-empty" class="text-sm text-white/40" data-i18n="social.none" hidden>No tienes ninguna cuenta ligada.</p>
+          <div id="social-panel-list" class="space-y-2"></div>
+          <div id="social-panel-add" class="space-y-2"></div>
+          <p id="social-panel-note" class="text-[11px] text-white/40" hidden></p>
+          <p id="social-panel-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
         <button id="btn-profile-logout" class="w-full py-3 rounded-xl card text-sm text-red-300" data-i18n="profile.signOut">Cerrar sesión</button>
       </div>
     </main>
@@ -789,6 +837,7 @@
 <script src="js/booking.js"></script>
 <script src="js/drink-art.js"></script>
 <script src="js/flirt.js"></script>
+<script src="js/social-login.js"></script>
 <script src="js/client.js"></script>
 <script src="js/index-screen.js"></script>
 <script src="js/show-screen.js"></script>

@@ -5,7 +5,7 @@
  * `EV2Map` (plano) y `EV2Roles` (a dónde va cada rol). Ninguna decisión de negocio vive
  * aquí: si algo hay que probar, va en esos módulos.
  */
-/* global EV2, EV2Format, EV2Client, EV2Map, EV2Roles, EV2Taxi, EV2DrinkArt */
+/* global EV2, EV2Format, EV2Client, EV2Map, EV2Roles, EV2Taxi, EV2DrinkArt, EV2Social */
 (function () {
   'use strict';
 
@@ -149,6 +149,234 @@
     }
   };
 
+  // ------------------------------------- entrar con una cuenta de otro (Facebook)
+
+  const API_BASE = meta('ev2:api', '/api');
+  // El proveedor de la última vuelta que dijo "ya quedó ligada". Se guarda porque el
+  // aviso tiene que salir DESPUÉS de que la pantalla del cliente esté montada.
+  let socialLinkedToast = null;
+  let socialCompletionToken = null;
+  let socialProviders = [];
+
+  function socialButton({ icon, color, text, onClick }) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'w-full py-3 rounded-xl text-sm font-semibold flex items-center '
+      + 'justify-center gap-3 bg-white/5 border border-white/10 tap';
+    const i = document.createElement('i');
+    i.className = icon;
+    i.style.color = color;
+    const s = document.createElement('span');
+    s.textContent = text;
+    b.append(i, s);
+    b.onclick = onClick;
+    return b;
+  }
+
+  /**
+   * Los botones de la pantalla de acceso.
+   *
+   * Si la lista no se puede pedir, no se pinta nada y no se avisa: correo y contraseña
+   * no dependen de ningún proveedor, así que la pantalla de acceso sigue sirviendo
+   * igual. Enseñar "no pudimos cargar los botones de Facebook" sobre el formulario que
+   * sí funciona solo asusta.
+   */
+  async function loadSocialButtons() {
+    try {
+      socialProviders = EV2Social.enabledProviders(await api.get('/auth/oauth/providers'));
+    } catch {
+      return;
+    }
+    renderSocialButtons();
+  }
+
+  function renderSocialButtons() {
+    const caja = $('social-buttons');
+    caja.innerHTML = '';
+    for (const p of socialProviders) {
+      caja.appendChild(socialButton({
+        icon: p.icon,
+        color: p.color,
+        text: t('social.with', { provider: p.label }),
+        // Navegación completa y no `fetch`: la respuesta es un 302 hacia Facebook, y
+        // un `fetch` lo seguiría en segundo plano en vez de llevarse a la persona.
+        onClick: () => {
+          location.href = EV2Social.startUrl({
+            baseUrl: API_BASE, provider: p.provider, clubSlug: CLUB_SLUG,
+          });
+        },
+      }));
+    }
+    $('social-block').hidden = socialProviders.length === 0 || !$('social-finish').hidden;
+  }
+
+  /**
+   * La vuelta del proveedor.
+   *
+   * Devuelve `true` cuando ya se hizo cargo de la pantalla, para que el arranque no
+   * siga con la sesión guardada por encima.
+   */
+  async function handleSocialReturn() {
+    const vuelta = EV2Social.takeFromLocation(location, window.history);
+    if (!vuelta) return false;
+
+    if (vuelta.kind === 'error') {
+      const el = $('auth-error');
+      el.textContent = t(EV2Social.errorKey(vuelta.value));
+      el.hidden = false;
+      return false;
+    }
+    if (vuelta.kind === 'linked') {
+      // La persona venía de su perfil: su sesión sigue guardada, así que el arranque
+      // la retoma solo. Aquí únicamente se recuerda el aviso.
+      socialLinkedToast = vuelta.value;
+      return false;
+    }
+    if (vuelta.kind === 'signup') {
+      showSocialFinish(vuelta.value);
+      return true;
+    }
+    try {
+      api.signInWith(await api.post('/auth/oauth/handoff', { handoff: vuelta.value }));
+      await afterSignIn();
+      return true;
+    } catch (err) {
+      showError(err, $('auth-error'));
+      return false;
+    }
+  }
+
+  function showSocialFinish(token) {
+    socialCompletionToken = token;
+    const falta = EV2Social.signupNeeds(token, EV2Social.peekToken);
+    const etiqueta = falta.provider
+      ? falta.provider.charAt(0).toUpperCase() + falta.provider.slice(1)
+      : null;
+    $('social-finish-note').textContent = etiqueta
+      ? t('social.finishNote', { provider: etiqueta })
+      : t('social.finishNoteGeneric');
+    // El correo se enseña siempre, ya escrito si el proveedor lo dio: así la persona
+    // ve con qué cuenta va a entrar y lo puede corregir antes de que exista.
+    $('social-email').value = falta.suggested_email || '';
+    $('form-login').hidden = true;
+    $('form-register').hidden = true;
+    $('social-block').hidden = true;
+    $('social-finish').hidden = false;
+    $('screen-auth').hidden = false;
+  }
+
+  $('social-finish').onsubmit = async (ev) => {
+    ev.preventDefault();
+    $('auth-error').hidden = true;
+    try {
+      const correo = $('social-email').value.trim();
+      api.signInWith(await api.post('/auth/oauth/complete', {
+        completion_token: socialCompletionToken,
+        email: correo || undefined,
+        birth_date: $('social-birth').value,
+        accept_terms: $('social-terms').checked,
+      }));
+      socialCompletionToken = null;
+      await afterSignIn();
+    } catch (err) {
+      // El servidor distingue "menor de edad" de "ese correo ya tiene cuenta"; ese
+      // texto es el útil.
+      showError(err, $('auth-error'));
+    }
+  };
+
+  $('social-finish-cancel').onclick = () => {
+    socialCompletionToken = null;
+    $('social-finish').hidden = true;
+    switchAuthTab('login');
+    renderSocialButtons();
+  };
+
+  /**
+   * El panel del perfil: qué cuentas hay ligadas, qué se puede ligar y qué se puede
+   * quitar. El botón de quitar solo sale cuando queda otra manera de entrar.
+   */
+  async function loadSocialPanel() {
+    let estado;
+    let ligadas;
+    try {
+      [estado, ligadas] = await Promise.all([
+        api.get('/auth/oauth/providers'),
+        api.get('/auth/oauth/linked'),
+      ]);
+    } catch {
+      return;
+    }
+    const disponibles = EV2Social.enabledProviders(estado);
+    const yaLigadas = ligadas.identities || [];
+    if (disponibles.length === 0 && yaLigadas.length === 0) {
+      $('social-panel').hidden = true;
+      return;
+    }
+
+    const puedeQuitar = EV2Social.canUnlink(ligadas);
+    const lista = $('social-panel-list');
+    lista.innerHTML = '';
+    for (const ident of yaLigadas) {
+      const cara = EV2Social.look(ident.provider);
+      const fila = document.createElement('div');
+      fila.className = 'flex items-center justify-between gap-3 text-sm';
+      const izq = document.createElement('span');
+      izq.className = 'flex items-center gap-2';
+      const i = document.createElement('i');
+      i.className = cara.icon;
+      i.style.color = cara.color;
+      const texto = document.createElement('span');
+      texto.textContent = ident.email || ident.display_name || ident.provider;
+      izq.append(i, texto);
+      fila.appendChild(izq);
+      if (puedeQuitar) {
+        const quitar = document.createElement('button');
+        quitar.type = 'button';
+        quitar.className = 'text-xs text-red-300 underline';
+        quitar.textContent = t('social.unlink');
+        quitar.onclick = async () => {
+          $('social-panel-error').hidden = true;
+          try {
+            await api.del(`/auth/oauth/${encodeURIComponent(ident.provider)}`);
+            await loadSocialPanel();
+          } catch (err) {
+            showError(err, $('social-panel-error'));
+          }
+        };
+        fila.appendChild(quitar);
+      }
+      lista.appendChild(fila);
+    }
+
+    const agregar = $('social-panel-add');
+    agregar.innerHTML = '';
+    const ligados = new Set(yaLigadas.map((x) => x.provider));
+    for (const p of disponibles.filter((x) => !ligados.has(x.provider))) {
+      agregar.appendChild(socialButton({
+        icon: p.icon,
+        color: p.color,
+        text: t('social.link', { provider: p.label }),
+        onClick: async () => {
+          $('social-panel-error').hidden = true;
+          try {
+            const r = await api.post(`/auth/oauth/${encodeURIComponent(p.provider)}/link`,
+              { redirect_to: 'index.html' });
+            location.href = r.authorize_url;
+          } catch (err) {
+            showError(err, $('social-panel-error'));
+          }
+        },
+      }));
+    }
+
+    $('social-panel-empty').hidden = yaLigadas.length > 0;
+    const nota = $('social-panel-note');
+    nota.textContent = puedeQuitar ? '' : t('social.lastWayIn');
+    nota.hidden = puedeQuitar || yaLigadas.length === 0;
+    $('social-panel').hidden = false;
+  }
+
   async function signOut() {
     if (state.realtime) state.realtime.close();
     await api.logout();
@@ -173,6 +401,8 @@
     renderOrders();
     if (!$('screen-app').hidden) { renderFloor(); renderTaxi(); }
     if (!$('screen-staff').hidden) renderStaffPending();
+    renderSocialButtons();
+    if (!$('social-panel').hidden) loadSocialPanel();
     setConnection(lastConnection.on, lastConnection.key);
     hub.emit('language', lang());
   }
@@ -231,6 +461,13 @@
     $('profile-club').textContent = (state.club && state.club.name) || 'EV2 Clandestinoz';
     await Promise.all([loadFloor(), loadMenu(), loadOrders(), loadTaxi()]);
     connectRealtime();
+    // El panel de cuentas ligadas no bloquea la entrada al club: si falla, el perfil
+    // se queda sin ese recuadro y todo lo demás funciona.
+    loadSocialPanel();
+    if (socialLinkedToast) {
+      toast(t('social.linked', { provider: socialLinkedToast }), 'ok');
+      socialLinkedToast = null;
+    }
     hub.emit('enter', context());
   }
 
@@ -963,6 +1200,14 @@
     } catch {
       // Sin club no se puede entrar, pero la pantalla de acceso debe verse igual.
     }
+    // Los botones sociales, antes de retomar la sesión: si la persona no tiene sesión
+    // guardada, lo primero que ve es la pantalla de acceso ya completa.
+    loadSocialButtons();
+
+    // La vuelta del proveedor manda sobre la sesión guardada: quien acaba de entrar
+    // con Facebook espera entrar CON ESA cuenta, no con la que quedó en el teléfono.
+    if (await handleSocialReturn()) return;
+
     const user = await api.resume();
     if (user) await afterSignIn();
   }());

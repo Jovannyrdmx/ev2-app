@@ -302,6 +302,341 @@ paths:
                       show_on_map: { type: boolean }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  # ==========================================================================
+  # Entrar con una cuenta de otro (Facebook)
+  #
+  # El viaje completo, en orden:
+  #   1. GET  /api/auth/oauth/providers            -> qué botones pintar
+  #   2. GET  /api/auth/oauth/{provider}/start     -> 302 a la pantalla de permisos
+  #   3. GET  /api/auth/oauth/{provider}/callback  -> 302 de vuelta, con un pase en el #
+  #   4. POST /api/auth/oauth/handoff              -> canjea ese pase por la sesión
+  #      o, si la cuenta es nueva:
+  #      POST /api/auth/oauth/complete             -> pide fecha y términos, y crea
+  #
+  # Dos cosas que no son obvias y son las que hacen esto seguro:
+  #
+  #   - Lo que vuelve en el fragmento (`#h=`) NO es la sesión: es un pase de un solo
+  #     uso que vive dos minutos. El fragmento se queda en el historial del navegador,
+  #     y en un teléfono prestado la sesión ahí sería la cuenta del cliente al alcance
+  #     del siguiente.
+  #   - Una cuenta social NO se liga sola a una cuenta que ya existe por el correo.
+  #     Quien logre que un proveedor le acepte un correo ajeno se quedaría con la
+  #     cuenta del cliente, sus reservaciones y su historial.
+  # ==========================================================================
+
+  /api/auth/oauth/providers:
+    get:
+      operationId: getAuthOauthProviders
+      tags: [Autenticación]
+      summary: Proveedores de acceso disponibles
+      description: |
+        Público y sin secretos: lo pide un navegador sin sesión, así que no lleva el
+        `app_secret` ni el `app_id`.
+
+        Solo se pinta el botón de un proveedor con `enabled: true`. Los apagados vienen
+        con el motivo: **Instagram** está declarado y apagado porque "Iniciar sesión con
+        Instagram" ya no existe para cuentas personales (la Basic Display API se apagó el
+        4 de diciembre de 2024 y sus sucesores solo aceptan cuentas Business o Creator, y
+        no entregan correo).
+
+        `password_available` es siempre `true`: el correo y la contraseña no dependen de
+        la cuenta de nadie más.
+      security: []
+      responses:
+        '200':
+          description: Lista de proveedores
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  any_enabled: { type: boolean }
+                  password_available: { type: boolean }
+                  providers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        provider: { type: string, enum: [facebook, instagram, google, apple] }
+                        label: { type: string, example: Facebook }
+                        enabled:
+                          type: boolean
+                          description: Lo único que decide si se pinta el botón.
+                        available:
+                          type: boolean
+                          description: |
+                            `false` = el proveedor no se puede usar (no es que falte
+                            configurarlo).
+                        unavailable_reason:
+                          type: string
+                          example: instagram_consumer_login_discontinued
+                        unavailable_note: { type: string }
+
+  /api/auth/oauth/linked:
+    get:
+      operationId: getAuthOauthLinked
+      tags: [Autenticación]
+      summary: Cuentas sociales ligadas a mi cuenta
+      description: |
+        `can_unlink` es `false` cuando la cuenta social es la **única** manera de entrar:
+        quitarla dejaría a la persona fuera de su propia cuenta, con sus reservaciones
+        adentro.
+      responses:
+        '200':
+          description: Cuentas ligadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  has_password: { type: boolean }
+                  can_unlink: { type: boolean }
+                  identities:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        provider: { type: string }
+                        email: { type: [string, 'null'], format: email }
+                        display_name: { type: [string, 'null'] }
+                        linked_at: { type: string, format: date-time }
+                        last_login_at: { type: [string, 'null'], format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/auth/oauth/{provider}:
+    delete:
+      operationId: deleteAuthOauthByProvider
+      tags: [Autenticación]
+      summary: Quitar una cuenta social
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, example: facebook } }
+      responses:
+        '204': { description: Cuenta desvinculada }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: No hay ninguna cuenta de ese proveedor ligada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: |
+            Es la única manera de entrar (`details.reason = last_way_in`). Hay que ponerle
+            una contraseña a la cuenta antes de quitarla.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/auth/oauth/{provider}/start:
+    get:
+      operationId: getAuthOauthStartByProvider
+      tags: [Autenticación]
+      summary: Empezar el acceso con una cuenta social
+      description: |
+        Público. Contesta **302** hacia la pantalla de permisos del proveedor, no un JSON:
+        así se puede poner en un `<a href>` y la pantalla de acceso funciona igual si el
+        navegador del cliente bloqueó los scripts. No se llama con `fetch`.
+
+        `redirect_to` se valida contra una lista blanca de páginas del propio sistema; un
+        destino libre convertiría esto en un salto abierto con la cara del club.
+      security: []
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, example: facebook } }
+        - { name: nightclub_slug, in: query, required: true, schema: { type: string, example: ev2 } }
+        - name: redirect_to
+          in: query
+          required: false
+          description: Página del sistema a la que volver. Fuera de la lista blanca cae a `index.html`.
+          schema: { type: string, example: index.html }
+      responses:
+        '302': { description: Redirección a la pantalla de permisos del proveedor }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: El proveedor o el club no existen
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '501':
+          description: |
+            El proveedor existe pero no se puede usar:
+            `provider_unavailable` (Instagram: el login de consumidor ya no existe) o
+            `provider_not_configured` (faltan credenciales; `details.missing` dice qué
+            variables).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/auth/oauth/{provider}/link:
+    post:
+      operationId: postAuthOauthLinkByProvider
+      tags: [Autenticación]
+      summary: Ligar una cuenta social a la sesión que ya existe
+      description: |
+        Aquí sí un JSON con la dirección, no un 302: esto lo llama la app con su sesión
+        puesta y necesita abrir la dirección ella misma.
+
+        Es el camino para quien ya tiene cuenta por correo: no se liga sola por el correo,
+        se liga desde el perfil.
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, example: facebook } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                redirect_to: { type: string, example: index.html }
+      responses:
+        '200':
+          description: Dirección a la que mandar a la persona
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authorize_url: { type: string, format: uri }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: El proveedor no existe
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '501':
+          description: El proveedor no se puede usar o no está configurado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/auth/oauth/{provider}/callback:
+    get:
+      operationId: getAuthOauthCallbackByProvider
+      tags: [Autenticación]
+      summary: La vuelta del proveedor
+      description: |
+        Público, y la llama el **navegador del cliente**, no la app. Siempre termina en un
+        **302** a una página del sistema, nunca en un JSON: la persona viene rebotada de
+        Facebook y un JSON en pantalla es un callejón.
+
+        Lo que pasa va en el fragmento de la dirección (`#`), que no viaja al servidor:
+
+        | Fragmento | Qué significa |
+        |---|---|
+        | `#h=<pase>` | Entró. Canjear con `POST /api/auth/oauth/handoff`. Un solo uso, 2 minutos. |
+        | `#oauth_signup=<token>` | Cuenta nueva: falta fecha de nacimiento y términos. Mandar a `POST /api/auth/oauth/complete`. |
+        | `#oauth_linked=<provider>` | Se ligó a la sesión que ya existía. |
+        | `#oauth_error=<código>` | `cancelled`, `provider`, `missing_code`, `expired_state`, `provider_unavailable`, `email_taken`, `already_linked`, `account_inactive`. |
+
+        `email_taken` es a propósito y **no** es un fallo: ese correo ya tiene cuenta en el
+        club, y ligarla sola sería regalar la cuenta a quien consiga que un proveedor le
+        acepte un correo ajeno.
+
+        El error que devuelva el proveedor nunca se reenvía al cliente: puede traer el id
+        de la app y detalles de la configuración. Se registra del lado del servidor.
+      security: []
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, example: facebook } }
+        - { name: code, in: query, required: false, schema: { type: string } }
+        - { name: state, in: query, required: false, schema: { type: string } }
+        - { name: error, in: query, required: false, schema: { type: string } }
+        - { name: error_description, in: query, required: false, schema: { type: string } }
+      responses:
+        '302':
+          description: Redirección a una página del sistema, con el resultado en el fragmento
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/auth/oauth/handoff:
+    post:
+      operationId: postAuthOauthHandoff
+      tags: [Autenticación]
+      summary: Canjear el pase de mano por la sesión
+      description: |
+        Público (el pase es la credencial) y de **un solo uso**: se borra al canjearlo, así
+        que el que quede en el historial del navegador ya no abre nada. Vive dos minutos.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handoff]
+              properties:
+                handoff: { type: string, description: El valor que vino en `#h=`. }
+      responses:
+        '200':
+          description: Sesión iniciada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: El pase venció o ya se usó
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: La cuenta no está activa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/auth/oauth/complete:
+    post:
+      operationId: postAuthOauthComplete
+      tags: [Autenticación]
+      summary: Terminar un registro que empezó con una cuenta social
+      description: |
+        Público (el `completion_token` es la credencial). Vive 15 minutos y va firmado con
+        un **emisor distinto** al de la sesión, así que presentarlo como `Bearer` se rechaza
+        por el emisor y no por casualidad.
+
+        Pide lo que el proveedor no puede dar y el club sí necesita: la **fecha de
+        nacimiento** —de ella depende dejar entrar a alguien a un negocio de alcohol, y
+        Facebook no la entrega de forma fiable— y la aceptación de términos. Misma
+        comprobación de edad que el registro normal.
+
+        La cuenta se crea con `password_hash = NULL`: no entra por contraseña, y no se le
+        inventa un hash que parezca una credencial y no lo sea. El `email` solo hace falta
+        si el proveedor no lo dio (el cliente puede negar ese permiso).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [completion_token, birth_date, accept_terms]
+              properties:
+                completion_token: { type: string, description: El valor que vino en `#oauth_signup=`. }
+                birth_date: { type: string, format: date, example: '1995-06-15' }
+                accept_terms: { type: boolean, enum: [true] }
+                email: { type: string, format: email }
+                phone: { type: string, example: '+526311234567' }
+      responses:
+        '201':
+          description: Cuenta creada y sesión iniciada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: El token de completar es inválido, venció, o es de otro tipo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: Ese correo ya tiene cuenta, o esa cuenta social ya está registrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: Menor de 18 años
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
   /api/nightclubs/by-slug/{slug}:
     get:
       operationId: getNightclubsBySlugBySlug

@@ -301,6 +301,26 @@
       return session.user;
     }
 
+    /**
+     * Guardar una sesión que ya vino armada de otra ruta.
+     *
+     * La usa el acceso con una cuenta social: la sesión no nace de `/auth/login`
+     * sino de canjear el pase de mano (`/auth/oauth/handoff`) o de terminar el
+     * registro (`/auth/oauth/complete`). Es la MISMA sesión —los mismos tokens,
+     * el mismo guardado, el mismo aviso— y por eso entra por aquí en vez de que
+     * cada pantalla escriba en `session` por su cuenta: una pantalla que guarda
+     * tokens a mano es una pantalla que algún día se olvida de `persist()` y
+     * pierde la sesión en la siguiente recarga.
+     */
+    function signInWith(data) {
+      if (!data || !data.access_token) {
+        throw new Error('signInWith needs a response with an access_token');
+      }
+      applyTokens(data);
+      bus.emit('auth:signed_in', { user: session.user });
+      return session.user;
+    }
+
     async function logout() {
       try {
         if (session.refreshToken) {
@@ -478,6 +498,7 @@
       NetworkError,
       uuid,
       login,
+      signInWith,
       logout,
       resume,
       refresh,

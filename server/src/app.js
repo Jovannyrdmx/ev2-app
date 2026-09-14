@@ -139,6 +139,14 @@ function createApp() {
   app.use('/api/auth/login', authLimiter);
   app.use('/api/auth/register', authLimiter);
   app.use('/api/auth/refresh', authLimiter);
+  // Canjear el pase de mano y completar el registro social entregan una sesión, así
+  // que cuentan como intentos de acceso. El `skipSuccessfulRequests` de este limitador
+  // es justo lo que hace falta: la vuelta legítima de Facebook acierta y no gasta
+  // cupo, y solo los fallos —alguien adivinando pases— se acumulan. No se limitan
+  // `providers` ni `callback`: el callback legítimo llega desde el navegador del
+  // cliente y en la puerta del club muchos comparten una sola IP.
+  app.use('/api/auth/oauth/handoff', authLimiter);
+  app.use('/api/auth/oauth/complete', authLimiter);
 
   app.use('/api/auth', authRoutes);
   app.use('/api', nightclubRoutes);
