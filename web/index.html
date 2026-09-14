@@ -732,6 +732,47 @@
       <p id="pass-used" class="text-sm" style="color:var(--ev2-lime)" hidden></p>
       <p class="text-[11px] text-white/40 leading-snug" data-i18n="pass.note">Enséñalo en la entrada. Sirve una sola vez y solo para esta noche.</p>
       <p id="pass-error" class="text-sm text-red-300" hidden></p>
+
+      <!--
+        Los pases de los demás. Va DEBAJO del propio a propósito: lo primero que el
+        titular necesita en la puerta es su QR, no la administración de la mesa.
+
+        Cada invitado tiene el suyo, y el titular los reparte por WhatsApp. Si alguien
+        no viene, se reasigna: el código viejo muere y sale uno nuevo, porque el
+        anterior ya salió de su teléfono y puede estar en la conversación de alguien
+        que ya no va a venir.
+      -->
+      <div id="gp-block" class="border-t border-white/10 pt-3 text-left space-y-2" hidden>
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="gp.title">Los pases de tu mesa</p>
+          <p id="gp-summary" class="text-[11px] text-white/50">—</p>
+        </div>
+        <p class="text-[11px] text-white/40 leading-snug" data-i18n="gp.note">
+          Un pase por persona. Cada uno sirve una sola vez y solo para quien lo lleva.
+        </p>
+        <div id="gp-list" class="space-y-2 max-h-64 overflow-y-auto"></div>
+        <p id="gp-error" class="text-sm text-red-300" hidden></p>
+      </div>
+    </div>
+  </div>
+
+  <!--
+    El motivo, para revocar o reasignar. Es su propia hoja porque el motivo es
+    obligatorio: un pase muerto sin motivo es una discusión en la puerta que nadie
+    puede resolver, y a la semana nadie se acuerda.
+  -->
+  <div id="gp-reason-sheet" class="fixed inset-0 z-[60] flex items-end justify-center bg-black/80 p-0" hidden>
+    <div class="w-full max-w-sm rounded-t-2xl p-5 space-y-3" style="background:#12121f;border-top:1px solid rgba(255,255,255,.12)">
+      <div class="flex items-start justify-between gap-3">
+        <p id="gp-reason-title" class="font-display text-base">—</p>
+        <button id="btn-gp-reason-close" class="text-white/50 px-2" aria-label="Cerrar"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <input id="gp-reason-name" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 outline-none text-sm"
+             maxlength="60" autocomplete="off" placeholder="¿Para quién es?" data-i18n-placeholder="gp.name" aria-label="Para quién es" hidden>
+      <input id="gp-reason-text" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 outline-none text-sm"
+             maxlength="200" autocomplete="off" placeholder="¿Por qué lo cancelas?" data-i18n-placeholder="gp.revokeWhy" aria-label="Motivo">
+      <p id="gp-reason-error" class="text-sm text-red-300" hidden></p>
+      <button id="btn-gp-reason-go" class="ev2-button w-full py-3 rounded-xl font-display text-sm">—</button>
     </div>
   </div>
 

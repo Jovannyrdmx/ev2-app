@@ -102,8 +102,20 @@ services:
       # pantalla como "Sin conexión", no como un error de configuración.
       # Entre comillas: el mensaje lleva dos puntos y sin comillas rompe el YAML.
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:?ALLOWED_ORIGINS es obligatorio: pon https://tudominio.com}"
-      # Caddy es el único salto delante de la API.
-      TRUST_PROXY_HOPS: 1
+      # DOS saltos delante de la API, no uno: Caddy termina el TLS y reenvía al
+      # contenedor `web`, y el nginx de `web` reenvía /api aquí. Cada uno agrega su
+      # entrada en `X-Forwarded-For`, así que con 1 Express se quedaba con la IP de
+      # Caddy en vez de la del cliente — y entonces TODAS las peticiones del mundo
+      # parecían venir de la misma IP. Consecuencia real: el límite de 10 intentos de
+      # acceso por minuto se compartía entre todos, así que diez contraseñas
+      # equivocadas de cualquiera dejaban a TODO el club sin poder entrar durante un
+      # minuto. Si algún día se quita el salto de nginx, esto vuelve a 1.
+      TRUST_PROXY_HOPS: 2
+      # El dominio con el que el servidor arma los enlaces que salen de él (el pase
+      # que el titular manda por WhatsApp). Se toma de aquí y NUNCA de la cabecera
+      # `Host` de quien pide: un enlace armado con lo que manda el cliente es un
+      # enlace a donde ese cliente quiera, saliendo con la cara del club.
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-https://${EV2_DOMAIN}}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # SEED_PASSWORD NO se pasa: el seed de desarrollo crea cuentas con contraseña
       # conocida y aquí no debe poder correr ni por accidente.

@@ -240,6 +240,21 @@
    */
   const scan = { stream: null, timer: null, last: null };
 
+  /**
+   * La revisión de identificación que está viva ahora mismo.
+   *
+   * Dura cinco minutos y sirve para UNA persona. Se guarda aquí y no en el
+   * servidor-por-sesión porque es del guardia que la hizo: si otro escanea con
+   * ella, el servidor la rechaza, y con razón — él no vio esa identificación.
+   */
+  const idc = { document: 'ine', check: null, timer: null, rejecting: false };
+
+  const MOTIVOS_RECHAZO = [
+    { key: 'idc.rejectMinor', reason: 'menor de edad' },
+    { key: 'idc.rejectInvalid', reason: 'identificación no válida' },
+    { key: 'idc.rejectOther', reason: 'otro motivo' },
+  ];
+
   const camaraDisponible = () => (
     typeof window.BarcodeDetector === 'function'
     && navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function'
@@ -258,14 +273,27 @@
     titulo.textContent = t(v.headlineKey);
     titulo.style.color = v.colors.text;
 
-    $('scan-who').textContent = v.guest
-      ? [v.guest, v.table ? t('scan.atTable', { table: v.table }) : null].filter(Boolean).join(' · ')
-      : '';
+    // Quién es, en el orden en que la puerta lo necesita: primero el apodo que el
+    // titular escribió para ESTA persona —es lo que el guardia va a decir en voz
+    // alta— y después de quién es la mesa.
+    $('scan-who').textContent = [
+      v.label ? t('scan.forGuest', { name: v.label }) : null,
+      v.guest,
+      v.table ? t('scan.atTable', { table: v.table }) : null,
+    ].filter(Boolean).join(' · ');
 
     const detalle = [];
-    if (v.guestCount) detalle.push(t('scan.people', { count: v.guestCount }));
+    if (v.kind) detalle.push(t(`scan.kind_${v.kind}`));
+    // Cuántos de esa mesa van adentro. Es lo que evita el "déjame preguntar" por
+    // radio cuando llega el sexto de ocho.
+    if (v.inside !== null && v.guestCount) {
+      detalle.push(t('scan.inside', { inside: v.inside, total: v.guestCount }));
+    } else if (v.guestCount) {
+      detalle.push(t('scan.people', { count: v.guestCount }));
+    }
     if (v.extras) detalle.push(t('scan.extras', { count: v.extras }));
-    if (v.result === 'already_in' && v.checkedInAt) {
+    if (v.idCheckReason) detalle.push(v.idCheckReason);
+    if ((v.result === 'already_in' || v.result === 'used') && v.checkedInAt) {
       detalle.push(t('scan.since', { time: EV2Format.time(v.checkedInAt) }));
     }
     if (v.result === 'not_tonight' && v.startsAt) {
@@ -291,16 +319,208 @@
 
   async function leerPase(code) {
     const limpio = String(code || '').trim();
-    if (limpio.length < 4) return;
+    const bloqueo = EV2DoorScan.scanBlocker({
+      code: limpio, idCheckId: idc.check && idc.check.id,
+    });
+    if (bloqueo) {
+      // No se manda nada: el servidor lo rechazaría y la persona de la puerta
+      // solo vería un error sin saber qué le falta.
+      toast(t(bloqueo), 'error');
+      return;
+    }
     $('btn-scan-code').disabled = true;
     try {
-      const data = await api.post(`/nightclubs/${clubId()}/door/check-in`, { code: limpio });
+      const data = await api.post(`/nightclubs/${clubId()}/door/check-in`, {
+        code: limpio, id_check_id: idc.check.id,
+      });
       pintarResultado(data);
       $('scan-code').value = '';
+      // La revisión se gastó con el escaneo, abriera o no: si el pase estaba mal,
+      // esa identificación ya se miró y la siguiente persona necesita la suya.
+      // Solo se conserva cuando lo que falló fue la propia revisión, para que el
+      // guardia pueda leer el motivo antes de volver a pedirla.
+      if (!(data.id_check && data.id_check.ok === false)) limpiarIdCheck();
     } catch (err) {
       showError(err);
     } finally {
       $('btn-scan-code').disabled = false;
+    }
+  }
+
+  // ------------------------------------------------- la identificación, paso 1
+
+  /** El campo del código solo se abre con una revisión viva. */
+  function renderIdCheck() {
+    const viva = Boolean(idc.check);
+    $('scan-code').disabled = !viva;
+    $('btn-scan-code').disabled = !viva;
+    $('scan-blocked').hidden = viva;
+
+    const estado = $('idc-state');
+    if (!viva) {
+      estado.hidden = true;
+    } else {
+      const quedan = EV2DoorScan.idCheckRemaining(idc.check);
+      estado.textContent = `${t('idc.ready')} · ${t('idc.expiresIn', { seconds: quedan })}`;
+      estado.style.background = 'rgba(0,255,0,.08)';
+      estado.style.color = '#7CFF7C';
+      estado.hidden = false;
+      if (quedan <= 0) limpiarIdCheck(t('idc.expired'));
+    }
+
+    $('idc-docs').innerHTML = EV2DoorScan.ID_DOCUMENTS.map((d) => `
+      <button type="button" data-doc="${d}"
+        class="px-3 py-1.5 rounded-full text-xs ${d === idc.document ? 'ev2-button' : 'card'}">
+        ${t(EV2DoorScan.documentKey(d))}
+      </button>`).join('');
+    for (const b of $('idc-docs').querySelectorAll('[data-doc]')) {
+      b.onclick = () => { idc.document = b.dataset.doc; renderIdCheck(); };
+    }
+
+    $('idc-reject-why').hidden = !idc.rejecting;
+    $('idc-reasons').innerHTML = MOTIVOS_RECHAZO.map((m, i) => `
+      <button type="button" data-motivo="${i}" class="px-3 py-1.5 rounded-full text-xs card">
+        ${t(m.key)}
+      </button>`).join('');
+    for (const b of $('idc-reasons').querySelectorAll('[data-motivo]')) {
+      b.onclick = () => rechazarIdentificacion(MOTIVOS_RECHAZO[Number(b.dataset.motivo)].reason);
+    }
+  }
+
+  function limpiarIdCheck(mensaje) {
+    idc.check = null;
+    idc.rejecting = false;
+    clearInterval(idc.timer);
+    idc.timer = null;
+    renderIdCheck();
+    if (mensaje) {
+      const estado = $('idc-state');
+      estado.textContent = mensaje;
+      estado.style.background = 'rgba(255,193,7,.08)';
+      estado.style.color = '#FFD666';
+      estado.hidden = false;
+    }
+  }
+
+  async function aceptarIdentificacion() {
+    $('btn-idc-accept').disabled = true;
+    try {
+      const body = EV2DoorScan.idCheckPayload({ document: idc.document, adult: true });
+      const data = await api.post(`/nightclubs/${clubId()}/door/id-checks`, body);
+      idc.check = data.id_check;
+      idc.rejecting = false;
+      renderIdCheck();
+      // La cuenta atrás en pantalla: una revisión que se vence mientras el guardia
+      // teclea es un escaneo que falla sin explicación aparente.
+      clearInterval(idc.timer);
+      idc.timer = setInterval(renderIdCheck, 1000);
+      $('scan-code').focus();
+    } catch (err) {
+      showError(err);
+    } finally {
+      $('btn-idc-accept').disabled = false;
+    }
+  }
+
+  async function rechazarIdentificacion(motivo) {
+    try {
+      const body = EV2DoorScan.idRejectionPayload({ document: idc.document, reason: motivo });
+      await api.post(`/nightclubs/${clubId()}/door/id-checks`, body);
+      // Queda registrado y NO abre nada. El pase de esa persona sigue vivo, así que
+      // el titular puede reasignarlo esa misma noche: por eso se dice aquí.
+      limpiarIdCheck(t('idc.rejected'));
+      toast(t('idc.rejected'), 'ok');
+    } catch (err) {
+      showError(err);
+    }
+  }
+
+  // ------------------------------------------------- llegó sin su código
+
+  const look = { rows: [], chosen: null };
+
+  function renderLookup() {
+    const lista = $('look-list');
+    if (!look.rows.length) {
+      lista.innerHTML = '';
+      $('cont-box').hidden = true;
+      return;
+    }
+    lista.innerHTML = look.rows.map((r) => {
+      const resumen = EV2DoorScan.lookupSummary(r);
+      const elegido = look.chosen && look.chosen.id === r.id;
+      return `
+        <button type="button" data-res="${r.id}"
+          class="w-full text-left rounded-xl p-3 ${elegido ? 'ev2-button' : 'card'}">
+          <p class="font-display text-sm">${escape(r.holder_name || '')}</p>
+          <p class="text-xs ${elegido ? 'text-black/70' : 'text-white/60'}">
+            ${escape(t('scan.atTable', { table: r.table_code || '?' }))}
+            · ${escape(t('look.passes', { used: resumen.used, total: resumen.total }))}
+          </p>
+          ${r.phone_last4 ? `<p class="text-[11px] ${elegido ? 'text-black/60' : 'text-white/40'}">${escape(t('look.phoneAsk', { last4: r.phone_last4 }))}</p>` : ''}
+        </button>`;
+    }).join('');
+    for (const b of lista.querySelectorAll('[data-res]')) {
+      b.onclick = () => {
+        look.chosen = look.rows.find((r) => r.id === b.dataset.res) || null;
+        renderLookup();
+      };
+    }
+
+    $('cont-box').hidden = !look.chosen;
+    if (look.chosen) {
+      $('cont-note').textContent = t('cont.note', { minutes: 45 });
+      $('cont-for').textContent = `${look.chosen.holder_name} · ${t('scan.atTable', { table: look.chosen.table_code || '?' })}`;
+    }
+  }
+
+  async function buscarSinCodigo(q) {
+    const bloqueo = EV2DoorScan.lookupBlocker(q);
+    $('look-error').hidden = !bloqueo;
+    $('look-error').textContent = bloqueo ? t(bloqueo) : '';
+    if (bloqueo) return;
+    $('btn-look').disabled = true;
+    try {
+      const data = await api.get(
+        `/nightclubs/${clubId()}/door/lookup?q=${encodeURIComponent(String(q).trim())}`);
+      look.rows = data.reservations || [];
+      look.chosen = look.rows.length === 1 ? look.rows[0] : null;
+      if (!look.rows.length) {
+        $('look-error').textContent = t('look.none');
+        $('look-error').hidden = false;
+      }
+      $('cont-result').hidden = true;
+      renderLookup();
+    } catch (err) {
+      showError(err);
+    } finally {
+      $('btn-look').disabled = false;
+    }
+  }
+
+  async function emitirContingencia() {
+    const datos = {
+      reservationId: look.chosen && look.chosen.id,
+      label: $('cont-label').value,
+      reason: $('cont-reason').value,
+    };
+    const bloqueo = EV2DoorScan.contingencyBlocker(datos);
+    $('cont-error').hidden = !bloqueo;
+    $('cont-error').textContent = bloqueo ? t(bloqueo) : '';
+    if (bloqueo) return;
+
+    $('btn-cont').disabled = true;
+    try {
+      const data = await api.post(`/nightclubs/${clubId()}/door/passes/contingency`,
+        EV2DoorScan.contingencyPayload(datos));
+      $('cont-code').textContent = data.pass.code;
+      $('cont-result').hidden = false;
+      $('cont-reason').value = '';
+      toast(t('cont.done'), 'ok');
+    } catch (err) {
+      showError(err);
+    } finally {
+      $('btn-cont').disabled = false;
     }
   }
 
@@ -624,6 +844,15 @@
     if (limpio !== input.value) input.value = limpio;
   };
   $('btn-scan-toggle').onclick = () => (scan.stream ? pararCamara() : arrancarCamara());
+  $('btn-idc-accept').onclick = aceptarIdentificacion;
+  $('btn-idc-reject').onclick = () => { idc.rejecting = !idc.rejecting; renderIdCheck(); };
+  $('look-form').onsubmit = (ev) => { ev.preventDefault(); buscarSinCodigo($('look-q').value); };
+  $('btn-cont').onclick = emitirContingencia;
+  $('btn-cont-use').onclick = () => {
+    $('scan-code').value = $('cont-code').textContent.trim();
+    $('scan-code').focus();
+  };
+  renderIdCheck();
   $('btn-sell-general').onclick = () => vender('general');
   $('btn-sell-extra').onclick = () => vender('vip_extra');
   $('sell-qty').oninput = renderVenta;

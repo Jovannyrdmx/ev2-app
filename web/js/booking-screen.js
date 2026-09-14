@@ -179,6 +179,9 @@
     $('pass-error').hidden = true;
     $('pass-qr').innerHTML = '';
     $('pass-sheet').hidden = false;
+    // Los pases de los invitados, en paralelo: la hoja ya se abrió y el QR del
+    // titular es lo que tiene que aparecer primero.
+    loadPasses(reservation.id).catch(() => {});
 
     let svg = null;
     try { svg = window.localStorage.getItem(guardado); } catch { svg = null; }
@@ -194,6 +197,210 @@
       // Sin QR, el código escrito basta: la puerta lo teclea.
       $('pass-error').textContent = t('pass.noQr');
       $('pass-error').hidden = false;
+    }
+  }
+
+  // ---------------------------------------------------------------- los pases de la mesa
+
+  /**
+   * Los pases de los invitados, desde el teléfono del titular.
+   *
+   * Cada uno es de una persona y sirve una vez. Lo que el titular hace aquí es lo
+   * único que este sistema le pide: ponerles nombre, mandarlos por WhatsApp, y
+   * cambiarlos cuando alguien no viene.
+   *
+   * El QR NO se pide aquí. La lista solo trae códigos; el payload firmado se pide
+   * pase por pase, al momento de compartirlo, porque es la credencial: mandarlo en
+   * cada renglón lo dejaría en la caché del navegador y en el historial.
+   */
+  const passes = { reservationId: null, rows: [], summary: null, busy: null, ask: null };
+
+  const gpError = (text) => {
+    const el = $('gp-error');
+    el.textContent = text || '';
+    el.hidden = !text;
+  };
+
+  function renderPasses() {
+    const bloque = $('gp-block');
+    if (!passes.rows.length) { bloque.hidden = true; return; }
+    bloque.hidden = false;
+
+    const s = passes.summary || {};
+    $('gp-summary').textContent = t('gp.summary', {
+      active: s.active || 0, used: s.used || 0,
+    });
+
+    let n = 0;
+    $('gp-list').innerHTML = passes.rows.map((p) => {
+      const esTitular = p.kind === 'holder';
+      if (!esTitular) n += 1;
+      const nombre = p.label || (esTitular ? t('gp.holder') : t('gp.guest', { n }));
+      const muerto = p.status !== 'active';
+
+      let estado = '';
+      if (p.status === 'used') {
+        estado = p.used_at
+          ? t('gp.usedAt', { time: window.EV2Format.time(p.used_at) })
+          : t('scan.used');
+      } else if (p.status === 'revoked') {
+        estado = t('gp.revoked', { reason: p.revoke_reason || '' });
+      } else if (p.share_count > 0) {
+        estado = t('gp.shared', { count: p.share_count });
+      }
+
+      // El titular no reparte su propio pase ni lo reasigna: es el suyo. Y un pase
+      // gastado no ofrece ningún botón, porque esa persona ya está adentro.
+      const acciones = (esTitular || muerto) ? '' : `
+        <div class="flex flex-wrap gap-1 mt-2">
+          <button data-gp-share="${p.id}" class="px-3 py-1.5 rounded-full text-[11px] ev2-button">
+            ${p.share_count > 0 ? t('gp.reshare') : t('gp.share')}
+          </button>
+          <button data-gp-reassign="${p.id}" class="px-3 py-1.5 rounded-full text-[11px] card">
+            ${t('gp.reassign')}
+          </button>
+          <button data-gp-revoke="${p.id}" class="px-3 py-1.5 rounded-full text-[11px] card">
+            ${t('gp.revoke')}
+          </button>
+        </div>`;
+
+      return `
+        <div class="rounded-xl p-3 card ${muerto ? 'opacity-50' : ''}">
+          <div class="flex items-baseline justify-between gap-2">
+            <p class="text-sm font-medium truncate">${escapeHtml(nombre)}</p>
+            <p class="font-display text-xs tracking-widest text-white/50">${escapeHtml(p.code)}</p>
+          </div>
+          ${estado ? `<p class="text-[11px] text-white/40 mt-0.5">${escapeHtml(estado)}</p>` : ''}
+          ${acciones}
+        </div>`;
+    }).join('');
+
+    for (const b of $('gp-list').querySelectorAll('[data-gp-share]')) {
+      b.onclick = () => compartirPase(b.dataset.gpShare);
+    }
+    for (const b of $('gp-list').querySelectorAll('[data-gp-revoke]')) {
+      b.onclick = () => pedirMotivo('revoke', b.dataset.gpRevoke);
+    }
+    for (const b of $('gp-list').querySelectorAll('[data-gp-reassign]')) {
+      b.onclick = () => pedirMotivo('reassign', b.dataset.gpReassign);
+    }
+  }
+
+  const escapeHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  async function loadPasses(reservationId) {
+    passes.reservationId = reservationId;
+    passes.rows = [];
+    passes.summary = null;
+    gpError('');
+    $('gp-block').hidden = true;
+    try {
+      const data = await ctx.api.get(
+        `/nightclubs/${ctx.clubId()}/reservations/${reservationId}/passes`);
+      passes.rows = data.passes || [];
+      passes.summary = data.summary || null;
+      renderPasses();
+    } catch {
+      // Sin la lista, el titular todavía tiene su propio pase arriba, que es lo que
+      // necesita para entrar. No se le grita un error por lo secundario.
+      $('gp-block').hidden = true;
+    }
+  }
+
+  /**
+   * Abrir WhatsApp con el mensaje ya escrito.
+   *
+   * El servidor devuelve el texto y el enlace; el teléfono del titular abre su propia
+   * app. Así el invitado recibe el mensaje del número de su amigo, que es el número
+   * del que hace caso, en vez de uno desconocido del club.
+   *
+   * `navigator.share` primero cuando existe: deja elegir WhatsApp, Telegram o un
+   * mensaje de texto, que es lo que de verdad usa la gente.
+   */
+  async function compartirPase(passId) {
+    if (passes.busy) return;
+    passes.busy = passId;
+    gpError('');
+    try {
+      const data = await ctx.api.post(
+        `/nightclubs/${ctx.clubId()}/reservations/${passes.reservationId}/passes/${passId}/share`,
+        { lang: window.EV2Format.getLanguage() });
+      const share = data.share;
+      let compartido = false;
+      if (navigator.share) {
+        try {
+          await navigator.share({ text: share.text });
+          compartido = true;
+        } catch {
+          // El usuario canceló, o el navegador lo bloqueó: se cae a WhatsApp.
+          compartido = false;
+        }
+      }
+      if (!compartido) window.open(share.whatsapp_url, '_blank', 'noopener');
+      await loadPasses(passes.reservationId);
+    } catch (err) {
+      gpError(window.EV2Format.errorMessage(err));
+    } finally {
+      passes.busy = null;
+    }
+  }
+
+  function pedirMotivo(accion, passId) {
+    passes.ask = { accion, passId };
+    $('gp-reason-title').textContent = t(accion === 'revoke' ? 'gp.revoke' : 'gp.reassign');
+    $('btn-gp-reason-go').textContent = t(accion === 'revoke' ? 'gp.revoke' : 'gp.reassign');
+    // Al reasignar se pregunta también el nombre del que viene en su lugar: es lo
+    // siguiente que el titular va a querer escribir, y pedirlo después sería otra
+    // pantalla más.
+    $('gp-reason-name').hidden = accion !== 'reassign';
+    $('gp-reason-name').value = '';
+    $('gp-reason-text').value = '';
+    $('gp-reason-error').hidden = true;
+    $('gp-reason-sheet').hidden = false;
+    $('gp-reason-text').focus();
+  }
+
+  const cerrarMotivo = () => { $('gp-reason-sheet').hidden = true; passes.ask = null; };
+
+  async function confirmarMotivo() {
+    if (!passes.ask) return;
+    const { accion, passId } = passes.ask;
+    const motivo = $('gp-reason-text').value.trim();
+    if (motivo.length < 3) {
+      $('gp-reason-error').textContent = t('gp.errReason');
+      $('gp-reason-error').hidden = false;
+      return;
+    }
+    $('btn-gp-reason-go').disabled = true;
+    try {
+      const base = `/nightclubs/${ctx.clubId()}/reservations/${passes.reservationId}/passes/${passId}`;
+      if (accion === 'revoke') {
+        await ctx.api.post(`${base}/revoke`, { reason: motivo });
+      } else {
+        const data = await ctx.api.post(`${base}/reassign`, {
+          reason: motivo, label: $('gp-reason-name').value.trim() || undefined,
+        });
+        cerrarMotivo();
+        await loadPasses(passes.reservationId);
+        // Y se ofrece mandarlo en el acto: un pase nuevo que nadie reparte es una
+        // silla vacía.
+        if (data.share) {
+          if (navigator.share) {
+            try { await navigator.share({ text: data.share.text }); } catch { /* canceló */ }
+          } else {
+            window.open(data.share.whatsapp_url, '_blank', 'noopener');
+          }
+        }
+        return;
+      }
+      cerrarMotivo();
+      await loadPasses(passes.reservationId);
+    } catch (err) {
+      $('gp-reason-error').textContent = window.EV2Format.errorMessage(err);
+      $('gp-reason-error').hidden = false;
+    } finally {
+      $('btn-gp-reason-go').disabled = false;
     }
   }
 
@@ -349,7 +556,11 @@
   };
   $('btn-book-confirm').onclick = confirm;
 
-  const closePass = () => { $('pass-sheet').hidden = true; };
+  $('btn-gp-reason-close').onclick = cerrarMotivo;
+  $('btn-gp-reason-go').onclick = confirmarMotivo;
+  $('gp-reason-sheet').onclick = (e) => { if (e.target === $('gp-reason-sheet')) cerrarMotivo(); };
+
+  const closePass = () => { $('pass-sheet').hidden = true; cerrarMotivo(); };
   $('btn-pass-close').onclick = closePass;
   $('pass-sheet').onclick = (e) => { if (e.target === $('pass-sheet')) closePass(); };
 

@@ -1692,41 +1692,476 @@ paths:
     post:
       operationId: doorCheckIn
       tags: [Puerta]
-      summary: Escanear el pase y sentar la mesa (hostess)
+      summary: Escanear un pase individual y dejar entrar a UNA persona (hostess)
       description: |
-        El escaneo de la entrada. Sienta **de verdad**: además de marcar la mesa como
-        ocupada, mete a la persona en la mesa, que es lo que la habilita para pedir
-        desde su teléfono.
+        El escaneo de la entrada. Entra **una persona por pase**, y el pase se gasta.
+        La mesa se sienta con el PRIMER pase que entra —no con el del titular— y
+        sentar significa meter a la persona en la mesa, que es lo que la habilita
+        para pedir desde su teléfono.
+
+        **Exige `id_check_id`**: la revisión de identificación va ANTES del escaneo y
+        se gasta con él. Sin una revisión aceptada, fresca (5 minutos) y del mismo
+        guardia, no abre. Eso es deliberado: así un menor de edad o una
+        identificación inválida NO queman el pase, y el titular lo puede reasignar a
+        alguien más esa misma noche.
 
         Un pase que no abre responde **200 con el motivo**, no un error: la puerta
-        necesita leer «ya entraron a las 11:40» o «es de mañana» para resolverlo
-        hablando. Los motivos son `not_found`, `already_in`, `not_tonight`,
-        `cancelled` y `unpaid`.
+        necesita leer «ese pase ya se usó» o «es de mañana» para resolverlo hablando.
+        Los motivos son `not_found`, `forged`, `used`, `revoked`, `expired`,
+        `no_id_check`, `not_tonight`, `cancelled` y `unpaid`.
 
-        `code` acepta el código tecleado (con o sin guiones, en minúsculas) o el
-        contenido completo del QR, incluida una dirección.
+        `code` acepta el payload firmado del QR (`EV2P.<código>.<firma>`), el enlace
+        de WhatsApp, o el código tecleado con o sin guiones y en minúsculas. Si viene
+        firmado y la firma no cuadra, se rechaza como `forged` **sin tocar la base**.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [code]
+              required: [code, id_check_id]
               properties:
                 code: { type: string, minLength: 4, maxLength: 200 }
+                id_check_id:
+                  type: string
+                  format: uuid
+                  description: La revisión de identificación de esta persona, sin gastar.
       responses:
         '200':
-          description: Resultado del escaneo. `seated` solo viene cuando sí abrió.
+          description: |
+            Resultado del escaneo. `admitted` y `seated` solo vienen cuando sí abrió.
+            `id_check` viene cuando lo que falló fue la revisión, con su motivo
+            (`id_rejected`, `id_check_used`, `id_check_stale`, `id_check_other_staff`).
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  pass: { $ref: '#/components/schemas/DoorPass' }
+                  pass: { $ref: '#/components/schemas/GuestPassScan' }
+                  admitted: { type: boolean }
                   seated: { type: boolean }
                   result: { type: string }
                   ok: { type: boolean }
+                  id_check:
+                    type: object
+                    properties:
+                      ok: { type: boolean }
+                      reason: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/door/id-checks:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    post:
+      operationId: createDoorIdCheck
+      tags: [Puerta]
+      summary: Registrar la revisión de identificación, ANTES de escanear (hostess)
+      description: |
+        Este es el orden que el backend obliga: seguridad pide la identificación, la
+        mira, la registra aquí, y solo entonces escanea el QR. La revisión vale 5
+        minutos, sirve para **una** persona y se gasta con el escaneo.
+
+        Lo que NO se guarda, a propósito: el número de la identificación, la fecha de
+        nacimiento y cualquier foto. Se guarda qué documento se enseñó, si era mayor
+        de edad, si se aceptó, por qué no, y quién lo revisó. Eso alcanza para
+        responder «¿quién dejó entrar a esta persona?» sin convertir la puerta en un
+        archivo de datos personales que hay que custodiar.
+
+        Una revisión **aceptada de un menor de edad no existe**: se responde 400.
+        Un rechazo **exige motivo**.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [document, adult, decision]
+              properties:
+                document:
+                  type: string
+                  enum: [ine, passport, license, other, none]
+                adult:
+                  type: boolean
+                  description: Lo único que se guarda de la edad.
+                decision:
+                  type: string
+                  enum: [accepted, rejected]
+                reason: { type: string, maxLength: 200 }
+      responses:
+        '201':
+          description: Revisión registrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id_check: { $ref: '#/components/schemas/DoorIdCheck' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/door/lookup:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: doorLookup
+      tags: [Puerta]
+      summary: Buscar a quien llega sin su QR (hostess)
+      description: |
+        Por folio, nombre o teléfono. Se contesta con lo mínimo para reconocer a la
+        persona: el nombre del titular, la mesa, la hora y cómo van sus pases.
+
+        El teléfono se busca por sus últimos dígitos y **no se devuelve**: la puerta
+        pregunta «¿tu teléfono termina en 4821?» y compara. Devolverlo convertiría
+        esta ruta en un directorio de los clientes del club.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 60 }
+      responses:
+        '200':
+          description: Reservaciones que coinciden
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reservations:
+                    type: array
+                    items: { $ref: '#/components/schemas/DoorLookupRow' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/door/passes/contingency:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    post:
+      operationId: issueContingencyPass
+      tags: [Puerta]
+      summary: Emitir un pase temporal para quien llegó sin su QR (hostess)
+      description: |
+        Existe porque la alternativa real es peor: sin esto, el invitado que llega
+        sin su código entra porque el de la puerta lo deja pasar de palabra, y de eso
+        no queda registro de ninguna clase. Con esto queda quién lo emitió, por qué,
+        a nombre de quién, y que vence a los 45 minutos aunque no se use.
+
+        Es de **un solo uso**, **exige motivo**, y no le quita su pase a nadie. La
+        reservación tiene que estar confirmada: una sin pagar no genera entradas ni
+        por la puerta de atrás.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reservation_id, reason]
+              properties:
+                reservation_id: { type: string, format: uuid }
+                label: { type: string, maxLength: 60 }
+                reason: { type: string, minLength: 5, maxLength: 200 }
+      responses:
+        '201':
+          description: Pase emitido, con su payload firmado para dibujar el QR
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pass: { $ref: '#/components/schemas/GuestPassIssued' }
+                  valid_minutes: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/guest-passes/{payload}:
+    get:
+      operationId: getGuestPassPublic
+      tags: [Pases]
+      summary: El pase que abre el invitado desde el enlace de WhatsApp (SIN sesión)
+      description: |
+        **No lleva autenticación, y eso es la decisión, no un descuido**: el invitado
+        no tiene cuenta en el club y no la va a crear en la fila. El enlace ES la
+        credencial, igual que un boleto de avión: quien lo tiene, entra.
+
+        Por eso: exige la firma (sin firma válida no se toca la base), enseña lo
+        mínimo para poder entrar —el QR, la mesa, la hora, el nombre del club— y
+        **nada de la persona**; y cada apertura queda registrada, así que un pase
+        compartido de más se ve en el conteo y el titular lo puede revocar.
+
+        Tiene su propio límite de peticiones, más estricto que el general.
+      parameters:
+        - name: payload
+          in: path
+          required: true
+          description: El payload firmado, `EV2P.<código>.<firma>`.
+          schema: { type: string, minLength: 8, maxLength: 200 }
+      responses:
+        '200':
+          description: El pase, con su QR dibujado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pass: { $ref: '#/components/schemas/GuestPassPublic' }
+        '404':
+          description: |
+            No existe, o la firma no cuadra. Es el mismo 404 a propósito: decirle a
+            quien prueba enlaces cuál de las dos cosas es sería ayudarlo.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/nightclubs/{nightclubId}/reservations/{reservationId}/passes:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/ReservationId'
+    get:
+      operationId: listGuestPasses
+      tags: [Pases]
+      summary: 'Los pases de una reservación: uno por persona'
+      description: |
+        Los ve el titular de la mesa y el personal de la puerta. A nadie más, y a
+        nadie más se le dice que la reservación existe: se responde **404, no 403**,
+        porque un 403 ya confirma que existe.
+
+        La lista **no trae el payload firmado**: ver la lista no es repartirla. El
+        payload es la credencial, y mandarlo en cada renglón lo dejaría en la caché
+        del navegador, en el historial y en cualquier registro que guarde respuestas.
+      responses:
+        '200':
+          description: Los pases y su resumen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  passes:
+                    type: array
+                    items: { $ref: '#/components/schemas/GuestPass' }
+                  summary:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      active: { type: integer }
+                      used: { type: integer }
+                      revoked: { type: integer }
+                      shared: { type: integer }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/reservations/{reservationId}/passes/{passId}:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/ReservationId'
+      - $ref: '#/components/parameters/GuestPassId'
+    get:
+      operationId: getGuestPass
+      tags: [Pases]
+      summary: Un pase con su QR dibujado
+      description: |
+        Aquí sí va el payload firmado y el QR en SVG: es para enseñarlo. El QR lo
+        dibuja el servidor y no el navegador a propósito — un QR mal generado no
+        falla, se ve bien y no lee, y eso se descubre con la fila enfrente.
+      responses:
+        '200':
+          description: El pase, con `qr_svg` y `payload`
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pass: { $ref: '#/components/schemas/GuestPassWithQr' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateGuestPass
+      tags: [Pases]
+      summary: Ponerle nombre al invitado
+      description: |
+        El apodo con el que la puerta lo va a reconocer: «Ana», «mi primo». A
+        propósito no hay teléfono, correo ni fecha de nacimiento — el sistema no
+        necesita saber quién es el invitado para dejarlo entrar, necesita que su pase
+        sea válido y que su identificación diga que es mayor de edad.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label: { type: [string, 'null'], maxLength: 60 }
+      responses:
+        '200':
+          description: El pase actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pass: { $ref: '#/components/schemas/GuestPass' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/reservations/{reservationId}/passes/{passId}/share:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/ReservationId'
+      - $ref: '#/components/parameters/GuestPassId'
+    post:
+      operationId: shareGuestPass
+      tags: [Pases]
+      summary: El mensaje y el enlace para mandarlo por WhatsApp
+      description: |
+        **No manda nada desde el servidor**: devuelve el texto y el enlace `wa.me`, y
+        el teléfono del titular abre su propia app. Mandarlo desde aquí necesitaría
+        la API de WhatsApp Business, una cuenta verificada, plantillas aprobadas y un
+        costo por mensaje — y sobre todo, el mensaje le llegaría al invitado de un
+        número desconocido en vez del teléfono de su amigo, que es el número del que
+        hace caso.
+
+        El enlace lo arma el servidor con su propio dominio configurado, **nunca con
+        la cabecera `Host` de quien pide**: un enlace armado con lo que manda el
+        cliente es un enlace a donde ese cliente quiera, saliendo con la cara del
+        club.
+
+        Un pase gastado o revocado no se comparte: mandarlo sería que alguien se
+        presente con un QR muerto y una explicación que dar.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lang: { type: string, enum: [es, en], default: es }
+                label: { type: string, maxLength: 60 }
+      responses:
+        '200':
+          description: El mensaje listo para mandar
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  share: { $ref: '#/components/schemas/GuestPassShare' }
+                  pass: { $ref: '#/components/schemas/GuestPass' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/reservations/{reservationId}/passes/{passId}/revoke:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/ReservationId'
+      - $ref: '#/components/parameters/GuestPassId'
+    post:
+      operationId: revokeGuestPass
+      tags: [Pases]
+      summary: 'Matar un pase: el invitado ya no va, o el QR se filtró'
+      description: |
+        Revocar **no borra**. El pase queda muerto, con motivo y con hora, y eso es
+        lo único que permite contestar «este QR ya no servía porque el titular lo
+        canceló a las 10:15» en vez de «no sé».
+
+        El motivo es **obligatorio**: un pase muerto sin motivo es una discusión en
+        la puerta que nadie puede resolver.
+
+        Un pase **ya usado NO se revoca**: esa persona está adentro, y marcar su pase
+        como revocado sería escribir que no entró.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 200 }
+      responses:
+        '200':
+          description: El pase revocado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pass: { $ref: '#/components/schemas/GuestPass' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/reservations/{reservationId}/passes/{passId}/reassign:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/ReservationId'
+      - $ref: '#/components/parameters/GuestPassId'
+    post:
+      operationId: reassignGuestPass
+      tags: [Pases]
+      summary: Va otra persona en lugar de la que no vino
+      description: |
+        Revocar y emitir en un solo acto, y tiene que ser un solo acto: si fueran dos
+        llamadas, una reservación podría quedarse con el pase muerto y sin el nuevo
+        —justo cuando el invitado de repuesto ya está en camino— porque el teléfono
+        del titular perdió la señal entre una y otra.
+
+        El pase nuevo lleva un **código nuevo**, no el mismo: el QR viejo ya salió del
+        teléfono del titular y puede estar en la conversación de alguien que ya no
+        viene. Y apunta al viejo con `replaces_id`, que es lo que permite seguir una
+        cadena de reasignaciones hasta el original.
+
+        El total de pases vivos no cambia: reasignar no regala entradas.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string, maxLength: 60 }
+                reason: { type: string, minLength: 3, maxLength: 200 }
+      responses:
+        '201':
+          description: El viejo revocado, el nuevo emitido, y el mensaje para mandarlo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked: { $ref: '#/components/schemas/GuestPass' }
+                  pass: { $ref: '#/components/schemas/GuestPassWithQr' }
+                  share: { $ref: '#/components/schemas/GuestPassShare' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/reservations/{reservationId}/passes/{passId}/history:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/ReservationId'
+      - $ref: '#/components/parameters/GuestPassId'
+    get:
+      operationId: getGuestPassHistory
+      tags: [Pases]
+      summary: La historia de un pase
+      description: |
+        La respuesta a «¿quién entró con esto y a qué hora?». La tabla de atrás es
+        **insert-only** con un disparador que lo impide: un registro de accesos que se
+        puede editar no es un registro.
+
+        Se enseña el nombre de quien actuó, nunca su correo: esto lo ve el titular de
+        la mesa.
+      responses:
+        '200':
+          description: Hasta 100 renglones, del más reciente al más viejo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  history:
+                    type: array
+                    items: { $ref: '#/components/schemas/GuestPassEvent' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /api/nightclubs/{nightclubId}/door/admissions:
     parameters:
@@ -1754,6 +2189,15 @@ paths:
                 type: object
                 properties:
                   admission: { $ref: '#/components/schemas/DoorAdmission' }
+                  passes:
+                    type: array
+                    description: |
+                      Un pase por cada extra pagado, con su payload firmado para
+                      dibujar el QR en el acto. Un cover `general` NO lleva pase: esa
+                      persona no tiene mesa, entra y se para donde quiera, y emitirle
+                      un QR que nadie va a volver a escanear sería papeleo que finge
+                      control.
+                    items: { $ref: '#/components/schemas/GuestPassIssued' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -6358,6 +6802,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    GuestPassId:
+      name: passId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     Limit:
       name: limit
       in: query
@@ -7277,6 +7726,13 @@ components:
           default: cash
         notes: { type: string, maxLength: 200 }
         event_id: { type: string, format: uuid }
+        labels:
+          type: array
+          maxItems: 50
+          items: { type: string, maxLength: 60 }
+          description: |
+            Los nombres de los invitados extra, en el orden en que se emiten sus
+            pases. Opcional: en la puerta a veces no hay tiempo de teclear nada.
 
     DoorAdmission:
       type: object
@@ -8675,3 +9131,178 @@ components:
         table_code: { type: [string, 'null'] }
         client_selectable: { type: boolean }
         active: { type: boolean }
+
+    # ---------------------------------------------------------------- pases individuales
+    GuestPass:
+      type: object
+      description: |
+        Un pase de una persona. `code` va siempre —el titular lo tiene que poder
+        dictar— pero el `payload` firmado solo en las respuestas donde alguien va a
+        dibujar el QR.
+      properties:
+        id: { type: string, format: uuid }
+        code:
+          type: string
+          description: Lo que va dentro del QR y lo que la puerta teclea. Sin dato personal.
+        kind:
+          type: string
+          enum: [holder, guest, extra, contingency]
+          description: |
+            `holder` es el que reservó y su código es el mismo de la reservación, para
+            que los QRs repartidos antes de la migración 019 sigan abriendo.
+        status: { type: string, enum: [active, used, revoked] }
+        label:
+          type: [string, 'null']
+          description: Cómo reconocer al invitado en la puerta. Un nombre de pila, nada más.
+        expires_at: { type: [string, 'null'], format: date-time }
+        used_at: { type: [string, 'null'], format: date-time }
+        used_by_name: { type: [string, 'null'] }
+        revoked_at: { type: [string, 'null'], format: date-time }
+        revoke_reason: { type: [string, 'null'] }
+        replaces_id:
+          type: [string, 'null']
+          format: uuid
+          description: El pase al que sustituyó, cuando este nació de una reasignación.
+        share_count: { type: integer }
+        last_shared_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        reservation_id: { type: [string, 'null'], format: uuid }
+        table_code: { type: [string, 'null'] }
+        section: { type: [string, 'null'] }
+        starts_at: { type: [string, 'null'], format: date-time }
+
+    GuestPassWithQr:
+      allOf:
+        - $ref: '#/components/schemas/GuestPass'
+        - type: object
+          properties:
+            payload:
+              type: string
+              description: '`EV2P.<código>.<firma>`. Es la credencial: no se registra ni se cachea.'
+            qr_svg: { type: string, description: 'El QR ya dibujado, en SVG.' }
+
+    GuestPassIssued:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        kind: { type: string }
+        status: { type: string }
+        label: { type: [string, 'null'] }
+        expires_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        payload: { type: string }
+
+    GuestPassPublic:
+      type: object
+      description: |
+        Lo que ve quien recibe el pase por WhatsApp. Enseña lo mínimo para poder
+        entrar y NADA de la persona: ni el nombre del titular, ni un teléfono, ni
+        quién más está invitado, ni el id de la reservación.
+      properties:
+        code: { type: string }
+        qr_svg: { type: string }
+        kind: { type: string }
+        status: { type: string }
+        label: { type: [string, 'null'] }
+        club_name: { type: string }
+        table_code: { type: [string, 'null'] }
+        section: { type: [string, 'null'] }
+        starts_at: { type: [string, 'null'], format: date-time }
+        expires_at: { type: [string, 'null'], format: date-time }
+        used_at: { type: [string, 'null'], format: date-time }
+        usable:
+          type: boolean
+          description: Si abre la puerta ahora mismo. Lo decide el servidor, no la página.
+        result: { type: string }
+
+    GuestPassScan:
+      type: object
+      description: Lo que la puerta ve al escanear.
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        kind: { type: string }
+        status: { type: string }
+        label: { type: [string, 'null'] }
+        expires_at: { type: [string, 'null'], format: date-time }
+        used_at: { type: [string, 'null'], format: date-time }
+        reservation_id: { type: [string, 'null'], format: uuid }
+        holder_name: { type: [string, 'null'] }
+        guest_count: { type: [integer, 'null'] }
+        already_inside:
+          type: integer
+          description: Cuántos de esa mesa ya entraron. Es el «van 6 de 8» de la puerta.
+        table:
+          type: [object, 'null']
+          properties:
+            id: { type: string, format: uuid }
+            code: { type: string }
+            section: { type: string }
+            floor: { type: [string, 'null'] }
+            capacity: { type: integer }
+        starts_at: { type: [string, 'null'], format: date-time }
+        result: { type: string }
+        ok: { type: boolean }
+        reason: { type: [string, 'null'] }
+
+    GuestPassShare:
+      type: object
+      properties:
+        text:
+          type: string
+          description: El mensaje, con el enlace y el código escrito abajo.
+        link: { type: string }
+        whatsapp_url:
+          type: string
+          description: '`wa.me`, que abre la app en teléfono y WhatsApp Web en computadora.'
+
+    GuestPassEvent:
+      type: object
+      description: Un renglón de la auditoría. La tabla es insert-only.
+      properties:
+        kind:
+          type: string
+          enum: [issued, shared, viewed, scanned, admitted, denied, revoked, reassigned]
+        reason: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+        actor_name:
+          type: [string, 'null']
+          description: Nulo cuando fue el invitado con el enlace, que no tiene cuenta.
+        document: { type: [string, 'null'] }
+        adult: { type: [boolean, 'null'] }
+
+    DoorIdCheck:
+      type: object
+      description: |
+        La revisión de identificación. NO guarda el número del documento, la fecha de
+        nacimiento ni una foto.
+      properties:
+        id: { type: string, format: uuid }
+        document: { type: string, enum: [ine, passport, license, other, none] }
+        adult: { type: boolean }
+        decision: { type: string, enum: [accepted, rejected] }
+        reason: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        valid_minutes: { type: integer }
+
+    DoorLookupRow:
+      type: object
+      description: |
+        Una reservación encontrada por folio, nombre o teléfono. El teléfono NO se
+        devuelve: solo sus últimos cuatro dígitos, para preguntar y comparar.
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string }
+        starts_at: { type: string, format: date-time }
+        guest_count: { type: integer }
+        pass_code: { type: [string, 'null'] }
+        holder_name: { type: string }
+        phone_last4: { type: [string, 'null'] }
+        table_code: { type: [string, 'null'] }
+        section: { type: [string, 'null'] }
+        floor: { type: [string, 'null'] }
+        passes_total: { type: integer }
+        passes_used: { type: integer }
+        passes_active: { type: integer }

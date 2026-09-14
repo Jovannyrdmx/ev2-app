@@ -18,6 +18,7 @@ const { authenticate, requireRole, sameNightclub } = require('../middleware/auth
 const eventPricing = require('../services/event-pricing');
 const events = require('../services/events');
 const door = require('../services/door');
+const guestPasses = require('../services/guest-passes');
 const seating = require('../services/seating');
 
 const router = express.Router({ mergeParams: true });
@@ -419,7 +420,7 @@ router.post('/nightclubs/:nightclubId/reservations',
                                      arrival_deadline, included_tickets, extra_guests,
                                      zone_base_at_booking, ticket_at_booking, pass_code)
            VALUES ($1,$2,$3,$4,$5,$6,$7,'pending_payment',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
-           RETURNING id`,
+           RETURNING id, nightclub_id, guest_count, pass_code`,
           [nightclubId, req.user.id, b.event_id, b.table_id, startsAt, durationMinutes,
             b.guest_count, quote.currency, quote.total, quote.deposit,
             quote.discount ? quote.discount.id : null, b.special_requests || null,
@@ -450,6 +451,15 @@ router.post('/nightclubs/:nightclubId/reservations',
           [quote.discount.id]);
       }
 
+      // Un pase por persona, aquí y no al confirmar el pago: el titular tiene que
+      // poder repartirlos por WhatsApp la misma tarde que reserva, aunque el
+      // depósito se pague después. Un pase de una reservación sin pagar existe y
+      // no abre —`guestPasses.check` contesta `unpaid`— que es distinto de no
+      // existir, y es lo que se le puede explicar al invitado en la puerta.
+      const emitidos = await guestPasses.issueForReservation(client, {
+        reservation, actorId: req.user.id,
+      });
+
       // Deposit is recorded as pending; the real charge lands in phase 3.
       await client.query(
         `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status,
@@ -479,6 +489,11 @@ router.post('/nightclubs/:nightclubId/reservations',
           currency: quote.currency,
           note: 'Payment processing is enabled in phase 3 (Stripe / Mercado Pago).',
         },
+        // Sin el payload firmado: la lista es para saber cuántos hay y ponerles
+        // nombre. Para repartir uno se pide ese pase, y ahí sí va el QR.
+        passes: emitidos.map((p) => ({
+          id: p.id, code: p.code, kind: p.kind, status: p.status, label: p.label,
+        })),
         arrival_deadline: quote.arrival_deadline,
       });
     } catch (err) {

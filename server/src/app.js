@@ -31,6 +31,7 @@ const valetRoutes = require('./routes/valet');
 const posRoutes = require('./routes/pos');
 const paymentRoutes = require('./routes/payments');
 const doorRoutes = require('./routes/door');
+const passRoutes = require('./routes/passes');
 
 // The OpenAPI contract is the agreement between backend, web and mobile.
 // It is served at /api/docs; a missing file must not stop the API from starting.
@@ -106,7 +107,24 @@ function createApp() {
     handler: (req, res, next) => next(ApiError.tooMany('Too many attempts, try again in a minute')),
   });
 
+  // El enlace del pase que llega por WhatsApp no lleva sesión: el invitado no
+  // tiene cuenta en el club y no la va a crear en la fila. Eso lo hace la única
+  // ruta abierta que devuelve algo del club, así que se limita aparte y fuerte.
+  //
+  // 20 por minuto y por IP: de sobra para una familia que abre su enlace varias
+  // veces en el estacionamiento, y muy poco para que sirva de ariete. Los aciertos
+  // también cuentan, al contrario que en el login: aquí la petición exitosa es
+  // precisamente la que se quiere frenar cuando alguien está probando enlaces.
+  const passLimiter = rateLimit({
+    windowMs: 60_000,
+    limit: Number(process.env.PASS_RATE_LIMIT_PER_MIN || 20),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    handler: (req, res, next) => next(ApiError.tooMany()),
+  });
+
   app.use('/api', generalLimiter);
+  app.use('/api/guest-passes', passLimiter);
   app.use('/api/auth/login', authLimiter);
   app.use('/api/auth/register', authLimiter);
   app.use('/api/auth/refresh', authLimiter);
@@ -119,6 +137,7 @@ function createApp() {
   app.use('/api', tableRoutes);
   app.use('/api', reservationRoutes);
   app.use('/api', doorRoutes);
+  app.use('/api', passRoutes);
   app.use('/api', eventRoutes);
   app.use('/api', flirtRoutes);
   app.use('/api', employeeRoutes);

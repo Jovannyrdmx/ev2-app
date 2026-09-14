@@ -31,9 +31,20 @@
   const RESULTS = {
     ok: { tone: 'ok', key: 'scan.ok' },
     already_in: { tone: 'warn', key: 'scan.alreadyIn' },
+    // `used` es el pase individual ya gastado, y es ÁMBAR a propósito, no rojo:
+    // casi siempre significa que esa persona ya entró y volvió a enseñar su
+    // teléfono, no que esté intentando colarse. Lo que sí es rojo es un pase
+    // revocado o fabricado.
+    used: { tone: 'warn', key: 'scan.used' },
     not_tonight: { tone: 'warn', key: 'scan.notTonight' },
     unpaid: { tone: 'warn', key: 'scan.unpaid' },
+    expired: { tone: 'warn', key: 'scan.expired' },
+    // Falta la revisión de identificación, o no sirve. Ámbar: se arregla
+    // volviendo a pedir la INE, y el pase NO se gastó.
+    no_id_check: { tone: 'warn', key: 'scan.noIdCheck' },
     cancelled: { tone: 'bad', key: 'scan.cancelled' },
+    revoked: { tone: 'bad', key: 'scan.revoked' },
+    forged: { tone: 'bad', key: 'scan.forged' },
     not_found: { tone: 'bad', key: 'scan.notFound' },
   };
 
@@ -55,15 +66,130 @@
       tone: shape.tone,
       colors: TONES[shape.tone],
       headlineKey: shape.key,
-      guest: pass ? pass.guest && pass.guest.name : null,
+      // Dos formas caben aquí: la de la MESA (mirar un pase sin gastarlo, que
+      // devuelve `guest.name`) y la del pase INDIVIDUAL (el escaneo, que devuelve
+      // el nombre del titular y el apodo del invitado). Una sola vista para las
+      // dos, porque la persona de la puerta mira la misma tarjeta en pantalla.
+      guest: pass ? ((pass.guest && pass.guest.name) || pass.holder_name || null) : null,
+      label: pass ? (pass.label || null) : null,
+      kind: pass ? (pass.kind || null) : null,
       table: pass ? pass.table && pass.table.code : null,
       section: pass ? pass.table && pass.table.section : null,
       guestCount: pass ? pass.guest_count : null,
+      // Cuántos de esa mesa ya están adentro. Es el número que la puerta usa para
+      // decir "van 6 de 8" sin llamar a nadie por radio.
+      inside: pass && pass.already_inside != null ? pass.already_inside : null,
       extras: pass ? pass.extras_bought : 0,
-      checkedInAt: pass ? pass.checked_in_at : null,
+      checkedInAt: pass ? (pass.checked_in_at || pass.used_at || null) : null,
+      expiresAt: pass ? (pass.expires_at || null) : null,
       startsAt: pass ? pass.starts_at : null,
       notes: pass ? pass.special_requests : null,
       reservationId: pass ? pass.reservation_id : null,
+      passId: pass ? (pass.id || null) : null,
+      // Por qué falló la revisión de identificación, cuando ese fue el motivo.
+      idCheckReason: r.id_check && r.id_check.ok === false ? r.id_check.reason : null,
+      admitted: r.admitted === true,
+      seated: r.seated === true,
+    };
+  }
+
+  // -------------------------------------------------------------- la identificación
+
+  /**
+   * Los documentos que la puerta puede aceptar.
+   *
+   * `none` existe porque pasa: alguien llega sin nada. No es un atajo — se
+   * registra como lo que es, y con `adult` en falso queda rechazado.
+   */
+  const ID_DOCUMENTS = ['ine', 'passport', 'license', 'other', 'none'];
+  const documentKey = (d) => `idc.doc_${d}`;
+
+  /**
+   * Lo que se manda al registrar la revisión.
+   *
+   * Solo tres datos: qué documento, si es mayor de edad, y si se acepta. NO se
+   * manda el número de la identificación ni la fecha de nacimiento, y no es un
+   * olvido: el club no necesita guardarlos para dejar entrar a alguien, y
+   * guardarlos lo obligaría a custodiarlos.
+   */
+  function idCheckPayload({ document, adult, reason }) {
+    const doc = ID_DOCUMENTS.includes(document) ? document : 'ine';
+    // Un menor de edad SIEMPRE es rechazo. La pantalla no ofrece la combinación
+    // contraria, y el servidor tampoco la acepta.
+    const esAdulto = adult === true;
+    const body = {
+      document: doc,
+      adult: esAdulto,
+      decision: esAdulto ? 'accepted' : 'rejected',
+    };
+    const motivo = String(reason || '').trim();
+    if (!esAdulto) body.reason = (motivo || 'menor de edad').slice(0, 200);
+    else if (motivo) body.reason = motivo.slice(0, 200);
+    return body;
+  }
+
+  /**
+   * Registrar un rechazo distinto de la edad: identificación vencida, foto que no
+   * corresponde, documento que no se deja ver.
+   */
+  function idRejectionPayload({ document, reason }) {
+    const doc = ID_DOCUMENTS.includes(document) ? document : 'other';
+    return {
+      document: doc,
+      adult: false,
+      decision: 'rejected',
+      reason: (String(reason || '').trim() || 'identificación no válida').slice(0, 200),
+    };
+  }
+
+  /** Por qué NO se puede escanear todavía. Devuelve la clave del motivo o null. */
+  function scanBlocker({ code, idCheckId }) {
+    if (!String(code || '').trim()) return 'scan.errNoCode';
+    if (!idCheckId) return 'scan.errNoIdCheck';
+    return null;
+  }
+
+  /**
+   * Cuánto le queda de vida a la revisión, en segundos. La pantalla lo enseña en
+   * cuenta atrás: una revisión que se vence mientras el guardia teclea el código
+   * es un escaneo que falla sin explicación aparente.
+   */
+  function idCheckRemaining(idCheck, now) {
+    if (!idCheck || !idCheck.expires_at) return 0;
+    const resta = new Date(idCheck.expires_at).getTime() - (now ? now.getTime() : Date.now());
+    return Math.max(0, Math.round(resta / 1000));
+  }
+
+  // -------------------------------------------------------------- sin QR en la mano
+
+  /** La búsqueda de la puerta. Menos de tres letras devolvería media base. */
+  function lookupBlocker(q) {
+    return String(q || '').trim().length < 3 ? 'look.errShort' : null;
+  }
+
+  /** Lo que se manda al emitir un pase de contingencia. El motivo es obligatorio. */
+  function contingencyPayload({ reservationId, label, reason }) {
+    const motivo = String(reason || '').trim();
+    const body = { reservation_id: reservationId, reason: motivo.slice(0, 200) };
+    const nombre = String(label || '').trim();
+    if (nombre) body.label = nombre.slice(0, 60);
+    return body;
+  }
+
+  function contingencyBlocker({ reservationId, reason }) {
+    if (!reservationId) return 'cont.errNoReservation';
+    if (String(reason || '').trim().length < 5) return 'cont.errReason';
+    return null;
+  }
+
+  /** Cómo van los pases de una reservación encontrada: "6 de 8 adentro". */
+  function lookupSummary(row) {
+    const r = row || {};
+    return {
+      total: Number(r.passes_total) || 0,
+      used: Number(r.passes_used) || 0,
+      active: Number(r.passes_active) || 0,
+      complete: (Number(r.passes_active) || 0) === 0 && (Number(r.passes_used) || 0) > 0,
     };
   }
 
@@ -108,5 +234,9 @@
   const METHODS = ['cash', 'card', 'transfer', 'courtesy'];
   const methodKey = (m) => `sell.m_${m}`;
 
-  return { RESULTS, TONES, view, admissionPayload, total, sellBlocker, canSellExtra, METHODS, methodKey };
+  return {
+    RESULTS, TONES, view, admissionPayload, total, sellBlocker, canSellExtra, METHODS, methodKey,
+    ID_DOCUMENTS, documentKey, idCheckPayload, idRejectionPayload, scanBlocker,
+    idCheckRemaining, lookupBlocker, contingencyPayload, contingencyBlocker, lookupSummary,
+  };
 }));

@@ -18,6 +18,7 @@ const { validate, z, uuid } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const events = require('../services/events');
 const door = require('../services/door');
+const passes = require('../services/guest-passes');
 const QRCode = require('qrcode');
 const seating = require('../services/seating');
 
@@ -134,65 +135,395 @@ router.get('/nightclubs/:nightclubId/door/pass/:code',
     return res.json({ pass: presentPass(rows[0], door.checkPass(rows[0])) });
   }));
 
-// ------------------------------------------------------------------ dejar entrar
+// ------------------------------------------------------------------ la identificación
 
 /**
- * El escaneo de la entrada. Esto es lo que de verdad sienta a la mesa.
+ * La revisión de la identificación, que va ANTES del escaneo.
  *
- * Un pase que no abre NO es un error: se contesta 200 con el motivo, porque la
- * persona de la puerta necesita leerlo y explicarlo, no un código de estado.
+ * Este es el orden que pidió el club y el que el backend obliga: seguridad pide
+ * la INE, la mira, la registra aquí, y solo entonces escanea el QR. No es un
+ * paso de papel: `check-in` se niega sin una revisión aceptada, fresca y sin
+ * gastar. Eso compra dos cosas concretas:
+ *
+ *   * un menor de edad o una identificación inválida NO queman el pase. Se
+ *     registra el rechazo, el pase sigue vivo, y el titular lo puede reasignar a
+ *     alguien más esa misma noche;
+ *   * "¿quién dejó entrar a esta persona?" tiene respuesta con nombre y hora,
+ *     sin que el club guarde el número de una sola credencial.
+ *
+ * Lo que NO se guarda, a propósito: el número de la identificación, la fecha de
+ * nacimiento y cualquier foto. Se guarda qué documento se enseñó, si era mayor
+ * de edad, si se aceptó, por qué no, y quién lo revisó.
+ */
+router.post('/nightclubs/:nightclubId/door/id-checks',
+  requireRole(...DOOR_ROLES),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      document: z.enum(['ine', 'passport', 'license', 'other', 'none']),
+      adult: z.boolean(),
+      decision: z.enum(['accepted', 'rejected']),
+      reason: z.string().trim().max(200).optional(),
+    })
+      // Una revisión aceptada de un menor de edad no existe. Se contesta 400 y no
+      // 200: no es un pase que no abre, es una petición que se contradice.
+      .refine((b) => b.decision === 'rejected' || b.adult, {
+        message: 'Un menor de edad no se acepta', path: ['adult'],
+      })
+      .refine((b) => b.decision === 'accepted' || (b.reason && b.reason.length >= 3), {
+        message: 'Un rechazo lleva motivo', path: ['reason'],
+      }),
+  }),
+  asyncHandler(async (req, res) => {
+    const b = req.body;
+    const { rows } = await pool.query(
+      `INSERT INTO door_id_checks (nightclub_id, document, adult, decision, reason, checked_by)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, document, adult, decision, reason, created_at`,
+      [req.params.nightclubId, b.document, b.adult, b.decision,
+        b.decision === 'rejected' ? b.reason : (b.reason || null), req.user.id],
+    );
+    const check = rows[0];
+    res.status(201).json({
+      id_check: {
+        ...check,
+        // Cuánto le queda de vida. La pantalla lo usa para avisar antes de que se
+        // venza, en vez de dejar que el escaneo falle con la fila esperando.
+        expires_at: new Date(new Date(check.created_at).getTime()
+          + passes.ID_CHECK_MINUTES * 60_000).toISOString(),
+        valid_minutes: passes.ID_CHECK_MINUTES,
+      },
+    });
+  }));
+
+// ------------------------------------------------------------------ dejar entrar
+
+// Lo que la puerta necesita del pase individual, y de la reservación detrás.
+const GUEST_PASS_SELECT = `
+  SELECT p.id, p.code, p.kind, p.status, p.label, p.expires_at, p.used_at, p.used_by,
+         p.revoke_reason, p.nightclub_id, p.reservation_id, p.admission_id,
+         r.status AS reservation_status, r.starts_at, r.ends_at, r.guest_count,
+         r.user_id AS holder_id, r.checked_in_at,
+         hu.display_name AS holder_name,
+         t.id AS table_id, t.code AS table_code, t.section, t.floor, t.capacity,
+         COALESCE(inside.n, 0)::int AS already_inside
+    FROM guest_passes p
+    LEFT JOIN reservations r ON r.id = p.reservation_id
+    LEFT JOIN users hu ON hu.id = r.user_id
+    LEFT JOIN tables t ON t.id = r.table_id
+    LEFT JOIN LATERAL (
+      SELECT count(*) AS n FROM guest_passes q
+       WHERE q.reservation_id = p.reservation_id AND q.status = 'used'
+    ) inside ON true`;
+
+function presentGuestPass(row, check) {
+  return {
+    id: row.id,
+    code: row.code,
+    kind: row.kind,
+    status: row.status,
+    label: row.label,
+    expires_at: row.expires_at,
+    used_at: row.used_at,
+    reservation_id: row.reservation_id,
+    holder_name: row.holder_name || null,
+    guest_count: row.guest_count,
+    already_inside: row.already_inside,
+    table: row.table_id ? {
+      id: row.table_id, code: row.table_code, section: row.section,
+      floor: row.floor, capacity: row.capacity,
+    } : null,
+    starts_at: row.starts_at,
+    result: check.status,
+    ok: check.ok,
+    reason: check.reason || null,
+  };
+}
+
+/**
+ * El escaneo de la entrada. Entra UNA persona por pase, y el pase se gasta.
+ *
+ * Un pase que no abre NO es un error: se contesta 200 con el motivo en palabras,
+ * porque la persona de la puerta necesita leerlo y explicarlo, no un código de
+ * estado. Los únicos 4xx de aquí son los que no puede resolver hablando: no
+ * mandaste la revisión de identificación, o la revisión ya se gastó.
+ *
+ * La mesa se sienta con el PRIMER pase que entra, no con el del titular: los
+ * amigos llegan antes que el que reservó más veces de las que nadie quisiera
+ * admitir, y hacerlos esperar afuera con su pase válido es la pelea de la
+ * entrada.
  */
 router.post('/nightclubs/:nightclubId/door/check-in',
   requireRole(...DOOR_ROLES),
   validate({
     params: z.object({ nightclubId: uuid }),
-    body: z.object({ code: z.string().trim().min(4).max(200) }),
+    body: z.object({
+      code: z.string().trim().min(4).max(200),
+      id_check_id: uuid,
+    }),
   }),
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
-    // Lo que llega puede ser el código pelón o la dirección completa del QR.
-    const code = door.passFromScan(req.body.code);
+    // Lo que llega puede ser el payload firmado del QR, un enlace, o el código
+    // pelón tecleado cuando la pantalla está rota.
+    const leido = passes.parse(req.body.code);
+    if (!leido.code) {
+      return res.json({ pass: null, result: passes.PASS_STATUS.notFound, ok: false });
+    }
+    // Una firma que no cuadra se rechaza sin tocar la base: es un QR fabricado.
+    if (leido.signed && !passes.verifySignature(leido.code, leido.signature)) {
+      return res.json({ pass: null, result: passes.PASS_STATUS.forged, ok: false });
+    }
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      // La revisión de identificación primero, y bloqueada: dos guardias
+      // escaneando a la vez con la misma revisión es justo la carrera que esto
+      // cierra. `FOR UPDATE` en la revisión, no en el pase, porque la revisión es
+      // lo único que los dos comparten.
+      const rev = await client.query(
+        `SELECT id, adult, decision, consumed_by, checked_by, created_at
+           FROM door_id_checks
+          WHERE id = $1 AND nightclub_id = $2 FOR UPDATE`,
+        [req.body.id_check_id, nightclubId]);
+      if (rev.rowCount === 0) {
+        await client.query('ROLLBACK');
+        throw ApiError.notFound('Esa revisión de identificación no existe');
+      }
+      const usable = passes.idCheckIsUsable(rev.rows[0], { staffId: req.user.id });
+
       const { rows } = await client.query(
-        `${PASS_SELECT} WHERE r.pass_code = $1 AND r.nightclub_id = $2 FOR UPDATE OF r`,
-        [code, nightclubId]);
+        `${GUEST_PASS_SELECT} WHERE p.code = $1 AND p.nightclub_id = $2 FOR UPDATE OF p`,
+        [leido.code, nightclubId]);
       if (rows.length === 0) {
         await client.query('ROLLBACK');
-        return res.json({ pass: null, result: door.PASS_STATUS.notFound, ok: false });
+        return res.json({ pass: null, result: passes.PASS_STATUS.notFound, ok: false });
       }
       const row = rows[0];
-      const check = door.checkPass(row);
+
+      // El pase se juzga primero para poder registrar POR QUÉ no abrió, aunque la
+      // revisión también estuviera mal: en la puerta importa más "este QR ya se
+      // usó a las 11:40" que "te falta la revisión".
+      // La reservación se arma aparte y no se pasa `row` entero: `row.status` es el
+      // del PASE, y confundirlo con el de la reservación dejaba entrar a una mesa
+      // sin pagar. Lo encontró la prueba de "sin pagar se distingue de cancelada".
+      const reserva = row.reservation_id ? {
+        status: row.reservation_status,
+        starts_at: row.starts_at,
+        ends_at: row.ends_at,
+        checked_in_at: row.checked_in_at,
+      } : null;
+      const check = passes.check(row, reserva, { scan: leido });
       if (!check.ok) {
-        await client.query('ROLLBACK');
-        return res.json({ pass: presentPass(row, check) });
+        await passes.audit(client, { passId: row.id, kind: 'denied', reason: check.status,
+          actorId: req.user.id, idCheckId: rev.rows[0].id });
+        await client.query('COMMIT');
+        return res.json({ pass: presentGuestPass(row, check) });
       }
 
+      if (!usable.ok) {
+        // El pase está bien y la revisión no. Se registra el intento y NO se gasta
+        // el pase: esa persona puede volver con su identificación, o el titular le
+        // reasigna el lugar a alguien más.
+        await passes.audit(client, { passId: row.id, kind: 'denied', reason: usable.reason,
+          actorId: req.user.id, idCheckId: rev.rows[0].id });
+        await client.query('COMMIT');
+        return res.json({
+          pass: presentGuestPass(row, { status: passes.PASS_STATUS.noIdCheck, ok: false }),
+          id_check: { ok: false, reason: usable.reason },
+        });
+      }
+
+      // Gastar el pase y gastar la revisión, en la misma transacción.
       await client.query(
-        `UPDATE reservations
-            SET status = 'seated', checked_in_at = now(), checked_in_by = $2, updated_at = now()
-          WHERE id = $1`,
+        `UPDATE guest_passes SET status = 'used', used_at = now(), used_by = $2 WHERE id = $1`,
         [row.id, req.user.id]);
-      // Y sentar de verdad: sin esto la mesa se pinta ocupada y el cliente sigue
-      // sin poder pedir nada desde su teléfono.
-      await seating.seatUser(client, { tableId: row.table_id, userId: row.user_id });
+      await client.query(
+        'UPDATE door_id_checks SET consumed_by = $2, consumed_at = now() WHERE id = $1',
+        [rev.rows[0].id, row.id]);
+      await passes.audit(client, { passId: row.id, kind: 'admitted', actorId: req.user.id,
+        idCheckId: rev.rows[0].id, metadata: { kind: row.kind } });
+
+      // Y sentar la mesa, si este es el primero que entra.
+      let seated = false;
+      if (row.reservation_id && row.reservation_status !== 'seated') {
+        await client.query(
+          `UPDATE reservations
+              SET status = 'seated', checked_in_at = COALESCE(checked_in_at, now()),
+                  checked_in_by = $2, updated_at = now()
+            WHERE id = $1`,
+          [row.reservation_id, req.user.id]);
+        // Sentar de verdad al titular: sin esto la mesa se pinta ocupada y el
+        // cliente sigue sin poder pedir nada desde su teléfono.
+        if (row.table_id && row.holder_id) {
+          await seating.seatUser(client, { tableId: row.table_id, userId: row.holder_id });
+        }
+        seated = true;
+        await events.publish({
+          nightclubId, type: 'reservation_seated', client,
+          audience: { roles: ['hostess', 'manager', 'waiter'], userIds: [row.holder_id] },
+          payload: {
+            reservation_id: row.reservation_id, table_id: row.table_id,
+            table_code: row.table_code, guest_count: row.guest_count,
+            first_entry: true,
+          },
+        });
+      }
 
       await events.publish({
-        nightclubId, type: 'reservation_seated', client,
-        audience: { roles: ['hostess', 'manager', 'waiter'], userIds: [row.user_id] },
+        nightclubId, type: 'guest_pass_admitted', client,
+        audience: { roles: ['hostess', 'manager'] },
         payload: {
-          reservation_id: row.id, table_id: row.table_id, table_code: row.table_code,
-          guest_count: row.guest_count,
+          pass_id: row.id, kind: row.kind, reservation_id: row.reservation_id,
+          table_code: row.table_code, inside: row.already_inside + 1,
         },
       });
       await client.query('COMMIT');
 
-      const fresco = await pool.query(`${PASS_SELECT} WHERE r.id = $1`, [row.id]);
+      const fresco = await pool.query(`${GUEST_PASS_SELECT} WHERE p.id = $1`, [row.id]);
       return res.status(200).json({
-        pass: presentPass(fresco.rows[0], { status: door.PASS_STATUS.ok, ok: true }),
-        seated: true,
+        pass: presentGuestPass(fresco.rows[0], { status: passes.PASS_STATUS.ok, ok: true }),
+        admitted: true,
+        seated,
+      });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }));
+
+// ------------------------------------------------------------------ sin QR en la mano
+
+/**
+ * Buscar a alguien que llega sin su QR: teléfono muerto, pantalla rota, nunca le
+ * llegó el mensaje.
+ *
+ * Se busca por folio (el código de la reservación), nombre o teléfono. Es
+ * personal de la puerta con la fila enfrente, así que se contesta con lo mínimo
+ * para reconocer a la persona y nada más: el nombre del titular, la mesa, la
+ * hora y cómo van sus pases.
+ *
+ * El teléfono se busca por sus últimos dígitos y NO se devuelve: la puerta
+ * pregunta "¿tu teléfono termina en 4821?" y compara. Devolverlo convertiría
+ * esta ruta en un directorio de los clientes del club.
+ */
+router.get('/nightclubs/:nightclubId/door/lookup',
+  requireRole(...DOOR_ROLES),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: z.object({ q: z.string().trim().min(3).max(60) }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const q = req.query.q;
+    const digitos = q.replace(/\D/g, '');
+    const { rows } = await pool.query(
+      `SELECT r.id, r.status, r.starts_at, r.guest_count, r.pass_code,
+              u.display_name AS holder_name,
+              right(regexp_replace(COALESCE(u.phone, ''), '\\D', '', 'g'), 4) AS phone_last4,
+              t.code AS table_code, t.section, t.floor,
+              COALESCE(pz.total, 0)::int   AS passes_total,
+              COALESCE(pz.used, 0)::int    AS passes_used,
+              COALESCE(pz.active, 0)::int  AS passes_active
+         FROM reservations r
+         JOIN users u ON u.id = r.user_id
+         JOIN tables t ON t.id = r.table_id
+         LEFT JOIN LATERAL (
+           SELECT count(*) AS total,
+                  count(*) FILTER (WHERE status = 'used') AS used,
+                  count(*) FILTER (WHERE status = 'active') AS active
+             FROM guest_passes g WHERE g.reservation_id = r.id
+         ) pz ON true
+        WHERE r.nightclub_id = $1
+          AND r.status IN ('pending_payment','confirmed','seated')
+          AND r.starts_at > now() - interval '12 hours'
+          AND (
+            r.pass_code = $2
+            OR u.display_name ILIKE '%' || $3 || '%'
+            OR ($4 <> '' AND regexp_replace(COALESCE(u.phone, ''), '\\D', '', 'g') LIKE '%' || $4)
+          )
+        ORDER BY r.starts_at
+        LIMIT 20`,
+      [nightclubId, door.normalizePassCode(q), q, digitos]);
+    res.json({ reservations: rows });
+  }));
+
+/**
+ * El pase de contingencia: temporal, de un uso, con motivo y con nombre de quién
+ * lo emitió.
+ *
+ * Existe porque la alternativa real es peor. Sin esto, el invitado que llega sin
+ * su QR entra porque el de la puerta lo deja pasar de palabra, y de eso no queda
+ * registro de ninguna clase. Con esto queda: quién lo emitió, por qué, a nombre
+ * de quién, y que se venció a los 45 minutos aunque no se haya usado.
+ *
+ * No consume un pase de la reservación ni se lo quita a nadie. Es una entrada
+ * más, y el gerente tiene que poder ver cuántas se emitieron en una noche: una
+ * puerta que emite treinta contingencias es una puerta que está regalando
+ * entradas.
+ */
+router.post('/nightclubs/:nightclubId/door/passes/contingency',
+  requireRole(...DOOR_ROLES),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      reservation_id: uuid,
+      label: z.string().trim().max(60).optional(),
+      reason: z.string().trim().min(5).max(200),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const b = req.body;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const r = await client.query(
+        `SELECT id, status, starts_at FROM reservations
+          WHERE id = $1 AND nightclub_id = $2`,
+        [b.reservation_id, nightclubId]);
+      if (r.rowCount === 0) throw ApiError.notFound('Reservación no encontrada');
+      if (!['confirmed', 'seated'].includes(r.rows[0].status)) {
+        // Una reservación sin pagar no genera entradas ni por la puerta de atrás.
+        throw ApiError.conflict('Esa reservación no está confirmada', { status: r.rows[0].status });
+      }
+
+      let creado = null;
+      for (let intento = 0; intento < 5 && !creado; intento += 1) {
+        try {
+          const ins = await client.query(
+            `INSERT INTO guest_passes (nightclub_id, reservation_id, code, kind, label,
+                                       expires_at, created_by)
+             VALUES ($1,$2,$3,'contingency',$4,$5,$6)
+             RETURNING id, code, kind, status, label, expires_at, created_at`,
+            [nightclubId, b.reservation_id, passes.generateCode(), b.label || null,
+              passes.contingencyExpiry(), req.user.id]);
+          creado = ins.rows[0];
+        } catch (err) {
+          if (err.code !== '23505') throw err;
+        }
+      }
+      if (!creado) throw ApiError.conflict('No se pudo generar el pase, inténtalo otra vez');
+
+      await passes.audit(client, { passId: creado.id, kind: 'issued', reason: b.reason,
+        actorId: req.user.id, metadata: { kind: 'contingency' } });
+      await events.publish({
+        nightclubId, type: 'guest_pass_contingency', client,
+        audience: { roles: ['manager', 'admin'] },
+        payload: { pass_id: creado.id, reservation_id: b.reservation_id, reason: b.reason },
+      });
+      await client.query('COMMIT');
+
+      // El payload firmado va aquí porque la pantalla de la puerta va a dibujar
+      // el QR en el acto y se lo va a enseñar a la persona.
+      return res.status(201).json({
+        pass: { ...creado, payload: passes.payload(creado.code) },
+        valid_minutes: passes.CONTINGENCY_MINUTES,
       });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -214,6 +545,9 @@ const admissionSchema = z.object({
   payment_method: z.enum(['cash', 'card', 'transfer', 'courtesy']).default('cash'),
   notes: z.string().trim().max(200).optional(),
   event_id: uuid.optional(),
+  // Los nombres de los invitados extra, en el orden en que se emiten sus pases.
+  // Opcional: en la puerta a veces no hay tiempo de teclear nada.
+  labels: z.array(z.string().trim().max(60)).max(50).optional(),
 }).refine((b) => b.kind !== 'vip_extra' || b.reservation_id, {
   message: 'Un extra VIP va contra una reservación', path: ['reservation_id'],
 });
@@ -268,13 +602,37 @@ router.post('/nightclubs/:nightclubId/door/admissions',
           req.user.id, b.notes || null],
       );
 
+      // Cada extra pagado se lleva su propio QR. Sin esto, "pagué dos extras" se
+      // resolvía dejando pasar a dos personas de palabra, y el conteo de adentro y
+      // el del cobro dejaban de cuadrar en cuanto alguien salía a fumar y volvía.
+      //
+      // Un cover general NO lleva pase: esa persona no tiene mesa, entra y se para
+      // donde quiera, y emitirle un QR que nadie va a volver a escanear sería
+      // papeleo que finge control.
+      let emitidos = [];
+      if (b.kind === 'vip_extra') {
+        emitidos = await passes.issueForAdmission(client, {
+          nightclubId,
+          admissionId: rows[0].id,
+          reservationId: b.reservation_id || null,
+          quantity: b.quantity,
+          actorId: req.user.id,
+          labels: b.labels || [],
+        });
+      }
+
       await events.publish({
         nightclubId, type: 'door_admission', client,
         audience: { roles: ['hostess', 'manager'] },
         payload: { kind: b.kind, quantity: b.quantity, total: String(total) },
       });
       await client.query('COMMIT');
-      return res.status(201).json({ admission: rows[0] });
+      return res.status(201).json({
+        admission: rows[0],
+        // Con el payload firmado: la pantalla de la puerta dibuja el QR y se lo
+        // enseña a la persona que acaba de pagar.
+        passes: emitidos.map((p) => ({ ...p, payload: passes.payload(p.code) })),
+      });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       throw err;

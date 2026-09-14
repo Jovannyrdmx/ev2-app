@@ -217,6 +217,47 @@
           código NO es un respaldo escondido: está siempre a la vista. La fila no
           se puede detener porque un lector no enfocó.
         -->
+        <!--
+          PASO 1: la identificación.
+
+          Va primero en la pantalla porque va primero en la vida, y porque el
+          servidor no acepta el escaneo sin ella. No es un formulario de trámite:
+          son dos toques —qué documento, y "es mayor"— y el campo del código se
+          desbloquea. El rechazo también es un botón, porque un menor de edad o una
+          identificación falsa tienen que quedar registrados igual que una entrada.
+
+          Lo que NO hay aquí, y es deliberado: ningún campo para el número de la
+          identificación ni para la fecha de nacimiento. El club no los necesita
+          para dejar entrar a alguien, y guardarlos lo obligaría a custodiarlos.
+        -->
+        <div class="card rounded-xl p-4 space-y-3" id="idc-panel">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="idc.title">Revisar identificación</p>
+            <span class="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-white/40" data-i18n="idc.step">Paso 1 de 2</span>
+          </div>
+
+          <p class="text-[11px] text-white/40" data-i18n="idc.which">¿Qué te enseñó?</p>
+          <div id="idc-docs" class="flex flex-wrap gap-1"></div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <button id="btn-idc-accept" class="ev2-button py-3 rounded-xl font-display text-sm" data-i18n="idc.accept">Es mayor: continuar</button>
+            <button id="btn-idc-reject" class="py-3 rounded-xl font-display text-sm card" data-i18n="idc.reject">No pasa</button>
+          </div>
+
+          <!-- Por qué no pasa. Aparece solo al tocar "No pasa": en el caso normal
+               estorba, y lo que estorba en una puerta se toca por error. -->
+          <div id="idc-reject-why" class="space-y-2" hidden>
+            <p class="text-[11px] text-white/40" data-i18n="idc.rejectWhy">¿Por qué no pasa?</p>
+            <div id="idc-reasons" class="flex flex-wrap gap-1"></div>
+          </div>
+
+          <p id="idc-state" class="text-xs rounded-lg p-2" hidden></p>
+          <p class="text-[10px] text-white/30 leading-snug" data-i18n="idc.noStore">
+            No se guarda el número de la identificación ni la fecha de nacimiento.
+          </p>
+        </div>
+
+        <!-- PASO 2: el código. Deshabilitado hasta que exista la revisión. -->
         <div class="card rounded-xl p-4 space-y-3">
           <div class="flex items-center justify-between gap-2">
             <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="scan.title">Leer un pase</p>
@@ -229,16 +270,57 @@
 
           <form id="scan-form" class="flex gap-2">
             <input id="scan-code" class="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none font-display tracking-widest uppercase"
-                   maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false"
-                   placeholder="EV2-XXXX-XXXX" aria-label="Código del pase">
-            <button type="submit" id="btn-scan-code" class="ev2-button px-5 rounded-xl font-display" data-i18n="scan.check">Entrar</button>
+                   maxlength="60" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                   placeholder="EV2-XXXX-XXXX" aria-label="Código del pase" disabled>
+            <button type="submit" id="btn-scan-code" class="ev2-button px-5 rounded-xl font-display" data-i18n="scan.check" disabled>Entrar</button>
           </form>
+          <p id="scan-blocked" class="text-[11px] text-amber-200/80" data-i18n="scan.errNoIdCheck">Primero revisa la identificación.</p>
 
           <!-- El resultado del último pase. Grande: se lee de reojo, con la fila enfrente. -->
           <div id="scan-result" class="rounded-xl p-3 space-y-1" hidden>
             <p id="scan-headline" class="font-display text-lg">—</p>
             <p id="scan-who" class="text-sm">—</p>
             <p id="scan-detail" class="text-xs text-white/60">—</p>
+          </div>
+        </div>
+
+        <!--
+          Llegó sin su código: teléfono muerto, pantalla rota, nunca le llegó el
+          mensaje. Existe porque la alternativa real es que el de la puerta lo deje
+          pasar de palabra y no quede registro de nada.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="look.title">Llegó sin su código</p>
+          <form id="look-form" class="flex gap-2">
+            <input id="look-q" class="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"
+                   maxlength="60" autocomplete="off" spellcheck="false"
+                   placeholder="Folio, nombre o teléfono" data-i18n-placeholder="look.search" aria-label="Buscar reservación">
+            <button type="submit" id="btn-look" class="px-5 rounded-xl font-display card text-sm" data-i18n="look.go">Buscar</button>
+          </form>
+          <p id="look-error" class="text-sm text-red-300" hidden></p>
+          <div id="look-list" class="space-y-2"></div>
+
+          <!-- El pase temporal. Solo aparece cuando ya se eligió una reservación. -->
+          <div id="cont-box" class="rounded-xl p-3 space-y-2" style="background:rgba(255,193,7,.06);border:1px solid rgba(255,193,7,.25)" hidden>
+            <p class="text-xs font-display" data-i18n="cont.title">Pase de contingencia</p>
+            <p id="cont-note" class="text-[11px] text-white/50">—</p>
+            <p id="cont-for" class="text-xs">—</p>
+            <input id="cont-label" class="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 outline-none text-sm"
+                   maxlength="60" autocomplete="off" placeholder="¿A nombre de quién?" data-i18n-placeholder="cont.forWhom" aria-label="A nombre de quién">
+            <input id="cont-reason" class="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 outline-none text-sm"
+                   maxlength="200" autocomplete="off" placeholder="¿Por qué se emite?" data-i18n-placeholder="cont.why" aria-label="Motivo">
+            <button id="btn-cont" class="ev2-button w-full py-3 rounded-xl font-display text-sm" data-i18n="cont.issue">Emitir pase</button>
+            <p id="cont-error" class="text-sm text-red-300" hidden></p>
+            <!--
+              El código recién emitido, grande. No se dibuja un QR a propósito:
+              esta persona llegó SIN teléfono, así que un QR en la pantalla del
+              guardia no le sirve de nada. El guardia teclea el código él mismo, y
+              el botón lo pone en el campo de arriba para que no lo copie a mano.
+            -->
+            <div id="cont-result" class="text-center space-y-2" hidden>
+              <p id="cont-code" class="font-display text-2xl tracking-widest">—</p>
+              <button id="btn-cont-use" class="w-full py-2 rounded-xl card text-xs" data-i18n="cont.use">Usar este código</button>
+            </div>
           </div>
         </div>
 

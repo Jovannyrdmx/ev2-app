@@ -4,7 +4,11 @@
  * Lo que se prueba aquí es lo que la fila de la entrada no perdona: que escanear
  * un pase deje al cliente REALMENTE sentado —pudiendo pedir desde su teléfono, no
  * solo con la mesa pintada de ocupada—, que el mismo QR reenviado no meta a dos
- * grupos, y que cada peso cobrado en la puerta caiga en el libro.
+ * personas, y que cada peso cobrado en la puerta caiga en el libro.
+ *
+ * A partir de la migración 019 el escaneo exige una revisión de identificación
+ * previa, así que casi todo pasa por `entrar()`: registrar la INE y luego
+ * escanear, en ese orden, que es el orden que el backend obliga.
  */
 'use strict';
 
@@ -12,6 +16,7 @@ const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
 const { loadPriceList } = require('../seeds/price-list');
+const guestPasses = require('../src/services/guest-passes');
 
 let club; let guest; let hostess; let manager; let waiter; let mesa;
 
@@ -31,19 +36,50 @@ beforeEach(async () => {
 
 const url = (p) => `/api/nightclubs/${club.id}${p}`;
 
-/** Una reservación viva esta noche, con su pase, escrita directo para no depender del flujo de cobro. */
+/**
+ * Una reservación viva esta noche, con sus pases, escrita directo para no
+ * depender del flujo de cobro. `pass_code` es el del titular, que es el mismo
+ * código de la reservación.
+ */
 async function reservar(over = {}) {
   const starts = over.starts_at || new Date(Date.now() + 30 * 60_000);
+  const nightclubId = over.nightclub_id || club.id;
   const { rows } = await pool.query(
     `INSERT INTO reservations (nightclub_id, user_id, table_id, starts_at, duration_minutes,
                                guest_count, status, currency, pass_code)
      VALUES ($1,$2,$3,$4,240,$5,$6,'MXN',$7)
-     RETURNING id, pass_code, status`,
-    [club.id, over.user_id || guest.id, over.table_id || mesa.id, starts,
+     RETURNING id, nightclub_id, pass_code, status, guest_count`,
+    [nightclubId, over.user_id || guest.id, over.table_id || mesa.id, starts,
       over.guest_count || 8, over.status || 'confirmed',
       over.pass_code || require('../src/services/door').generatePassCode()],
   );
+  await guestPasses.issueForReservation(pool, { reservation: rows[0] });
   return rows[0];
+}
+
+/** Los pases de una reservación, en el orden en que se emitieron. */
+async function pasesDe(reservationId) {
+  const { rows } = await pool.query(
+    `SELECT id, code, kind, status FROM guest_passes
+      WHERE reservation_id = $1 ORDER BY kind DESC, created_at`,
+    [reservationId]);
+  return rows;
+}
+
+/** La revisión de identificación: lo que va ANTES del escaneo. */
+async function revisarIne(staff, over = {}) {
+  const res = await api().post(url('/door/id-checks')).set(auth(staff)).send({
+    document: 'ine', adult: true, decision: 'accepted', ...over,
+  });
+  return res;
+}
+
+/** Revisar la INE y escanear, en ese orden. Es el camino normal de la puerta. */
+async function entrar(code, staff = null) {
+  const quien = staff || hostess;
+  const rev = await revisarIne(quien);
+  return api().post(url('/door/check-in')).set(auth(quien))
+    .send({ code, id_check_id: rev.body.id_check.id });
 }
 
 const sentado = async (userId) => {
@@ -59,7 +95,7 @@ describe('escanear el pase', () => {
     // Este es el fallo que originó todo el cambio: antes "Llegó" ponía la mesa en
     // ocupada y no metía a nadie, así que el cliente no podía pedir un trago.
     const r = await reservar();
-    const res = await api().post(url('/door/check-in')).set(auth(hostess)).send({ code: r.pass_code });
+    const res = await entrar(r.pass_code);
 
     expect(res.status).toBe(200);
     expect(res.body.seated).toBe(true);
@@ -75,7 +111,7 @@ describe('escanear el pase', () => {
 
   it('deja escrito quién y cuándo dejó entrar', async () => {
     const r = await reservar();
-    await api().post(url('/door/check-in')).set(auth(hostess)).send({ code: r.pass_code });
+    await entrar(r.pass_code);
     const { rows } = await pool.query(
       'SELECT status, checked_in_at, checked_in_by FROM reservations WHERE id = $1', [r.id]);
     expect(rows[0].status).toBe('seated');
@@ -84,31 +120,63 @@ describe('escanear el pase', () => {
   });
 
   it('el mismo pase no abre dos veces', async () => {
-    // Un QR reenviado por WhatsApp no puede meter a dos grupos con una reservación.
+    // Un QR reenviado por WhatsApp no puede meter a dos personas con un pase.
     const r = await reservar();
-    await api().post(url('/door/check-in')).set(auth(hostess)).send({ code: r.pass_code });
-    const segunda = await api().post(url('/door/check-in')).set(auth(hostess)).send({ code: r.pass_code });
+    await entrar(r.pass_code);
+    const segunda = await entrar(r.pass_code);
     expect(segunda.status).toBe(200);
-    expect(segunda.body.pass.result).toBe('already_in');
-    expect(segunda.body.seated).toBeUndefined();
+    expect(segunda.body.pass.result).toBe('used');
+    expect(segunda.body.admitted).toBeUndefined();
+  });
+
+  it('pero los OTROS pases de la mesa sí abren: eso es el punto de emitir uno por persona', async () => {
+    // El fallo que originó la migración 019: ocho personas con un solo código, y
+    // el primero que llegaba lo gastaba.
+    const r = await reservar({ guest_count: 3 });
+    const pases = await pasesDe(r.id);
+    expect(pases).toHaveLength(3);
+
+    for (const p of pases) {
+      const res = await entrar(p.code);
+      expect(res.body.admitted).toBe(true);
+    }
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM guest_passes WHERE reservation_id = $1 AND status = 'used'`,
+      [r.id]);
+    expect(rows[0].n).toBe(3);
   });
 
   it('acepta el código tecleado con espacios y en minúsculas', async () => {
     const r = await reservar();
     const tecleado = r.pass_code.toLowerCase().replace(/-/g, ' ');
-    const res = await api().post(url('/door/check-in')).set(auth(hostess)).send({ code: tecleado });
+    const res = await entrar(tecleado);
     expect(res.body.seated).toBe(true);
   });
 
-  it('acepta lo que trae un QR con dirección completa', async () => {
+  it('acepta el payload firmado que trae el QR', async () => {
     const r = await reservar();
-    const res = await api().post(url('/door/check-in')).set(auth(hostess))
-      .send({ code: `https://ev2clandestinoz.com/pase/${r.pass_code}` });
+    const res = await entrar(guestPasses.payload(r.pass_code));
     expect(res.body.seated).toBe(true);
+  });
+
+  it('acepta el enlace de WhatsApp escaneado con la cámara del teléfono', async () => {
+    const r = await reservar();
+    const enlace = guestPasses.shareLink('https://ev2clandestinoz.com', r.pass_code);
+    const res = await entrar(enlace);
+    expect(res.body.seated).toBe(true);
+  });
+
+  it('un QR con la firma cambiada NO abre: es un código fabricado', async () => {
+    const r = await reservar();
+    const falso = `EV2P.${r.pass_code}.AAAAAAAAAA`;
+    const res = await entrar(falso);
+    expect(res.status).toBe(200);
+    expect(res.body.result).toBe('forged');
+    expect(await sentado(guest.id)).toBeNull();
   });
 
   it('un código inventado contesta 200 con el motivo, no un error que detiene la fila', async () => {
-    const res = await api().post(url('/door/check-in')).set(auth(hostess)).send({ code: 'EV2-ZZZZ-ZZZZ' });
+    const res = await entrar('EV2-ZZZZ-ZZZZ');
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(false);
     expect(res.body.result).toBe('not_found');
@@ -116,14 +184,14 @@ describe('escanear el pase', () => {
 
   it('una reservación sin pagar se distingue de una cancelada', async () => {
     const r = await reservar({ status: 'pending_payment' });
-    const res = await api().post(url('/door/check-in')).set(auth(hostess)).send({ code: r.pass_code });
+    const res = await entrar(r.pass_code);
     expect(res.body.pass.result).toBe('unpaid');
     expect(await sentado(guest.id)).toBeNull();
   });
 
   it('la de mañana no abre hoy, y nadie queda sentado', async () => {
     const r = await reservar({ starts_at: new Date(Date.now() + 30 * 3_600_000) });
-    const res = await api().post(url('/door/check-in')).set(auth(hostess)).send({ code: r.pass_code });
+    const res = await entrar(r.pass_code);
     expect(res.body.pass.result).toBe('not_tonight');
     expect(await sentado(guest.id)).toBeNull();
   });
@@ -132,16 +200,23 @@ describe('escanear el pase', () => {
     const otro = await f.createNightclub({ slug: 'otro' });
     const suGuest = await f.createUser(otro.id, { role: 'guest' });
     const suMesa = await f.createTable(otro.id, { code: 'X1', section: 'GENERAL', capacity: 4 });
-    const ajena = await reservar({ user_id: suGuest.id, table_id: suMesa.id });
-    await pool.query('UPDATE reservations SET nightclub_id = $2 WHERE id = $1', [ajena.id, otro.id]);
+    const ajena = await reservar({
+      nightclub_id: otro.id, user_id: suGuest.id, table_id: suMesa.id,
+    });
 
-    const res = await api().post(url('/door/check-in')).set(auth(hostess)).send({ code: ajena.pass_code });
+    const res = await entrar(ajena.pass_code);
     expect(res.body.result).toBe('not_found');
   });
 
   it('un cliente no puede escanear pases', async () => {
     const r = await reservar();
-    const res = await api().post(url('/door/check-in')).set(auth(guest)).send({ code: r.pass_code });
+    const res = await api().post(url('/door/check-in')).set(auth(guest))
+      .send({ code: r.pass_code, id_check_id: r.id });
+    expect(res.status).toBe(403);
+  });
+
+  it('ni registrar una revisión de identificación', async () => {
+    const res = await revisarIne(guest);
     expect(res.status).toBe(403);
   });
 
@@ -184,7 +259,7 @@ describe('el cliente ya no se sienta solo', () => {
 describe('cerrar la reservación', () => {
   it('al terminar, la mesa se vacía: si no, sigue recibiendo pedidos de quien ya se fue', async () => {
     const r = await reservar();
-    await api().post(url('/door/check-in')).set(auth(hostess)).send({ code: r.pass_code });
+    await entrar(r.pass_code);
     await api().post(url(`/reservations/${r.id}/status`)).set(auth(manager)).send({ status: 'completed' });
 
     expect(await sentado(guest.id)).toBeNull();
@@ -245,7 +320,7 @@ describe('lo que se vende en la entrada', () => {
 describe('el aforo', () => {
   it('cuenta por separado lo reservado y lo vendido en la puerta', async () => {
     const r = await reservar();
-    await api().post(url('/door/check-in')).set(auth(hostess)).send({ code: r.pass_code });
+    await entrar(r.pass_code);
     await api().post(url('/door/admissions')).set(auth(hostess))
       .send({ kind: 'general', quantity: 20, unit_price: 150 });
     await api().post(url('/door/admissions')).set(auth(hostess))

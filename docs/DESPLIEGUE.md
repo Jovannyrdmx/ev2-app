@@ -279,9 +279,16 @@ con sus propios comandos:
 docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api npm run seed:floor
 docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api npm run seed:prices
 docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api npm run seed:menu
+docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api npm run seed:supplies
 ```
 
-Ninguno de los tres es opcional. Sin `seed:prices` ninguna mesa tiene precio y la
+`seed:supplies` carga las tres ubicaciones (almacen y las dos barras), los 88 insumos,
+las 129 recetas y los 60 puntos de entrega con su QR. **Carga existencia CERO a
+proposito**: las botellas entran por `almacen.html`, con una entrada de mercancia o un
+conteo fisico. Es idempotente y no pisa un tamano de botella ya confirmado a mano ni una
+zona ya asignada a una barra.
+
+Ninguno de los cuatro es opcional. Sin `seed:prices` ninguna mesa tiene precio y la
 pantalla de reservación sale vacía sin explicar por qué; sin `seed:menu` el cliente
 abre el menú y no hay nada que pedir.
 
@@ -337,6 +344,11 @@ cd ~/ev2
 git pull
 docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d --build
 ```
+
+Las migraciones se aplican solas al arrancar la API. **Cuando la actualizacion trae
+seeds nuevos, hay que correrlos a mano**: la API no los ejecuta al arrancar, porque un
+seed que corre solo en cada despliegue es un seed que algun dia va a pisar datos reales.
+La bitacora (`docs/AVANCE.md`) dice cual trae cada paso.
 
 Las migraciones se aplican solas al arrancar la API. Antes de actualizar en un servidor
 con datos reales, **respalda primero**:

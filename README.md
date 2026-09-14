@@ -106,7 +106,9 @@ pedido avanzar solo, abre otra ventana con `bartender@ev2.local` (paso 5.7).
 | Barra | `bartender.html` | La cola **de su barra**, ordenada por hora de pago; puede reacomodarla por eficiencia sin tocar la auditoria. |
 | Almacen | `almacen.html` | Entradas, surtido a las barras, mermas, cortesias, salidas y conteo fisico, con kardex. |
 | Gerente | `manager.html` | Precios, plano, empleados, caja del turno, reportes y moderacion. |
-| Puerta | `staff.html` | Escanea el pase, vende acceso general y lleva el aforo. |
+| Puerta | `staff.html` | Revisa la identificacion, escanea el pase de cada invitado, vende acceso general y extras, emite pases de contingencia y lleva el aforo. |
+| Invitado sin cuenta | `pase.html` | El pase que le llego por WhatsApp: su QR, su codigo y la mesa. Publico, sin sesion. |
+| Verificar constancia | `verificar.html` | Comprueba un folio de salida segura. Publico, sin sesion. |
 
 ### Probar el flujo completo del inventario
 
@@ -121,6 +123,32 @@ Con la app arriba y el almacen cargado:
    y no en la otra.
 5. Vuelve a `almacen.html`: el kardex muestra el consumo, con el saldo que quedo en ese
    estante y contra que pedido salio.
+
+### Probar el flujo completo de la entrada
+
+1. Reserva una mesa para 4 desde `index.html`. La reservacion nace con **4 pases**: el
+   tuyo y tres de invitado.
+2. Abre tu pase (boton *Ver mi pase*) y baja al bloque **Los pases de tu mesa**. Ponle
+   nombre a uno y toca **Mandar por WhatsApp**: se abre tu propia app con el mensaje y
+   el enlace ya escritos.
+3. Abre ese enlace (en otro navegador, o en modo incognito, **sin sesion**): es
+   `pase.html`, y ahi esta el QR del invitado.
+4. Entra como **puerta** en `staff.html`, pestana *Puerta*. El campo del codigo nace
+   **deshabilitado**: primero elige el documento y toca *Es mayor: continuar*. Entonces
+   se abre, con una cuenta atras de 5 minutos.
+5. Escanea o teclea el codigo del invitado. Entra **una** persona; el mismo codigo una
+   segunda vez dice *ese pase ya se uso*, y los otros tres siguen sirviendo.
+6. Prueba el rechazo: toca *No pasa* -> *Menor de edad*. Queda registrado y el pase
+   **sigue vivo**; desde el telefono del titular se puede **reasignar** a otra persona,
+   lo que mata el codigo viejo y emite uno nuevo.
+7. Prueba la contingencia: en *Llego sin su codigo*, busca por nombre, escribe un motivo
+   y emite el pase. Vale una vez y vence a los 45 minutos.
+8. En `manager.html` -> *Inventario* y en el historial de cada pase queda quien reviso la
+   identificacion, quien dejo entrar y a que hora.
+
+> El QR **no lleva ningun dato de la persona**: un codigo aleatorio y una firma. Y la
+> revision de identificacion **no guarda** el numero del documento ni la fecha de
+> nacimiento; solo que se enseño una INE y que era mayor de edad.
 
 > `ALLOWED_ORIGINS` **tiene que incluir el origen desde el que abres la pagina**, aunque
 > la API vaya detras del mismo proxy: el navegador manda la cabecera `Origin` tambien en

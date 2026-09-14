@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Tu pase — EV2 Clandestinoz</title>
+    <meta name="theme-color" content="#0a0a14">
+    <link rel="icon" href="images/favicon-32x32.png" type="image/png" sizes="32x32">
+    <meta name="ev2:api" content="/api">
+    <!--
+      Esta página es PÚBLICA a propósito: la abre el invitado desde el mensaje de
+      WhatsApp que le mandó su amigo. No pide cuenta, no guarda sesión y no lleva el
+      service worker. Tiene que funcionar en un teléfono prestado, en la banqueta, con
+      una barra de señal y sin haber instalado nada.
+
+      El enlace ES la credencial, como un boleto de avión: quien lo tiene, entra. De
+      ahí tres decisiones:
+
+        * no se indexa. El pase es de quien lo trae, no de un buscador;
+        * la página no enseña un solo dato de nadie. Ni el nombre del titular, ni un
+          teléfono, ni quién más está invitado. Solo el QR, la mesa, la hora y el
+          apodo que el titular escribió para QUIEN VA A LEER esta pantalla;
+        * el código va escrito debajo del QR, grande. A alguien se le va a morir el
+          teléfono en la fila, y entonces lo dicta.
+    -->
+    <meta name="robots" content="noindex, nofollow">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
+        :root { --ev2-cyan: #00BFFF; --ev2-pink: #FF1493; --ev2-lime: #00FF00; }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%);
+            min-height: 100vh;
+        }
+        .font-display { font-family: 'Poppins', sans-serif; font-weight: 700; }
+        .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
+        /* El QR va sobre blanco y sin filtros: un lector barato falla con un QR
+           invertido o con poco contraste, y aquí fallar significa una fila detenida. */
+        #pass-qr { background: #fff; border-radius: .75rem; padding: .75rem; }
+        #pass-qr svg { display: block; width: 100%; height: auto; }
+        .dead #pass-qr { opacity: .25; }
+        button, .tap { min-height: 44px; }
+    </style>
+</head>
+<body class="text-white">
+<main class="max-w-sm mx-auto px-5 py-8 space-y-5">
+
+    <header class="text-center space-y-1">
+        <p class="font-display text-2xl">EV2 Clandestinoz</p>
+        <p id="pass-club" class="text-sm text-white/60">—</p>
+    </header>
+
+    <!-- Mientras carga. Sin números ni textos inventados: solo que está trabajando. -->
+    <p id="pass-loading" class="text-center text-sm text-white/50 py-10" data-i18n="pass.loading">
+        Cargando tu pase…
+    </p>
+
+    <!-- Si el enlace no sirve. Un enlace mal copiado de WhatsApp es el caso normal. -->
+    <section id="pass-error" class="card rounded-xl p-5 text-center space-y-2" hidden>
+        <p class="font-display text-lg" data-i18n="pass.badLink">Este enlace no sirve</p>
+        <p class="text-sm text-white/60" data-i18n="pass.badLinkHelp">
+            Puede que se haya cortado al copiarlo. Pídele a quien te lo mandó que te lo reenvíe completo.
+        </p>
+    </section>
+
+    <section id="pass-card" class="card rounded-xl p-5 space-y-4" hidden>
+        <div class="text-center space-y-1">
+            <p id="pass-for" class="font-display text-xl">—</p>
+            <p id="pass-kind" class="text-[11px] uppercase tracking-wider text-white/40">—</p>
+        </div>
+
+        <div id="pass-qr" aria-live="polite"></div>
+
+        <div class="text-center space-y-1">
+            <p class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="pass.code">Tu código</p>
+            <p id="pass-code" class="font-display text-2xl tracking-widest select-all">—</p>
+        </div>
+
+        <!-- El estado. Es lo único que cambia de color, porque es lo único que decide
+             si el invitado sale de su casa. -->
+        <p id="pass-state" class="rounded-lg p-3 text-center text-sm" hidden></p>
+
+        <dl class="divide-y divide-white/5 text-sm">
+            <div class="flex justify-between py-2">
+                <dt class="text-white/50" data-i18n="pass.table">Mesa</dt>
+                <dd id="pass-table" class="font-medium">—</dd>
+            </div>
+            <div class="flex justify-between py-2">
+                <dt class="text-white/50" data-i18n="pass.when">Cuándo</dt>
+                <dd id="pass-when" class="font-medium text-right">—</dd>
+            </div>
+        </dl>
+
+        <div class="rounded-lg p-3 text-[12px] leading-snug"
+             style="background:rgba(0,191,255,.07);border:1px solid rgba(0,191,255,.25)">
+            <p class="font-medium mb-1" data-i18n="pass.rulesTitle">Antes de venir</p>
+            <ul class="space-y-1 text-white/70 list-disc pl-4">
+                <li data-i18n="pass.ruleId">Trae tu identificación. En la puerta la revisan antes de leer el código.</li>
+                <li data-i18n="pass.ruleOnce">Este pase es tuyo y sirve una sola vez.</li>
+                <li data-i18n="pass.ruleScreenshot">Guarda una captura: si se te acaba la batería, dicta el código.</li>
+            </ul>
+        </div>
+
+        <button id="btn-save" class="w-full py-3 rounded-xl card font-display text-sm"
+                data-i18n="pass.save">Guardar la imagen del código</button>
+    </section>
+
+    <div class="text-center">
+        <button id="btn-lang" class="text-[11px] text-white/40 underline">English</button>
+    </div>
+</main>
+
+<script src="js/format.js"></script>
+<script src="js/door-scan.js"></script>
+<script src="js/pass-screen.js"></script>
+</body>
+</html>
