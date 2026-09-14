@@ -28,7 +28,11 @@
   const state = {
     orders: [], lane: 'new', realtime: null, busy: new Set(), arrived: new Set(),
     alert: true,
+    // La barra en la que esta parado el cantinero. Se recuerda en el aparato, porque
+    // el telefono de la barra de arriba es siempre el de la barra de arriba.
+    bars: [], barId: null,
   };
+  const BAR_KEY = 'ev2.bar.location';
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
   const lang = () => EV2Format.getLanguage();
@@ -174,6 +178,7 @@
     $('screen-wrong-role').hidden = true;
     $('screen-bar').hidden = false;
     $('me-name').textContent = (api.session.user && api.session.user.display_name) || '';
+    await loadBars();
     await loadQueue();
     connectRealtime();
     // El reloj de espera avanza solo: sin esto, "hace 2 min" se queda en 2 min toda la
@@ -181,11 +186,55 @@
     setInterval(renderAll, 30000);
   }
 
+  /**
+   * Las barras del club.
+   *
+   * Sin esto la pantalla mezclaba las dos colas: el cantinero de arriba veia -y podia
+   * preparar- los tragos de abajo, que salen de un estante que no tiene enfrente.
+   */
+  async function loadBars() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/supply-locations`);
+      state.bars = (data.locations || []).filter((l) => l.kind === 'bar' && l.active);
+      let saved = null;
+      try { saved = localStorage.getItem(BAR_KEY); } catch { saved = null; }
+      const known = state.bars.some((b) => b.id === saved);
+      // Con una sola barra no hay nada que elegir; con varias, la recordada, y si no
+      // ninguna: "todas" es honesto mientras nadie diga en cual esta.
+      state.barId = known ? saved : (state.bars.length === 1 ? state.bars[0].id : null);
+    } catch (err) { showError(err); }
+  }
+
+  function chooseBar(barId) {
+    state.barId = barId;
+    try {
+      if (barId) localStorage.setItem(BAR_KEY, barId);
+      else localStorage.removeItem(BAR_KEY);
+    } catch { /* navegacion privada: la eleccion vive solo en memoria */ }
+    loadQueue();
+  }
+
+  function renderBars() {
+    const holder = $('bar-chips');
+    if (!holder) return;
+    holder.hidden = state.bars.length < 2;
+    if (state.bars.length < 2) return;
+    const chips = [{ id: null, name: t('bar.allBars') }]
+      .concat(state.bars.map((b) => ({ id: b.id, name: b.name })));
+    holder.innerHTML = chips.map((c) => `
+      <button class="chip tap px-3 whitespace-nowrap ${c.id === state.barId ? 'on' : ''}"
+              data-bar="${c.id === null ? '' : escape(c.id)}">${escape(c.name)}</button>`).join('');
+    for (const button of holder.querySelectorAll('[data-bar]')) {
+      button.onclick = () => chooseBar(button.dataset.bar || null);
+    }
+  }
+
   async function loadQueue() {
     try {
       // `active=true` trae solo lo que sigue vivo en la barra; el cliente de la API no
-      // arma la query, así que va en la ruta.
-      const data = await api.get(`/nightclubs/${clubId()}/orders?active=true&limit=100`);
+      // arma la query, así que va en la ruta. `bar_id` la separa de la otra barra.
+      const bar = state.barId ? `&bar_id=${state.barId}` : '';
+      const data = await api.get(`/nightclubs/${clubId()}/orders?active=true&limit=100${bar}`);
       state.orders = data.orders || [];
       renderAll();
     } catch (err) { showError(err); }
@@ -203,6 +252,8 @@
 
     const oldest = EV2Bar.oldestWait(state.orders, now);
     $('stat-oldest').textContent = oldest === null ? '—' : t('bar.minutes', { n: oldest });
+
+    renderBars();
 
     document.querySelectorAll('[data-lane]').forEach((b) => {
       b.classList.toggle('active', b.dataset.lane === state.lane);
@@ -228,6 +279,7 @@
 
     const wait = minutes === null ? ''
       : (minutes < 1 ? t('bar.justNow') : t('bar.minutes', { n: minutes }));
+    const paid = EV2Bar.isPaid(order);
 
     const who = order.recipient_name
       ? `<span class="text-pink-300"><i class="fa-solid fa-gift mr-1"></i>${escape(t('bar.gift'))}: ${escape(order.recipient_name)}</span>`
@@ -245,6 +297,8 @@
           <p class="text-xs text-white/45 mt-1">${who}</p>
           ${order.message ? `<p class="text-xs text-amber-200/80 mt-1">${escape(t('bar.note'))}: ${escape(order.message)}</p>` : ''}
           ${order.status === 'pos_error' ? `<p class="text-xs text-red-300 mt-1">${escape(t('bar.posError'))}${order.pos_error ? ` ${escape(order.pos_error)}` : ''}</p>` : ''}
+          ${paid ? '' : `<p class="text-xs text-amber-300 mt-1"><i class="fa-solid fa-hand-holding-dollar mr-1"></i>${escape(t('bar.unpaid'))}</p>`}
+          ${!state.barId && order.bar_name ? `<p class="text-[11px] text-white/35 mt-1">${escape(order.bar_name)}</p>` : ''}
         </div>
         <div class="text-right flex-none">
           <p class="text-xs ${level === 'late' ? 'text-red-300' : level === 'warn' ? 'text-amber-300' : 'text-white/50'}">${escape(wait)}</p>
@@ -252,8 +306,10 @@
         </div>
       </div>
       <div class="flex gap-2 mt-3">
-        ${action ? `<button class="ev2-button flex-1 rounded-lg" data-do="${escape(action.status)}" ${busy ? 'disabled' : ''}>${escape(t(action.key))}</button>` : ''}
+        ${action ? `<button class="ev2-button flex-1 rounded-lg" data-do="${escape(action.status)}" ${busy || !paid ? 'disabled' : ''}>${escape(t(action.key))}</button>` : ''}
         ${EV2Bar.canCancel(order.status) ? `<button class="card rounded-lg px-4 text-sm text-red-300" data-do="cancelled" ${busy ? 'disabled' : ''}>${escape(t('bar.cancel'))}</button>` : ''}
+        <button class="card rounded-lg px-3 text-sm" data-move="up" title="${escape(t('bar.moveUp'))}" ${busy ? 'disabled' : ''}>↑</button>
+        <button class="card rounded-lg px-3 text-sm" data-move="down" title="${escape(t('bar.moveDown'))}" ${busy ? 'disabled' : ''}>↓</button>
       </div>
     </article>`;
   }
@@ -263,7 +319,35 @@
       el.querySelectorAll('[data-do]').forEach((button) => {
         button.onclick = () => advance(el.dataset.order, button.dataset.do);
       });
+      el.querySelectorAll('[data-move]').forEach((button) => {
+        button.onclick = () => move(el.dataset.order, button.dataset.move);
+      });
     });
+  }
+
+  /**
+   * Reacomodar la cola por eficiencia, sin tocar la auditoria.
+   *
+   * Lo que se manda es el orden completo del carril; el servidor solo guarda una
+   * preferencia de pantalla. La hora en que entro cada pedido y la hora en que se pago
+   * siguen intactas, que es lo que el reporte del cierre usa para decir cuanto espero
+   * de verdad cada cliente.
+   */
+  async function move(orderId, direction) {
+    const ids = EV2Bar.reorder(state.orders, state.lane, orderId, direction);
+    if (!ids) return;
+    // Se pinta antes de que el servidor conteste: mover una tarjeta tiene que sentirse
+    // inmediato, y si falla se recarga la cola, que es la verdad.
+    const position = new Map(ids.map((id, i) => [id, i + 1]));
+    state.orders = state.orders.map((o) => (position.has(o.id)
+      ? Object.assign({}, o, { bar_position: position.get(o.id) }) : o));
+    renderAll();
+    try {
+      await api.put(`/nightclubs/${clubId()}/orders/queue-order`, { order_ids: ids });
+    } catch (err) {
+      showError(err);
+      await loadQueue();
+    }
   }
 
   /**

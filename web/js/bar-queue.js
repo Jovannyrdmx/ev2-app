@@ -94,16 +94,73 @@
       const lane = laneOf(order.status);
       if (lane) lanes[lane].push(order);
     }
-    for (const lane of LANES) {
-      lanes[lane].sort((a, b) => {
-        const ta = toTime(a.created_at);
-        const tb = toTime(b.created_at);
-        if (ta === null) return 1;
-        if (tb === null) return -1;
-        return ta - tb;
-      });
-    }
+    for (const lane of LANES) lanes[lane].sort(queueOrder);
     return lanes;
+  }
+
+  /**
+   * El orden de la cola.
+   *
+   * Primero lo que el cantinero movio a mano (`bar_position`): tres tragos del mismo
+   * whisky se preparan juntos, y obligarlo a seguir el orden de llegada es hacer la
+   * barra mas lenta a proposito. Lo que NO se mueve es la hora: `created_at` sigue
+   * siendo la auditoria, asi que el reporte del cierre dice cuanto espero de verdad
+   * cada cliente aunque su tarjeta cambiara de lugar.
+   *
+   * Sin posicion puesta, el mas viejo primero. Ese orden no es estetico: si se
+   * ordenara por el ultimo cambio, un pedido que nadie toco se hunde y el cliente
+   * espera media hora.
+   */
+  function queueOrder(a, b) {
+    const pa = Number.isFinite(Number(a.bar_position)) ? Number(a.bar_position) : null;
+    const pb = Number.isFinite(Number(b.bar_position)) ? Number(b.bar_position) : null;
+    if (pa !== null && pb !== null && pa !== pb) return pa - pb;
+    if (pa !== null && pb === null) return -1;
+    if (pa === null && pb !== null) return 1;
+    const ta = toTime(a.created_at);
+    const tb = toTime(b.created_at);
+    if (ta === null) return 1;
+    if (tb === null) return -1;
+    return ta - tb;
+  }
+
+  /**
+   * Solo los pedidos de UNA barra.
+   *
+   * La barra de arriba no tiene por que ver -ni preparar- los tragos de la de abajo:
+   * dos colas mezcladas es como un trago se queda media hora esperando a que alguien
+   * decida que le toca.
+   */
+  function filterByBar(orders, barId) {
+    if (!barId) return (orders || []).slice();
+    return (orders || []).filter((o) => o.bar_location_id === barId);
+  }
+
+  /**
+   * La barra no sirve a credito: un pedido sin pagar se ve, pero no se prepara.
+   *
+   * `not_required` es un pedido que no cuesta nada (un producto de precio cero), que no
+   * tiene cobro que esperar. Distinto de `pending`, que es dinero que nadie entrego.
+   */
+  const isPaid = (order) => ['paid', 'not_required'].includes(
+    (order && order.payment_status) || 'not_required');
+
+  /**
+   * Mover una tarjeta de lugar dentro de su carril.
+   *
+   * Devuelve la lista COMPLETA de ids del carril en el orden nuevo, que es lo que
+   * espera el servidor: mandar solo el id movido dejaria al resto sin posicion y el
+   * siguiente reacomodo empezaria de cero.
+   */
+  function reorder(orders, lane, orderId, direction) {
+    const list = groupByLane(orders)[lane] || [];
+    const ids = list.map((o) => o.id);
+    const from = ids.indexOf(orderId);
+    if (from === -1) return null;
+    const to = direction === 'up' ? from - 1 : from + 1;
+    if (to < 0 || to >= ids.length) return null;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    return ids;
   }
 
   /** "2× Corona, 1× Margarita". Lo que el bartender tiene que preparar, de un vistazo. */
@@ -121,7 +178,14 @@
   /** A dónde va: la mesa es lo único que el mesero necesita. */
   function destination(order) {
     if (!order) return null;
+    // El punto de entrega manda sobre la mesa: en la pista no hay mesa, y "Pista A" es
+    // una direccion a la que el mesero puede llegar. Un pedido sin ninguno de los dos
+    // es la venta en la barra, que se entrega ahi mismo.
+    if (order.delivery_point_name && order.delivery_point_kind !== 'table') {
+      return order.delivery_point_name;
+    }
     if (order.table_code) return order.table_code;
+    if (order.delivery_point_name) return order.delivery_point_name;
     return null;
   }
 
@@ -209,6 +273,10 @@
     waitMinutes,
     urgency,
     groupByLane,
+    queueOrder,
+    filterByBar,
+    isPaid,
+    reorder,
     itemsSummary,
     itemCount,
     destination,

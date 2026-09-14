@@ -20,7 +20,8 @@
     "seed:floor": "node seeds/floor-plan.js",
     "seed:prices": "node seeds/price-list.js",
     "seed:menu": "node seeds/menu.js",
-    "bootstrap": "node scripts/bootstrap.js"
+    "bootstrap": "node scripts/bootstrap.js",
+    "seed:supplies": "node seeds/supplies.js"
   },
   "jest": {
     "testEnvironment": "node",

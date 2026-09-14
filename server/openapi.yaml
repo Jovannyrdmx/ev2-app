@@ -91,6 +91,10 @@ tags:
     description: Perfil del club, personal, contactos de emergencia, eventos y tablero.
   - name: Bebidas
     description: Catálogo y existencias.
+  - name: Inventario
+    description: |
+      La existencia real: insumos, recetas, lugares (almacén y barras) y el kardex. El
+      saldo vive en un insumo EN UN LUGAR, y todo cambio deja un renglón con su motivo.
   - name: Pedidos
     description: Pedidos de bebidas y flujo de la barra.
   - name: Mesas
@@ -456,6 +460,16 @@ paths:
       operationId: getNightclubsByNightclubIdDrinks
       tags: [Bebidas]
       summary: Menú del club
+      description: |
+        `stock` no es un contador del producto: es cuántas unidades ALCANZAN con lo que
+        hay en una barra, el mínimo entre los ingredientes de su receta. `null` significa
+        que ese producto no lleva control de existencia (no tiene receta capturada), que
+        es distinto de 0.
+
+        Los números son SIEMPRE de una barra, y `bar_location_id` dice de cuál: la de la
+        mesa donde está sentado quien pregunta, la que pida `bar_id`, o la primera del
+        club. Sin eso, "quedan 3" no dice tres dónde, y el mesero promete un trago que
+        la otra barra no tiene.
       parameters:
         - { $ref: '#/components/parameters/NightclubId' }
         - name: category
@@ -468,6 +482,10 @@ paths:
         - name: search
           in: query
           schema: { type: string }
+        - name: bar_id
+          in: query
+          description: La barra contra la que se calculan las existencias.
+          schema: { type: string, format: uuid }
       responses:
         '200':
           description: Bebidas
@@ -479,6 +497,10 @@ paths:
                   drinks:
                     type: array
                     items: { $ref: '#/components/schemas/Drink' }
+                  bar_location_id:
+                    type: [string, 'null']
+                    format: uuid
+                    description: La barra a la que se refieren las existencias.
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
     post:
@@ -5522,6 +5544,763 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  # ==========================================================================
+  # Inventario: lugares, insumos, recetas, kardex y puntos de entrega
+  # ==========================================================================
+
+  /api/nightclubs/{nightclubId}/supply-locations:
+    get:
+      operationId: getNightclubsByNightclubIdSupplyLocations
+      tags: [Inventario]
+      summary: Lugares donde vive la existencia
+      description: |
+        El almacén y las barras. Cada barra trae las zonas del plano que atiende, que es
+        lo que decide de qué estante baja el pedido de una mesa.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: include_inactive, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: Lugares del club
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  locations:
+                    type: array
+                    items: { $ref: '#/components/schemas/SupplyLocation' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: postNightclubsByNightclubIdSupplyLocations
+      tags: [Inventario]
+      summary: Dar de alta un lugar
+      description: Solo gerencia. Un tercer estante, una barra de terraza, una bodega chica.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SupplyLocationCreate' }
+      responses:
+        '201':
+          description: Lugar creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  location: { $ref: '#/components/schemas/SupplyLocation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/supply-locations/{locationId}:
+    patch:
+      operationId: patchNightclubsByNightclubIdSupplyLocationsByLocationId
+      tags: [Inventario]
+      summary: Editar o apagar un lugar
+      description: |
+        Apagar una barra que todavía atiende zonas responde 409 y nombra las zonas: sin
+        eso, los pedidos de esas mesas se quedarían sin barra a media noche.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/LocationId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 80 }
+                floor: { type: string, maxLength: 10 }
+                sort_order: { type: integer }
+                active: { type: boolean }
+      responses:
+        '200':
+          description: Lugar actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  location: { $ref: '#/components/schemas/SupplyLocation' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/zone-bars:
+    get:
+      operationId: getNightclubsByNightclubIdZoneBars
+      tags: [Inventario]
+      summary: Qué barra atiende cada zona
+      description: |
+        Todas las zonas del plano, tengan barra asignada o no. `unassigned` es lo que el
+        gerente necesita ver antes de que llegue el primer pedido: una zona sin barra
+        cae en la barra de su planta por omisión, que puede no ser la correcta.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Zonas y su barra
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  zones:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        section: { type: string }
+                        floor: { type: string }
+                        tables: { type: integer }
+                        location_id: { type: [string, 'null'], format: uuid }
+                        bar_code: { type: [string, 'null'] }
+                        bar_name: { type: [string, 'null'] }
+                  unassigned:
+                    type: array
+                    items: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      operationId: putNightclubsByNightclubIdZoneBars
+      tags: [Inventario]
+      summary: Reasignar zonas a una barra
+      description: |
+        Solo gerencia, y se puede hacer a media noche: "la terraza pasa a la barra de
+        arriba". `location_id: null` desasigna y la zona vuelve a la barra de su planta.
+        Una zona no se puede asignar al almacén (422): el almacén no sirve tragos.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assignments]
+              properties:
+                assignments:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [section, location_id]
+                    properties:
+                      section: { type: string, maxLength: 40 }
+                      location_id: { type: [string, 'null'], format: uuid }
+      responses:
+        '200':
+          description: Asignaciones vigentes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assignments:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        section: { type: string }
+                        location_id: { type: string, format: uuid }
+                        bar_code: { type: string }
+                        bar_name: { type: string }
+                        updated_at: { type: string, format: date-time }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/supplies:
+    get:
+      operationId: getNightclubsByNightclubIdSupplies
+      tags: [Inventario]
+      summary: Insumos con su existencia por lugar
+      description: |
+        `stock` es el total del club y `locations` lo desglosa por estante, que es lo
+        único que sirve para saber si una barra puede servir algo. `packages` dice
+        cuántas presentaciones son, que es como se cuenta mirando el estante.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: category, in: query, schema: { type: string, maxLength: 40 } }
+        - { name: location_id, in: query, schema: { type: string, format: uuid } }
+        - { name: low_only, in: query, schema: { type: boolean, default: false } }
+        - { name: unconfirmed_only, in: query, schema: { type: boolean, default: false } }
+        - { name: include_inactive, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: Insumos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supplies:
+                    type: array
+                    items: { $ref: '#/components/schemas/Supply' }
+                  unconfirmed_sizes:
+                    type: integer
+                    description: Cuántas presentaciones nadie ha confirmado todavía.
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: postNightclubsByNightclubIdSupplies
+      tags: [Inventario]
+      summary: Dar de alta un insumo
+      description: |
+        Nace en cero a propósito: la existencia entra por una recepción o un conteo,
+        nunca al darlo de alta. Un saldo inicial tecleado es un número sin respaldo.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SupplyCreate' }
+      responses:
+        '201':
+          description: Insumo creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supply: { $ref: '#/components/schemas/Supply' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/supplies/{supplyId}:
+    patch:
+      operationId: patchNightclubsByNightclubIdSuppliesBySupplyId
+      tags: [Inventario]
+      summary: Editar un insumo
+      description: |
+        `stock` y `avg_cost` no se editan: se mueven. Cambiar `package_size` da el
+        tamaño por confirmado, porque es exactamente el dato que faltaba.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/SupplyId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: '#/components/schemas/SupplyCreate' }
+                - type: object
+                  properties:
+                    active: { type: boolean }
+      responses:
+        '200':
+          description: Insumo actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supply: { $ref: '#/components/schemas/Supply' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/supplies/{supplyId}/min-stock:
+    put:
+      operationId: putNightclubsByNightclubIdSuppliesBySupplyIdMinStock
+      tags: [Inventario]
+      summary: Mínimo por lugar
+      description: |
+        El mínimo es por estante: la barra se surte cuando baja de dos botellas, el
+        almacén cuando baja de una caja. Un solo mínimo para los dos avisa tarde en un
+        lado y de más en el otro.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/SupplyId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [location_id, min_stock]
+              properties:
+                location_id: { type: string, format: uuid }
+                min_stock: { type: number, minimum: 0 }
+      responses:
+        '200':
+          description: Insumo con su mínimo nuevo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supply: { $ref: '#/components/schemas/Supply' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/supplies/{supplyId}/receive:
+    post:
+      operationId: postNightclubsByNightclubIdSuppliesBySupplyIdReceive
+      tags: [Inventario]
+      summary: Entrada de mercancía
+      description: |
+        La única puerta por la que entra producto al club. Se captura en presentaciones
+        (`packages`) o en la unidad base (`quantity`), nunca en las dos. `package_cost`
+        es lo que dice la factura por la presentación completa; el costo promedio
+        ponderado se recalcula solo.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/SupplyId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SupplyReceipt' }
+      responses:
+        '201':
+          description: Mercancía recibida
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supply: { $ref: '#/components/schemas/Supply' }
+                  movement: { $ref: '#/components/schemas/SupplyMovement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/supplies/{supplyId}/transfer:
+    post:
+      operationId: postNightclubsByNightclubIdSuppliesBySupplyIdTransfer
+      tags: [Inventario]
+      summary: Traspaso entre lugares
+      description: |
+        Lo que sale del almacén entra en la barra, en la misma transacción y con el mismo
+        folio (`transfer_group`). Un traspaso que dejaría el origen en negativo responde
+        409 con lo que hay de verdad.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/SupplyId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SupplyTransfer' }
+      responses:
+        '201':
+          description: Traspaso hecho
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supply: { $ref: '#/components/schemas/Supply' }
+                  transfer:
+                    type: object
+                    properties:
+                      transfer_group: { type: string, format: uuid }
+                      out: { $ref: '#/components/schemas/SupplyMovement' }
+                      in: { $ref: '#/components/schemas/SupplyMovement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/supplies/{supplyId}/count:
+    post:
+      operationId: postNightclubsByNightclubIdSuppliesBySupplyIdCount
+      tags: [Inventario]
+      summary: Conteo físico
+      description: |
+        Se captura lo que hay en el estante y el sistema calcula la diferencia. Se guarda
+        la DIFERENCIA, no el número contado, para que el kardex siga sumando. `shrinkage`
+        es lo que se fue sin venderse: es el número por el que existe todo lo demás.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/SupplyId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [location_id]
+              properties:
+                location_id: { type: string, format: uuid }
+                counted: { type: number, minimum: 0 }
+                counted_packages: { type: number, minimum: 0 }
+                reason: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: Conteo aplicado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supply: { $ref: '#/components/schemas/Supply' }
+                  difference: { type: number }
+                  shrinkage: { type: number }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/supplies/{supplyId}/adjust:
+    post:
+      operationId: postNightclubsByNightclubIdSuppliesBySupplyIdAdjust
+      tags: [Inventario]
+      summary: Merma, cortesía, salida o corrección
+      description: |
+        Todas exigen motivo: un saldo corregido sin explicación es indistinguible de un
+        robo. Merma, cortesía y salida SIEMPRE restan, aunque el número venga en
+        positivo. La corrección (`adjustment`) es la única que puede subir la existencia
+        sin mercancía, y por eso solo la autoriza la gerencia. El cantinero puede
+        reportar la merma de su barra, que es donde se rompen las botellas.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/SupplyId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SupplyAdjustment' }
+      responses:
+        '200':
+          description: Movimiento aplicado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supply: { $ref: '#/components/schemas/Supply' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/supply-movements:
+    get:
+      operationId: getNightclubsByNightclubIdSupplyMovements
+      tags: [Inventario]
+      summary: Kardex del club
+      description: |
+        Solo inserciones: el saldo es la suma de su historia. Cada renglón dice qué,
+        dónde, cuánto, quién y por qué, y los dos lados de un traspaso comparten
+        `transfer_group`.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: supply_id, in: query, schema: { type: string, format: uuid } }
+        - { name: location_id, in: query, schema: { type: string, format: uuid } }
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [receipt, issue, transfer_in, transfer_out, consumption, return, waste, courtesy, count, adjustment]
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Movimientos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  movements:
+                    type: array
+                    items: { $ref: '#/components/schemas/SupplyMovement' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/supplies/{supplyId}/movements:
+    get:
+      operationId: getNightclubsByNightclubIdSuppliesBySupplyIdMovements
+      tags: [Inventario]
+      summary: Kardex de un insumo
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/SupplyId' }
+        - { name: location_id, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Movimientos del insumo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  movements:
+                    type: array
+                    items: { $ref: '#/components/schemas/SupplyMovement' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/recipes:
+    get:
+      operationId: getNightclubsByNightclubIdRecipes
+      tags: [Inventario]
+      summary: Recetas de la carta
+      description: |
+        Cuánto de cada insumo consume una unidad de cada producto. Los productos SIN
+        receta salen primero: son los que no tienen control de existencia, y saber
+        cuántos faltan es la mitad del trabajo mientras se captura el inventario.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: missing_only, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: Recetas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recipes:
+                    type: array
+                    items: { $ref: '#/components/schemas/Recipe' }
+                  without_recipe: { type: integer }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/recipes/{drinkId}:
+    put:
+      operationId: putNightclubsByNightclubIdRecipesByDrinkId
+      tags: [Inventario]
+      summary: Guardar la receta de un producto
+      description: |
+        Se reemplaza entera: una receta es una lista, no un historial. Lo que de verdad
+        salió con la receta anterior ya está en el kardex. Una receta vacía apaga el
+        control de existencia de ese producto, que es la verdad cuando nadie la capturó.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/DrinkId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    required: [supply_id, quantity]
+                    properties:
+                      supply_id: { type: string, format: uuid }
+                      quantity: { type: number, exclusiveMinimum: 0 }
+      responses:
+        '200':
+          description: Receta guardada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recipe:
+                    type: object
+                    properties:
+                      drink_id: { type: string, format: uuid }
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            supply_id: { type: string, format: uuid }
+                            name: { type: string }
+                            unit: { type: string }
+                            quantity: { type: number }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/delivery-points:
+    get:
+      operationId: getNightclubsByNightclubIdDeliveryPoints
+      tags: [Mesas]
+      summary: Puntos de entrega
+      description: |
+        A dónde se lleva un pedido cuando no hay mesa: "Pista A", "Terraza". El cliente
+        solo ve los que puede elegir (la barra no, para no amontonar gente esperando su
+        trago); el personal los ve todos.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: kind, in: query, schema: { type: string, enum: [table, floor, terrace, bar] } }
+        - { name: include_tables, in: query, schema: { type: boolean, default: false } }
+        - { name: include_inactive, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: Puntos de entrega
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  delivery_points:
+                    type: array
+                    items: { $ref: '#/components/schemas/DeliveryPoint' }
+    post:
+      operationId: postNightclubsByNightclubIdDeliveryPoints
+      tags: [Mesas]
+      summary: Crear un punto de entrega
+      description: Solo gerencia. El token del QR se genera solo y nunca se reutiliza.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name, kind]
+              properties:
+                code: { type: string, maxLength: 30, pattern: '^[a-z0-9-]+$' }
+                name: { type: string, maxLength: 80 }
+                kind: { type: string, enum: [floor, terrace, bar] }
+                floor: { type: string, maxLength: 10 }
+                section: { type: string, maxLength: 40 }
+                client_selectable: { type: boolean, default: true }
+      responses:
+        '201':
+          description: Punto creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  delivery_point: { $ref: '#/components/schemas/DeliveryPoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/delivery-points/by-token/{token}:
+    get:
+      operationId: getNightclubsByNightclubIdDeliveryPointsByToken
+      tags: [Mesas]
+      summary: Qué hay detrás de un QR
+      description: |
+        La puerta de "pedir escaneando". Devuelve lo mínimo -- el punto y, si es una
+        mesa, cuál -- y nunca quién está sentado ahí.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: token, in: path, required: true, schema: { type: string, minLength: 8, maxLength: 64 } }
+      responses:
+        '200':
+          description: El punto de entrega de ese código
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  delivery_point: { $ref: '#/components/schemas/DeliveryPoint' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/delivery-points/{pointId}/qr:
+    get:
+      operationId: getNightclubsByNightclubIdDeliveryPointsByPointIdQr
+      tags: [Mesas]
+      summary: El token para imprimir el QR
+      description: Solo gerencia. Es lo que autoriza a pedir a nombre de un lugar.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/PointId' }
+      responses:
+        '200':
+          description: Token del punto
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  delivery_point:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      code: { type: string }
+                      name: { type: string }
+                      kind: { type: string }
+                      qr_token: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/delivery-points/{pointId}:
+    patch:
+      operationId: patchNightclubsByNightclubIdDeliveryPointsByPointId
+      tags: [Mesas]
+      summary: Editar un punto de entrega
+      description: |
+        `rotate_qr` invalida el papel pegado en la columna y genera uno nuevo. Es lo que
+        hay que hacer si alguien fotografió el QR.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/PointId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 80 }
+                floor: { type: string, maxLength: 10 }
+                section: { type: string, maxLength: 40 }
+                client_selectable: { type: boolean }
+                active: { type: boolean }
+                rotate_qr: { type: boolean }
+      responses:
+        '200':
+          description: Punto actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  delivery_point: { $ref: '#/components/schemas/DeliveryPoint' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/orders/queue-order:
+    put:
+      operationId: putNightclubsByNightclubIdOrdersQueueOrder
+      tags: [Pedidos]
+      summary: Reacomodar la cola de la barra
+      description: |
+        Tres tragos del mismo whisky se preparan juntos, y obligar a la barra a seguir el
+        orden de llegada la hace más lenta a propósito. Lo que se mueve es una
+        preferencia de pantalla (`bar_position`): la hora en que entró el pedido y la
+        hora en que se pagó no se tocan, así que el reporte del cierre sigue diciendo
+        cuánto esperó de verdad cada cliente.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order_ids]
+              properties:
+                order_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Cola reacomodada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order_ids:
+                    type: array
+                    items: { type: string, format: uuid }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -5538,6 +6317,21 @@ components:
         no hereda permisos de ningun usuario y solo sirve en las rutas /api/pos/agent/*.
 
   parameters:
+    SupplyId:
+      name: supplyId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    LocationId:
+      name: locationId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PointId:
+      name: pointId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     NightclubId:
       name: nightclubId
       in: path
@@ -6050,6 +6844,31 @@ components:
         message: { type: [string, 'null'] }
         table_id: { type: [string, 'null'], format: uuid }
         table_code: { type: [string, 'null'] }
+        table_section: { type: [string, 'null'] }
+        table_floor: { type: [string, 'null'] }
+        bar_location_id:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            La barra de la que sale y en la que se descuenta el inventario: la que atiende
+            la zona de la mesa, o la que indique quien lo levanta en una venta en barra.
+        bar_name: { type: [string, 'null'] }
+        bar_code: { type: [string, 'null'] }
+        delivery_point_id:
+          type: [string, 'null']
+          format: uuid
+          description: A dónde se lleva cuando no es una mesa (un punto de la pista o la terraza).
+        delivery_point_name: { type: [string, 'null'] }
+        delivery_point_kind: { type: [string, 'null'], enum: [table, floor, terrace, bar, null] }
+        prep_started_at:
+          type: [string, 'null']
+          format: date-time
+          description: Cuándo la barra empezó a prepararlo de verdad.
+        bar_position:
+          type: [integer, 'null']
+          description: >
+            El orden en que el cantinero decidió prepararlos. Es una preferencia de
+            pantalla: no toca la hora de creación ni la de pago, que son la auditoría.
         sender_id: { type: string, format: uuid }
         sender_name: { type: [string, 'null'] }
         recipient_id: { type: [string, 'null'], format: uuid }
@@ -7683,3 +8502,176 @@ components:
         methods:
           type: array
           items: { type: string }
+    SupplyLocation:
+      type: object
+      description: Un lugar donde vive la existencia (el almacén o una barra).
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, example: barra-baja }
+        name: { type: string, example: Barra planta baja }
+        kind: { type: string, enum: [warehouse, bar] }
+        floor: { type: [string, 'null'], example: baja }
+        sort_order: { type: integer }
+        active: { type: boolean }
+        sections:
+          type: array
+          description: Las zonas del plano que atiende esta barra.
+          items: { type: string }
+
+    SupplyLocationCreate:
+      type: object
+      required: [code, name, kind]
+      properties:
+        code: { type: string, maxLength: 30, pattern: '^[a-z0-9-]+$' }
+        name: { type: string, maxLength: 80 }
+        kind: { type: string, enum: [warehouse, bar] }
+        floor: { type: string, maxLength: 10 }
+        sort_order: { type: integer, default: 0 }
+
+    Supply:
+      type: object
+      description: |
+        Lo que el club compra y cuenta. `unit` es la unidad base en la que hablan la
+        existencia, la receta y el costo; `package_size` es cuánto de esa unidad trae una
+        presentación, para poder decir "quedan 3.5 botellas" en vez de "quedan 2,630 ml".
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        category: { type: [string, 'null'] }
+        unit: { type: string, enum: [ml, g, pza] }
+        package_size: { type: number, example: 750 }
+        package_label: { type: [string, 'null'], example: botella 750 ml }
+        size_confirmed:
+          type: boolean
+          description: false = nadie ha confirmado el tamaño; se cargó con un valor por omisión.
+        avg_cost: { type: number, description: 'Costo promedio ponderado por unidad base.' }
+        pos_id: { type: [string, 'null'] }
+        active: { type: boolean }
+        stock: { type: number, description: 'Total del club, en unidad base.' }
+        packages: { type: number, description: 'El total, en presentaciones.' }
+        stock_value: { type: number, description: 'Al costo, nunca al precio de venta.' }
+        low: { type: boolean, description: 'Bajo mínimo en algún lugar.' }
+        locations:
+          type: array
+          items:
+            type: object
+            properties:
+              location_id: { type: string, format: uuid }
+              code: { type: string }
+              name: { type: string }
+              kind: { type: string, enum: [warehouse, bar] }
+              stock: { type: number }
+              packages: { type: number }
+              min_stock: { type: number }
+              low: { type: boolean }
+
+    SupplyCreate:
+      type: object
+      required: [name, unit, package_size]
+      properties:
+        name: { type: string, maxLength: 120 }
+        category: { type: string, maxLength: 40 }
+        unit: { type: string, enum: [ml, g, pza] }
+        package_size: { type: number, exclusiveMinimum: 0 }
+        package_label: { type: string, maxLength: 60 }
+        size_confirmed: { type: boolean }
+        pos_id: { type: string, maxLength: 60 }
+
+    SupplyReceipt:
+      type: object
+      required: [location_id]
+      description: Captura en presentaciones o en la unidad base, nunca en las dos.
+      properties:
+        location_id: { type: string, format: uuid }
+        quantity: { type: number, exclusiveMinimum: 0 }
+        packages: { type: number, exclusiveMinimum: 0 }
+        package_cost: { type: number, minimum: 0, description: 'Lo que dice la factura por la presentación completa.' }
+        reference_type: { type: string, maxLength: 30 }
+        reason: { type: string, maxLength: 200 }
+
+    SupplyTransfer:
+      type: object
+      required: [from_location_id, to_location_id]
+      properties:
+        from_location_id: { type: string, format: uuid }
+        to_location_id: { type: string, format: uuid }
+        quantity: { type: number, exclusiveMinimum: 0 }
+        packages: { type: number, exclusiveMinimum: 0 }
+        reason: { type: string, maxLength: 200 }
+
+    SupplyAdjustment:
+      type: object
+      required: [location_id, kind, reason]
+      properties:
+        location_id: { type: string, format: uuid }
+        kind: { type: string, enum: [adjustment, waste, courtesy, issue] }
+        quantity: { type: number }
+        packages: { type: number }
+        reason: { type: string, minLength: 3, maxLength: 200 }
+
+    SupplyMovement:
+      type: object
+      description: |
+        Un renglón del kardex. Solo inserciones: corregir un saldo es escribir otro
+        renglón, nunca editar este.
+      properties:
+        id: { type: string, format: uuid }
+        kind:
+          type: string
+          enum: [receipt, issue, transfer_in, transfer_out, consumption, return, waste, courtesy, count, adjustment]
+        quantity: { type: number, description: 'Con signo, en unidad base. Positivo entra.' }
+        balance_after: { type: number, description: 'El saldo de ese insumo EN ESE LUGAR.' }
+        unit_cost: { type: [number, 'null'] }
+        reference_type: { type: [string, 'null'] }
+        reference_id: { type: [string, 'null'], format: uuid }
+        reason: { type: [string, 'null'] }
+        transfer_group: { type: [string, 'null'], format: uuid }
+        supply_id: { type: string, format: uuid }
+        supply_name: { type: string }
+        unit: { type: string }
+        package_size: { type: number }
+        location_id: { type: string, format: uuid }
+        location_code: { type: string }
+        location_name: { type: string }
+        counterpart_location_id: { type: [string, 'null'], format: uuid }
+        counterpart_code: { type: [string, 'null'] }
+        counterpart_name: { type: [string, 'null'] }
+        created_by: { type: [string, 'null'], format: uuid }
+        created_by_name: { type: [string, 'null'] }
+        authorized_by: { type: [string, 'null'], format: uuid }
+        authorized_by_name: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+
+    Recipe:
+      type: object
+      properties:
+        drink_id: { type: string, format: uuid }
+        name: { type: string }
+        category: { type: string }
+        price: { type: string, description: 'Cadena decimal de dos posiciones.' }
+        cost: { type: number, description: 'Lo que cuesta servirlo hoy, al costo promedio.' }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              supply_id: { type: string, format: uuid }
+              name: { type: string }
+              unit: { type: string }
+              quantity: { type: number }
+              package_size: { type: number }
+
+    DeliveryPoint:
+      type: object
+      description: A dónde se lleva un pedido. El token del QR no se publica aquí.
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [table, floor, terrace, bar] }
+        section: { type: [string, 'null'] }
+        floor: { type: [string, 'null'] }
+        table_id: { type: [string, 'null'], format: uuid }
+        table_code: { type: [string, 'null'] }
+        client_selectable: { type: boolean }
+        active: { type: boolean }

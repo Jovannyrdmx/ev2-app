@@ -11,10 +11,10 @@
  */
 'use strict';
 
-const VERSION = 'ev2-v6';
+const VERSION = 'ev2-v7';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
-  'valet.html', 'employee-portal.html', 'manifest.json',
+  'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
   // La página pública de verificación: la abre alguien SIN cuenta, en la calle,
   // posiblemente con mala señal. Es justo donde una caché sirve.
   'verificar.html', 'js/verify-screen.js',
@@ -29,6 +29,9 @@ const SHELL = [
   'js/staff-admin.js', 'js/payouts.js', 'js/shift.js', 'js/door.js',
   'js/flirt.js', 'js/flirt-screen.js', 'js/drink-art.js', 'js/order-taking.js',
   'js/door-scan.js',
+  // El almacen se cuenta en una bodega, que es donde peor entra la senal de todo el
+  // edificio: si esta pantalla no abre sin red, el conteo se hace en papel.
+  'js/warehouse.js', 'js/warehouse-screen.js',
   'images/favicon-32x32.png', 'images/ev2-logo.svg',
 ];
 

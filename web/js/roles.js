@@ -61,6 +61,10 @@
       label: { es: 'Conductor', en: 'Driver' }, home: 'driver.html', ready: true,
       does: { es: 'Aceptar viajes, confirmar inicio y fin, y ver lo cobrado.', en: 'Accept rides, confirm start and end, and see what was charged.' },
     },
+    warehouse: {
+      label: { es: 'Almacén', en: 'Storeroom' }, home: 'almacen.html', ready: true,
+      does: { es: 'Recibir mercancía, surtir las barras, registrar mermas y hacer el conteo.', en: 'Receive goods, restock the bars, record waste and run the counts.' },
+    },
     manager: {
       label: { es: 'Gerente', en: 'Manager' }, home: 'manager.html', ready: true,
       does: { es: 'Precios, plano, empleados, caja del turno y aprobación de retiros.', en: "Prices, floor plan, staff, the shift's till and payout approvals." },

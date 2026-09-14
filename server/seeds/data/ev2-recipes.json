@@ -1,0 +1,3072 @@
+{
+  "$comment": "Receta de cada producto de la carta: cuanto de cada insumo consume UNA unidad, en la unidad base del insumo. Generado por scripts/import-sr11-catalog.py desde recetas.xls. `pos_quantity`/`pos_unit` conservan lo que dijo la caja, para poder auditar la conversion. Un producto que no aparece aqui no descuenta nada y se vende sin control de existencia, que es la verdad mientras no tenga receta.",
+  "version": 1,
+  "source": "SoftRestaurant11 - recetas.xls",
+  "exported_on": "2026-09-14",
+  "oz_to_ml": 30.0,
+  "items": [
+    {
+      "pos_id": "03124",
+      "name": "30-30 AÑEJO",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002110",
+          "supply_name": "TEQUILA 30-30 AÑEJO",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03123",
+      "name": "30-30 BLANCO",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002109",
+          "supply_name": "TEQUILA 30-30 BLANCO",
+          "quantity": 990.0,
+          "unit": "ml",
+          "pos_quantity": 33.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03126",
+      "name": "30-30 CRISTALINO",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002107",
+          "supply_name": "TEQUILA 30-30 CRISTALINO",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03125",
+      "name": "30-30 REPOSADO",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002108",
+          "supply_name": "TEQUILA 30-30 REPOSADO",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03043",
+      "name": "ABSOLUT",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002070",
+          "supply_name": "VODKA ABSOLUT",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03011",
+      "name": "ABSOLUT LIMON",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001056",
+          "supply_name": "VODKA ABSOLUT LIMON",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03044",
+      "name": "ABSOLUT MANGO",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "004014",
+          "supply_name": "VODKA ABSOLUT MANGO",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03046",
+      "name": "ABSOLUT PERA",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001057",
+          "supply_name": "VODKA ABSOLUT PERA",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03045",
+      "name": "ABSOLUT RASPBERRY",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001058",
+          "supply_name": "VODKA ABSOLUT RASPBERRY",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 25.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03047",
+      "name": "ABSOLUT SANDIA",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002068",
+          "supply_name": "VODKA ABSOLUT SANDIA",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03004",
+      "name": "AZUL MANGO",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001010",
+          "supply_name": "TEQUILA MANGO AZUL",
+          "quantity": 700.0,
+          "unit": "ml",
+          "pos_quantity": 23.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03015",
+      "name": "BACARDI",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001052",
+          "supply_name": "RON BACARDI BLANCO",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 25.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03026",
+      "name": "BACARDI LIMON",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001043",
+          "supply_name": "RON BACARDI LIMON",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 25.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03027",
+      "name": "BACARDI MANGO CHILE",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001012",
+          "supply_name": "RON BACARDI MANGO",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 25.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03028",
+      "name": "BACARDI RASPBERRY",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001006",
+          "supply_name": "RON BACARDI RASPBERRY",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 25.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03131",
+      "name": "BARULLO SPICY SANDIA",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002113",
+          "supply_name": "TEQUILA BARULLO SANDIA",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03009",
+      "name": "BLACK LABEL",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001074",
+          "supply_name": "WHISKY BLACK LABEL",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 25.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03017",
+      "name": "BLUE LABEL",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001022",
+          "supply_name": "WHISKY BLUE LABEL",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03040",
+      "name": "BOMBAY",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002069",
+          "supply_name": "VODKA BOMBAY",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03006",
+      "name": "BUCHANANS 12",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001076",
+          "supply_name": "WHISKY BUCHANNANS 12",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 25.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03007",
+      "name": "BUCHANANS 18",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001077",
+          "supply_name": "WHISKY BUCHANNANS 18",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 25.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03128",
+      "name": "BUCHANANS 21",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002111",
+          "supply_name": "WHISKY BUCHANNANS 21 *RED SEAL*",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03037",
+      "name": "BUCHANANS MASTER",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002061",
+          "supply_name": "WHISKY BUCHANNANS MASTER",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03038",
+      "name": "BUCHANANS PIÑA",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002062",
+          "supply_name": "WHISKY BUCHANNANS PIÑA",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03014",
+      "name": "CAPTAIN MORGAN",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001020",
+          "supply_name": "RON CAPITAN MORGAN",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 25.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03024",
+      "name": "CHAMPAGNE DE LA CASA",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001001",
+          "supply_name": "VINO ESPUMOSO CHAMPAGNE DE LA CASA",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03021",
+      "name": "CLASE AZUL REPOSADO",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001068",
+          "supply_name": "TEQUILA CLASE AZUL",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03023",
+      "name": "DOM PERIGNON",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001082",
+          "supply_name": "VINO ESPUMOSO DOM PERIGNON",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03020",
+      "name": "DON JULIO 1942",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001067",
+          "supply_name": "TEQUILA DON JULIO 1942",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03001",
+      "name": "DON JULIO 70",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001033",
+          "supply_name": "TEQUILA DON JULIO 70",
+          "quantity": 690.0,
+          "unit": "ml",
+          "pos_quantity": 23.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03039",
+      "name": "DON JULIO BLANCO",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001065",
+          "supply_name": "TEQUILA DON JULIO BLANCO",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03122",
+      "name": "DON JULIO REPOSADO",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001066",
+          "supply_name": "TEQUILA DON JULIO REPOSADO",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03010",
+      "name": "DOUBLE BLACK LABEL",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001075",
+          "supply_name": "WHISKY DOUBLE BLACK LABEL",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03003",
+      "name": "GRAN MALO",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001069",
+          "supply_name": "TEQUILA GRAN MALO",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03013",
+      "name": "GREY GOOSE",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001083",
+          "supply_name": "VODKA GREY GOOSE",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03005",
+      "name": "HERRADURA ULTRA",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001071",
+          "supply_name": "TEQUILA HERRADURA ULTRA",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03016",
+      "name": "HPNOTIQ",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001080",
+          "supply_name": "LICOR HPNOTIQ",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03031",
+      "name": "JACK DANIELS",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001078",
+          "supply_name": "WHISKY JACK DANIELS",
+          "quantity": 700.0,
+          "unit": "ml",
+          "pos_quantity": 23.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03042",
+      "name": "JAGERMEISTER",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001046",
+          "supply_name": "LICOR JAGERMEISTER",
+          "quantity": 700.0,
+          "unit": "ml",
+          "pos_quantity": 23.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03002",
+      "name": "MAESTRO TEQUILERO",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001070",
+          "supply_name": "TEQUILA MAESTRO DOBEL",
+          "quantity": 700.0,
+          "unit": "ml",
+          "pos_quantity": 23.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03129",
+      "name": "MEZCAL 400 CONEJOS JOVEN",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002112",
+          "supply_name": "MEZCAL 400 CONEJOS (JOVEN)",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03022",
+      "name": "MOET",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001081",
+          "supply_name": "VINO ESPUMOSO MOET",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03019",
+      "name": "NUVO",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001025",
+          "supply_name": "VODKA NUVO",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "12014",
+      "name": "RED LABEL",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001018",
+          "supply_name": "WHISKEY RED LABEL",
+          "quantity": 700.0,
+          "unit": "ml",
+          "pos_quantity": 23.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "03012",
+      "name": "SMIRNOFF TAMARINDO",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "001084",
+          "supply_name": "VODKA SMIRNOF TAMARINDO",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 25.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "01019",
+      "name": "TEQUILA 1800",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002052",
+          "supply_name": "TEQUILA 1800",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03127",
+      "name": "TITOS",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002106",
+          "supply_name": "VODKA TITOS",
+          "quantity": 750.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "03041",
+      "name": "TORRES 10",
+      "category": "Botellas",
+      "lines": [
+        {
+          "supply_pos_id": "002072",
+          "supply_name": "LICOR BRANDY TORRES 10",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "012044",
+      "name": "CUB. TECATE LIGHT 1/4",
+      "category": "Cervezas",
+      "lines": [
+        {
+          "supply_pos_id": "001051",
+          "supply_name": "TECATE LIGHT",
+          "quantity": 10.0,
+          "unit": "pza",
+          "pos_quantity": 10.0,
+          "pos_unit": "CUAR"
+        }
+      ]
+    },
+    {
+      "pos_id": "01007",
+      "name": "CUB. TECATE ROJA 1/4",
+      "category": "Cervezas",
+      "lines": [
+        {
+          "supply_pos_id": "001059",
+          "supply_name": "TECATE ROJA",
+          "quantity": 10.0,
+          "unit": "pza",
+          "pos_quantity": 10.0,
+          "pos_unit": "CUAR"
+        }
+      ]
+    },
+    {
+      "pos_id": "02042",
+      "name": "MICHELADA CLASICA",
+      "category": "Cervezas",
+      "lines": [
+        {
+          "supply_pos_id": "001050",
+          "supply_name": "CLAMATO",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02043",
+      "name": "MICHELADA MANGO",
+      "category": "Cervezas",
+      "lines": [
+        {
+          "supply_pos_id": "001050",
+          "supply_name": "CLAMATO",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001011",
+          "supply_name": "CONCENTRADO MANGO",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001039",
+          "supply_name": "JUGO MANGO",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "01006",
+      "name": "MICHELADA TAMARINDO",
+      "category": "Cervezas",
+      "lines": [
+        {
+          "supply_pos_id": "001050",
+          "supply_name": "CLAMATO",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001061",
+          "supply_name": "CONCENTRADO TAMARINDO",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "01001",
+      "name": "TECATE LIGHT 1/4",
+      "category": "Cervezas",
+      "lines": [
+        {
+          "supply_pos_id": "001051",
+          "supply_name": "TECATE LIGHT",
+          "quantity": 1.0,
+          "unit": "pza",
+          "pos_quantity": 1.0,
+          "pos_unit": "CUAR"
+        }
+      ]
+    },
+    {
+      "pos_id": "01017",
+      "name": "TECATE ROJA 1/4",
+      "category": "Cervezas",
+      "lines": [
+        {
+          "supply_pos_id": "001059",
+          "supply_name": "TECATE ROJA",
+          "quantity": 1.0,
+          "unit": "pza",
+          "pos_quantity": 1.0,
+          "pos_unit": "CUAR"
+        }
+      ]
+    },
+    {
+      "pos_id": "02159",
+      "name": "AMIGA DATE CUENTA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001032",
+          "supply_name": "RON MALIBU",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02008",
+      "name": "AZULITO",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001007",
+          "supply_name": "LICOR CARIBU CURACAO AZUL",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001002",
+          "supply_name": "LICOR CARIBU TRIPLE SEC",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001004",
+          "supply_name": "SPRITE 3 L",
+          "quantity": 360.0,
+          "unit": "ml",
+          "pos_quantity": 12.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "004007",
+          "supply_name": "VODKA OSO NEGRO",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02026",
+      "name": "AZULITO S/A",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001037",
+          "supply_name": "POWERADE",
+          "quantity": 180.0,
+          "unit": "ml",
+          "pos_quantity": 6.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001004",
+          "supply_name": "SPRITE 3 L",
+          "quantity": 240.0,
+          "unit": "ml",
+          "pos_quantity": 8.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02071",
+      "name": "BACARDI - COCA COLA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "006024",
+          "supply_name": "COCA COLA",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001052",
+          "supply_name": "RON BACARDI BLANCO",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02161",
+      "name": "BANANA COLADA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001034",
+          "supply_name": "CALAHUA",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001009",
+          "supply_name": "JUGO PIÑA",
+          "quantity": 300.0,
+          "unit": "ml",
+          "pos_quantity": 10.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "002071",
+          "supply_name": "RON ANTILLANO BLANCO",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02153",
+      "name": "BELLAKEO TROPICAL",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001009",
+          "supply_name": "JUGO PIÑA",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001013",
+          "supply_name": "LICOR GRANADINA",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001017",
+          "supply_name": "NARANJADA",
+          "quantity": 240.0,
+          "unit": "ml",
+          "pos_quantity": 8.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001052",
+          "supply_name": "RON BACARDI BLANCO",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001032",
+          "supply_name": "RON MALIBU",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02004",
+      "name": "BICHOTA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001002",
+          "supply_name": "LICOR CARIBU TRIPLE SEC",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001013",
+          "supply_name": "LICOR GRANADINA",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001012",
+          "supply_name": "RON BACARDI MANGO",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001004",
+          "supply_name": "SPRITE 3 L",
+          "quantity": 360.0,
+          "unit": "ml",
+          "pos_quantity": 12.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02068",
+      "name": "BLACK LABEL - AGUA MINERAL",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001074",
+          "supply_name": "WHISKY BLACK LABEL",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02155",
+      "name": "BLACK LABEL - MONSTER",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001021",
+          "supply_name": "MONSTER",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001074",
+          "supply_name": "WHISKY BLACK LABEL",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02067",
+      "name": "BLACK LABEL - SPRITE",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001004",
+          "supply_name": "SPRITE 3 L",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001074",
+          "supply_name": "WHISKY BLACK LABEL",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02021",
+      "name": "BOTE DE BASURA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "002076",
+          "supply_name": "GINEBRA OSO NEGRO",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001007",
+          "supply_name": "LICOR CARIBU CURACAO AZUL",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001027",
+          "supply_name": "LICOR CARIBU DURAZNO",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001021",
+          "supply_name": "MONSTER",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "002071",
+          "supply_name": "RON ANTILLANO BLANCO",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001004",
+          "supply_name": "SPRITE 3 L",
+          "quantity": 360.0,
+          "unit": "ml",
+          "pos_quantity": 12.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001079",
+          "supply_name": "TEQUILA (CABRITOS, HERENCIA ORO - 33 OZ)",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "004007",
+          "supply_name": "VODKA OSO NEGRO",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "0212026",
+      "name": "BUCHANANS 12 - AGUA MINERAL",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001076",
+          "supply_name": "WHISKY BUCHANNANS 12",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02154",
+      "name": "BUCHANANS 12 - MONSTER",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001021",
+          "supply_name": "MONSTER",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001076",
+          "supply_name": "WHISKY BUCHANNANS 12",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02046",
+      "name": "BUCHANANS 12 - SPRITE",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001004",
+          "supply_name": "SPRITE 3 L",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001076",
+          "supply_name": "WHISKY BUCHANNANS 12",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02030",
+      "name": "BUCHANANS 18 - AGUA MINERAL",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001077",
+          "supply_name": "WHISKY BUCHANNANS 18",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02029",
+      "name": "BUCHANANS 18 - SPRITE",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001004",
+          "supply_name": "SPRITE 3 L",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001077",
+          "supply_name": "WHISKY BUCHANNANS 18",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02001",
+      "name": "CAIPIRIÑA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001002",
+          "supply_name": "LICOR CARIBU TRIPLE SEC",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001005",
+          "supply_name": "LICOR JARABE NATURAL",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "003026",
+          "supply_name": "SQUIRT GRANDE",
+          "quantity": 270.0,
+          "unit": "ml",
+          "pos_quantity": 9.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "004007",
+          "supply_name": "VODKA OSO NEGRO",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02070",
+      "name": "CAPITAN MORGAN - COCA COLA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "006024",
+          "supply_name": "COCA COLA",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001020",
+          "supply_name": "RON CAPITAN MORGAN",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02158",
+      "name": "CLAMATO PREPARADO",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001050",
+          "supply_name": "CLAMATO",
+          "quantity": 540.0,
+          "unit": "ml",
+          "pos_quantity": 18.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02011",
+      "name": "CLANDEDRINK",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001030",
+          "supply_name": "JUGO ARANDANO",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001007",
+          "supply_name": "LICOR CARIBU CURACAO AZUL",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001005",
+          "supply_name": "LICOR JARABE NATURAL",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001004",
+          "supply_name": "SPRITE 3 L",
+          "quantity": 360.0,
+          "unit": "ml",
+          "pos_quantity": 12.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001058",
+          "supply_name": "VODKA ABSOLUT RASPBERRY",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02152",
+      "name": "COSMOPOLITAN",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 180.0,
+          "unit": "ml",
+          "pos_quantity": 6.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001030",
+          "supply_name": "JUGO ARANDANO",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001002",
+          "supply_name": "LICOR CARIBU TRIPLE SEC",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001004",
+          "supply_name": "SPRITE 3 L",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "004007",
+          "supply_name": "VODKA OSO NEGRO",
+          "quantity": 75.0,
+          "unit": "ml",
+          "pos_quantity": 2.5,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02149",
+      "name": "EN LAS ROCAS BLACK LABEL",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001074",
+          "supply_name": "WHISKY BLACK LABEL",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02150",
+      "name": "EN LAS ROCAS BUCHANANS 12",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001076",
+          "supply_name": "WHISKY BUCHANNANS 12",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02148",
+      "name": "EN LAS ROCAS RED LABEL",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001018",
+          "supply_name": "WHISKEY RED LABEL",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02072",
+      "name": "FABULOSO",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001007",
+          "supply_name": "LICOR CARIBU CURACAO AZUL",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001002",
+          "supply_name": "LICOR CARIBU TRIPLE SEC",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001013",
+          "supply_name": "LICOR GRANADINA",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001021",
+          "supply_name": "MONSTER",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "003026",
+          "supply_name": "SQUIRT GRANDE",
+          "quantity": 300.0,
+          "unit": "ml",
+          "pos_quantity": 10.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001084",
+          "supply_name": "VODKA SMIRNOF TAMARINDO",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02069",
+      "name": "JACK DANIELS - COCA COLA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "006024",
+          "supply_name": "COCA COLA",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001078",
+          "supply_name": "WHISKY JACK DANIELS",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02160",
+      "name": "KRIPTONITA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001053",
+          "supply_name": "LICOR CARIBU MELON",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "002071",
+          "supply_name": "RON ANTILLANO BLANCO",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001004",
+          "supply_name": "SPRITE 3 L",
+          "quantity": 480.0,
+          "unit": "ml",
+          "pos_quantity": 16.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "004007",
+          "supply_name": "VODKA OSO NEGRO",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02162",
+      "name": "LUCES DE HABANA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 150.0,
+          "unit": "ml",
+          "pos_quantity": 5.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001041",
+          "supply_name": "JUGO NARANJA",
+          "quantity": 330.0,
+          "unit": "ml",
+          "pos_quantity": 11.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001053",
+          "supply_name": "LICOR CARIBU MELON",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001032",
+          "supply_name": "RON MALIBU",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02007",
+      "name": "LYSOL",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001007",
+          "supply_name": "LICOR CARIBU CURACAO AZUL",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001021",
+          "supply_name": "MONSTER",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "003026",
+          "supply_name": "SQUIRT GRANDE",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "004007",
+          "supply_name": "VODKA OSO NEGRO",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02156",
+      "name": "MALIBU PIÑA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001009",
+          "supply_name": "JUGO PIÑA",
+          "quantity": 480.0,
+          "unit": "ml",
+          "pos_quantity": 16.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001032",
+          "supply_name": "RON MALIBU",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02041",
+      "name": "MANGO KUSH",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001011",
+          "supply_name": "CONCENTRADO MANGO",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001039",
+          "supply_name": "JUGO MANGO",
+          "quantity": 300.0,
+          "unit": "ml",
+          "pos_quantity": 10.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001010",
+          "supply_name": "TEQUILA MANGO AZUL",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "12025",
+      "name": "MARGARITA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001002",
+          "supply_name": "LICOR CARIBU TRIPLE SEC",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001005",
+          "supply_name": "LICOR JARABE NATURAL",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "003026",
+          "supply_name": "SQUIRT GRANDE",
+          "quantity": 450.0,
+          "unit": "ml",
+          "pos_quantity": 15.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001079",
+          "supply_name": "TEQUILA (CABRITOS, HERENCIA ORO - 33 OZ)",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02016",
+      "name": "MARGARITA CHERRY",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001002",
+          "supply_name": "LICOR CARIBU TRIPLE SEC",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001013",
+          "supply_name": "LICOR GRANADINA",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "003026",
+          "supply_name": "SQUIRT GRANDE",
+          "quantity": 450.0,
+          "unit": "ml",
+          "pos_quantity": 15.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001079",
+          "supply_name": "TEQUILA (CABRITOS, HERENCIA ORO - 33 OZ)",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02023",
+      "name": "MARGARITA CHERRY S/A",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001013",
+          "supply_name": "LICOR GRANADINA",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "003026",
+          "supply_name": "SQUIRT GRANDE",
+          "quantity": 450.0,
+          "unit": "ml",
+          "pos_quantity": 15.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02015",
+      "name": "MARGARITA MANGO",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001011",
+          "supply_name": "CONCENTRADO MANGO",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001039",
+          "supply_name": "JUGO MANGO",
+          "quantity": 450.0,
+          "unit": "ml",
+          "pos_quantity": 15.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001010",
+          "supply_name": "TEQUILA MANGO AZUL",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02022",
+      "name": "MARGARITA MANGO S/A",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001011",
+          "supply_name": "CONCENTRADO MANGO",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001039",
+          "supply_name": "JUGO MANGO",
+          "quantity": 450.0,
+          "unit": "ml",
+          "pos_quantity": 15.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001005",
+          "supply_name": "LICOR JARABE NATURAL",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02050",
+      "name": "MARGARITA S/A",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001005",
+          "supply_name": "LICOR JARABE NATURAL",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "003026",
+          "supply_name": "SQUIRT GRANDE",
+          "quantity": 450.0,
+          "unit": "ml",
+          "pos_quantity": 15.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02010",
+      "name": "PALOMA CLANDESTINA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001002",
+          "supply_name": "LICOR CARIBU TRIPLE SEC",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "003026",
+          "supply_name": "SQUIRT GRANDE",
+          "quantity": 300.0,
+          "unit": "ml",
+          "pos_quantity": 10.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001010",
+          "supply_name": "TEQUILA MANGO AZUL",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02062",
+      "name": "PALOMA OAXAQUEÑA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001041",
+          "supply_name": "JUGO NARANJA",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "004021",
+          "supply_name": "JUGO TORONJA",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001005",
+          "supply_name": "LICOR JARABE NATURAL",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "002086",
+          "supply_name": "RON BACANORA",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "003026",
+          "supply_name": "SQUIRT GRANDE",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02019",
+      "name": "PIÑA COLADA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001034",
+          "supply_name": "CALAHUA",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001040",
+          "supply_name": "CARNATION",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001035",
+          "supply_name": "CREMA BATIDA",
+          "quantity": 1.0,
+          "unit": "pza",
+          "pos_quantity": 1.0,
+          "pos_unit": "PZA"
+        },
+        {
+          "supply_pos_id": "001009",
+          "supply_name": "JUGO PIÑA",
+          "quantity": 300.0,
+          "unit": "ml",
+          "pos_quantity": 10.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "002071",
+          "supply_name": "RON ANTILLANO BLANCO",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02025",
+      "name": "PIÑA COLADA S/A",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001034",
+          "supply_name": "CALAHUA",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001040",
+          "supply_name": "CARNATION",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001035",
+          "supply_name": "CREMA BATIDA",
+          "quantity": 1.0,
+          "unit": "pza",
+          "pos_quantity": 1.0,
+          "pos_unit": "PZA"
+        },
+        {
+          "supply_pos_id": "001009",
+          "supply_name": "JUGO PIÑA",
+          "quantity": 300.0,
+          "unit": "ml",
+          "pos_quantity": 10.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02066",
+      "name": "RED LABEL - AGUA MINERAL",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001018",
+          "supply_name": "WHISKEY RED LABEL",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02065",
+      "name": "RED LABEL - SPRITE",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001004",
+          "supply_name": "SPRITE 3 L",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001018",
+          "supply_name": "WHISKEY RED LABEL",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02003",
+      "name": "REY MAMABICHO",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001009",
+          "supply_name": "JUGO PIÑA",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001007",
+          "supply_name": "LICOR CARIBU CURACAO AZUL",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001002",
+          "supply_name": "LICOR CARIBU TRIPLE SEC",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001006",
+          "supply_name": "RON BACARDI RASPBERRY",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001004",
+          "supply_name": "SPRITE 3 L",
+          "quantity": 240.0,
+          "unit": "ml",
+          "pos_quantity": 8.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02020",
+      "name": "SEX ON THE BEACH",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001030",
+          "supply_name": "JUGO ARANDANO",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001027",
+          "supply_name": "LICOR CARIBU DURAZNO",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001017",
+          "supply_name": "NARANJADA",
+          "quantity": 300.0,
+          "unit": "ml",
+          "pos_quantity": 10.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "004007",
+          "supply_name": "VODKA OSO NEGRO",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02006",
+      "name": "SUAVITEL",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001007",
+          "supply_name": "LICOR CARIBU CURACAO AZUL",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001021",
+          "supply_name": "MONSTER",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "003026",
+          "supply_name": "SQUIRT GRANDE",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001018",
+          "supply_name": "WHISKEY RED LABEL",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02064",
+      "name": "TAMARINDAZO",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001061",
+          "supply_name": "CONCENTRADO TAMARINDO",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001005",
+          "supply_name": "LICOR JARABE NATURAL",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "003026",
+          "supply_name": "SQUIRT GRANDE",
+          "quantity": 330.0,
+          "unit": "ml",
+          "pos_quantity": 11.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001079",
+          "supply_name": "TEQUILA (CABRITOS, HERENCIA ORO - 33 OZ)",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02157",
+      "name": "TEQUILA MINERAL",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 240.0,
+          "unit": "ml",
+          "pos_quantity": 8.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001079",
+          "supply_name": "TEQUILA (CABRITOS, HERENCIA ORO - 33 OZ)",
+          "quantity": 240.0,
+          "unit": "ml",
+          "pos_quantity": 8.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02018",
+      "name": "TEQUILA SUNRISE",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001002",
+          "supply_name": "LICOR CARIBU TRIPLE SEC",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001013",
+          "supply_name": "LICOR GRANADINA",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001017",
+          "supply_name": "NARANJADA",
+          "quantity": 450.0,
+          "unit": "ml",
+          "pos_quantity": 15.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001079",
+          "supply_name": "TEQUILA (CABRITOS, HERENCIA ORO - 33 OZ)",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02073",
+      "name": "TORNADO",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "002082",
+          "supply_name": "LICOR CARIBU MENTA VERDE",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001004",
+          "supply_name": "SPRITE 3 L",
+          "quantity": 450.0,
+          "unit": "ml",
+          "pos_quantity": 15.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001018",
+          "supply_name": "WHISKEY RED LABEL",
+          "quantity": 90.0,
+          "unit": "ml",
+          "pos_quantity": 3.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02005",
+      "name": "TUSSA",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 300.0,
+          "unit": "ml",
+          "pos_quantity": 10.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001002",
+          "supply_name": "LICOR CARIBU TRIPLE SEC",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001013",
+          "supply_name": "LICOR GRANADINA",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001017",
+          "supply_name": "NARANJADA",
+          "quantity": 240.0,
+          "unit": "ml",
+          "pos_quantity": 8.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001084",
+          "supply_name": "VODKA SMIRNOF TAMARINDO",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "02151",
+      "name": "VODKA CON AGUA MINERAL (1L)",
+      "category": "Drinks",
+      "lines": [
+        {
+          "supply_pos_id": "001008",
+          "supply_name": "AGUA MINERAL 2 L",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "004007",
+          "supply_name": "VODKA OSO NEGRO",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "04008",
+      "name": "RONDA BABY MANGO",
+      "category": "Shots",
+      "lines": [
+        {
+          "supply_pos_id": "001011",
+          "supply_name": "CONCENTRADO MANGO",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001039",
+          "supply_name": "JUGO MANGO",
+          "quantity": 240.0,
+          "unit": "ml",
+          "pos_quantity": 8.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001002",
+          "supply_name": "LICOR CARIBU TRIPLE SEC",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001005",
+          "supply_name": "LICOR JARABE NATURAL",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001010",
+          "supply_name": "TEQUILA MANGO AZUL",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "04009",
+      "name": "RONDA MAMADAS",
+      "category": "Shots",
+      "lines": [
+        {
+          "supply_pos_id": "001035",
+          "supply_name": "CREMA BATIDA",
+          "quantity": 8.0,
+          "unit": "pza",
+          "pos_quantity": 8.0,
+          "pos_unit": "PZA"
+        },
+        {
+          "supply_pos_id": "001044",
+          "supply_name": "LICOR BAILEYS",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001048",
+          "supply_name": "LICOR KALHUA",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "04010",
+      "name": "RONDA PERLAS NEGRAS",
+      "category": "Shots",
+      "lines": [
+        {
+          "supply_pos_id": "001007",
+          "supply_name": "LICOR CARIBU CURACAO AZUL",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001046",
+          "supply_name": "LICOR JAGERMEISTER",
+          "quantity": 240.0,
+          "unit": "ml",
+          "pos_quantity": 8.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001021",
+          "supply_name": "MONSTER",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "04007",
+      "name": "RONDA RAINBOW",
+      "category": "Shots",
+      "lines": [
+        {
+          "supply_pos_id": "001009",
+          "supply_name": "JUGO PIÑA",
+          "quantity": 210.0,
+          "unit": "ml",
+          "pos_quantity": 7.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001007",
+          "supply_name": "LICOR CARIBU CURACAO AZUL",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001027",
+          "supply_name": "LICOR CARIBU DURAZNO",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001013",
+          "supply_name": "LICOR GRANADINA",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001032",
+          "supply_name": "RON MALIBU",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "004007",
+          "supply_name": "VODKA OSO NEGRO",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "04014",
+      "name": "RONDA TAMARINDAZO",
+      "category": "Shots",
+      "lines": [
+        {
+          "supply_pos_id": "001061",
+          "supply_name": "CONCENTRADO TAMARINDO",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001005",
+          "supply_name": "LICOR JARABE NATURAL",
+          "quantity": 30.0,
+          "unit": "ml",
+          "pos_quantity": 1.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "003026",
+          "supply_name": "SQUIRT GRANDE",
+          "quantity": 120.0,
+          "unit": "ml",
+          "pos_quantity": 4.0,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001079",
+          "supply_name": "TEQUILA (CABRITOS, HERENCIA ORO - 33 OZ)",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 2.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "04040",
+      "name": "SHOT BACANORA",
+      "category": "Shots",
+      "lines": [
+        {
+          "supply_pos_id": "002086",
+          "supply_name": "RON BACANORA",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "04039",
+      "name": "SHOT CAPITAN MORGAN",
+      "category": "Shots",
+      "lines": [
+        {
+          "supply_pos_id": "001020",
+          "supply_name": "RON CAPITAN MORGAN",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "04002",
+      "name": "SHOT DON JULIO 70",
+      "category": "Shots",
+      "lines": [
+        {
+          "supply_pos_id": "001033",
+          "supply_name": "TEQUILA DON JULIO 70",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "04041",
+      "name": "SHOT HORNITOS REPOSADO",
+      "category": "Shots",
+      "lines": [
+        {
+          "supply_pos_id": "002065",
+          "supply_name": "TEQUILA HORNITOS",
+          "quantity": 60.0,
+          "unit": "ml",
+          "pos_quantity": 0.08,
+          "pos_unit": "BOTE"
+        }
+      ]
+    },
+    {
+      "pos_id": "04003",
+      "name": "SHOT MAESTRO TEQUILERO",
+      "category": "Shots",
+      "lines": [
+        {
+          "supply_pos_id": "001070",
+          "supply_name": "TEQUILA MAESTRO DOBEL",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "04006",
+      "name": "SHOT PERLA NEGRA",
+      "category": "Shots",
+      "lines": [
+        {
+          "supply_pos_id": "001007",
+          "supply_name": "LICOR CARIBU CURACAO AZUL",
+          "quantity": 15.0,
+          "unit": "ml",
+          "pos_quantity": 0.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001046",
+          "supply_name": "LICOR JAGERMEISTER",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        },
+        {
+          "supply_pos_id": "001021",
+          "supply_name": "MONSTER",
+          "quantity": 105.0,
+          "unit": "ml",
+          "pos_quantity": 3.5,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "04005",
+      "name": "SHOT TEQUILA MANGO",
+      "category": "Shots",
+      "lines": [
+        {
+          "supply_pos_id": "001010",
+          "supply_name": "TEQUILA MANGO AZUL",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "04004",
+      "name": "SHOT VODKA TAMARINDO",
+      "category": "Shots",
+      "lines": [
+        {
+          "supply_pos_id": "001084",
+          "supply_name": "VODKA SMIRNOF TAMARINDO",
+          "quantity": 45.0,
+          "unit": "ml",
+          "pos_quantity": 1.5,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "01015",
+      "name": "AGUA",
+      "category": "Sin alcohol",
+      "lines": [
+        {
+          "supply_pos_id": "001054",
+          "supply_name": "AGUA",
+          "quantity": 1.0,
+          "unit": "pza",
+          "pos_quantity": 1.0,
+          "pos_unit": "PZA"
+        }
+      ]
+    },
+    {
+      "pos_id": "05001",
+      "name": "AGUA MINERAL CH",
+      "category": "Sin alcohol",
+      "lines": [
+        {
+          "supply_pos_id": "003024",
+          "supply_name": "AGUA MINERAL 355 ML",
+          "quantity": 1.0,
+          "unit": "pza",
+          "pos_quantity": 1.0,
+          "pos_unit": "PZA"
+        }
+      ]
+    },
+    {
+      "pos_id": "05006",
+      "name": "JUGO ARANDANO",
+      "category": "Sin alcohol",
+      "lines": [
+        {
+          "supply_pos_id": "001030",
+          "supply_name": "JUGO ARANDANO",
+          "quantity": 1000.0,
+          "unit": "ml",
+          "pos_quantity": 33.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "05010",
+      "name": "JUGO MANGO",
+      "category": "Sin alcohol",
+      "lines": [
+        {
+          "supply_pos_id": "001039",
+          "supply_name": "JUGO MANGO",
+          "quantity": 1000.0,
+          "unit": "ml",
+          "pos_quantity": 33.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "172056",
+      "name": "JUGO NARANJA",
+      "category": "Sin alcohol",
+      "lines": [
+        {
+          "supply_pos_id": "001041",
+          "supply_name": "JUGO NARANJA",
+          "quantity": 1000.0,
+          "unit": "ml",
+          "pos_quantity": 33.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "05007",
+      "name": "JUGO PIÑA",
+      "category": "Sin alcohol",
+      "lines": [
+        {
+          "supply_pos_id": "001009",
+          "supply_name": "JUGO PIÑA",
+          "quantity": 1000.0,
+          "unit": "ml",
+          "pos_quantity": 33.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "05008",
+      "name": "MONSTER",
+      "category": "Sin alcohol",
+      "lines": [
+        {
+          "supply_pos_id": "001021",
+          "supply_name": "MONSTER",
+          "quantity": 473.0,
+          "unit": "ml",
+          "pos_quantity": 16.0,
+          "pos_unit": "OZ"
+        }
+      ]
+    },
+    {
+      "pos_id": "05003",
+      "name": "SPRITE",
+      "category": "Sin alcohol",
+      "lines": [
+        {
+          "supply_pos_id": "001063",
+          "supply_name": "SPRITE 355 ML",
+          "quantity": 1.0,
+          "unit": "pza",
+          "pos_quantity": 1.0,
+          "pos_unit": "PZA"
+        }
+      ]
+    },
+    {
+      "pos_id": "05009",
+      "name": "SQUIRT",
+      "category": "Sin alcohol",
+      "lines": [
+        {
+          "supply_pos_id": "003027",
+          "supply_name": "SQUIRT",
+          "quantity": 1.0,
+          "unit": "pza",
+          "pos_quantity": 1.0,
+          "pos_unit": "PZA"
+        }
+      ]
+    }
+  ]
+}

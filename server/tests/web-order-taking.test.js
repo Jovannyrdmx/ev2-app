@@ -195,3 +195,98 @@ describe('si el precio cambió entre armar y cobrar', () => {
     expect(Take.priceDrift(cart, { subtotal: '120.00' })).toBe(0);
   });
 });
+
+/**
+ * A dónde se lleva, y qué falta por entregar.
+ *
+ * El cliente de general no tiene mesa: está en la pista. Sin un punto de entrega, el
+ * pedido no tiene dirección y el mesero sale a buscar a alguien con una charola en la
+ * mano — que es exactamente lo que pasaba antes de esto.
+ */
+describe('Puntos de entrega', () => {
+  const points = [
+    { id: 'p1', name: 'Pista A', kind: 'floor', active: true, client_selectable: true },
+    { id: 'p2', name: 'Terraza', kind: 'terrace', active: true, client_selectable: true },
+    { id: 'p3', name: 'Barra planta baja', kind: 'bar', active: true, client_selectable: false },
+    { id: 'p4', name: 'Mesa 39', kind: 'table', active: true, client_selectable: true },
+    { id: 'p5', name: 'Pista vieja', kind: 'floor', active: false, client_selectable: true },
+  ];
+
+  it('el cliente ve la pista y la terraza, nunca la barra', () => {
+    expect(Take.deliveryPoints(points).map((p) => p.name)).toEqual(['Pista A', 'Terraza']);
+  });
+
+  it('el personal sí puede usar la barra: la venta en barra se entrega ahí mismo', () => {
+    expect(Take.deliveryPoints(points, { forStaff: true }).map((p) => p.name))
+      .toEqual(['Barra planta baja', 'Pista A', 'Terraza']);
+  });
+
+  it('las mesas no son puntos de esta lista: la mesa se elige en el plano', () => {
+    expect(Take.deliveryPoints(points, { forStaff: true }).some((p) => p.kind === 'table'))
+      .toBe(false);
+  });
+
+  it('un punto apagado no se ofrece', () => {
+    expect(Take.deliveryPoints(points).some((p) => p.id === 'p5')).toBe(false);
+  });
+});
+
+describe('El pedido lleva UNA dirección', () => {
+  const cart = [{ drink: { id: 'd1', price: '150.00' }, quantity: 1 }];
+
+  it('con mesa manda mesa y nada más', () => {
+    const body = Take.orderPayload({ tableId: 't1', cart, requestId: 'r1', deliveryPointId: 'p1' });
+    expect(body.table_id).toBe('t1');
+    expect(body.delivery_point_id).toBeUndefined();
+  });
+
+  it('sin mesa manda el punto de la pista', () => {
+    const body = Take.orderPayload({ tableId: null, cart, requestId: 'r1', deliveryPointId: 'p1' });
+    expect(body.delivery_point_id).toBe('p1');
+    expect(body.table_id).toBeUndefined();
+  });
+
+  it('la venta en barra manda la barra de la que sale', () => {
+    const body = Take.orderPayload({ cart, requestId: 'r1', barLocationId: 'b1' });
+    expect(body.bar_location_id).toBe('b1');
+  });
+
+  it('sin ninguna dirección no se manda: una charola sin destino', () => {
+    expect(Take.orderBlocker({ cart })).toBe('no_table');
+    expect(Take.orderBlocker({ cart, deliveryPointId: 'p1' })).toBeNull();
+    expect(Take.orderBlocker({ cart, barLocationId: 'b1' })).toBeNull();
+  });
+});
+
+describe('Lo que hay que entregar', () => {
+  const now = Date.parse('2026-09-14T02:00:00Z');
+  const orders = [
+    { id: 'a', status: 'ready', created_at: '2026-09-14T01:00:00Z', ready_at: '2026-09-14T01:50:00Z' },
+    { id: 'b', status: 'ready', created_at: '2026-09-14T01:30:00Z', ready_at: '2026-09-14T01:40:00Z' },
+    { id: 'c', status: 'preparing', created_at: '2026-09-14T01:10:00Z' },
+  ];
+
+  it('solo los que la barra marcó listos', () => {
+    expect(Take.readyToDeliver(orders).map((o) => o.id)).toEqual(['b', 'a']);
+  });
+
+  it('ordena por cuándo quedó LISTO, no por cuándo se pidió', () => {
+    // 'b' se pidió después que 'a', pero lleva más tiempo enfriándose en la barra.
+    expect(Take.readyToDeliver(orders)[0].id).toBe('b');
+  });
+
+  it('dice cuántos minutos lleva esperando en la barra', () => {
+    expect(Take.waitingSince(orders[1], now)).toBe(20);
+    expect(Take.waitingSince(orders[0], now)).toBe(10);
+  });
+
+  it('un pedido de otro mesero no aparece en la lista de uno', () => {
+    const mixed = [{ ...orders[0], taken_by: 'otro' }, { ...orders[1], taken_by: 'yo' }];
+    expect(Take.readyToDeliver(mixed, { waiterId: 'yo' }).map((o) => o.id)).toEqual(['b']);
+  });
+
+  it('pero uno que nadie levantó sí: alguien tiene que llevarlo', () => {
+    const mixed = [{ ...orders[0], taken_by: null }];
+    expect(Take.readyToDeliver(mixed, { waiterId: 'yo' })).toHaveLength(1);
+  });
+});

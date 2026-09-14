@@ -313,3 +313,98 @@ describe('Quién abre la pantalla de la barra', () => {
     });
   });
 });
+
+/**
+ * Dos barras y una cola que se puede reacomodar.
+ *
+ * Lo que se prueba aquí es la diferencia entre una barra que trabaja y una que espera:
+ * que cada barra vea SOLO lo suyo, que lo que no está pagado no se prepare, y que
+ * mover una tarjeta de lugar no borre la hora a la que entró — que es la única prueba
+ * de cuánto esperó el cliente.
+ */
+describe('Cada barra ve lo suyo', () => {
+  const pedido = (id, bar, over = {}) => Object.assign({
+    id, status: 'pending', bar_location_id: bar, created_at: '2026-09-14T01:00:00Z',
+  }, over);
+
+  it('filtra por barra', () => {
+    const orders = [pedido('a', 'baja'), pedido('b', 'alta'), pedido('c', 'baja')];
+    expect(Bar.filterByBar(orders, 'baja').map((o) => o.id)).toEqual(['a', 'c']);
+  });
+
+  it('sin barra elegida se ven las dos: es lo honesto mientras nadie diga dónde está', () => {
+    const orders = [pedido('a', 'baja'), pedido('b', 'alta')];
+    expect(Bar.filterByBar(orders, null)).toHaveLength(2);
+  });
+});
+
+describe('La barra no sirve a crédito', () => {
+  it('un pedido sin pagar no está pagado', () => {
+    expect(Bar.isPaid({ payment_status: 'pending' })).toBe(false);
+    expect(Bar.isPaid({ payment_status: 'pending_manual' })).toBe(false);
+  });
+
+  it('pagado y "no lleva cobro" son lo mismo para la barra', () => {
+    expect(Bar.isPaid({ payment_status: 'paid' })).toBe(true);
+    // Un producto de precio cero (una cortesía autorizada) no tiene cobro que esperar.
+    expect(Bar.isPaid({ payment_status: 'not_required' })).toBe(true);
+    expect(Bar.isPaid({})).toBe(true);
+  });
+});
+
+describe('Reacomodar la cola sin tocar la auditoría', () => {
+  const orders = [
+    { id: 'a', status: 'pending', created_at: '2026-09-14T01:00:00Z' },
+    { id: 'b', status: 'pending', created_at: '2026-09-14T01:05:00Z' },
+    { id: 'c', status: 'pending', created_at: '2026-09-14T01:10:00Z' },
+  ];
+
+  it('sin posición puesta manda el más viejo', () => {
+    expect(Bar.groupByLane(orders).new.map((o) => o.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('subir una tarjeta devuelve el carril completo en el orden nuevo', () => {
+    expect(Bar.reorder(orders, 'new', 'c', 'up')).toEqual(['a', 'c', 'b']);
+  });
+
+  it('bajar la última no hace nada: no hay a dónde', () => {
+    expect(Bar.reorder(orders, 'new', 'c', 'down')).toBeNull();
+    expect(Bar.reorder(orders, 'new', 'a', 'up')).toBeNull();
+  });
+
+  it('lo que el cantinero movió va primero, y el resto sigue por hora', () => {
+    const movidos = [
+      { id: 'x', status: 'pending', bar_position: 1, created_at: '2026-09-14T03:00:00Z' },
+      ...orders,
+    ];
+    expect(Bar.groupByLane(movidos).new.map((o) => o.id)).toEqual(['x', 'a', 'b', 'c']);
+  });
+
+  it('mover no cambia la espera: el cliente lleva esperando desde que pidió', () => {
+    const now = Date.parse('2026-09-14T01:30:00Z');
+    const movido = { ...orders[0], bar_position: 9 };
+    expect(Bar.waitMinutes(movido, now)).toBe(30);
+  });
+
+  it('un pedido que ya no está en el carril no se reacomoda', () => {
+    expect(Bar.reorder(orders, 'ready', 'a', 'up')).toBeNull();
+  });
+});
+
+describe('A dónde va el pedido', () => {
+  it('un punto de la pista es una dirección, no una mesa', () => {
+    expect(Bar.destination({
+      delivery_point_name: 'Pista A', delivery_point_kind: 'floor', table_code: null,
+    })).toBe('Pista A');
+  });
+
+  it('cuando el punto ES la mesa, se dice la mesa', () => {
+    expect(Bar.destination({
+      delivery_point_name: 'Mesa 39', delivery_point_kind: 'table', table_code: '39',
+    })).toBe('39');
+  });
+
+  it('una venta en la barra no tiene a dónde llevarse', () => {
+    expect(Bar.destination({})).toBeNull();
+  });
+});

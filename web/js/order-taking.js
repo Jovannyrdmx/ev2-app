@@ -67,16 +67,43 @@
         || String(a.code).localeCompare(String(b.code), 'es', { numeric: true }));
   }
 
-  /** Lo que se manda al crear el pedido. `on_behalf_of` solo si hay cliente identificado. */
-  function orderPayload({ tableId, guestId, cart, requestId }) {
+  /**
+   * A donde se lleva, cuando no es una mesa.
+   *
+   * En la pista nadie tiene mesa: el cliente esta bailando y el mesero necesita un
+   * lugar concreto al que llegar. Los puntos ("Pista A", "Terraza") los configura la
+   * gerencia y cada uno tiene su QR pegado en una columna.
+   *
+   * La barra queda fuera a proposito (`client_selectable: false`): en esta primera
+   * version el club no quiere gente amontonada en la barra esperando su trago. El
+   * mesero si puede usarla, porque la venta en barra se entrega ahi mismo.
+   */
+  function deliveryPoints(points, { forStaff = false } = {}) {
+    return (points || [])
+      .filter((p) => p && p.active !== false && p.kind !== 'table')
+      .filter((p) => forStaff || p.client_selectable !== false)
+      .map((p) => ({ id: p.id, name: p.name, kind: p.kind, floor: p.floor || null }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es', { numeric: true }));
+  }
+
+  /**
+   * Lo que se manda al crear el pedido. `on_behalf_of` solo si hay cliente
+   * identificado; `delivery_point_id` solo cuando no se entrega en una mesa.
+   *
+   * Nunca los dos: una mesa YA es un punto de entrega, y mandar los dos deja al mesero
+   * con dos direcciones distintas para la misma charola.
+   */
+  function orderPayload({ tableId, guestId, cart, requestId, deliveryPointId, barLocationId }) {
     const body = {
       client_request_id: requestId,
-      table_id: tableId,
       items: (cart || []).map((line) => ({
         drink_id: line.drink.id,
         quantity: line.quantity,
       })),
     };
+    if (tableId) body.table_id = tableId;
+    else if (deliveryPointId) body.delivery_point_id = deliveryPointId;
+    if (barLocationId) body.bar_location_id = barLocationId;
     if (guestId) body.on_behalf_of = guestId;
     return body;
   }
@@ -116,11 +143,39 @@
     return null;
   }
 
-  /** Por qué todavía no se puede mandar el pedido. `null` significa que se puede. */
-  function orderBlocker({ tableId, cart }) {
-    if (!tableId) return 'no_table';
+  /**
+   * Por qué todavía no se puede mandar el pedido. `null` significa que se puede.
+   *
+   * Hace falta UNA direccion: una mesa, un punto de la pista, o la barra en la que el
+   * cantinero esta vendiendo. Un pedido sin direccion es una charola dando vueltas.
+   */
+  function orderBlocker({ tableId, cart, deliveryPointId, barLocationId }) {
+    if (!tableId && !deliveryPointId && !barLocationId) return 'no_table';
     if (!cart || cart.length === 0) return 'empty_cart';
     return null;
+  }
+
+  /**
+   * Los pedidos que el mesero tiene que ir a ENTREGAR: los que la barra ya marco
+   * listos.
+   *
+   * Ordenados por la hora en que quedaron listos, no por la hora en que se pidieron: el
+   * trago que lleva mas tiempo en la barra es el que se esta calentando, y es el que hay
+   * que levantar primero aunque se haya pedido despues.
+   */
+  function readyToDeliver(orders, { waiterId } = {}) {
+    return (orders || [])
+      .filter((o) => o && o.status === 'ready')
+      .filter((o) => !waiterId || !o.taken_by || o.taken_by === waiterId)
+      .sort((a, b) => Date.parse(a.ready_at || a.created_at || 0)
+        - Date.parse(b.ready_at || b.created_at || 0));
+  }
+
+  /** Cuantos minutos lleva listo, esperando a que alguien lo lleve. */
+  function waitingSince(order, now) {
+    const at = Date.parse((order && (order.ready_at || order.created_at)) || 0);
+    if (!Number.isFinite(at)) return null;
+    return Math.max(0, Math.floor(((now || Date.now()) - at) / 60000));
   }
 
   /**
@@ -163,6 +218,7 @@
     methodKeys,
     methodFor,
     servableTables,
+    deliveryPoints,
     orderPayload,
     chargePayload,
     chargeBlocker,
@@ -171,5 +227,7 @@
     fromCents,
     priceDrift,
     awaitingPayment,
+    readyToDeliver,
+    waitingSince,
   };
 }));

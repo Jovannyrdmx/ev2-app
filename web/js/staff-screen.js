@@ -41,7 +41,11 @@
     // Lo que el mesero está levantando ahora mismo. `order` se llena cuando el pedido
     // ya existe en el servidor y solo falta cobrarlo: mientras esté ahí, cerrar la hoja
     // no borra el cobro pendiente, queda en la lista de "por cobrar".
-    take: { open: false, table: null, guestId: null, cart: null, order: null, search: '', sending: false },
+    take: { open: false, table: null, guestId: null, cart: null, order: null, search: '', sending: false, pointId: null },
+    // Los puntos de entrega de la pista y la terraza. Se cargan una vez: no cambian a
+    // media noche, y pedirlos en cada pedido seria un viaje de mas con el cliente
+    // enfrente.
+    points: [],
   };
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
@@ -596,6 +600,8 @@
   // ------------------------------------------------- levantar pedido: enganches
 
   $('btn-take-close').onclick = closeTake;
+  $('btn-take-floor').onclick = openTakeOnFloor;
+  $('take-point').onchange = (ev) => { state.take.pointId = ev.target.value || null; renderTake(); };
   $('btn-take-send').onclick = sendTake;
   $('btn-take-charge').onclick = chargeTake;
   $('take-method').onchange = onMethodChange;
@@ -757,6 +763,60 @@
       const order = pendientes.find((o) => o.id === el.dataset.unpaid);
       el.querySelector('button').onclick = () => openCharge(order);
     });
+
+    renderReady();
+  }
+
+  /**
+   * Lo que la barra ya tiene listo, en el orden en que se enfria.
+   *
+   * Ordenado por la hora en que quedo LISTO y no por la hora en que se pidio: el trago
+   * que lleva mas tiempo en la barra es el que hay que levantar primero, aunque se haya
+   * pedido despues.
+   */
+  function renderReady() {
+    const listos = EV2OrderTaking.readyToDeliver(state.orders,
+      { waiterId: api.session.user && api.session.user.id });
+    $('ready-block').hidden = listos.length === 0;
+    const now = Date.now();
+    $('ready-list').innerHTML = listos.map((order) => {
+      const minutos = EV2OrderTaking.waitingSince(order, now);
+      const donde = order.delivery_point_name && order.delivery_point_kind !== 'table'
+        ? order.delivery_point_name
+        : (order.table_code ? `${t('floor.tableShort')} ${order.table_code}` : t('take.noTable'));
+      return `
+      <div class="flex items-center justify-between gap-2" data-ready="${escape(order.id)}">
+        <div class="min-w-0">
+          <p class="text-sm truncate">${escape(donde)}
+            <span class="text-white/40">${order.bar_name ? escape(`· ${order.bar_name}`) : ''}</span></p>
+          <p class="text-xs text-white/50 truncate">${escape((order.items || []).map((i) => `${i.quantity}× ${i.name}`).join(', '))}</p>
+          <p class="text-[11px] ${minutos >= 5 ? 'text-amber-300' : 'text-white/40'}">
+            ${escape(minutos === null ? '' : t('take.readyFor', { n: minutos }))}
+          </p>
+        </div>
+        <button class="ev2-button rounded-lg px-3 py-2 text-xs font-display flex-none">
+          ${escape(t('take.delivered'))}
+        </button>
+      </div>`;
+    }).join('');
+
+    $('ready-list').querySelectorAll('[data-ready]').forEach((el) => {
+      el.querySelector('button').onclick = () => deliver(el.dataset.ready);
+    });
+  }
+
+  /** Confirmar la entrega. Es el ultimo paso del pedido y lo da quien lo llevo. */
+  async function deliver(orderId) {
+    try {
+      await api.post(`/nightclubs/${clubId()}/orders/${orderId}/status`, { status: 'delivered' });
+      const index = state.orders.findIndex((o) => o.id === orderId);
+      if (index !== -1) state.orders.splice(index, 1);
+      toast(t('take.deliveredOk'), 'ok');
+      renderUnpaid();
+    } catch (err) {
+      showError(err);
+      await loadOrders();
+    }
   }
 
 
@@ -774,6 +834,34 @@
       const d = await api.get(`/nightclubs/${clubId()}/drinks`);
       state.drinks = d.drinks || [];
     } catch (err) { showError(err); }
+  }
+
+  async function loadPoints() {
+    if (state.points.length > 0) return;
+    try {
+      const d = await api.get(`/nightclubs/${clubId()}/delivery-points`);
+      state.points = d.delivery_points || [];
+    } catch (err) { showError(err); }
+  }
+
+  /**
+   * Levantar un pedido sin mesa: el cliente esta en la pista.
+   *
+   * Es la mitad de la clientela de general, y hasta ahora no habia forma de pedirle
+   * nada: la hoja solo se abria desde una mesa.
+   */
+  async function openTakeOnFloor() {
+    state.take = {
+      open: true, table: null, guestId: null, cart: EV2Client.createCart(),
+      order: null, search: '', sending: false, pointId: null,
+    };
+    $('take-sheet').hidden = false;
+    $('take-search').value = '';
+    $('take-reference').value = '';
+    renderTakeMethods();
+    renderTake();
+    await Promise.all([loadDrinks(), loadPoints()]);
+    renderTake();
   }
 
   async function openTake(table) {
@@ -854,6 +942,17 @@
     $('take-title').textContent = mesa
       ? `${t('floor.tableShort')} ${mesa.code}` : t('take.noTable');
 
+    // Sin mesa hace falta un punto de entrega: "Pista A", "Terraza". Con mesa no se
+    // pregunta, porque la mesa YA es el punto y dos direcciones para una charola es
+    // como se entrega en el lugar equivocado.
+    const puntos = EV2OrderTaking.deliveryPoints(state.points, { forStaff: true });
+    $('take-point-wrap').hidden = Boolean(mesa) || Boolean(take.order) || puntos.length === 0;
+    if (!$('take-point-wrap').hidden) {
+      $('take-point').innerHTML = [`<option value="">${escape(t('take.pickPoint'))}</option>`]
+        .concat(puntos.map((p) => `<option value="${escape(p.id)}"${p.id === take.pointId ? ' selected' : ''}>${escape(p.name)}</option>`))
+        .join('');
+    }
+
     // A nombre de quién. Con nadie registrado en la mesa el cobro queda a nombre del
     // mesero, y la pantalla lo dice en lugar de dejarlo en blanco.
     const guests = (mesa && mesa.guests) || [];
@@ -913,7 +1012,9 @@
       : money(take.cart.total, take.cart.currency);
 
     $('btn-take-send').disabled = take.sending
-      || EV2OrderTaking.orderBlocker({ tableId: mesa && mesa.id, cart: take.cart.lines }) !== null;
+      || EV2OrderTaking.orderBlocker({
+        tableId: mesa && mesa.id, deliveryPointId: take.pointId, cart: take.cart.lines,
+      }) !== null;
   }
 
   function takeError(key) {
@@ -926,14 +1027,17 @@
   async function sendTake() {
     const take = state.take;
     const mesa = take.table;
-    const blocker = EV2OrderTaking.orderBlocker({ tableId: mesa && mesa.id, cart: take.cart.lines });
+    const blocker = EV2OrderTaking.orderBlocker({
+      tableId: mesa && mesa.id, deliveryPointId: take.pointId, cart: take.cart.lines,
+    });
     if (blocker) { takeError(`take.blocked.${blocker}`); return; }
 
     take.sending = true;
     renderTake();
     try {
       const body = EV2OrderTaking.orderPayload({
-        tableId: mesa.id,
+        tableId: mesa && mesa.id,
+        deliveryPointId: take.pointId,
         guestId: take.guestId,
         cart: take.cart.lines,
         // La misma clave si hay que reintentar: el servidor devuelve el mismo pedido

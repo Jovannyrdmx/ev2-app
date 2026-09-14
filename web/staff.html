@@ -177,6 +177,20 @@
           <div id="unpaid-list" class="space-y-2"></div>
         </div>
 
+        <!--
+          Lo que la barra ya tiene listo. Va arriba de las mesas a proposito: un trago
+          listo que nadie levanta se calienta, y es la queja mas comun de una noche.
+        -->
+        <div id="ready-block" class="card rounded-xl p-3 space-y-2 border border-emerald-400/30" hidden>
+          <p class="text-xs uppercase tracking-wider text-emerald-300" data-i18n="take.readyTitle">Listos para llevar</p>
+          <div id="ready-list" class="space-y-2"></div>
+        </div>
+
+        <!-- En la pista no hay mesa: el pedido se levanta contra un punto de entrega. -->
+        <button id="btn-take-floor" class="w-full card rounded-xl py-3 text-sm" data-i18n="take.onFloor">
+          Levantar un pedido en la pista
+        </button>
+
         <div id="tables-list" class="space-y-2"></div>
       </div>
 
@@ -303,6 +317,12 @@
     </header>
 
     <!-- A nombre de quién. Solo aparece si hay alguien registrado en esa mesa. -->
+    <!-- A donde se lleva, cuando no es una mesa. -->
+    <div id="take-point-wrap" class="px-4 pt-3" hidden>
+      <label class="text-xs text-white/50" data-i18n="take.point">Punto de entrega</label>
+      <select id="take-point" class="w-full mt-1 px-4 py-2 rounded-xl bg-white/5 border border-white/10 outline-none"></select>
+    </div>
+
     <div id="take-who" class="px-4 pt-3" hidden>
       <label class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="take.forWhom">¿De quién es?</label>
       <select id="take-guest-select" class="w-full mt-1 px-4 py-2 rounded-xl bg-white/5 border border-white/10 outline-none"></select>

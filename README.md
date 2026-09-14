@@ -61,16 +61,66 @@ docker compose --env-file .env -f deploy/docker-compose.yml up --build -d
 docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed
 docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed:floor
 docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed:prices
+docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed:menu
+docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed:supplies
 ```
 
 > `seed:prices` no es opcional: carga el precio de cada zona. Sin el, la pantalla de
 > reservacion no encuentra ninguna mesa con precio y no se puede reservar nada.
+>
+> `seed:menu` carga la carta real del club (129 productos) y `seed:supplies` el almacen:
+> los 3 lugares (almacen y las dos barras), los 88 insumos, las 129 recetas y un punto de
+> entrega con QR por cada mesa, mas la pista y la terraza. **No carga ninguna
+> existencia**: el saldo entra por una recepcion de mercancia o por un conteo fisico
+> desde `almacen.html`, nunca de una semilla. Un inventario que arranca con numeros
+> inventados miente desde el primer dia.
+
+### Volver a exportar el catalogo desde la caja
+
+Cuando el club cambie precios o recetas en SoftRestaurant11, se exportan las tablas
+`productos` y `recetas` a `.xls` y se regeneran los tres archivos de semilla:
+
+```bash
+pip install xlrd
+python3 server/scripts/import-sr11-catalog.py productos.xls recetas.xls
+npm --prefix server run seed:menu && npm --prefix server run seed:supplies
+```
+
+El script imprime que precios se unificaron entre barras (se toma **el mayor**) y que
+presentaciones quedaron **por confirmar**. Las reglas de conversion -entre ellas que
+**una onza son 30 ml**, que es como sirve la barra- estan explicadas en la cabecera del
+propio script.
 
 Abre **http://localhost:8080**. El contenedor `web` sirve la pagina y reenvia `/api` a la
 API y `/ws` al servidor de tiempo real, asi que todo va por un solo origen.
 
 Entra con `guest@ev2.local` y la contrasena que pusiste en `SEED_PASSWORD`. Para ver el
 pedido avanzar solo, abre otra ventana con `bartender@ev2.local` (paso 5.7).
+
+### Pantallas por rol
+
+| Rol | Pantalla | Que hace ahi |
+|---|---|---|
+| Cliente | `index.html` | Mapa, carta, pedidos, reservacion, propinas, pase de entrada. |
+| Mesero | `staff.html` | Levanta el pedido en la mesa o en la pista, cobra en efectivo o terminal, recibe los listos y confirma la entrega. |
+| Barra | `bartender.html` | La cola **de su barra**, ordenada por hora de pago; puede reacomodarla por eficiencia sin tocar la auditoria. |
+| Almacen | `almacen.html` | Entradas, surtido a las barras, mermas, cortesias, salidas y conteo fisico, con kardex. |
+| Gerente | `manager.html` | Precios, plano, empleados, caja del turno, reportes y moderacion. |
+| Puerta | `staff.html` | Escanea el pase, vende acceso general y lleva el aforo. |
+
+### Probar el flujo completo del inventario
+
+Con la app arriba y el almacen cargado:
+
+1. Entra como **almacen** o gerente en `almacen.html`, elige un insumo y registra una
+   **entrada** en cajas con el costo de la factura.
+2. **Surte** la barra que corresponda (pestana *Surtir*: lista lo que esta bajo minimo y
+   si alcanza con lo que hay en el almacen).
+3. Entra como **mesero** en `staff.html`, levanta un pedido en una mesa y cobralo.
+4. Entra como **barra** en `bartender.html`: el pedido aparece en la cola **de esa barra**
+   y no en la otra.
+5. Vuelve a `almacen.html`: el kardex muestra el consumo, con el saldo que quedo en ese
+   estante y contra que pedido salio.
 
 > `ALLOWED_ORIGINS` **tiene que incluir el origen desde el que abres la pagina**, aunque
 > la API vaya detras del mismo proxy: el navegador manda la cabecera `Origin` tambien en

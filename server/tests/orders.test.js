@@ -29,9 +29,19 @@ const newOrder = (over = {}) => ({
   ...over,
 });
 
-async function stockOf(drinkId) {
-  const { rows } = await pool.query('SELECT quantity FROM inventory WHERE drink_id = $1', [drinkId]);
-  return Number(rows[0].quantity);
+/**
+ * Existencia real de un producto: la del INSUMO del que sale. Desde la migración 018
+ * el producto no tiene contador propio, y preguntarle a uno era justo el defecto.
+ */
+async function stockOf(drinkId, locationId = null) {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(sum(ss.stock), 0)::float8 AS stock
+       FROM drink_supplies ds
+       JOIN supplies s ON s.id = ds.supply_id
+       LEFT JOIN supply_stock ss ON ss.supply_id = s.id
+        AND ($2::uuid IS NULL OR ss.location_id = $2::uuid)
+      WHERE ds.drink_id = $1`, [drinkId, locationId]);
+  return rows.length ? Number(rows[0].stock) : null;
 }
 
 /** Lo que ve la barra del cobro de un pedido. */
@@ -106,7 +116,11 @@ describe('POST /orders', () => {
       .send(newOrder({ items: [{ drink_id: shot.id, quantity: 5 }] }));
 
     expect(res.status).toBe(409);
-    expect(res.body.error.details[0]).toMatchObject({ reason: 'out_of_stock', stock: 3 });
+    // El error nombra el INSUMO que faltó y cuánto queda de verdad, no un
+    // "sin existencias" que obliga a adivinar cuál de los ingredientes se acabó.
+    expect(res.body.error.details.supplies[0]).toMatchObject({
+      reason: 'out_of_stock', available: 3, needed: 5,
+    });
     expect(await stockOf(shot.id)).toBe(3);
   });
 
