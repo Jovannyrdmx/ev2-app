@@ -150,6 +150,13 @@ Con la app arriba y el almacen cargado:
 > revision de identificacion **no guarda** el numero del documento ni la fecha de
 > nacimiento; solo que se enseño una INE y que era mayor de edad.
 
+### Subirlo al servidor
+
+`docs/PONER-EN-LINEA.md` es la lista de una sola pasada para dejarlo en linea: que
+subir, que correr, que hay que ver en cada paso, y **las dos cosas que estan fuera del
+servidor** (el cortafuegos del proveedor, que no es `ufw`, y la copia que guarda el
+navegador). `docs/DESPLIEGUE.md` es la referencia completa.
+
 ### Cuando algo no funciona en el servidor
 
 Dos herramientas, y conviene usarlas en este orden:
