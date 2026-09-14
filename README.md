@@ -150,6 +150,27 @@ Con la app arriba y el almacen cargado:
 > revision de identificacion **no guarda** el numero del documento ni la fecha de
 > nacimiento; solo que se enseño una INE y que era mayor de edad.
 
+### Cuando algo no funciona en el servidor
+
+Dos herramientas, y conviene usarlas en este orden:
+
+```bash
+# 1. Que eslabon esta roto. Recorre configuracion, contenedores, la API, el proxy
+#    interno, Caddy, los puertos y las cuentas, y se detiene a explicar el primero
+#    que falla. No cambia nada.
+bash docs/api/diagnostico-vps.sh
+
+# 2. Que la ENTRADA funciona de verdad, de punta a punta, contra la API viva.
+SEED_PASSWORD=... bash docs/api/smoke-test-puerta.sh
+
+# 3. Lo mismo para el inventario.
+SEED_PASSWORD=... bash docs/api/smoke-test-inventario.sh
+```
+
+El chequeo de salud responde en **`/health`** (lo que mira Docker desde adentro) y en
+**`/api/health`** (lo unico que el proxy reenvia desde fuera, y por lo tanto la unica
+direccion que sirve para vigilar el servidor o para comprobarlo con `curl`).
+
 > `ALLOWED_ORIGINS` **tiene que incluir el origen desde el que abres la pagina**, aunque
 > la API vaya detras del mismo proxy: el navegador manda la cabecera `Origin` tambien en
 > peticiones al mismo origen cuando no son GET. Si falta, la API responde 403 diciendo

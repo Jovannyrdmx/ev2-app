@@ -446,8 +446,8 @@ describe('Dinero e idioma', () => {
 
   it('cambia de idioma y usa el mensaje del servidor cuando lo hay', () => {
     fmt.setLanguage('en');
-    expect(fmt.t('error.network')).toMatch(/No connection/);
-    expect(fmt.errorMessage({ name: 'NetworkError' })).toMatch(/No connection/);
+    expect(fmt.t('error.network')).toMatch(/reach the server/);
+    expect(fmt.errorMessage({ name: 'NetworkError' })).toMatch(/reach the server/);
     expect(fmt.errorMessage({ code: 'forbidden' })).toMatch(/permission/);
 
     fmt.setLanguage('es');
@@ -459,7 +459,7 @@ describe('Dinero e idioma', () => {
 
   it('un idioma que no existe cae a español en vez de quedarse en blanco', () => {
     expect(fmt.setLanguage('fr')).toBe('es');
-    expect(fmt.t('error.network')).toMatch(/Sin conexión/);
+    expect(fmt.t('error.network')).toMatch(/contactar al servidor/);
   });
 });
 

@@ -82,14 +82,25 @@ function createApp() {
   }));
 
   // Health check stays outside rate limiting so monitoring never trips it.
-  app.get('/health', (req, res) => {
+  //
+  // Served at BOTH paths, and that is not redundancy for its own sake. Docker's
+  // healthcheck talks to the container directly, so `/health` is what it needs.
+  // But the proxy in front (deploy/nginx-web.conf) only forwards `/api/`, so from
+  // outside the server `/health` does not exist at all — which meant the club had
+  // no way to check whether its own API was alive through its own domain, and the
+  // monitoring the plan calls for had nothing to point at. It also made every
+  // troubleshooting instruction of the form `curl https://dominio/api/health`
+  // answer 404 and send whoever was debugging down the wrong path.
+  const health = (req, res) => {
     const body = { status: 'ok', service: 'ev2-api', timestamp: new Date().toISOString() };
     // Set by src/index.js when the process is running the event relay (D26). Absent in
     // tests, which import the app without starting the relay.
     const relay = req.app.locals.relay;
     if (relay) body.relay = relay.status();
     res.json(body);
-  });
+  };
+  app.get('/health', health);
+  app.get('/api/health', health);
 
   const generalLimiter = rateLimit({
     windowMs: 60_000,

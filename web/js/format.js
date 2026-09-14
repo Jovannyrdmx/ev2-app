@@ -20,7 +20,7 @@
 
   const STRINGS = {
     es: {
-      'error.network': 'Sin conexión. Revisa tu señal e intenta de nuevo.',
+      'error.network': 'No se pudo contactar al servidor. Revisa tu conexión; si tienes internet, el servidor no está respondiendo.',
       'error.unauthorized': 'Tu sesión terminó. Vuelve a entrar.',
       // Un 401 al ENTRAR no es una sesión vencida: no había sesión. Decirle a alguien
       // que su sesión terminó cuando lo que pasó es que se equivocó de contraseña lo
@@ -1094,7 +1094,7 @@
       'manager.conductNote': 'Si escribes algo aquí, el cliente TIENE que aceptarlo para poder pedir un viaje, y queda registrada la hora en que lo aceptó. Si lo dejas vacío, no se le pide nada.',
     },
     en: {
-      'error.network': 'No connection. Check your signal and try again.',
+      'error.network': 'Could not reach the server. Check your connection; if you have internet, the server is not responding.',
       'error.unauthorized': 'Your session ended. Please sign in again.',
       'error.badLogin': 'Wrong email or password.',
       'error.forbidden': "You don't have permission to do this.",
