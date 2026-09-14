@@ -5,7 +5,7 @@
  * y `EV2Roles`. Cubre lo que el dueño dejó para configurar después: conductores, zonas y
  * tarifas del taxi, y los cajones del estacionamiento — más el resumen del turno.
  */
-/* global EV2, EV2Format, EV2Manager, EV2Roles, EV2PasswordGate, EV2StaffAdmin, EV2Payouts */
+/* global EV2, EV2Format, EV2Manager, EV2Warehouse, EV2Roles, EV2PasswordGate, EV2StaffAdmin, EV2Payouts */
 (function () {
   'use strict';
 
@@ -28,6 +28,14 @@
     valetSettings: null, spots: [], occupancy: null,
     reports: [], reportFilter: null,
     nights: [], staff: [], withdrawals: [], accounts: [],
+    // Inventario: lo que el gerente mira, no lo que el almacen opera.
+    supplies: [], locations: [], recipes: [], movements: [],
+    // Hasta que el inventario llegue de la API, la pestana NO pinta ceros: un
+    // "MX$0.00" mientras carga no es "cargando", es un dato falso, y el gerente que
+    // lo alcanza a leer se lleva la idea de que la bodega esta vacia.
+    invLoaded: false,
+    invView: 'stock', invSearch: '',
+    recipe: null,   // { drink_id, name, price, lines: [{supply_id, quantity}] }
     realtime: null, busy: false,
   };
   const secret = EV2Manager.createSecretBox();
@@ -196,7 +204,14 @@
         (d) => { state.staff = d.employees || []; }),
       get(`/nightclubs/${club}/withdrawals?limit=100`, (d) => { state.withdrawals = d.withdrawals || []; }),
       loadReports(),
+      // Inventario. Va en el mismo lote: son tres consultas y el gerente abre la
+      // pestana sin esperar, que es la diferencia entre revisar margenes y no hacerlo.
+      get(`/nightclubs/${club}/supply-locations`, (d) => { state.locations = d.locations || []; }),
+      get(`/nightclubs/${club}/supplies`, (d) => { state.supplies = d.supplies || []; }),
+      get(`/nightclubs/${club}/recipes`, (d) => { state.recipes = d.recipes || []; }),
+      get(`/nightclubs/${club}/supply-movements?limit=60`, (d) => { state.movements = d.movements || []; }),
     ]);
+    state.invLoaded = true;
     // Las cuentas por verificar se piden por empleado: no hay un listado del club, y
     // sin verificar una cuenta esa persona no puede cobrar nunca.
     await loadAccounts();
@@ -228,7 +243,7 @@
 
   // ---------------------------------------------------------------- pintar
 
-  const TABS = ['summary', 'nights', 'staff', 'payouts', 'reports', 'drivers', 'taxi', 'parking'];
+  const TABS = ['summary', 'nights', 'staff', 'payouts', 'reports', 'drivers', 'taxi', 'parking', 'inventory'];
 
   function renderAll() {
     for (const tab of TABS) $(`tab-${tab}`).hidden = tab !== state.tab;
@@ -244,6 +259,7 @@
     renderDrivers();
     renderTaxi();
     renderParking();
+    renderInventory();
     renderSecret();
   }
 
@@ -1151,6 +1167,301 @@
       toast(t('manager.saved'), 'ok');
     } catch (err) { showError(err); }
   };
+
+
+  // ---------------------------------------------------------------- inventario
+  //
+  // Lo que el gerente necesita y la pantalla de almacen no da: cuanto vale lo que hay,
+  // que producto se vende con poco margen, y el editor de recetas -- que hasta ahora
+  // solo existia como ruta de la API, o sea que corregir una receta requeria un curl.
+
+  function renderInventory() {
+    if (!$('tab-inventory')) return;
+    if (!state.invLoaded) {
+      for (const id of ['inv-value', 'inv-low', 'inv-norecipe']) $(id).textContent = '—';
+      $('inv-unconfirmed').hidden = true;
+      $('inv-list').innerHTML = '';
+      $('inv-empty').textContent = t('inv.loading');
+      $('inv-empty').hidden = false;
+      return;
+    }
+    const value = EV2Warehouse.inventoryValue(state.supplies);
+    $('inv-value').textContent = money(value.total, 'MXN');
+    $('inv-low').textContent = state.supplies.filter((x) => x.low).length;
+    $('inv-norecipe').textContent = state.recipes.filter((r) => (r.items || []).length === 0).length;
+
+    const sinConfirmar = state.supplies.filter((x) => x.size_confirmed === false).length;
+    $('inv-unconfirmed').hidden = sinConfirmar === 0;
+    $('inv-unconfirmed-n').textContent = sinConfirmar;
+
+    for (const b of document.querySelectorAll('[data-inv]')) {
+      b.classList.toggle('on', b.dataset.inv === state.invView);
+    }
+
+    if (state.invView === 'recipes') return renderRecipeList();
+    if (state.invView === 'kardex') return renderKardex();
+    return renderStockList();
+  }
+
+  function invEmpty(message) {
+    $('inv-list').innerHTML = '';
+    $('inv-empty').textContent = message;
+    $('inv-empty').hidden = false;
+  }
+
+  const invMatches = (text) => !state.invSearch
+    || String(text || '').toLowerCase().includes(state.invSearch);
+
+  /** Existencias: el total del club y el desglose por estante, en presentaciones. */
+  function renderStockList() {
+    const list = state.supplies.filter((x) => invMatches(x.name) || invMatches(x.category));
+    if (list.length === 0) return invEmpty(t('inv.emptyStock'));
+    $('inv-empty').hidden = true;
+
+    $('inv-list').innerHTML = EV2Warehouse.byCategory(list).map((group) => `
+      <section class="mb-3">
+        <h3 class="text-xs uppercase tracking-widest text-white/40 mb-1 px-1">${escape(group.category)}</h3>
+        <div class="space-y-2">
+          ${group.items.map((supply) => `
+            <article class="card rounded-xl px-3 py-2 ${supply.low ? 'border-l-4 border-amber-400' : ''}">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <p class="text-sm font-semibold truncate">${escape(supply.name)}
+                    ${supply.size_confirmed === false ? `<span class="text-pink-300 text-[11px]">· ${escape(t('inv.confirmSize'))}</span>` : ''}</p>
+                  <p class="text-xs text-white/60">${escape(EV2Warehouse.describeStock(supply, supply.stock, lang()))}</p>
+                  <p class="text-[11px] text-white/40">${(supply.locations || []).map((l) => `${escape(l.name)}: <b>${EV2Warehouse.packagesOf(l.stock, supply.package_size)}</b>`).join(' · ') || escape(t('inv.noStock'))}</p>
+                </div>
+                <div class="text-right shrink-0">
+                  <p class="text-sm">${escape(money(supply.stock_value, 'MXN'))}</p>
+                  <p class="text-[11px] text-white/40">${escape(t('inv.atCost'))}</p>
+                  <button class="chip tap px-2 mt-1" data-min="${escape(supply.id)}">${escape(t('inv.setMin'))}</button>
+                </div>
+              </div>
+            </article>`).join('')}
+        </div>
+      </section>`).join('');
+
+    for (const button of $('inv-list').querySelectorAll('[data-min]')) {
+      button.onclick = () => setMinimum(button.dataset.min);
+    }
+  }
+
+  /**
+   * El minimo por estante.
+   *
+   * Se pregunta en presentaciones porque es como se piensa ("surte cuando baje de dos
+   * botellas"), y se manda en unidad base, que es lo que entiende el inventario.
+   */
+  async function setMinimum(supplyId) {
+    const supply = state.supplies.find((x) => x.id === supplyId);
+    if (!supply) return;
+    const bars = state.locations.filter((l) => l.kind === 'bar' || l.kind === 'warehouse');
+    if (bars.length === 0) return;
+    const nombres = bars.map((b, i) => `${i + 1}) ${b.name}`).join('  ');
+    const cual = window.prompt(t('inv.askPlace', { list: nombres }), '1');
+    const place = bars[Number(cual) - 1];
+    if (!place) return;
+    const actual = (supply.locations || []).find((l) => l.location_id === place.id);
+    const previo = actual ? EV2Warehouse.packagesOf(actual.min_stock, supply.package_size) : 0;
+    const raw = window.prompt(t('inv.askMin', { name: supply.name, place: place.name }), String(previo));
+    if (raw === null) return;
+    const packages = Number(raw);
+    if (!Number.isFinite(packages) || packages < 0) { toast(t('inv.badMin'), 'error'); return; }
+    try {
+      const { supply: updated } = await api.put(
+        `/nightclubs/${clubId()}/supplies/${supplyId}/min-stock`,
+        { location_id: place.id, min_stock: packages * Number(supply.package_size) });
+      state.supplies = state.supplies.map((x) => (x.id === updated.id ? updated : x));
+      toast(t('inv.minSaved'), 'ok');
+      renderInventory();
+    } catch (err) { showError(err); }
+  }
+
+  /** Recetas: primero lo que no tiene, despues lo de menor margen. */
+  function renderRecipeList() {
+    const list = EV2Manager.sortRecipes(state.recipes, { search: state.invSearch });
+    if (list.length === 0) return invEmpty(t('inv.emptyRecipes'));
+    $('inv-empty').hidden = true;
+
+    $('inv-list').innerHTML = list.map((r) => {
+      const sin = (r.items || []).length === 0;
+      const m = r.margin;
+      return `
+      <article class="card rounded-xl px-3 py-2 ${sin ? 'border-l-4 border-red-400' : ''}"
+               data-recipe="${escape(r.drink_id)}">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <p class="text-sm font-semibold truncate">${escape(r.name)}</p>
+            <p class="text-xs text-white/60">
+              ${sin ? escape(t('inv.withoutRecipe'))
+                : escape((r.items || []).map((i) => `${i.quantity} ${i.unit} ${i.name}`).join(' + '))}
+            </p>
+          </div>
+          <div class="text-right shrink-0">
+            <p class="text-sm">${escape(money(r.price, 'MXN'))}</p>
+            <p class="text-[11px] ${m.pct === null ? 'text-white/40' : (m.pct < 50 ? 'text-amber-300' : 'text-emerald-300')}">
+              ${m.pct === null ? escape(t('inv.noCost')) : `${escape(money(m.cost, 'MXN'))} · ${m.pct}%`}
+            </p>
+          </div>
+        </div>
+      </article>`;
+    }).join('');
+
+    for (const el of $('inv-list').querySelectorAll('[data-recipe]')) {
+      el.onclick = () => openRecipe(el.dataset.recipe);
+    }
+  }
+
+  /** Los ultimos movimientos, de solo lectura: el detalle se opera en almacen.html. */
+  function renderKardex() {
+    const list = state.movements.filter((m) => invMatches(m.supply_name) || invMatches(m.reason));
+    if (list.length === 0) return invEmpty(t('inv.emptyKardex'));
+    $('inv-empty').hidden = true;
+    $('inv-list').innerHTML = list.map((m) => {
+      const signo = Number(m.quantity) > 0 ? '+' : '';
+      const color = Number(m.quantity) > 0 ? 'text-emerald-300' : 'text-red-300';
+      const otro = m.counterpart_name ? ` ${m.kind === 'transfer_in' ? '←' : '→'} ${escape(m.counterpart_name)}` : '';
+      return `
+      <article class="card rounded-xl px-3 py-2">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <p class="text-sm truncate">${escape(m.supply_name)}</p>
+            <p class="text-xs text-white/60">${escape(t(`wh.kind.${m.kind}`))} · ${escape(m.location_name)}${otro}</p>
+            <p class="text-[11px] text-white/40">${escape(EV2Format.dateTime(m.created_at))}${m.created_by_name ? ` · ${escape(m.created_by_name)}` : ''}${m.reason ? ` · ${escape(m.reason)}` : ''}</p>
+          </div>
+          <p class="${color} text-sm shrink-0">${signo}${Number(m.quantity)} ${escape(m.unit)}</p>
+        </div>
+      </article>`;
+    }).join('');
+  }
+
+  // ------------------------------------------------------- editor de receta
+
+  function openRecipe(drinkId) {
+    const r = state.recipes.find((x) => x.drink_id === drinkId);
+    if (!r) return;
+    state.recipe = {
+      drink_id: r.drink_id,
+      name: r.name,
+      price: r.price,
+      lines: (r.items || []).map((i) => ({ supply_id: i.supply_id, quantity: Number(i.quantity) })),
+    };
+    $('recipe-error').hidden = true;
+    $('recipe-qty').value = '';
+    renderRecipeSheet();
+    $('recipe-sheet').hidden = false;
+  }
+
+  function closeRecipe() {
+    state.recipe = null;
+    $('recipe-sheet').hidden = true;
+  }
+
+  const supplyById = (id) => state.supplies.find((x) => x.id === id) || null;
+
+  function renderRecipeSheet() {
+    const r = state.recipe;
+    if (!r) return;
+    $('recipe-title').textContent = r.name;
+    $('recipe-note').textContent = t('inv.recipeNote', { price: money(r.price, 'MXN') });
+
+    $('recipe-lines').innerHTML = r.lines.length === 0
+      ? `<p class="text-center text-white/40 text-sm py-8">${escape(t('inv.recipeEmpty'))}</p>`
+      : r.lines.map((line, index) => {
+        const supply = supplyById(line.supply_id);
+        const costo = supply ? Number(supply.avg_cost) * Number(line.quantity) : 0;
+        return `
+        <div class="card rounded-xl px-3 py-2 flex items-center justify-between gap-2" data-line="${index}">
+          <div class="min-w-0">
+            <p class="text-sm truncate">${escape(supply ? supply.name : line.supply_id)}</p>
+            <p class="text-xs text-white/50">${line.quantity} ${escape(supply ? supply.unit : '')} · ${escape(money(costo, 'MXN'))}</p>
+          </div>
+          <button class="card rounded-lg px-3 text-red-300 text-sm shrink-0" data-drop="${index}">✕</button>
+        </div>`;
+      }).join('');
+
+    // Solo insumos activos y que no esten ya en la receta: repetir uno la invalida.
+    const usados = new Set(r.lines.map((l) => l.supply_id));
+    $('recipe-supply').innerHTML = state.supplies
+      .filter((x) => x.active !== false && !usados.has(x.id))
+      .map((x) => `<option value="${escape(x.id)}">${escape(x.name)} (${escape(x.unit)})</option>`)
+      .join('');
+
+    const costo = r.lines.reduce((sum, l) => {
+      const supply = supplyById(l.supply_id);
+      return sum + (supply ? Number(supply.avg_cost) * Number(l.quantity) : 0);
+    }, 0);
+    const m = EV2Manager.recipeMargin({ price: r.price, cost: costo });
+    $('recipe-cost').textContent = m.pct === null
+      ? t('inv.noCostYet')
+      : t('inv.marginLine', { cost: money(m.cost, 'MXN'), profit: money(m.profit, 'MXN'), pct: m.pct });
+
+    for (const button of $('recipe-lines').querySelectorAll('[data-drop]')) {
+      button.onclick = () => {
+        r.lines.splice(Number(button.dataset.drop), 1);
+        renderRecipeSheet();
+      };
+    }
+  }
+
+  function addRecipeLine() {
+    const r = state.recipe;
+    if (!r) return;
+    const supplyId = $('recipe-supply').value;
+    const quantity = Number($('recipe-qty').value);
+    if (!supplyId) { recipeError('inv.err.no_supply'); return; }
+    if (!(quantity > 0)) { recipeError('inv.err.bad_quantity'); return; }
+    r.lines.push({ supply_id: supplyId, quantity });
+    $('recipe-qty').value = '';
+    recipeError(null);
+    renderRecipeSheet();
+  }
+
+  function recipeError(key) {
+    const el = $('recipe-error');
+    if (!key) { el.hidden = true; return; }
+    el.textContent = t(key);
+    el.hidden = false;
+  }
+
+  async function saveRecipe() {
+    const r = state.recipe;
+    if (!r) return;
+    const problem = EV2Manager.validateRecipe(r.lines);
+    if (problem) { recipeError(`inv.err.${problem}`); return; }
+    try {
+      await api.put(`/nightclubs/${clubId()}/recipes/${r.drink_id}`,
+        EV2Manager.recipePayload(r.lines));
+      // Se vuelve a pedir la lista: el costo y el margen los calcula el servidor con el
+      // costo promedio de cada insumo, y recalcularlos aqui seria inventar el numero.
+      const d = await api.get(`/nightclubs/${clubId()}/recipes`);
+      state.recipes = d.recipes || [];
+      toast(r.lines.length === 0 ? t('inv.recipeCleared') : t('inv.recipeSaved'), 'ok');
+      closeRecipe();
+      renderInventory();
+    } catch (err) { showError(err, $('recipe-error')); }
+  }
+
+  for (const b of document.querySelectorAll('[data-inv]')) {
+    b.onclick = () => {
+      state.invView = b.dataset.inv;
+      // La busqueda se limpia al cambiar de vista: "BUCHANANS" busca un producto en
+      // recetas y un insumo en existencias, y arrastrarla entre las dos deja la lista
+      // vacia sin que se vea por que.
+      state.invSearch = '';
+      if ($('inv-search')) $('inv-search').value = '';
+      renderInventory();
+    };
+  }
+  if ($('inv-search')) {
+    $('inv-search').oninput = (ev) => {
+      state.invSearch = ev.target.value.trim().toLowerCase();
+      renderInventory();
+    };
+  }
+  if ($('btn-recipe-close')) $('btn-recipe-close').onclick = closeRecipe;
+  if ($('btn-recipe-add')) $('btn-recipe-add').onclick = addRecipeLine;
+  if ($('btn-recipe-save')) $('btn-recipe-save').onclick = saveRecipe;
 
   // ---------------------------------------------------------------- tiempo real
 

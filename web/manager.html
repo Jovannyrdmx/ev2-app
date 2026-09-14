@@ -61,6 +61,12 @@
         .pill-off { background: rgba(255,255,255,.12); color: rgba(255,255,255,.6); }
         .pill-bad { background: rgba(255,68,68,.18); color: var(--ev2-red); }
 
+        .chip {
+            padding: .25rem .6rem; border-radius: 9999px; font-size: .7rem;
+            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
+        }
+        .chip.on { background: var(--ev2-cyan); color: #000; border-color: var(--ev2-cyan); font-weight: 700; }
+
         .field { width: 100%; padding: .6rem 1rem; border-radius: .6rem; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); outline: none; }
         .field:focus { border-color: var(--ev2-cyan); }
         .field.bad { border-color: var(--ev2-red); }
@@ -149,6 +155,7 @@
       <button data-tab="reports" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="mod.tab">Reportes</button>
       <button data-tab="drivers" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabDrivers">Conductores</button>
       <button data-tab="taxi" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabTaxi">Taxi</button>
+      <button data-tab="inventory" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="inv.tab">Inventario</button>
       <button data-tab="parking" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabParking">Cajones</button>
     </nav>
 
@@ -418,6 +425,60 @@
       </div>
 
       <!-- ---------------------------- CAJONES ---------------------------- -->
+      <!--
+        ---------------------------- INVENTARIO ----------------------------
+        Lo que el gerente necesita y la pantalla de almacen no da: cuanto vale lo que
+        hay, que producto se esta vendiendo con poco margen, y el editor de recetas
+        -- que hasta ahora solo existia como ruta de la API, o sea que nadie podia
+        corregir una receta sin que yo escribiera un curl.
+      -->
+      <div id="tab-inventory" class="space-y-4" hidden>
+        <div class="grid grid-cols-3 gap-2">
+          <div class="stat-card"><div class="stat-number" id="inv-value">—</div><div class="stat-label" data-i18n="inv.value">Valor al costo</div></div>
+          <div class="stat-card"><div class="stat-number" id="inv-low">—</div><div class="stat-label" data-i18n="inv.low">Bajo mínimo</div></div>
+          <div class="stat-card"><div class="stat-number" id="inv-norecipe">—</div><div class="stat-label" data-i18n="inv.noRecipe">Sin receta</div></div>
+        </div>
+
+        <div id="inv-unconfirmed" class="card rounded-xl p-3 border border-pink-400/40 text-sm" hidden>
+          <p class="text-pink-200"><span id="inv-unconfirmed-n">0</span> <span data-i18n="inv.unconfirmed">presentaciones sin confirmar: hasta que se confirmen, el conteo de esas botellas no es de fiar.</span></p>
+        </div>
+
+        <nav class="flex gap-2 text-xs">
+          <button class="chip tap px-3 on" data-inv="stock" data-i18n="inv.subStock">Existencias</button>
+          <button class="chip tap px-3" data-inv="recipes" data-i18n="inv.subRecipes">Recetas y margen</button>
+          <button class="chip tap px-3" data-inv="kardex" data-i18n="inv.subKardex">Movimientos</button>
+        </nav>
+
+        <input id="inv-search" type="search" class="field" placeholder="Buscar" data-i18n-placeholder="inv.search">
+
+        <p id="inv-empty" class="text-center text-white/40 text-sm py-10" hidden></p>
+        <div id="inv-list" class="space-y-2"></div>
+      </div>
+
+      <!-- Editor de una receta. Se abre desde la lista de recetas. -->
+      <div id="recipe-sheet" class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur flex flex-col" hidden>
+        <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
+          <div class="min-w-0">
+            <p id="recipe-title" class="font-display text-lg truncate">—</p>
+            <p id="recipe-note" class="text-xs text-white/50 truncate">—</p>
+          </div>
+          <button id="btn-recipe-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="inv.close">Cerrar</button>
+        </header>
+
+        <div id="recipe-lines" class="flex-1 overflow-y-auto px-4 py-3 space-y-2"></div>
+
+        <div class="px-4 py-3 border-t border-white/10 space-y-3 bg-black/40">
+          <div class="flex gap-2">
+            <select id="recipe-supply" class="field"></select>
+            <input id="recipe-qty" type="number" min="0" step="0.001" class="field w-28" inputmode="decimal">
+            <button id="btn-recipe-add" class="ev2-button rounded-lg px-4 font-display">+</button>
+          </div>
+          <p id="recipe-cost" class="text-sm text-white/70"></p>
+          <button id="btn-recipe-save" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="inv.save">Guardar receta</button>
+          <p id="recipe-error" class="text-sm text-red-300" hidden></p>
+        </div>
+      </div>
+
       <div id="tab-parking" class="space-y-4" hidden>
         <div class="grid grid-cols-3 gap-2">
           <div class="stat-card"><div class="stat-number" id="p-total">—</div><div class="stat-label" data-i18n="manager.parkingTotal">Cajones</div></div>
@@ -455,6 +516,7 @@
 <script src="js/format.js"></script>
 <script src="js/roles.js"></script>
 <script src="js/password-gate.js"></script>
+<script src="js/warehouse.js"></script>
 <script src="js/manager.js"></script>
 <script src="js/staff-admin.js"></script>
 <script src="js/payouts.js"></script>

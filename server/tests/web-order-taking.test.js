@@ -290,3 +290,70 @@ describe('Lo que hay que entregar', () => {
     expect(Take.readyToDeliver(mixed, { waiterId: 'yo' })).toHaveLength(1);
   });
 });
+
+/**
+ * La venta en la barra.
+ *
+ * El cliente que llega, pide y paga ahí mismo. Antes de esto no existía en el sistema:
+ * el cantinero servía el trago y el inventario nunca se enteraba.
+ */
+describe('Venta en la barra', () => {
+  const cart = [{ drink: { id: 'd1', price: '150.00' }, quantity: 1 }];
+
+  it('sin barra no se cobra: de algún estante tienen que salir los mililitros', () => {
+    expect(Take.barSaleBlocker({ cart })).toBe('no_bar');
+  });
+
+  it('con la barra y algo en el carrito, se puede cobrar', () => {
+    expect(Take.barSaleBlocker({ barId: 'b1', cart })).toBeNull();
+  });
+
+  it('un carrito vacío no se cobra', () => {
+    expect(Take.barSaleBlocker({ barId: 'b1', cart: [] })).toBe('empty_cart');
+  });
+
+  it('NO pide mesa: una venta en barra se entrega en la barra', () => {
+    const body = Take.orderPayload({ cart, requestId: 'r1', barLocationId: 'b1' });
+    expect(body.bar_location_id).toBe('b1');
+    expect(body.table_id).toBeUndefined();
+    expect(body.delivery_point_id).toBeUndefined();
+  });
+});
+
+describe('Lo que la barra puede servir ahora', () => {
+  const carta = [
+    { name: 'Con existencia', stock: 5, category: 'Drinks' },
+    { name: 'Agotado', stock: 0, category: 'Drinks' },
+    { name: 'Sin receta', stock: null, category: 'Botellas' },
+    { name: 'Apagado por la barra', stock: 9, available: false, category: 'Drinks' },
+  ];
+
+  it('esconde lo que está en cero: ofrecerlo es prometer un trago que no hay', () => {
+    // Ordenado por categoría: Botellas antes que Drinks, como se lee una carta.
+    expect(Take.sellableDrinks(carta).map((d) => d.name))
+      .toEqual(['Sin receta', 'Con existencia']);
+  });
+
+  it('lo que no lleva receta se vende libre: no se sabe cuánto hay y se dice', () => {
+    expect(Take.sellableDrinks(carta).some((d) => d.name === 'Sin receta')).toBe(true);
+  });
+
+  it('lo que el cantinero apagó no aparece, aunque haya existencia', () => {
+    expect(Take.sellableDrinks(carta).some((d) => d.name === 'Apagado por la barra')).toBe(false);
+  });
+
+  it('busca por nombre sin distinguir mayúsculas', () => {
+    expect(Take.sellableDrinks(carta, { search: 'EXISTEN' }).map((d) => d.name))
+      .toEqual(['Con existencia']);
+  });
+
+  it('ordena por categoría y luego por nombre, como se lee una carta', () => {
+    const mezclado = [
+      { name: 'Zombie', stock: 1, category: 'Drinks' },
+      { name: 'Absolut', stock: 1, category: 'Botellas' },
+      { name: 'Azulito', stock: 1, category: 'Drinks' },
+    ];
+    expect(Take.sellableDrinks(mezclado).map((d) => d.name))
+      .toEqual(['Absolut', 'Azulito', 'Zombie']);
+  });
+});

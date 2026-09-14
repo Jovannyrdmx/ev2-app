@@ -5,7 +5,7 @@
  * abrir esto). Las decisiones —qué carril, qué botón, qué hace un evento— viven en
  * `bar-queue.js` y están probadas ahí.
  */
-/* global EV2, EV2Format, EV2Bar, EV2Roles, EV2PasswordGate */
+/* global EV2, EV2Format, EV2Bar, EV2Client, EV2OrderTaking, EV2Roles, EV2PasswordGate */
 (function () {
   'use strict';
 
@@ -31,6 +31,8 @@
     // La barra en la que esta parado el cantinero. Se recuerda en el aparato, porque
     // el telefono de la barra de arriba es siempre el de la barra de arriba.
     bars: [], barId: null,
+    // La venta en la barra: la carta de ESA barra y el carrito de quien esta enfrente.
+    drinks: [], sale: { open: false, cart: null, search: '', sending: false },
   };
   const BAR_KEY = 'ev2.bar.location';
 
@@ -95,10 +97,11 @@
     $('btn-lang').textContent = EV2Format.otherLanguage().toUpperCase();
     renderAll();
     if (!$('screen-wrong-role').hidden) renderWrongRole();
+    if (state.sale && state.sale.open) { renderSaleMethods(); renderSale(); }
     setConnection(lastConnection.on, lastConnection.key, lastConnection.vars);
   }
 
-  const PASSWORD_GATE_HIDES = ['screen-auth', 'screen-wrong-role', 'screen-bar'];
+  const PASSWORD_GATE_HIDES = ['screen-auth', 'screen-wrong-role', 'screen-bar', 'sale-sheet'];
 
   // ---------------------------------------------------------------- contraseña temporal
 
@@ -211,6 +214,8 @@
       if (barId) localStorage.setItem(BAR_KEY, barId);
       else localStorage.removeItem(BAR_KEY);
     } catch { /* navegacion privada: la eleccion vive solo en memoria */ }
+    // La carta traia las existencias de la OTRA barra: se vuelve a pedir.
+    state.drinks = [];
     loadQueue();
   }
 
@@ -475,6 +480,172 @@
 
     rt.connect();
   }
+
+  // ---------------------------------------------------------------- venta en la barra
+  //
+  // El cliente que llega a la barra, pide y paga ahi mismo. Hasta ahora no existia en el
+  // sistema: el cantinero servia el trago y el inventario nunca se enteraba. Son dos
+  // pasos y en ESE orden -- primero existe el pedido con su cobro, despues se cobra --
+  // porque al reves un fallo de red dejaria dinero recibido sin nada que lo respalde.
+
+  const sale = () => state.sale;
+
+  async function loadDrinks() {
+    // La carta de ESTA barra: `stock` es cuantos alcanzan en este estante, no en el club.
+    const bar = state.barId ? `?bar_id=${state.barId}` : '';
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/drinks${bar}`);
+      state.drinks = data.drinks || [];
+    } catch (err) { showError(err); }
+  }
+
+  function openSale() {
+    if (!state.barId && state.bars.length > 1) { toast(t('sale.pickBar'), 'error'); return; }
+    const barId = state.barId || (state.bars[0] && state.bars[0].id) || null;
+    state.barId = barId;
+    state.sale = { open: true, cart: EV2Client.createCart(), search: '', sending: false };
+    $('sale-search').value = '';
+    $('sale-reference').value = '';
+    $('sale-error').hidden = true;
+    $('sale-bar').textContent = (state.bars.find((b) => b.id === barId) || {}).name || '';
+    renderSaleMethods();
+    renderSale();
+    $('sale-sheet').hidden = false;
+    loadDrinks().then(renderSale);
+  }
+
+  function closeSale() {
+    state.sale = { open: false, cart: null, search: '', sending: false };
+    $('sale-sheet').hidden = true;
+  }
+
+  function renderSaleMethods() {
+    $('sale-method').innerHTML = EV2OrderTaking.methodKeys()
+      .map((k) => `<option value="${escape(k)}">${escape(t(`take.method.${k}`))}</option>`).join('');
+    onSaleMethodChange();
+  }
+
+  function onSaleMethodChange() {
+    const method = EV2OrderTaking.methodFor($('sale-method').value);
+    // El folio solo lo pide la terminal: sin el, un cobro con tarjeta es la palabra del
+    // cantinero contra el estado de cuenta del banco.
+    $('sale-reference').hidden = !(method && method.requiresReference);
+    renderSale();
+  }
+
+  function renderSale() {
+    if (!sale().open) return;
+    const cart = sale().cart;
+    const lista = EV2OrderTaking.sellableDrinks(state.drinks, { search: sale().search });
+
+    $('sale-menu').innerHTML = lista.length === 0
+      ? `<p class="text-center text-white/40 text-sm py-10">${escape(t('sale.empty'))}</p>`
+      : lista.map((drink) => `
+        <div class="card rounded-xl p-3 flex items-center gap-3" data-drink="${escape(drink.id)}">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm truncate">${escape(drink.name)}</p>
+            <p class="text-xs text-white/50">
+              ${escape(EV2Format.money(drink.price, drink.currency))}
+              ${drink.stock === null || drink.stock === undefined ? ''
+                : `<span class="text-white/35">· ${escape(t('sale.left', { n: drink.stock }))}</span>`}
+            </p>
+          </div>
+          <div class="flex items-center gap-2 flex-none">
+            <button class="card rounded-lg w-9 h-9 text-lg" data-minus="1" aria-label="-">−</button>
+            <span class="w-5 text-center text-sm">${cart.quantityOf(drink.id)}</span>
+            <button class="ev2-button rounded-lg w-9 h-9 text-lg font-display" data-plus="1" aria-label="+">+</button>
+          </div>
+        </div>`).join('');
+
+    for (const el of $('sale-menu').querySelectorAll('[data-drink]')) {
+      const drink = state.drinks.find((d) => d.id === el.dataset.drink);
+      el.querySelector('[data-plus]').onclick = () => {
+        // `add` respeta la existencia del estante: no deja pedir lo que no hay.
+        if (!cart.add(drink)) toast(t('sale.noMore'), 'error');
+        renderSale();
+      };
+      el.querySelector('[data-minus]').onclick = () => { cart.remove(drink.id); renderSale(); };
+    }
+
+    $('sale-cart').innerHTML = cart.lines.map((l) => `
+      <div class="flex justify-between text-xs">
+        <span class="truncate">${l.quantity}× ${escape(l.drink.name)}</span>
+        <span class="text-white/60">${escape(EV2Format.money(l.subtotal, cart.currency))}</span>
+      </div>`).join('');
+    $('sale-total').textContent = EV2Format.money(cart.total, cart.currency);
+
+    const method = $('sale-method').value;
+    const reference = $('sale-reference').value;
+    const blocker = EV2OrderTaking.barSaleBlocker({ barId: state.barId, cart: cart.lines })
+      || (EV2OrderTaking.methodFor(method) && EV2OrderTaking.methodFor(method).requiresReference
+        && !String(reference).trim() ? 'no_reference' : null);
+    $('btn-sale-charge').disabled = sale().sending || blocker !== null;
+  }
+
+  function saleError(key, vars) {
+    const el = $('sale-error');
+    if (!key) { el.hidden = true; return; }
+    el.textContent = vars ? t(key, vars) : t(key);
+    el.hidden = false;
+  }
+
+  /**
+   * Cobrar y mandar a preparar.
+   *
+   * La clave de idempotencia se genera UNA vez y se reusa en el reintento: regenerarla
+   * en el catch es como se cobra dos veces la misma ronda.
+   */
+  async function chargeSale() {
+    const current = sale();
+    if (!current.open || current.sending) return;
+    const cart = current.cart;
+    const method = $('sale-method').value;
+    const reference = $('sale-reference').value;
+
+    const blocker = EV2OrderTaking.barSaleBlocker({ barId: state.barId, cart: cart.lines });
+    if (blocker) { saleError(`sale.blocked.${blocker}`); return; }
+
+    current.sending = true;
+    saleError(null);
+    renderSale();
+    try {
+      const body = EV2OrderTaking.orderPayload({
+        cart: cart.lines,
+        barLocationId: state.barId,
+        // `requestKey` guarda la clave en el carrito: el reintento manda la MISMA.
+        requestId: cart.requestKey(EV2.uuid),
+      });
+      const { order } = await api.post(`/nightclubs/${clubId()}/orders`, body);
+
+      // Un producto de precio cero no genera cobro: ya esta listo para preparar.
+      if (order.transaction_id) {
+        const chargeBlocker = EV2OrderTaking.chargeBlocker({ order, method, reference });
+        if (chargeBlocker) { saleError(`take.blocked.${chargeBlocker}`); return; }
+        await api.post(`/nightclubs/${clubId()}/manual-payments/register`,
+          EV2OrderTaking.chargePayload({ order, method, reference }));
+      }
+
+      toast(t('sale.done', { total: EV2Format.money(order.subtotal, order.currency) }), 'ok');
+      closeSale();
+      await loadQueue();
+    } catch (err) {
+      // El pedido pudo quedar creado y el cobro no: recargar la cola dice la verdad, y
+      // el pedido aparece ahi con su aviso de "sin pagar" para cobrarlo desde la tarjeta.
+      showError(err, $('sale-error'));
+      await loadQueue();
+    } finally {
+      const still = sale();
+      if (still) still.sending = false;
+      if (!$('sale-sheet').hidden) renderSale();
+    }
+  }
+
+  $('btn-new-sale').onclick = openSale;
+  $('btn-sale-close').onclick = closeSale;
+  $('btn-sale-charge').onclick = chargeSale;
+  $('sale-method').onchange = onSaleMethodChange;
+  $('sale-reference').oninput = renderSale;
+  $('sale-search').oninput = (ev) => { state.sale.search = ev.target.value; renderSale(); };
 
   // ---------------------------------------------------------------- arranque
 

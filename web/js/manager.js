@@ -435,8 +435,85 @@
    */
   const affectsModeration = (message) => (message && (message.event_type || message.type)) === 'user_reported';
 
+
+  // ---------------------------------------------------------------- recetas y costos
+
+  /**
+   * El margen de un producto: lo que queda despues de pagar lo que lleva dentro.
+   *
+   * Es el numero que el dueno mira para decidir precios, y el que nadie podia ver:
+   * el costo del trago vivia en la cabeza de quien arma la receta. Se calcula en
+   * centavos enteros porque un margen con dos decimales mal redondeados, multiplicado
+   * por mil tragos en una noche, es una decision tomada sobre un numero falso.
+   *
+   * `cost` es cero cuando todavia no se ha recibido mercancia (no hay costo promedio):
+   * en ese caso el margen no se inventa, se reporta `null`.
+   */
+  function recipeMargin(recipe) {
+    const price = Math.round(Number((recipe && recipe.price) || 0) * 100);
+    const cost = Math.round(Number((recipe && recipe.cost) || 0) * 100);
+    if (!(price > 0)) return { price: 0, cost: cost / 100, profit: null, pct: null };
+    if (!(cost > 0)) return { price: price / 100, cost: 0, profit: null, pct: null };
+    const profit = price - cost;
+    return {
+      price: price / 100,
+      cost: cost / 100,
+      profit: profit / 100,
+      pct: Math.round((profit / price) * 1000) / 10,
+    };
+  }
+
+  /**
+   * Las recetas ordenadas como las necesita el gerente: primero lo que NO tiene receta
+   * (no tiene control de existencia), y despues lo de menor margen, que es donde se
+   * esta perdiendo dinero sin que nadie lo vea.
+   */
+  function sortRecipes(recipes, { search = '' } = {}) {
+    const needle = String(search || '').trim().toLowerCase();
+    return (recipes || [])
+      .filter((r) => !needle || String(r.name || '').toLowerCase().includes(needle))
+      .map((r) => Object.assign({}, r, { margin: recipeMargin(r) }))
+      .sort((a, b) => {
+        const sinA = (a.items || []).length === 0 ? 0 : 1;
+        const sinB = (b.items || []).length === 0 ? 0 : 1;
+        if (sinA !== sinB) return sinA - sinB;
+        const pa = a.margin.pct === null ? Infinity : a.margin.pct;
+        const pb = b.margin.pct === null ? Infinity : b.margin.pct;
+        if (pa !== pb) return pa - pb;
+        return String(a.name).localeCompare(String(b.name), 'es');
+      });
+  }
+
+  /**
+   * Que falta para poder guardar una receta. Devuelve la razon, no un booleano.
+   *
+   * Una receta VACIA es valida a proposito: es como se apaga el control de existencia
+   * de un producto que el club vende sin descontar nada (un cover, una cortesia).
+   */
+  function validateRecipe(lines) {
+    const items = (lines || []).filter((l) => l && l.supply_id);
+    const ids = items.map((l) => l.supply_id);
+    if (new Set(ids).size !== ids.length) return 'duplicate_supply';
+    if (items.some((l) => !(Number(l.quantity) > 0))) return 'bad_quantity';
+    if (items.length > 20) return 'too_many';
+    return null;
+  }
+
+  /** El cuerpo que espera la API: solo insumo y cantidad, nada de nombres. */
+  function recipePayload(lines) {
+    return {
+      items: (lines || [])
+        .filter((l) => l && l.supply_id && Number(l.quantity) > 0)
+        .map((l) => ({ supply_id: l.supply_id, quantity: Number(l.quantity) })),
+    };
+  }
+
   return {
     revenueFor,
+    recipeMargin,
+    sortRecipes,
+    validateRecipe,
+    recipePayload,
     currenciesIn,
     summary,
     pct,

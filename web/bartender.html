@@ -151,6 +151,17 @@
     <!-- Cual barra. Solo aparece cuando el club tiene mas de una. -->
     <div id="bar-chips" class="px-4 pt-3 flex gap-2 overflow-x-auto" hidden></div>
 
+    <!--
+      La venta en la barra: el cliente que llega, pide y paga ahi mismo. Es el boton mas
+      grande de la pantalla despues de la cola, porque es lo segundo que mas se toca en
+      una noche.
+    -->
+    <div class="px-4 pt-3">
+      <button id="btn-new-sale" class="ev2-button w-full py-3 rounded-xl font-display">
+        <i class="fa-solid fa-cash-register mr-2"></i><span data-i18n="sale.new">Venta en la barra</span>
+      </button>
+    </div>
+
     <div class="grid grid-cols-2 gap-2 px-4 pt-3">
       <div class="stat-card">
         <div class="stat-number" id="stat-open">—</div>
@@ -180,6 +191,40 @@
     </main>
   </section>
 
+  <!-- ====================== VENTA EN LA BARRA ====================== -->
+  <div id="sale-sheet" class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur flex flex-col" hidden>
+    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
+      <div class="min-w-0">
+        <p class="font-display text-lg" data-i18n="sale.title">Venta en la barra</p>
+        <p id="sale-bar" class="text-xs text-white/50 truncate">—</p>
+      </div>
+      <button id="btn-sale-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="sale.close">Cerrar</button>
+    </header>
+
+    <div class="px-4 pt-3">
+      <input id="sale-search" type="search" class="field" placeholder="Buscar en la carta"
+             data-i18n-placeholder="sale.search">
+    </div>
+
+    <div id="sale-menu" class="flex-1 overflow-y-auto px-4 py-3 space-y-2"></div>
+
+    <div class="px-4 py-3 border-t border-white/10 space-y-3 bg-black/40">
+      <div id="sale-cart" class="space-y-1 max-h-32 overflow-y-auto"></div>
+      <div class="flex items-center justify-between">
+        <span class="text-sm text-white/60" data-i18n="sale.total">Total</span>
+        <span id="sale-total" class="font-display text-2xl">—</span>
+      </div>
+
+      <select id="sale-method" class="field"></select>
+      <input id="sale-reference" class="field uppercase" placeholder="Folio del voucher"
+             data-i18n-placeholder="sale.reference" maxlength="40" hidden>
+
+      <button id="btn-sale-charge" class="ev2-button w-full py-4 rounded-xl font-display"
+              data-i18n="sale.charge" disabled>Cobrar y preparar</button>
+      <p id="sale-error" class="text-sm text-red-300" hidden></p>
+    </div>
+  </div>
+
   <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50" hidden></div>
 </div>
 
@@ -187,6 +232,8 @@
 <script src="js/format.js"></script>
 <script src="js/roles.js"></script>
 <script src="js/password-gate.js"></script>
+<script src="js/client.js"></script>
+<script src="js/order-taking.js"></script>
 <script src="js/bar-queue.js"></script>
 <script src="js/bartender-screen.js"></script>
 <script src="js/pwa.js"></script>

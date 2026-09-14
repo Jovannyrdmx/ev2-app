@@ -200,6 +200,39 @@
   }
 
   /**
+   * La venta en la barra: el cliente que llega, pide y paga ahí mismo.
+   *
+   * Es la mitad de la clientela de una barra y hasta ahora no existía en el sistema:
+   * el cantinero la servía y el trago salía del inventario sin que nadie lo registrara,
+   * o no salía en absoluto. `null` significa que se puede cobrar.
+   *
+   * No pide mesa a propósito: una venta en barra se entrega en la barra. Lo que sí pide
+   * es LA BARRA, porque de ese estante van a salir los mililitros.
+   */
+  function barSaleBlocker({ barId, cart }) {
+    if (!barId) return 'no_bar';
+    if (!cart || cart.length === 0) return 'empty_cart';
+    return null;
+  }
+
+  /**
+   * Lo que la barra puede servir AHORA: disponible y con existencia en ese estante.
+   *
+   * Un producto sin receta (`stock: null`) se vende libre: el sistema no sabe cuánto
+   * hay y decirlo es mejor que inventarlo. Lo que se esconde es lo que está en cero de
+   * verdad, porque ofrecerlo es prometer un trago que no se puede servir.
+   */
+  function sellableDrinks(drinks, { search = '' } = {}) {
+    const needle = String(search || '').trim().toLowerCase();
+    return (drinks || [])
+      .filter((d) => d && d.available !== false)
+      .filter((d) => d.stock === null || d.stock === undefined || Number(d.stock) > 0)
+      .filter((d) => !needle || String(d.name || '').toLowerCase().includes(needle))
+      .sort((a, b) => String(a.category || '').localeCompare(String(b.category || ''), 'es')
+        || String(a.name).localeCompare(String(b.name), 'es'));
+  }
+
+  /**
    * Los pedidos que el mesero tiene que ir a cobrar: los que alguien pidió desde su
    * teléfono y siguen esperando dinero. No incluye los que él mismo acaba de levantar y
    * cobrar, porque esos ya están.
@@ -223,6 +256,8 @@
     chargePayload,
     chargeBlocker,
     orderBlocker,
+    barSaleBlocker,
+    sellableDrinks,
     totalCents,
     fromCents,
     priceDrift,

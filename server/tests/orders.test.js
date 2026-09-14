@@ -446,3 +446,100 @@ describe('El mesero levanta el pedido', () => {
     expect(res.body.order.taken_by).toBeNull();
   });
 });
+
+/**
+ * La venta en la barra.
+ *
+ * El cliente que llega a la barra, pide y paga ahí mismo: la mitad de la clientela de
+ * una barra. Hasta ahora el sistema no la contemplaba — el pedido exigía una mesa — así
+ * que el cantinero servía el trago y el inventario nunca se enteraba.
+ */
+describe('Venta directa en la barra', () => {
+  let barra;
+  beforeEach(async () => {
+    barra = await f.barOf(club.id, 'barra-baja');
+  });
+
+  const venta = (over = {}) => api().post(url('/orders')).set(auth(bartender)).send({
+    client_request_id: randomUUID(),
+    bar_location_id: barra,
+    items: [{ drink_id: beer.id, quantity: 2 }],
+    ...over,
+  });
+
+  it('se crea sin mesa y con la barra de la que sale', async () => {
+    const res = await venta();
+    expect(res.status).toBe(201);
+    expect(res.body.order.table_id).toBeNull();
+    expect(res.body.order.bar_location_id).toBe(barra);
+    expect(res.body.order.bar_name).toBe('Barra planta baja');
+  });
+
+  it('nace debiendo dinero, igual que cualquier otro pedido', async () => {
+    const res = await venta();
+    expect(res.body.order.payment_status).toBe('pending');
+    expect(res.body.order.subtotal).toBe('120.00');
+  });
+
+  it('queda a nombre del cantinero: es quien recibió el dinero', async () => {
+    const res = await venta();
+    expect(res.body.order.taken_by).toBe(bartender.id);
+    expect(res.body.order.sender_id).toBe(bartender.id);
+  });
+
+  it('el cantinero la cobra en efectivo y queda confirmada de un paso', async () => {
+    const res = await venta();
+    const pago = await payFor(res.body.order.id, bartender);
+    expect(pago.status).toBe(201);
+
+    const after = await api().get(url(`/orders/${res.body.order.id}`)).set(auth(bartender));
+    expect(after.body.order.payment_status).toBe('paid');
+    expect(after.body.order.status).toBe('confirmed');
+  });
+
+  it('descuenta del estante de ESA barra', async () => {
+    const antes = await f.supplyStock(beer.supply_id, barra);
+    await venta();
+    expect(await f.supplyStock(beer.supply_id, barra)).toBe(antes - 2);
+  });
+
+  it('no se lleva lo que no hay en esa barra', async () => {
+    const arriba = await f.barOf(club.id, 'barra-alta');
+    const res = await venta({ bar_location_id: arriba });
+    expect(res.status).toBe(409);
+    expect(res.body.error.details.supplies[0].available).toBe(0);
+  });
+
+  it('aparece en la cola de su barra y no en la otra', async () => {
+    const res = await venta();
+    await payFor(res.body.order.id, bartender);
+    const arriba = await f.barOf(club.id, 'barra-alta');
+
+    const suya = await api().get(url(`/orders?bar_id=${barra}&active=true`)).set(auth(bartender));
+    const otra = await api().get(url(`/orders?bar_id=${arriba}&active=true`)).set(auth(bartender));
+    expect(suya.body.orders.map((o) => o.id)).toContain(res.body.order.id);
+    expect(otra.body.orders.map((o) => o.id)).not.toContain(res.body.order.id);
+  });
+
+  it('es idempotente: el doble toque no cobra dos rondas', async () => {
+    const key = randomUUID();
+    const uno = await venta({ client_request_id: key });
+    const dos = await venta({ client_request_id: key });
+    expect(uno.body.order.id).toBe(dos.body.order.id);
+    expect(dos.headers['idempotent-replay']).toBe('true');
+  });
+
+  it('un cliente NO puede elegir de qué barra sale su pedido', async () => {
+    // Elegiría la barra que tenga existencia, no la que le toca a su mesa.
+    const arriba = await f.barOf(club.id, 'barra-alta');
+    const res = await api().post(url('/orders')).set(auth(guest)).send({
+      client_request_id: randomUUID(),
+      table_id: table.id,
+      bar_location_id: arriba,
+      items: [{ drink_id: beer.id, quantity: 1 }],
+    });
+    expect(res.status).toBe(201);
+    // Se ignora lo que mandó: sale de la barra que atiende su mesa.
+    expect(res.body.order.bar_location_id).toBe(barra);
+  });
+});
