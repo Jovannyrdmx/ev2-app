@@ -60,7 +60,12 @@ const round3 = (n) => Math.round(Number(n) * 1000) / 1000;
  */
 async function move(client, { nightclubId, supplyId, locationId, kind, quantity, unitCost = null,
   referenceType = null, referenceId = null, reason = null, userId = null, authorizedBy = null,
-  counterpartLocationId = null, transferGroup = null }) {
+  counterpartLocationId = null, transferGroup = null,
+  // Migracion 022. Van en el INSERT y no en un UPDATE posterior porque
+  // `supply_movements` es solo-insercion por diseno: un renglon del kardex se
+  // escribe una vez y ya. Sellarlos despues fallaria contra el disparador, y con
+  // razon -- si el folio se pudiera pegar despues, tambien se podria cambiar.
+  supplierId = null, receiptGroup = null, requestId = null }) {
   if (!MOVEMENT_KINDS.includes(kind)) throw new Error(`Unknown movement kind: ${kind}`);
   const delta = round3(quantity);
   if (delta === 0) return null;
@@ -82,11 +87,13 @@ async function move(client, { nightclubId, supplyId, locationId, kind, quantity,
   const { rows: mov } = await client.query(
     `INSERT INTO supply_movements (nightclub_id, supply_id, location_id, counterpart_location_id,
                                    transfer_group, kind, quantity, balance_after, unit_cost,
-                                   reference_type, reference_id, reason, created_by, authorized_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+                                   reference_type, reference_id, reason, created_by, authorized_by,
+                                   supplier_id, receipt_group, request_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      RETURNING id, balance_after::float8 AS balance_after, created_at`,
     [nightclubId, supplyId, locationId, counterpartLocationId, transferGroup, kind, delta,
-      round3(rows[0].stock), unitCost, referenceType, referenceId, reason, userId, authorizedBy],
+      round3(rows[0].stock), unitCost, referenceType, referenceId, reason, userId, authorizedBy,
+      supplierId, receiptGroup, requestId],
   );
   return mov[0];
 }
@@ -272,7 +279,8 @@ async function restore(client, { nightclubId, orderId, userId, reason = null }) 
  * del estante en el que este parado.
  */
 async function receive(client, { nightclubId, supplyId, locationId, quantity, unitCost,
-  referenceType = null, referenceId = null, reason = null, userId = null, authorizedBy = null }) {
+  referenceType = null, referenceId = null, reason = null, userId = null, authorizedBy = null,
+  supplierId = null, receiptGroup = null }) {
   const qty = round3(quantity);
   if (!(qty > 0)) throw ApiError.unprocessable('La cantidad recibida tiene que ser mayor que cero');
 
@@ -298,7 +306,7 @@ async function receive(client, { nightclubId, supplyId, locationId, quantity, un
 
   return move(client, {
     nightclubId, supplyId, locationId, kind: 'receipt', quantity: qty, unitCost: cost,
-    referenceType, referenceId, reason, userId, authorizedBy,
+    referenceType, referenceId, reason, userId, authorizedBy, supplierId, receiptGroup,
   });
 }
 
@@ -311,7 +319,7 @@ async function receive(client, { nightclubId, supplyId, locationId, quantity, un
  * un traspaso que deja el almacen en negativo es un traspaso que no ocurrio.
  */
 async function transfer(client, { nightclubId, supplyId, fromLocationId, toLocationId,
-  quantity, reason = null, userId = null, authorizedBy = null }) {
+  quantity, reason = null, userId = null, authorizedBy = null, requestId = null }) {
   const qty = round3(quantity);
   if (!(qty > 0)) throw ApiError.unprocessable('La cantidad del traspaso tiene que ser mayor que cero');
   if (fromLocationId === toLocationId) {
@@ -347,10 +355,12 @@ async function transfer(client, { nightclubId, supplyId, fromLocationId, toLocat
   const out = await move(client, {
     nightclubId, supplyId, locationId: fromLocationId, kind: 'transfer_out', quantity: -qty,
     counterpartLocationId: toLocationId, transferGroup: group, reason, userId, authorizedBy,
+    requestId,
   });
   const into = await move(client, {
     nightclubId, supplyId, locationId: toLocationId, kind: 'transfer_in', quantity: qty,
     counterpartLocationId: fromLocationId, transferGroup: group, reason, userId, authorizedBy,
+    requestId,
   });
   return { transfer_group: group, out, in: into };
 }

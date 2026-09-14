@@ -6616,6 +6616,681 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  # ==========================================================================
+  # Proveedores, entrada en lote, y pedidos de barra (migración 022)
+  #
+  # La ruta de un solo insumo (`/supplies/{id}/receive`) se queda: sirve para la
+  # botella suelta y para corregir. La de lote existe porque el camión llega con
+  # quince renglones, y su diferencia no es la comodidad: es que las quince entran
+  # en UNA transacción. Con la de a una, la novena puede fallar y quedan ocho
+  # adentro y siete afuera, y nadie sabe cuáles ocho hasta contar el estante.
+  #
+  # Y los pedidos invierten quién manda: la barra PIDE, el almacén SURTE. Quien sabe
+  # qué falta es el cantinero mirando su estante a las once de la noche, no el
+  # almacenista a las seis de la tarde.
+  # ==========================================================================
+
+  /api/nightclubs/{nightclubId}/suppliers:
+    get:
+      operationId: getNightclubsByNightclubIdSuppliers
+      tags: [Inventario]
+      summary: Proveedores del club
+      description: |
+        Almacén y gerencia. Por omisión solo los activos: la lista sirve para capturar
+        una entrada, y un proveedor apagado no debería poder elegirse por descuido.
+
+        `purchases_total` suma solo movimientos de entrada **con costo**. Los renglones
+        capturados sin costo no se pueden sumar en pesos, y sumarlos como cero daría un
+        total que parece exacto y está mal.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: include_inactive, in: query, schema: { type: string, enum: ['true', 'false'] } }
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Lista de proveedores
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  suppliers:
+                    type: array
+                    items: { $ref: '#/components/schemas/Supplier' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: postNightclubsByNightclubIdSuppliers
+      tags: [Inventario]
+      summary: Dar de alta un proveedor
+      description: |
+        **Solo gerencia.** Un proveedor nuevo es una decisión de compras: quien recibe
+        mercancía no debería poder inventarse el origen de una caja para justificarla.
+
+        El único por nombre ignora mayúsculas y espacios. Sin eso, en tres meses hay
+        "Corona", "corona sa" y "CORONA S.A." como tres proveedores distintos y la
+        pregunta "cuánto le compro a Corona" deja de tener respuesta.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 120, example: Distribuidora Corona }
+                contact_name: { type: string, maxLength: 120 }
+                phone: { type: string, maxLength: 30 }
+                email: { type: string, format: email }
+                notes: { type: string, maxLength: 400 }
+      responses:
+        '201':
+          description: Proveedor creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supplier: { $ref: '#/components/schemas/Supplier' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Ya existe un proveedor con ese nombre en este club
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/suppliers/{supplierId}:
+    get:
+      operationId: getNightclubsByNightclubIdSuppliersBySupplierId
+      tags: [Inventario]
+      summary: Un proveedor y lo que surte
+      description: |
+        `supplies` trae lo que ese proveedor surte con `last_cost`, el costo de la
+        presentación la última vez que se le compró. Es lo que la pantalla de captura
+        usa para precargar los renglones de una entrega — la diferencia entre capturar
+        en dos minutos y buscar quince insumos entre doscientos con el camión esperando.
+
+        `last_cost` es distinto de `avg_cost`: el promedio valúa el inventario, esto
+        avisa que subió el precio.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: supplierId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Proveedor
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supplier: { $ref: '#/components/schemas/Supplier' }
+                  supplies:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        supply_id: { type: string, format: uuid }
+                        name: { type: string }
+                        unit: { type: string, enum: [ml, g, pza] }
+                        package_size: { type: number }
+                        package_label: { type: [string, 'null'] }
+                        avg_cost: { type: number }
+                        last_cost: { type: [number, 'null'] }
+                        last_bought_at: { type: [string, 'null'], format: date-time }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: patchNightclubsByNightclubIdSuppliersBySupplierId
+      tags: [Inventario]
+      summary: Editar o apagar un proveedor
+      description: |
+        Solo gerencia. `active: false` es una **baja lógica**: un proveedor con compras
+        capturadas no se puede borrar sin dejar huérfano el historial, y el historial de
+        compras es justo lo que contesta "¿por qué subió el costo del whisky?".
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: supplierId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 120 }
+                contact_name: { type: string, maxLength: 120 }
+                phone: { type: string, maxLength: 30 }
+                email: { type: string, format: email }
+                notes: { type: string, maxLength: 400 }
+                active: { type: boolean }
+      responses:
+        '200':
+          description: Proveedor actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supplier: { $ref: '#/components/schemas/Supplier' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Ese nombre ya lo tiene otro proveedor
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/supplies/{supplyId}/suppliers:
+    get:
+      operationId: getNightclubsByNightclubIdSuppliesBySupplyIdSuppliers
+      tags: [Inventario]
+      summary: Quién surte este insumo
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/SupplyId' }
+      responses:
+        '200':
+          description: Proveedores del insumo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supply_id: { type: string, format: uuid }
+                  suppliers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        supplier_id: { type: string, format: uuid }
+                        name: { type: string }
+                        active: { type: boolean }
+                        last_cost: { type: [number, 'null'] }
+                        last_bought_at: { type: [string, 'null'], format: date-time }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      operationId: putNightclubsByNightclubIdSuppliesBySupplyIdSuppliers
+      tags: [Inventario]
+      summary: Fijar quién surte este insumo
+      description: |
+        Solo gerencia. Se reemplaza la **lista completa** en vez de agregar y quitar de a
+        uno: es como lo ve el gerente en la pantalla (una lista de casillas) y así no hay
+        dos rutas que puedan dejar el conjunto a medias.
+
+        El `last_cost` de los que ya estaban no se pisa: es historia de compras, y esta
+        ruta edita una relación, no un precio.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/SupplyId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [supplier_ids]
+              properties:
+                supplier_ids:
+                  type: array
+                  maxItems: 20
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Lista actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supply_id: { type: string, format: uuid }
+                  suppliers: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Alguno de esos proveedores no es de este club
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/supply-receipts:
+    post:
+      operationId: postNightclubsByNightclubIdSupplyReceipts
+      tags: [Inventario]
+      summary: Entrada de mercancía en lote
+      description: |
+        Almacén y gerencia. Todas las líneas entran en **una sola transacción**: una
+        línea mala aborta las demás y el error dice qué renglón y por qué, con su número,
+        para que quien captura corrija en vez de volver a empezar.
+
+        Cada línea lleva su cantidad en presentaciones (`packages`) o en la unidad base
+        (`quantity`), nunca en las dos, y su `package_cost` — lo que dice ese renglón de
+        la factura por la presentación completa. **El costo es por línea a propósito**:
+        cada renglón mueve el costo promedio de SU insumo, ponderado por cantidad.
+        Repartir un total daría un promedio que no corresponde a ningún precio real y
+        volvería inútil el margen del trago.
+
+        Un insumo **repetido** en el mismo lote se rechaza: casi nunca es intencional —
+        es el mismo renglón capturado dos veces — y aceptarlo duplicaría la entrada en
+        silencio.
+
+        `supplier_id` es opcional: una entrega de un proveedor que todavía no está en el
+        catálogo no se puede quedar sin capturar por eso.
+
+        `total_is_complete: false` significa que algún renglón entró sin costo, así que
+        el total **no cuadra con el papel**. Se dice, en vez de dar un número que parece
+        exacto.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [location_id, lines]
+              properties:
+                location_id: { type: string, format: uuid }
+                supplier_id: { type: string, format: uuid }
+                reason: { type: string, maxLength: 200 }
+                reference_type: { type: string, maxLength: 30 }
+                lines:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [supply_id]
+                    properties:
+                      supply_id: { type: string, format: uuid }
+                      quantity: { type: number, description: 'En la unidad base. Excluyente con `packages`.' }
+                      packages: { type: number, description: 'En presentaciones. Excluyente con `quantity`.' }
+                      package_cost: { type: number, description: 'Costo de la presentación completa, como en la factura.' }
+                      reason: { type: string, maxLength: 200 }
+      responses:
+        '201':
+          description: Entrada registrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  receipt: { $ref: '#/components/schemas/SupplyReceiptBatch' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: |
+            Hay renglones que no se pueden capturar. `details.lines` los nombra con su
+            número de renglón y un código: `unknown_supply`, `inactive_supply`,
+            `duplicate_supply`, `bad_quantity`, `missing_cost`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    get:
+      operationId: getNightclubsByNightclubIdSupplyReceipts
+      tags: [Inventario]
+      summary: Bitácora de compras
+      description: Una línea por entrega, no una por movimiento.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { name: supplier_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Últimas capturas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  receipts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        receipt_group: { type: string, format: uuid }
+                        created_at: { type: string, format: date-time }
+                        line_count: { type: integer }
+                        location_name: { type: string }
+                        supplier_name: { type: [string, 'null'] }
+                        created_by_name: { type: [string, 'null'] }
+                        total: { type: [number, 'null'] }
+                        total_is_complete: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/supply-receipts/{group}:
+    get:
+      operationId: getNightclubsByNightclubIdSupplyReceiptsByGroup
+      tags: [Inventario]
+      summary: Una entrega completa, por su folio
+      description: Es a lo que se vuelve cuando el proveedor reclama o cuando algo no cuadra.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: group, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: La entrega
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  receipt:
+                    type: object
+                    properties:
+                      receipt_group: { type: string, format: uuid }
+                      location_name: { type: string }
+                      supplier_name: { type: [string, 'null'] }
+                      created_at: { type: string, format: date-time }
+                      created_by_name: { type: [string, 'null'] }
+                      total: { type: number }
+                      total_is_complete: { type: boolean }
+                      lines:
+                        type: array
+                        items: { $ref: '#/components/schemas/SupplyMovement' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/bar-requests/suggested:
+    get:
+      operationId: getNightclubsByNightclubIdBarRequestsSuggested
+      tags: [Inventario]
+      summary: Lo que esta barra debería pedir
+      description: |
+        Los insumos de esa barra **bajo su mínimo**, con lo que hay en el almacén al lado.
+        Es lo que hace que pedir sea de un toque en vez de buscar quince insumos entre
+        doscientos a las once de la noche.
+
+        Solo mira insumos con mínimo capturado: sin mínimo no hay forma de saber qué es
+        "poco". `suggested_packages` va redondeado **hacia arriba** — nadie manda media
+        botella del almacén a la barra — y `warehouse_has_enough: false` avisa de que ese
+        pedido nace muerto: eso no se surte, se compra.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: location_id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Sugerencias
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  location_id: { type: string, format: uuid }
+                  location_name: { type: string }
+                  suggested:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        supply_id: { type: string, format: uuid }
+                        name: { type: string }
+                        unit: { type: string }
+                        package_size: { type: number }
+                        stock: { type: number }
+                        min_stock: { type: number }
+                        missing: { type: number }
+                        suggested_packages: { type: integer }
+                        warehouse_stock: { type: number }
+                        warehouse_has_enough: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: Ese lugar no es una barra
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/bar-requests:
+    get:
+      operationId: getNightclubsByNightclubIdBarRequests
+      tags: [Inventario]
+      summary: Pedidos de las barras
+      description: |
+        Por omisión (`status=pending`) solo lo que falta por surtir: es la bandeja de
+        trabajo del almacén, y enterrarla bajo los pedidos de anoche la vuelve
+        inservible. `status=all` da el historial.
+
+        Cada renglón trae lo **pedido**, lo **surtido** y lo que **falta** — tres números
+        distintos que son lo único que después contesta "pedí doce y me llegaron ocho".
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { name: location_id, in: query, schema: { type: string, format: uuid } }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, partial, fulfilled, cancelled, pending, all]
+            default: pending
+      responses:
+        '200':
+          description: Pedidos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requests:
+                    type: array
+                    items: { $ref: '#/components/schemas/BarRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: postNightclubsByNightclubIdBarRequests
+      tags: [Inventario]
+      summary: La barra pide al almacén
+      description: |
+        Barra, almacén y gerencia. `location_id` tiene que ser una **barra**: el almacén
+        no se pide producto a sí mismo.
+
+        **No** se valida que haya existencia en el almacén al pedir, a propósito: pedir
+        algo que no hay es información valiosa — es lo que hay que comprar.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [location_id, lines]
+              properties:
+                location_id: { type: string, format: uuid }
+                note: { type: string, maxLength: 300 }
+                lines:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [supply_id]
+                    properties:
+                      supply_id: { type: string, format: uuid }
+                      quantity: { type: number }
+                      packages: { type: number }
+      responses:
+        '201':
+          description: Pedido creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request: { $ref: '#/components/schemas/BarRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Ese lugar no es una barra, o hay renglones que no se pueden pedir
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/bar-requests/{requestId}:
+    get:
+      operationId: getNightclubsByNightclubIdBarRequestsByRequestId
+      tags: [Inventario]
+      summary: Un pedido
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: El pedido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request: { $ref: '#/components/schemas/BarRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/bar-requests/{requestId}/fulfill:
+    post:
+      operationId: postNightclubsByNightclubIdBarRequestsByRequestIdFulfill
+      tags: [Inventario]
+      summary: El almacén surte un pedido
+      description: |
+        **Almacén y gerencia, nunca la barra que pidió**: es justo la separación que hace
+        que un faltante tenga dos nombres y no uno.
+
+        Sin `lines`, se surte todo lo que falte. Con `lines`, solo eso — que es lo que
+        pasa cuando el almacenista manda la mitad y deja el resto para luego.
+
+        **Surtir de menos no es un error.** Si el almacén tiene ocho de los doce pedidos,
+        se mandan ocho, el pedido queda `partial` y el faltante viaja en `short`. Negar el
+        pedido entero porque falta un renglón dejaría a la barra sin los once que sí
+        había, y el cantinero acabaría tomándolo del almacén sin que quede registro.
+
+        **Surtir de más sí se niega** (`over_request`): si la barra necesita más, lo pide
+        otra vez, y así cada surtido queda contado por separado.
+
+        Los dos renglones del traspaso quedan ligados al pedido (`request_id`), así que el
+        kardex puede contestar "esto bajó porque la barra lo pidió" en vez de dejar un
+        traspaso sin causa.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_location_id]
+              properties:
+                from_location_id:
+                  type: string
+                  format: uuid
+                  description: |
+                    De dónde sale. Normalmente el almacén, pero se acepta otra barra:
+                    surtir de la barra de abajo a la de arriba a media noche es lo que de
+                    verdad pasa. Lo que no se acepta es la barra que pidió.
+                lines:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [supply_id]
+                    properties:
+                      supply_id: { type: string, format: uuid }
+                      quantity: { type: number }
+                      packages: { type: number }
+      responses:
+        '200':
+          description: Surtido (completo o a medias)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request: { $ref: '#/components/schemas/BarRequest' }
+                  from_location_id: { type: string, format: uuid }
+                  sent:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        supply_id: { type: string, format: uuid }
+                        name: { type: string }
+                        requested: { type: number }
+                        sent: { type: number }
+                        transfer_group: { type: string, format: uuid }
+                  short:
+                    description: Lo que no alcanzó, con lo que había de verdad.
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        supply_id: { type: string, format: uuid }
+                        name: { type: string }
+                        requested: { type: number }
+                        sent: { type: number }
+                        available: { type: number }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El pedido está cancelado o ya se surtió completo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: |
+            Una barra no se surte a sí misma, no queda nada por surtir, o hay renglones
+            que no se pueden surtir (`not_in_request`, `over_request`, `bad_quantity`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/bar-requests/{requestId}/cancel:
+    post:
+      operationId: postNightclubsByNightclubIdBarRequestsByRequestIdCancel
+      tags: [Inventario]
+      summary: Cancelar un pedido
+      description: |
+        Exige motivo: un pedido que desaparece sin explicación es un pedido perdido, y el
+        almacén se queda esperando surtirlo.
+
+        Lo ya surtido antes de cancelar **no se devuelve**: esa mercancía está físicamente
+        en la barra, y devolverla en la base dejaría el saldo del almacén diciendo que
+        tiene botellas que están arriba.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 200 }
+      responses:
+        '200':
+          description: Pedido cancelado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request: { $ref: '#/components/schemas/BarRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Ya estaba cancelado, o ya se surtió
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /api/nightclubs/{nightclubId}/supplies/{supplyId}/receive:
     post:
       operationId: postNightclubsByNightclubIdSuppliesBySupplyIdReceive
@@ -9455,6 +10130,108 @@ components:
         authorized_by: { type: [string, 'null'], format: uuid }
         authorized_by_name: { type: [string, 'null'] }
         created_at: { type: string, format: date-time }
+        # Migración 022: el contexto del movimiento. Sin esto, el kardex dice que algo
+        # bajó del almacén pero no por qué, y una entrada no dice de quién vino.
+        supplier_id: { type: [string, 'null'], format: uuid }
+        supplier_name: { type: [string, 'null'] }
+        receipt_group:
+          type: [string, 'null']
+          format: uuid
+          description: Une los renglones capturados juntos. Hermano de `transfer_group`.
+        request_id:
+          type: [string, 'null']
+          format: uuid
+          description: El pedido de barra que originó este traspaso, cuando lo hubo.
+
+    Supplier:
+      type: object
+      description: |
+        A quién le compra el club. Baja lógica (`active: false`), nunca borrado: un
+        proveedor con compras capturadas no se puede borrar sin dejar huérfano el
+        historial de compras.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        contact_name: { type: [string, 'null'] }
+        phone: { type: [string, 'null'] }
+        email: { type: [string, 'null'] }
+        notes: { type: [string, 'null'] }
+        active: { type: boolean }
+        supply_count: { type: integer, description: 'Cuántos insumos surte.' }
+        last_bought_at: { type: [string, 'null'], format: date-time }
+        purchases_total:
+          type: number
+          description: |
+            Suma de las entradas CON costo. Los renglones sin costo no se pueden sumar en
+            pesos, y contarlos como cero daría un total que parece exacto y está mal.
+        last_receipt_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    SupplyReceiptBatch:
+      type: object
+      description: Una entrega capturada en lote, con su folio.
+      properties:
+        receipt_group: { type: string, format: uuid }
+        location_id: { type: string, format: uuid }
+        supplier_id: { type: [string, 'null'], format: uuid }
+        total: { type: number }
+        total_is_complete:
+          type: boolean
+          description: |
+            `false` = algún renglón entró sin costo, así que el total NO cuadra con la
+            factura. Se dice, en vez de dar un número que parece exacto.
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              supply_id: { type: string, format: uuid }
+              name: { type: string }
+              unit: { type: string }
+              quantity: { type: number, description: 'En la unidad base.' }
+              packages: { type: number }
+              unit_cost: { type: [number, 'null'], description: 'Costo de la unidad base.' }
+              line_total: { type: [number, 'null'] }
+              balance_after: { type: number }
+              movement_id: { type: string, format: uuid }
+
+    BarRequest:
+      type: object
+      description: |
+        Lo que una barra le pide al almacén. La barra pide, el almacén surte: quien sabe
+        qué falta es el cantinero mirando su estante a las once de la noche.
+      properties:
+        id: { type: string, format: uuid }
+        location_id: { type: string, format: uuid }
+        location_name: { type: string }
+        location_code: { type: string }
+        status:
+          type: string
+          enum: [open, partial, fulfilled, cancelled]
+          description: |
+            `partial` no es un estado de trámite: es la verdad de la noche, y se queda
+            visible para que a la mañana siguiente alguien pregunte por lo que faltó.
+        note: { type: [string, 'null'] }
+        cancel_reason: { type: [string, 'null'] }
+        requested_by_name: { type: [string, 'null'] }
+        fulfilled_by_name: { type: [string, 'null'] }
+        pending_lines: { type: integer }
+        created_at: { type: string, format: date-time }
+        fulfilled_at: { type: [string, 'null'], format: date-time }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              supply_id: { type: string, format: uuid }
+              name: { type: string }
+              unit: { type: string }
+              package_size: { type: number }
+              package_label: { type: [string, 'null'] }
+              quantity: { type: number, description: 'Lo pedido, en unidad base.' }
+              fulfilled: { type: number, description: 'Lo realmente surtido.' }
+              pending: { type: number }
 
     Recipe:
       type: object

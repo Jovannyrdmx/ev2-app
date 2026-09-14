@@ -14,7 +14,7 @@
  *   - Antes de guardar, se enseña el saldo que va a quedar. Corregir antes es gratis;
  *     corregir después deja un renglón de ajuste que alguien tendrá que explicar.
  */
-/* global EV2, EV2Format, EV2Warehouse, EV2Roles, EV2PasswordGate */
+/* global EV2, EV2Format, EV2Warehouse, EV2Receiving, EV2Roles, EV2PasswordGate */
 (function () {
   'use strict';
 
@@ -39,6 +39,17 @@
     search: '',
     sheet: null,            // { supply, kind, mode }
     busy: false,
+    // --- entrada de mercancía en lote ---
+    suppliers: [],
+    // El borrador vive en el estado y NO en los <input> de la pantalla: una entrega
+    // son quince renglones capturados con el camión esperando, y cualquier repintado
+    // que los borre es justo el momento en que alguien decide "ya, ponle que llegó
+    // todo".
+    draft: [],
+    draftSupplier: '',
+    // --- pedidos de las barras ---
+    requests: [],
+    fulfill: null,          // { request, from, lines }
   };
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
@@ -179,10 +190,35 @@
       ]);
       state.locations = locations.locations || [];
       state.supplies = supplies.supplies || [];
+      // Los pedidos pendientes se cargan SIEMPRE, no solo al abrir su pestaña: el
+      // número en la pestaña es lo que hace que el almacenista se entere de que la
+      // barra pidió algo. Un contador que solo aparece al entrar no avisa de nada.
+      await Promise.all([loadRequests(), loadSuppliers()]);
       if (state.tab === 'kardex') await loadMovements();
+      if (state.draft.length === 0) state.draft = [EV2Receiving.emptyLine()];
       renderAll();
       banner(null);
     } catch (err) { showError(err); }
+  }
+
+  async function loadSuppliers() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/suppliers`);
+      state.suppliers = data.suppliers || [];
+    } catch {
+      // Sin proveedores se puede capturar igual: el proveedor es opcional a
+      // propósito, y una entrega no se queda sin registrar por eso.
+      state.suppliers = [];
+    }
+  }
+
+  async function loadRequests() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/bar-requests?limit=50`);
+      state.requests = data.requests || [];
+    } catch {
+      state.requests = [];
+    }
   }
 
   async function loadMovements() {
@@ -257,15 +293,22 @@
     const visible = filtered();
     $('count-stock').textContent = visible.length;
     $('count-restock').textContent = restock().length;
+    $('count-entry').textContent = EV2Receiving.draftSummary(state.draft, state.supplies).lines;
+    $('count-requests').textContent = state.requests
+      .filter((r) => EV2Receiving.statusOf(r.status).pending).length;
     for (const tab of document.querySelectorAll('[data-tab]')) {
       tab.classList.toggle('active', tab.dataset.tab === state.tab);
     }
+    // El buscador filtra la lista de existencias. En la captura de una entrada y en
+    // la bandeja de pedidos no filtra nada, y dejarlo ahí hace creer que sí.
+    $('search-wrap').hidden = ['entrada', 'pedidos'].includes(state.tab);
   }
 
   for (const tab of document.querySelectorAll('[data-tab]')) {
     tab.onclick = async () => {
       state.tab = tab.dataset.tab;
       if (state.tab === 'kardex') await loadMovements();
+      if (state.tab === 'pedidos') await loadRequests();
       renderAll();
     };
   }
@@ -291,6 +334,8 @@
   function renderList() {
     if (state.tab === 'restock') return renderRestock();
     if (state.tab === 'kardex') return renderKardex();
+    if (state.tab === 'entrada') return renderEntry();
+    if (state.tab === 'pedidos') return renderRequests();
     return renderStock();
   }
 
@@ -416,6 +461,437 @@
         </article>`;
     }).join('');
   }
+
+  // ==================================================== entrada de mercancía en lote
+
+  /** Las opciones del selector de insumo, una sola vez por repintado. */
+  function supplyOptions(selectedId) {
+    return ['<option value="">—</option>'].concat(
+      state.supplies
+        .filter((s) => s.active !== false)
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((s) => `<option value="${escape(s.id)}" ${s.id === selectedId ? 'selected' : ''}>
+            ${escape(s.name)}${s.package_label ? ` · ${escape(s.package_label)}` : ''}
+          </option>`),
+    ).join('');
+  }
+
+  const supplyById = (id) => state.supplies.find((s) => s.id === id) || null;
+
+  /** ¿A dónde entra la mercancía? Al almacén, salvo que se filtre otro lugar. */
+  function entryLocation() {
+    if (state.locationFilter) return state.locationFilter;
+    const almacen = state.locations.find((l) => l.kind === 'warehouse');
+    return almacen ? almacen.id : (state.locations[0] && state.locations[0].id) || null;
+  }
+
+  function renderEntry() {
+    $('list-empty').hidden = true;
+    const resumen = EV2Receiving.draftSummary(state.draft, state.supplies);
+    const problemas = EV2Receiving.validateDraft(state.draft, state.supplies);
+    const porRenglon = new Map();
+    for (const p of problemas) {
+      if (!porRenglon.has(p.row)) porRenglon.set(p.row, []);
+      porRenglon.get(p.row).push(p);
+    }
+    const lugar = locationById(entryLocation());
+    const puedeAltaProveedor = api.hasRole('manager');
+
+    $('list').innerHTML = `
+      <section class="card rounded-xl px-3 py-3 mb-3 space-y-3">
+        <div>
+          <label class="text-xs text-white/50" data-i18n="wh.entryInto">Entra en</label>
+          <p class="text-sm font-semibold">${escape(lugar ? lugar.name : t('wh.noLocations'))}</p>
+        </div>
+        <div>
+          <label class="text-xs text-white/50" data-i18n="wh.supplier">Proveedor</label>
+          <div class="flex gap-2">
+            <select id="entry-supplier" class="field">
+              <option value="">${escape(t('wh.noSupplier'))}</option>
+              ${state.suppliers.map((p) => `<option value="${escape(p.id)}"
+                  ${p.id === state.draftSupplier ? 'selected' : ''}>${escape(p.name)}</option>`).join('')}
+            </select>
+            ${puedeAltaProveedor
+    ? `<button type="button" id="entry-new-supplier" class="chip tap px-3 shrink-0">+</button>` : ''}
+          </div>
+          <p class="text-[11px] text-white/40 mt-1" data-i18n="wh.supplierOptional">
+            Opcional. Si lo eliges, se precargan los insumos que surte.
+          </p>
+        </div>
+      </section>
+
+      <div id="entry-lines" class="space-y-2">
+        ${state.draft.map((line, index) => entryRow(line, index, porRenglon.get(index + 1) || [])).join('')}
+      </div>
+
+      <div class="card rounded-xl px-3 py-3 mt-3 space-y-2">
+        <div class="flex items-center justify-between text-sm">
+          <span class="text-white/60">${escape(t('wh.entryLines', { n: resumen.lines }))}</span>
+          <span class="font-display text-lg">${escape(EV2Format.money(resumen.total, 'MXN'))}</span>
+        </div>
+        ${resumen.lines > 0 && !resumen.total_is_complete
+    ? `<p class="text-[11px] text-amber-300">${escape(t('wh.entryTotalPartial'))}</p>` : ''}
+        <button type="button" id="entry-add" class="chip tap px-3 w-full py-2">
+          ${escape(t('wh.entryAddLine'))}
+        </button>
+        <p id="entry-error" class="text-sm text-red-300" hidden></p>
+        <button type="button" id="entry-submit"
+                class="ev2-button w-full py-3 rounded-xl font-display">
+          ${escape(t('wh.entrySave'))}
+        </button>
+        <button type="button" id="entry-clear" class="w-full text-xs text-white/40 underline">
+          ${escape(t('wh.entryClear'))}
+        </button>
+      </div>`;
+
+    wireEntry();
+  }
+
+  function entryRow(line, index, problemas) {
+    const supply = supplyById(line.supply_id);
+    const totales = EV2Receiving.lineTotals(line, supply);
+    const malo = problemas.length > 0;
+    const unidad = supply ? supply.unit : 'ml';
+
+    return `
+      <article class="card rounded-xl px-3 py-2 ${malo ? 'row-empty' : ''}" data-row="${index}">
+        <div class="flex items-center gap-2 mb-2">
+          <select class="field" data-entry="supply" data-index="${index}">
+            ${supplyOptions(line.supply_id)}
+          </select>
+          <button type="button" class="text-white/40 px-2 shrink-0" data-entry="remove"
+                  data-index="${index}" aria-label="${escape(t('wh.entryRemoveLine'))}">✕</button>
+        </div>
+        <div class="flex gap-2">
+          <input type="number" step="0.001" min="0" inputmode="decimal" class="field"
+                 placeholder="${escape(line.mode === 'packages' ? t('wh.inPackages') : unidad)}"
+                 value="${escape(line.amount)}" data-entry="amount" data-index="${index}">
+          <div class="flex gap-1 shrink-0">
+            <button type="button" class="chip tap px-2 ${line.mode === 'packages' ? 'on' : ''}"
+                    data-entry="mode" data-mode="packages" data-index="${index}">
+              ${escape(t('wh.inPackages'))}
+            </button>
+            <button type="button" class="chip tap px-2 ${line.mode === 'base' ? 'on' : ''}"
+                    data-entry="mode" data-mode="base" data-index="${index}">${escape(unidad)}</button>
+          </div>
+          <input type="number" step="0.01" min="0" inputmode="decimal" class="field"
+                 placeholder="${escape(t('wh.packageCostShort'))}"
+                 value="${escape(line.package_cost)}" data-entry="cost" data-index="${index}">
+        </div>
+        <div class="flex items-center justify-between mt-1 text-[11px]">
+          <span class="text-white/40">
+            ${totales.quantity !== null && supply
+    ? escape(EV2Warehouse.describeStock(supply, totales.quantity, lang())) : ''}
+          </span>
+          <span class="text-white/60">
+            ${totales.total !== null ? escape(EV2Format.money(totales.total, 'MXN')) : ''}
+          </span>
+        </div>
+        ${malo ? `<p class="text-[11px] text-red-300 mt-1">
+            ${problemas.map((p) => escape(entryProblemText(p))).join(' · ')}
+          </p>` : ''}
+      </article>`;
+  }
+
+  /** Los códigos del validador, en palabras. Se traducen aquí, no en la lógica. */
+  function entryProblemText(problem) {
+    const key = `wh.entryErr.${problem.field}.${problem.code}`;
+    const texto = t(key);
+    return texto === key ? t('wh.entryErr.generic') : texto;
+  }
+
+  function wireEntry() {
+    const repintar = () => { renderTabs(); renderEntry(); };
+
+    const selector = $('entry-supplier');
+    if (selector) {
+      selector.onchange = async () => {
+        state.draftSupplier = selector.value;
+        if (!state.draftSupplier) return repintar();
+        // Precargar los renglones del proveedor es la diferencia entre capturar una
+        // entrega en dos minutos y buscar quince insumos entre doscientos con el
+        // camión esperando. Solo si el borrador está limpio: pisar lo capturado
+        // sería perder trabajo hecho.
+        const limpio = state.draft.every((l) => EV2Receiving.isEmptyLine(l));
+        if (!limpio) return repintar();
+        try {
+          const data = await api.get(`/nightclubs/${clubId()}/suppliers/${state.draftSupplier}`);
+          if ((data.supplies || []).length > 0) {
+            state.draft = EV2Receiving.draftFromSupplier(data.supplies);
+          }
+        } catch { /* sin precarga se captura a mano, que es lo de siempre */ }
+        return repintar();
+      };
+    }
+
+    const nuevo = $('entry-new-supplier');
+    if (nuevo) nuevo.onclick = () => openSupplierSheet();
+
+    $('entry-add').onclick = () => {
+      state.draft.push(EV2Receiving.emptyLine());
+      repintar();
+    };
+
+    $('entry-clear').onclick = () => {
+      state.draft = [EV2Receiving.emptyLine()];
+      state.draftSupplier = '';
+      repintar();
+    };
+
+    for (const el of $('list').querySelectorAll('[data-entry]')) {
+      const index = Number(el.dataset.index);
+      const campo = el.dataset.entry;
+
+      if (campo === 'supply') {
+        el.onchange = () => { state.draft[index].supply_id = el.value || null; repintar(); };
+      } else if (campo === 'amount') {
+        // `onchange` y no `oninput`: repintar en cada tecla mueve el foco y borra lo
+        // que la persona está escribiendo.
+        el.onchange = () => { state.draft[index].amount = el.value; repintar(); };
+      } else if (campo === 'cost') {
+        el.onchange = () => { state.draft[index].package_cost = el.value; repintar(); };
+      } else if (campo === 'mode') {
+        el.onclick = () => { state.draft[index].mode = el.dataset.mode; repintar(); };
+      } else if (campo === 'remove') {
+        el.onclick = () => {
+          state.draft.splice(index, 1);
+          if (state.draft.length === 0) state.draft = [EV2Receiving.emptyLine()];
+          repintar();
+        };
+      }
+    }
+
+    $('entry-submit').onclick = submitEntry;
+  }
+
+  async function submitEntry() {
+    if (state.busy) return;
+    const problemas = EV2Receiving.validateDraft(state.draft, state.supplies);
+    if (problemas.length > 0) {
+      const el = $('entry-error');
+      el.textContent = problemas[0].row === 0
+        ? t(`wh.entryErr.lines.${problemas[0].code}`)
+        : t('wh.entryFixLines', { n: new Set(problemas.map((p) => p.row)).size });
+      el.hidden = false;
+      return;
+    }
+    const lugar = entryLocation();
+    if (!lugar) { showError(new Error(t('wh.noLocations')), $('entry-error')); return; }
+
+    state.busy = true;
+    $('entry-submit').disabled = true;
+    try {
+      const body = EV2Receiving.receiptRequest({
+        locationId: lugar,
+        supplierId: state.draftSupplier || null,
+        lines: state.draft,
+      });
+      const data = await api.post(`/nightclubs/${clubId()}/supply-receipts`, body);
+      toast(t('wh.entrySaved', { n: data.receipt.lines.length }), 'ok');
+      state.draft = [EV2Receiving.emptyLine()];
+      state.draftSupplier = '';
+      await load();
+    } catch (err) {
+      showError(err, $('entry-error'));
+    } finally {
+      state.busy = false;
+      const boton = $('entry-submit');
+      if (boton) boton.disabled = false;
+    }
+  }
+
+  // -------------------------------------------------------------- proveedor nuevo
+
+  function openSupplierSheet() {
+    $('supplier-error').hidden = true;
+    $('form-supplier').reset();
+    $('sheet-backdrop').hidden = false;
+    $('sheet-supplier').hidden = false;
+  }
+
+  function closeSupplierSheet() {
+    $('sheet-supplier').hidden = true;
+    if ($('sheet').hidden && $('sheet-fulfill').hidden) $('sheet-backdrop').hidden = true;
+  }
+
+  $('supplier-close').onclick = closeSupplierSheet;
+
+  $('form-supplier').onsubmit = async (ev) => {
+    ev.preventDefault();
+    $('supplier-error').hidden = true;
+    try {
+      const data = await api.post(`/nightclubs/${clubId()}/suppliers`, {
+        name: $('supplier-name').value.trim(),
+        contact_name: $('supplier-contact').value.trim() || undefined,
+        phone: $('supplier-phone').value.trim() || undefined,
+      });
+      await loadSuppliers();
+      // Se deja elegido: quien acaba de darlo de alta es porque va a capturar su
+      // entrega ahora mismo.
+      state.draftSupplier = data.supplier.id;
+      closeSupplierSheet();
+      toast(t('wh.supplierSaved'), 'ok');
+      renderAll();
+    } catch (err) {
+      showError(err, $('supplier-error'));
+    }
+  };
+
+  // ============================================ pedidos de las barras
+
+  function renderRequests() {
+    if (state.requests.length === 0) return empty(t('wh.emptyRequests'));
+    $('list-empty').hidden = true;
+
+    $('list').innerHTML = state.requests.map((request) => {
+      const estado = EV2Receiving.statusOf(request.status);
+      const tono = estado.tone === 'warn' ? 'row-low' : (estado.tone === 'ok' ? '' : 'row-empty');
+      const lineas = (request.lines || []).map((l) => {
+        const falta = Number(l.pending);
+        const cuantas = Math.round((falta / Number(l.package_size)) * 100) / 100;
+        return `<li class="flex justify-between gap-2">
+            <span class="truncate">${escape(l.name)}</span>
+            <span class="shrink-0 ${falta > 0 ? 'text-amber-200' : 'text-white/40'}">
+              ${falta > 0 ? escape(t('wh.requestPending', { n: cuantas })) : escape(t('wh.requestDone'))}
+            </span>
+          </li>`;
+      }).join('');
+
+      return `
+        <article class="card rounded-xl px-3 py-2 ${tono} mb-2">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <p class="font-semibold truncate">${escape(request.location_name)}</p>
+              <p class="text-[11px] text-white/40">
+                ${escape(EV2Format.dateTime(request.created_at))}
+                ${request.requested_by_name ? `· ${escape(request.requested_by_name)}` : ''}
+              </p>
+              ${request.note ? `<p class="text-xs text-white/60 mt-1">${escape(request.note)}</p>` : ''}
+            </div>
+            <span class="chip shrink-0">${escape(t(`wh.requestStatus.${request.status}`))}</span>
+          </div>
+          <ul class="text-xs text-white/70 mt-2 space-y-.5">${lineas}</ul>
+          ${estado.pending ? `
+            <div class="flex gap-2 mt-2">
+              <button class="chip on tap px-3" data-fulfill="${escape(request.id)}">
+                ${escape(t('wh.fulfillSend'))}
+              </button>
+            </div>` : ''}
+        </article>`;
+    }).join('');
+
+    for (const button of $('list').querySelectorAll('[data-fulfill]')) {
+      button.onclick = () => openFulfillSheet(button.dataset.fulfill);
+    }
+  }
+
+  /** Lo que hay en un lugar de un insumo, para avisar antes de prometer producto. */
+  function stockAt(supplyId, locationId) {
+    const supply = supplyById(supplyId);
+    if (!supply) return 0;
+    const here = (supply.locations || []).find((l) => l.location_id === locationId);
+    return here ? Number(here.stock) : 0;
+  }
+
+  function openFulfillSheet(requestId) {
+    const request = state.requests.find((r) => r.id === requestId);
+    if (!request) return;
+    const almacen = state.locations.find((l) => l.kind === 'warehouse');
+    state.fulfill = {
+      request,
+      // El origen por omisión es el almacén. Se puede cambiar porque a media noche
+      // se surte de la otra barra, que es lo que de verdad pasa.
+      from: almacen ? almacen.id : null,
+      lines: EV2Receiving.fulfillDraft(request),
+    };
+    $('sheet-backdrop').hidden = false;
+    $('sheet-fulfill').hidden = false;
+    renderFulfill();
+  }
+
+  function closeFulfillSheet() {
+    state.fulfill = null;
+    $('sheet-fulfill').hidden = true;
+    if ($('sheet').hidden && $('sheet-supplier').hidden) $('sheet-backdrop').hidden = true;
+  }
+
+  $('fulfill-close').onclick = closeFulfillSheet;
+
+  function renderFulfill() {
+    const f = state.fulfill;
+    if (!f) return;
+    $('fulfill-bar').textContent = f.request.location_name;
+    $('fulfill-from').innerHTML = state.locations
+      .filter((l) => l.id !== f.request.location_id)
+      .map((l) => `<option value="${escape(l.id)}" ${l.id === f.from ? 'selected' : ''}>
+          ${escape(l.name)}</option>`).join('');
+    $('fulfill-from').onchange = () => { f.from = $('fulfill-from').value; renderFulfill(); };
+
+    $('fulfill-lines').innerHTML = f.lines.map((line, index) => {
+      const hay = stockAt(line.supply_id, f.from);
+      const pide = Number(line.amount) * Number(line.package_size);
+      const corto = pide > hay;
+      return `
+        <article class="card rounded-xl px-3 py-2 ${corto ? 'row-low' : ''}">
+          <div class="flex items-center justify-between gap-2">
+            <div class="min-w-0">
+              <p class="text-sm font-semibold truncate">${escape(line.name)}</p>
+              <p class="text-[11px] text-white/40">
+                ${escape(t('wh.fulfillPendingOf', {
+    pending: Math.round((line.pending / line.package_size) * 100) / 100,
+    available: Math.round((hay / line.package_size) * 100) / 100,
+  }))}
+              </p>
+            </div>
+            <input type="number" step="0.01" min="0" inputmode="decimal"
+                   class="field w-24 shrink-0" value="${escape(line.amount)}"
+                   data-fulfill-index="${index}">
+          </div>
+          ${corto ? `<p class="text-[11px] text-amber-300 mt-1">${escape(t('wh.fulfillShortLine'))}</p>` : ''}
+        </article>`;
+    }).join('');
+
+    for (const input of $('fulfill-lines').querySelectorAll('[data-fulfill-index]')) {
+      input.onchange = () => {
+        f.lines[Number(input.dataset.fulfillIndex)].amount = input.value;
+        renderFulfill();
+      };
+    }
+
+    const existencias = {};
+    for (const line of f.lines) existencias[line.supply_id] = stockAt(line.supply_id, f.from);
+    const vista = EV2Receiving.fulfillPreview(f.request, f.lines, existencias);
+    // Que el estado se pueda anticipar importa: el almacenista tiene que saber que va
+    // a dejar el pedido a medias ANTES de mandarlo, para poder decírselo a la barra.
+    $('fulfill-preview').textContent = vista.status_after === 'fulfilled'
+      ? t('wh.fulfillWillComplete')
+      : t('wh.fulfillWillPartial', { n: vista.short.length });
+  }
+
+  $('fulfill-submit').onclick = async () => {
+    const f = state.fulfill;
+    if (!f || state.busy) return;
+    if (!f.from) { showError(new Error(t('wh.noLocations')), $('fulfill-error')); return; }
+    state.busy = true;
+    $('fulfill-submit').disabled = true;
+    $('fulfill-error').hidden = true;
+    try {
+      const body = EV2Receiving.fulfillBody({ fromLocationId: f.from, draft: f.lines });
+      const data = await api.post(
+        `/nightclubs/${clubId()}/bar-requests/${f.request.id}/fulfill`, body);
+      toast(data.short && data.short.length > 0
+        ? t('wh.fulfilledPartial', { n: data.short.length })
+        : t('wh.fulfilledAll'), data.short && data.short.length > 0 ? 'info' : 'ok');
+      closeFulfillSheet();
+      await load();
+    } catch (err) {
+      showError(err, $('fulfill-error'));
+    } finally {
+      state.busy = false;
+      $('fulfill-submit').disabled = false;
+    }
+  };
 
   // ------------------------------------------------------- captura de movimiento
 

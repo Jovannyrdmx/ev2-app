@@ -162,6 +162,19 @@
       </button>
     </div>
 
+    <!--
+      Pedir al almacén. Quien sabe qué falta es el cantinero mirando su estante a
+      las once de la noche, no el almacenista a las seis de la tarde: por eso el
+      botón vive aquí y no allá. El número avisa de lo que ya se pidió y todavía no
+      llega, para que nadie pida dos veces lo mismo.
+    -->
+    <div class="px-4 pt-2">
+      <button id="btn-restock" class="w-full py-3 rounded-xl card text-sm font-semibold">
+        <i class="fa-solid fa-dolly mr-2"></i><span data-i18n="req.ask">Pedir al almacén</span>
+        <span id="restock-pending" class="lane-count" hidden>0</span>
+      </button>
+    </div>
+
     <div class="grid grid-cols-2 gap-2 px-4 pt-3">
       <div class="stat-card">
         <div class="stat-number" id="stat-open">—</div>
@@ -225,6 +238,40 @@
     </div>
   </div>
 
+  <!-- ====================== PEDIR AL ALMACÉN ======================
+       Nace con lo que está bajo mínimo en ESTA barra ya marcado y con la cantidad
+       sugerida: a las once de la noche, pedir tiene que ser un toque. Lo que el
+       almacén tampoco tiene sale aparte, como lista de compra, porque perseguir
+       producto que no existe es lo que hace inservible una lista de surtido. -->
+  <div id="req-sheet" class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur flex flex-col" hidden>
+    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
+      <div class="min-w-0">
+        <p class="font-display text-lg" data-i18n="req.title">Pedir al almacén</p>
+        <p id="req-bar" class="text-xs text-white/50 truncate">—</p>
+      </div>
+      <button id="btn-req-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="sale.close">Cerrar</button>
+    </header>
+
+    <nav class="flex px-2 pt-2 border-b border-white/10 text-sm">
+      <button data-req-tab="new" class="lane-tab active flex-1 py-3 font-semibold">
+        <span data-i18n="req.tabNew">Pedir</span>
+      </button>
+      <button data-req-tab="mine" class="lane-tab flex-1 py-3 font-semibold">
+        <span data-i18n="req.tabMine">Mis pedidos</span><span class="lane-count" id="req-count-mine">0</span>
+      </button>
+    </nav>
+
+    <div id="req-body" class="flex-1 overflow-y-auto px-4 py-3 space-y-2"></div>
+
+    <div id="req-footer" class="px-4 py-3 border-t border-white/10 space-y-3 bg-black/40">
+      <input id="req-note" class="field" maxlength="300" placeholder="Nota para el almacén (opcional)"
+             data-i18n-placeholder="req.note">
+      <button id="btn-req-send" class="ev2-button w-full py-4 rounded-xl font-display"
+              data-i18n="req.send" disabled>Enviar pedido</button>
+      <p id="req-error" class="text-sm text-red-300" hidden></p>
+    </div>
+  </div>
+
   <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50" hidden></div>
 </div>
 
@@ -235,6 +282,7 @@
 <script src="js/client.js"></script>
 <script src="js/order-taking.js"></script>
 <script src="js/bar-queue.js"></script>
+<script src="js/receiving.js"></script>
 <script src="js/bartender-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

@@ -23,6 +23,7 @@ const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const inventory = require('../services/inventory');
+const receiving = require('../services/receiving');
 
 const router = express.Router({ mergeParams: true });
 
@@ -543,13 +544,19 @@ const MOVEMENT_SELECT = `
          m.location_id, l.code AS location_code, l.name AS location_name,
          m.counterpart_location_id, cl.code AS counterpart_code, cl.name AS counterpart_name,
          m.created_by, u.display_name AS created_by_name,
-         m.authorized_by, a.display_name AS authorized_by_name
+         m.authorized_by, a.display_name AS authorized_by_name,
+         -- Migracion 022: de quien vino, con que captura entro, y que pedido lo
+         -- origino. Sin esto, el kardex dice que algo bajo del almacen pero no por
+         -- que, y una entrada no dice de quien.
+         m.supplier_id, p.name AS supplier_name,
+         m.receipt_group, m.request_id
     FROM supply_movements m
     JOIN supplies s ON s.id = m.supply_id
     JOIN supply_locations l ON l.id = m.location_id
     LEFT JOIN supply_locations cl ON cl.id = m.counterpart_location_id
     LEFT JOIN users u ON u.id = m.created_by
-    LEFT JOIN users a ON a.id = m.authorized_by`;
+    LEFT JOIN users a ON a.id = m.authorized_by
+    LEFT JOIN suppliers p ON p.id = m.supplier_id`;
 
 router.get('/nightclubs/:nightclubId/supply-movements',
   requireRole('warehouse', 'manager', 'admin'),
@@ -596,6 +603,287 @@ router.get('/nightclubs/:nightclubId/supplies/:supplyId/movements',
         req.query.limit, req.query.offset],
     );
     res.json({ movements: rows });
+  }));
+
+// ==========================================================================
+// Entrada de mercancia en lote
+//
+// La ruta de un solo insumo (`/supplies/:id/receive`) se queda: sirve para la
+// botella suelta y para corregir. Esta es para cuando llega el camion, que es lo
+// normal, y su diferencia no es la comodidad: es que las quince lineas entran en
+// UNA transaccion. Con la ruta de a una, la novena puede fallar y quedan ocho
+// adentro y siete afuera, y nadie sabe cuales ocho hasta contar el estante.
+// ==========================================================================
+
+const receiptLine = z.object({
+  supply_id: uuid,
+  quantity: z.number().positive().max(10_000_000).optional(),
+  packages: z.number().positive().max(100_000).optional(),
+  // Lo que dice el renglon de la factura: el costo de la PRESENTACION completa.
+  package_cost: z.number().min(0).max(1_000_000).optional(),
+  reason: z.string().trim().max(200).optional(),
+}).refine((l) => (l.quantity === undefined) !== (l.packages === undefined),
+  { message: 'Captura la cantidad en presentaciones o en la unidad base, no en las dos' });
+
+router.post('/nightclubs/:nightclubId/supply-receipts',
+  requireRole('warehouse', 'manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      location_id: uuid,
+      // Opcional a proposito: una entrega de un proveedor que todavia no esta en el
+      // catalogo no se puede quedar sin capturar por eso.
+      supplier_id: uuid.optional(),
+      lines: z.array(receiptLine).min(1).max(receiving.MAX_LINES),
+      reason: z.string().trim().max(200).optional(),
+      reference_type: z.string().trim().max(30).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const b = req.body;
+    const result = await inTransaction(async (client) => {
+      const lugar = await findLocation(client, nightclubId, b.location_id);
+      return receiving.receiveBatch(client, {
+        nightclubId,
+        locationId: lugar.id,
+        supplierId: b.supplier_id || null,
+        lines: b.lines,
+        reason: b.reason || null,
+        referenceType: b.reference_type || null,
+        userId: req.user.id,
+      });
+    });
+    res.status(201).json({ receipt: result });
+  }));
+
+/** Una captura completa, por su folio. Es a lo que se vuelve cuando algo no cuadra. */
+router.get('/nightclubs/:nightclubId/supply-receipts/:group',
+  requireRole('warehouse', 'manager', 'admin'),
+  validate({ params: z.object({ nightclubId: uuid, group: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `${MOVEMENT_SELECT}
+        WHERE m.nightclub_id = $1 AND m.receipt_group = $2
+        ORDER BY s.name`,
+      [req.params.nightclubId, req.params.group]);
+    if (rows.length === 0) throw ApiError.notFound('Esa captura no existe');
+
+    const conCosto = rows.filter((r) => r.unit_cost !== null);
+    res.json({
+      receipt: {
+        receipt_group: req.params.group,
+        location_id: rows[0].location_id,
+        location_name: rows[0].location_name,
+        supplier_id: rows[0].supplier_id,
+        supplier_name: rows[0].supplier_name,
+        created_at: rows[0].created_at,
+        created_by_name: rows[0].created_by_name,
+        lines: rows,
+        total: Number(conCosto.reduce((s, r) => s + r.quantity * r.unit_cost, 0).toFixed(2)),
+        // Si algun renglon entro sin costo, el total NO cuadra con el papel. Se dice,
+        // en vez de dar un numero que parece exacto.
+        total_is_complete: conCosto.length === rows.length,
+      },
+    });
+  }));
+
+/** Las ultimas capturas, una linea por entrega. La bitacora de compras. */
+router.get('/nightclubs/:nightclubId/supply-receipts',
+  requireRole('warehouse', 'manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: pagination.extend({ supplier_id: uuid.optional() }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `SELECT m.receipt_group,
+              min(m.created_at)                       AS created_at,
+              count(*)::int                           AS line_count,
+              max(l.name)                             AS location_name,
+              max(p.name)                             AS supplier_name,
+              max(u.display_name)                     AS created_by_name,
+              sum(m.quantity * m.unit_cost)::float8   AS total,
+              bool_and(m.unit_cost IS NOT NULL)       AS total_is_complete
+         FROM supply_movements m
+         JOIN supply_locations l ON l.id = m.location_id
+         LEFT JOIN suppliers p ON p.id = m.supplier_id
+         LEFT JOIN users u ON u.id = m.created_by
+        WHERE m.nightclub_id = $1 AND m.receipt_group IS NOT NULL
+          AND ($2::uuid IS NULL OR m.supplier_id = $2::uuid)
+        GROUP BY m.receipt_group
+        ORDER BY min(m.created_at) DESC
+        LIMIT $3 OFFSET $4`,
+      [req.params.nightclubId, req.query.supplier_id || null,
+        req.query.limit, req.query.offset]);
+    res.json({ receipts: rows });
+  }));
+
+// ==========================================================================
+// Pedidos de barra: la barra pide, el almacen surte
+//
+// El orden importa y es el del club real: quien sabe que falta es el cantinero
+// mirando su estante a las once de la noche, no el almacenista a las seis de la
+// tarde. Antes de esto, surtir era una orden hacia abajo y lo que faltaba se
+// resolvia de palabra -- que es como acaba producto en la barra sin registro.
+// ==========================================================================
+
+const requestLine = z.object({
+  supply_id: uuid,
+  quantity: z.number().positive().max(10_000_000).optional(),
+  packages: z.number().positive().max(100_000).optional(),
+}).refine((l) => (l.quantity === undefined) !== (l.packages === undefined),
+  { message: 'Captura la cantidad en presentaciones o en la unidad base, no en las dos' });
+
+/** Lo que esta barra deberia pedir: sus insumos bajo el minimo, con lo que hay en almacen. */
+router.get('/nightclubs/:nightclubId/bar-requests/suggested',
+  requireRole('bartender', 'warehouse', 'manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: z.object({ location_id: uuid }),
+  }),
+  asyncHandler(async (req, res) => {
+    const lugar = await findLocation(pool, req.params.nightclubId, req.query.location_id);
+    if (lugar.kind !== 'bar') throw ApiError.unprocessable('Ese lugar no es una barra');
+    res.json({
+      location_id: lugar.id,
+      location_name: lugar.name,
+      suggested: await receiving.suggestForBar(pool, {
+        nightclubId: req.params.nightclubId, locationId: lugar.id,
+      }),
+    });
+  }));
+
+router.get('/nightclubs/:nightclubId/bar-requests',
+  requireRole('bartender', 'warehouse', 'manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: pagination.extend({
+      location_id: uuid.optional(),
+      // Por omision solo lo que falta por surtir: es la bandeja de trabajo del
+      // almacen, y enterrarla bajo los pedidos de anoche la vuelve inservible.
+      status: z.enum(['open', 'partial', 'fulfilled', 'cancelled', 'pending', 'all'])
+        .default('pending'),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const q = req.query;
+    const estados = q.status === 'pending' ? receiving.OPEN_STATUSES
+      : (q.status === 'all' ? null : [q.status]);
+    const { rows } = await pool.query(
+      `SELECT r.id, r.location_id, l.name AS location_name, l.code AS location_code,
+              r.status, r.note, r.created_at, r.fulfilled_at, r.cancel_reason,
+              u.display_name AS requested_by_name,
+              f.display_name AS fulfilled_by_name,
+              COALESCE(li.lines, '[]'::json) AS lines,
+              COALESCE(li.pending_lines, 0)::int AS pending_lines
+         FROM bar_requests r
+         JOIN supply_locations l ON l.id = r.location_id
+         LEFT JOIN users u ON u.id = r.requested_by
+         LEFT JOIN users f ON f.id = r.fulfilled_by
+         LEFT JOIN LATERAL (
+           SELECT json_agg(json_build_object(
+                    'supply_id', s.id, 'name', s.name, 'unit', s.unit,
+                    'package_size', s.package_size::float8,
+                    'package_label', s.package_label,
+                    'quantity', bl.quantity::float8,
+                    'fulfilled', bl.fulfilled::float8,
+                    'pending', GREATEST(bl.quantity - bl.fulfilled, 0)::float8
+                  ) ORDER BY s.name) AS lines,
+                  count(*) FILTER (WHERE bl.fulfilled < bl.quantity) AS pending_lines
+             FROM bar_request_lines bl JOIN supplies s ON s.id = bl.supply_id
+            WHERE bl.request_id = r.id
+         ) li ON true
+        WHERE r.nightclub_id = $1
+          AND ($2::uuid IS NULL OR r.location_id = $2::uuid)
+          AND ($3::text[] IS NULL OR r.status = ANY($3::text[]))
+        ORDER BY r.created_at DESC
+        LIMIT $4 OFFSET $5`,
+      [req.params.nightclubId, q.location_id || null, estados, q.limit, q.offset]);
+    res.json({ requests: rows });
+  }));
+
+router.post('/nightclubs/:nightclubId/bar-requests',
+  requireRole('bartender', 'warehouse', 'manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      location_id: uuid,
+      lines: z.array(requestLine).min(1).max(receiving.MAX_LINES),
+      note: z.string().trim().max(300).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const result = await inTransaction(async (client) => {
+      const lugar = await findLocation(client, nightclubId, req.body.location_id);
+      if (lugar.kind !== 'bar') throw ApiError.unprocessable('Solo una barra pide al almacen');
+      return receiving.createRequest(client, {
+        nightclubId,
+        locationId: lugar.id,
+        lines: req.body.lines,
+        note: req.body.note || null,
+        userId: req.user.id,
+      });
+    });
+    res.status(201).json({ request: result });
+  }));
+
+/**
+ * Surtir. Solo almacen y gerencia: quien pide no se surte a si mismo, porque es
+ * justo la separacion que hace que un faltante tenga dos nombres y no uno.
+ */
+router.post('/nightclubs/:nightclubId/bar-requests/:requestId/fulfill',
+  requireRole('warehouse', 'manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid, requestId: uuid }),
+    body: z.object({
+      from_location_id: uuid,
+      // Sin `lines`, se surte todo lo que falte. Con `lines`, solo eso -- que es lo
+      // que pasa cuando el almacenista manda la mitad y deja el resto para luego.
+      lines: z.array(requestLine).min(1).max(receiving.MAX_LINES).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, requestId } = req.params;
+    const result = await inTransaction(async (client) => {
+      const origen = await findLocation(client, nightclubId, req.body.from_location_id);
+      return receiving.fulfillRequest(client, {
+        nightclubId,
+        requestId,
+        fromLocationId: origen.id,
+        lines: req.body.lines || null,
+        userId: req.user.id,
+      });
+    });
+    res.json(result);
+  }));
+
+router.post('/nightclubs/:nightclubId/bar-requests/:requestId/cancel',
+  requireRole('bartender', 'warehouse', 'manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid, requestId: uuid }),
+    body: z.object({ reason: z.string().trim().min(3).max(200) }),
+  }),
+  asyncHandler(async (req, res) => {
+    const result = await inTransaction((client) => receiving.cancelRequest(client, {
+      nightclubId: req.params.nightclubId,
+      requestId: req.params.requestId,
+      reason: req.body.reason,
+      userId: req.user.id,
+    }));
+    res.json({ request: result });
+  }));
+
+router.get('/nightclubs/:nightclubId/bar-requests/:requestId',
+  requireRole('bartender', 'warehouse', 'manager', 'admin'),
+  validate({ params: z.object({ nightclubId: uuid, requestId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    res.json({
+      request: await receiving.loadRequest(pool, {
+        nightclubId: req.params.nightclubId, requestId: req.params.requestId,
+      }),
+    });
   }));
 
 // --------------------------------------------------------------------- recetas

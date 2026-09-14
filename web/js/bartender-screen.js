@@ -5,7 +5,7 @@
  * abrir esto). Las decisiones —qué carril, qué botón, qué hace un evento— viven en
  * `bar-queue.js` y están probadas ahí.
  */
-/* global EV2, EV2Format, EV2Bar, EV2Client, EV2OrderTaking, EV2Roles, EV2PasswordGate */
+/* global EV2, EV2Format, EV2Bar, EV2Client, EV2OrderTaking, EV2Receiving, EV2Roles, EV2PasswordGate */
 (function () {
   'use strict';
 
@@ -183,6 +183,9 @@
     $('me-name').textContent = (api.session.user && api.session.user.display_name) || '';
     await loadBars();
     await loadQueue();
+    // Lo pedido y todavía no surtido, para que el número del botón avise en cuanto
+    // se abre la pantalla y nadie pida dos veces lo mismo.
+    await loadMyRequests();
     connectRealtime();
     // El reloj de espera avanza solo: sin esto, "hace 2 min" se queda en 2 min toda la
     // noche y el color deja de avisar.
@@ -217,6 +220,8 @@
     // La carta traia las existencias de la OTRA barra: se vuelve a pedir.
     state.drinks = [];
     loadQueue();
+    // Y los pedidos pendientes son de ESA barra, no de la anterior.
+    loadMyRequests();
   }
 
   function renderBars() {
@@ -638,6 +643,247 @@
       if (still) still.sending = false;
       if (!$('sale-sheet').hidden) renderSale();
     }
+  }
+
+  // ==================================================== pedir al almacén
+  //
+  // La barra pide, el almacén surte. Quien sabe qué falta es el cantinero mirando su
+  // estante a las once de la noche; antes de esto, surtir era una orden hacia abajo y
+  // lo que faltaba se resolvía de palabra — que es cómo acaba producto en la barra sin
+  // registro, y cómo un faltante deja de tener dueño.
+
+  const req = {
+    open: false,
+    tab: 'new',
+    suggested: [],
+    mine: [],
+    picked: new Map(),   // supply_id -> presentaciones a pedir
+    sending: false,
+  };
+
+  /** La barra en la que se está parado. Sin una elegida no hay a quién surtir. */
+  function myBar() {
+    if (state.barId) return state.bars.find((b) => b.id === state.barId) || null;
+    return state.bars.length === 1 ? state.bars[0] : null;
+  }
+
+  async function loadMyRequests() {
+    const bar = myBar();
+    if (!bar) { req.mine = []; return; }
+    try {
+      const data = await api.get(
+        `/nightclubs/${clubId()}/bar-requests?location_id=${bar.id}&status=all&limit=20`);
+      req.mine = data.requests || [];
+    } catch { req.mine = []; }
+    renderPendingBadge();
+  }
+
+  /** El número del botón: lo pedido que todavía no llega. Evita pedir dos veces. */
+  function renderPendingBadge() {
+    const pendientes = req.mine.filter((r) => EV2Receiving.statusOf(r.status).pending).length;
+    const badge = $('restock-pending');
+    if (!badge) return;
+    badge.textContent = pendientes;
+    badge.hidden = pendientes === 0;
+  }
+
+  async function openRestock() {
+    const bar = myBar();
+    if (!bar) { toast(t('req.pickBarFirst'), 'error'); return; }
+    req.open = true;
+    req.tab = 'new';
+    req.picked = new Map();
+    $('req-bar').textContent = bar.name;
+    $('req-sheet').hidden = false;
+    $('req-error').hidden = true;
+    $('req-note').value = '';
+
+    try {
+      const data = await api.get(
+        `/nightclubs/${clubId()}/bar-requests/suggested?location_id=${bar.id}`);
+      req.suggested = data.suggested || [];
+      // Lo que está bajo mínimo Y el almacén tiene se marca solo, con la cantidad
+      // sugerida: pedir tiene que ser un toque, no una captura.
+      for (const linea of EV2Receiving.requestFromSuggested(req.suggested)) {
+        req.picked.set(linea.supply_id, linea.amount);
+      }
+    } catch (err) {
+      req.suggested = [];
+      showError(err, $('req-error'));
+    }
+    await loadMyRequests();
+    renderRestock();
+  }
+
+  function closeRestock() {
+    req.open = false;
+    $('req-sheet').hidden = true;
+  }
+
+  function renderRestock() {
+    for (const tab of document.querySelectorAll('[data-req-tab]')) {
+      tab.classList.toggle('active', tab.dataset.reqTab === req.tab);
+    }
+    $('req-count-mine').textContent = req.mine
+      .filter((r) => EV2Receiving.statusOf(r.status).pending).length;
+    $('req-footer').hidden = req.tab !== 'new';
+    if (req.tab === 'mine') return renderMyRequests();
+    return renderSuggested();
+  }
+
+  function renderSuggested() {
+    const conStock = req.suggested.filter((s) => Number(s.warehouse_stock) > 0);
+    const sinStock = req.suggested.filter((s) => Number(s.warehouse_stock) <= 0);
+
+    if (req.suggested.length === 0) {
+      $('req-body').innerHTML = `<p class="text-center text-white/40 text-sm py-16">
+          ${escape(t('req.nothingLow'))}</p>`;
+      $('btn-req-send').disabled = true;
+      return;
+    }
+
+    const fila = (item) => {
+      const elegido = req.picked.has(item.supply_id);
+      return `
+        <article class="card rounded-xl px-3 py-2 ${elegido ? 'row-low' : ''}">
+          <div class="flex items-center justify-between gap-2">
+            <label class="flex items-center gap-2 min-w-0 flex-1 cursor-pointer">
+              <input type="checkbox" class="w-5 h-5 shrink-0 accent-cyan-400"
+                     data-req-pick="${escape(item.supply_id)}" ${elegido ? 'checked' : ''}>
+              <span class="min-w-0">
+                <span class="block text-sm font-semibold truncate">${escape(item.name)}</span>
+                <span class="block text-[11px] text-white/40">
+                  ${escape(t('req.lowHere', {
+    have: Math.round((item.stock / item.package_size) * 100) / 100,
+    min: Math.round((item.min_stock / item.package_size) * 100) / 100,
+  }))}
+                </span>
+              </span>
+            </label>
+            <input type="number" min="0.01" step="0.01" inputmode="decimal"
+                   class="field w-20 shrink-0"
+                   value="${escape(req.picked.get(item.supply_id) || item.suggested_packages)}"
+                   data-req-amount="${escape(item.supply_id)}" ${elegido ? '' : 'disabled'}>
+          </div>
+        </article>`;
+    };
+
+    $('req-body').innerHTML = `
+      ${conStock.length > 0 ? `<div class="space-y-2">${conStock.map(fila).join('')}</div>` : ''}
+      ${sinStock.length > 0 ? `
+        <section class="mt-4">
+          <h3 class="text-xs uppercase tracking-widest text-white/40 mb-1 px-1">
+            ${escape(t('req.toBuy'))}
+          </h3>
+          <p class="text-[11px] text-white/40 px-1 mb-2">${escape(t('req.toBuyNote'))}</p>
+          <div class="space-y-2">${sinStock.map(fila).join('')}</div>
+        </section>` : ''}`;
+
+    for (const box of $('req-body').querySelectorAll('[data-req-pick]')) {
+      box.onchange = () => {
+        const id = box.dataset.reqPick;
+        if (box.checked) {
+          const item = req.suggested.find((s) => s.supply_id === id);
+          req.picked.set(id, String(item ? item.suggested_packages : 1));
+        } else req.picked.delete(id);
+        renderRestock();
+      };
+    }
+    for (const input of $('req-body').querySelectorAll('[data-req-amount]')) {
+      input.onchange = () => {
+        if (req.picked.has(input.dataset.reqAmount)) {
+          req.picked.set(input.dataset.reqAmount, input.value);
+        }
+      };
+    }
+    $('btn-req-send').disabled = req.picked.size === 0 || req.sending;
+  }
+
+  function renderMyRequests() {
+    if (req.mine.length === 0) {
+      $('req-body').innerHTML = `<p class="text-center text-white/40 text-sm py-16">
+          ${escape(t('req.noneYet'))}</p>`;
+      return;
+    }
+    $('req-body').innerHTML = req.mine.map((request) => {
+      const estado = EV2Receiving.statusOf(request.status);
+      const lineas = (request.lines || []).map((l) => {
+        const falta = Number(l.pending);
+        const cuantas = Math.round((falta / Number(l.package_size)) * 100) / 100;
+        return `<li class="flex justify-between gap-2">
+            <span class="truncate">${escape(l.name)}</span>
+            <span class="shrink-0 ${falta > 0 ? 'text-amber-200' : 'text-emerald-300'}">
+              ${falta > 0 ? escape(t('req.stillMissing', { n: cuantas })) : escape(t('req.arrived'))}
+            </span>
+          </li>`;
+      }).join('');
+      return `
+        <article class="card rounded-xl px-3 py-2 ${estado.pending ? 'row-low' : ''}">
+          <div class="flex items-start justify-between gap-2">
+            <p class="text-[11px] text-white/40">${escape(EV2Format.dateTime(request.created_at))}</p>
+            <span class="chip shrink-0">${escape(t(`req.status.${request.status}`))}</span>
+          </div>
+          <ul class="text-xs text-white/70 mt-1 space-y-.5">${lineas}</ul>
+          ${estado.pending ? `
+            <button class="text-[11px] text-red-300 underline mt-2"
+                    data-req-cancel="${escape(request.id)}">${escape(t('req.cancel'))}</button>` : ''}
+        </article>`;
+    }).join('');
+
+    for (const button of $('req-body').querySelectorAll('[data-req-cancel]')) {
+      button.onclick = async () => {
+        // Cancelar exige motivo: un pedido que desaparece sin explicación es un
+        // pedido perdido, y el almacén se queda esperando surtirlo.
+        const motivo = prompt(t('req.cancelWhy'));
+        if (!motivo || !motivo.trim()) return;
+        try {
+          await api.post(
+            `/nightclubs/${clubId()}/bar-requests/${button.dataset.reqCancel}/cancel`,
+            { reason: motivo.trim() });
+          await loadMyRequests();
+          renderRestock();
+        } catch (err) { showError(err, $('req-error')); }
+      };
+    }
+  }
+
+  async function sendRestock() {
+    const bar = myBar();
+    if (!bar || req.sending || req.picked.size === 0) return;
+    req.sending = true;
+    $('btn-req-send').disabled = true;
+    $('req-error').hidden = true;
+    try {
+      const lines = [...req.picked.entries()].map(([supplyId, amount]) => ({
+        supply_id: supplyId, mode: 'packages', amount,
+      }));
+      await api.post(`/nightclubs/${clubId()}/bar-requests`,
+        EV2Receiving.requestBody({
+          locationId: bar.id, lines, note: $('req-note').value,
+        }));
+      toast(t('req.sent'), 'ok');
+      req.picked = new Map();
+      $('req-note').value = '';
+      req.tab = 'mine';
+      await loadMyRequests();
+      renderRestock();
+    } catch (err) {
+      showError(err, $('req-error'));
+    } finally {
+      req.sending = false;
+      renderRestock();
+    }
+  }
+
+  $('btn-restock').onclick = openRestock;
+  $('btn-req-close').onclick = closeRestock;
+  $('btn-req-send').onclick = sendRestock;
+  for (const tab of document.querySelectorAll('[data-req-tab]')) {
+    tab.onclick = async () => {
+      req.tab = tab.dataset.reqTab;
+      if (req.tab === 'mine') await loadMyRequests();
+      renderRestock();
+    };
   }
 
   $('btn-new-sale').onclick = openSale;

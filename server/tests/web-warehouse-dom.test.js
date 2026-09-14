@@ -37,10 +37,29 @@ function idsQueBusca(fuente) {
   return [...ids];
 }
 
+/**
+ * Los `id` que el propio controlador crea en sus plantillas.
+ *
+ * La captura de una entrada en lote (migración 022) se pinta desde JavaScript, así
+ * que sus `id` no están en `almacen.html` y no por eso faltan. Lo que sí es un error
+ * —y es lo que esta prueba persigue— es un `$('algo')` que no existe en ninguno de
+ * los dos sitios: eso no falla al cargar la página, falla cuando el almacenista ya
+ * tiene el camión enfrente.
+ */
+function idsQueCrea(fuente) {
+  const ids = new Set();
+  const re = /id="([a-z0-9-]+)"/g;
+  let m = re.exec(fuente);
+  while (m) { ids.add(m[1]); m = re.exec(fuente); }
+  return ids;
+}
+
 describe('el controlador y el HTML se encuentran', () => {
-  it('cada id que busca warehouse-screen.js existe en almacen.html', () => {
+  it('cada id que busca warehouse-screen.js existe en almacen.html o lo crea él mismo', () => {
     const doc = documento();
-    const faltantes = idsQueBusca(controlador).filter((id) => !doc.getElementById(id));
+    const creados = idsQueCrea(controlador);
+    const faltantes = idsQueBusca(controlador)
+      .filter((id) => !doc.getElementById(id) && !creados.has(id));
     expect(faltantes).toEqual([]);
   });
 
@@ -62,10 +81,12 @@ describe('el controlador y el HTML se encuentran', () => {
     expect(doc.getElementById('screen-auth').hasAttribute('hidden')).toBe(false);
   });
 
-  it('están las tres pestañas y la de existencias es la que abre', () => {
+  it('están las cinco pestañas y la de existencias es la que abre', () => {
     const doc = documento();
     const tabs = [...doc.querySelectorAll('[data-tab]')].map((t) => t.dataset.tab);
-    expect(tabs).toEqual(['stock', 'restock', 'kardex']);
+    // `entrada` y `pedidos` llegaron con la migración 022. El orden importa: lo
+    // primero que se ve es qué hay, y lo segundo es meter lo que acaba de llegar.
+    expect(tabs).toEqual(['stock', 'entrada', 'pedidos', 'restock', 'kardex']);
     expect(doc.querySelector('.tab.active').dataset.tab).toBe('stock');
   });
 

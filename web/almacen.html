@@ -148,6 +148,12 @@
       <button class="tab active flex-1 py-3" data-tab="stock">
         <span data-i18n="wh.tabStock">Existencias</span><span class="tab-count" id="count-stock">0</span>
       </button>
+      <button class="tab flex-1 py-3" data-tab="entrada">
+        <span data-i18n="wh.tabEntry">Entrada</span><span class="tab-count" id="count-entry">0</span>
+      </button>
+      <button class="tab flex-1 py-3" data-tab="pedidos">
+        <span data-i18n="wh.tabRequests">Pedidos</span><span class="tab-count" id="count-requests">0</span>
+      </button>
       <button class="tab flex-1 py-3" data-tab="restock">
         <span data-i18n="wh.tabRestock">Surtir</span><span class="tab-count" id="count-restock">0</span>
       </button>
@@ -156,7 +162,10 @@
       </button>
     </nav>
 
-    <div class="px-4 py-3">
+    <!-- El buscador no aplica a la captura de una entrada ni a la bandeja de
+         pedidos: ahí el buscador vive dentro de cada renglón. Se esconde en vez de
+         dejarlo filtrando algo que no se está viendo. -->
+    <div class="px-4 py-3" id="search-wrap">
       <input id="search" type="search" class="field" placeholder="Buscar insumo…" data-i18n-placeholder="wh.search">
     </div>
 
@@ -214,6 +223,54 @@
     </div>
   </section>
 
+  <!-- ============ PROVEEDOR NUEVO (hoja inferior) ============
+       Solo gerencia. Un proveedor nuevo es una decisión de compras: quien recibe
+       mercancía no debería poder inventarse el origen de una caja para
+       justificarla. El servidor lo exige igual; esto solo esconde el botón. -->
+  <section id="sheet-supplier" class="fixed bottom-0 left-0 right-0 z-40 sheet rounded-t-2xl px-4 pt-3 pb-6 max-w-3xl mx-auto max-h-[88vh] overflow-y-auto" hidden>
+    <div class="flex items-start justify-between mb-3">
+      <h3 class="font-display text-lg" data-i18n="wh.newSupplier">Proveedor nuevo</h3>
+      <button id="supplier-close" class="text-white/50 px-2" aria-label="Cerrar">✕</button>
+    </div>
+    <form id="form-supplier" class="space-y-3">
+      <div>
+        <label class="text-xs text-white/50" data-i18n="wh.supplierName">Nombre</label>
+        <input id="supplier-name" type="text" maxlength="120" required class="field">
+      </div>
+      <div>
+        <label class="text-xs text-white/50" data-i18n="wh.supplierContact">Contacto</label>
+        <input id="supplier-contact" type="text" maxlength="120" class="field">
+      </div>
+      <div>
+        <label class="text-xs text-white/50" data-i18n="wh.supplierPhone">Teléfono</label>
+        <input id="supplier-phone" type="tel" maxlength="30" class="field">
+      </div>
+      <p id="supplier-error" class="text-sm text-red-300" hidden></p>
+      <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="wh.save">Registrar</button>
+    </form>
+  </section>
+
+  <!-- ============ SURTIR UN PEDIDO (hoja inferior) ============
+       Nace con lo que FALTA de cada renglón, no con lo pedido: un pedido a medias
+       se termina de surtir, no se vuelve a mandar completo. -->
+  <section id="sheet-fulfill" class="fixed bottom-0 left-0 right-0 z-40 sheet rounded-t-2xl px-4 pt-3 pb-6 max-w-3xl mx-auto max-h-[88vh] overflow-y-auto" hidden>
+    <div class="flex items-start justify-between mb-2">
+      <div>
+        <h3 class="font-display text-lg" data-i18n="wh.fulfillTitle">Surtir pedido</h3>
+        <p id="fulfill-bar" class="text-xs text-white/50">—</p>
+      </div>
+      <button id="fulfill-close" class="text-white/50 px-2" aria-label="Cerrar">✕</button>
+    </div>
+    <div>
+      <label class="text-xs text-white/50" data-i18n="wh.fulfillFrom">Surtir desde</label>
+      <select id="fulfill-from" class="field"></select>
+    </div>
+    <div id="fulfill-lines" class="space-y-2 mt-3"></div>
+    <div id="fulfill-preview" class="text-sm text-white/70 card rounded-xl px-3 py-2 mt-3"></div>
+    <p id="fulfill-error" class="text-sm text-red-300 mt-2" hidden></p>
+    <button id="fulfill-submit" class="ev2-button w-full py-3 rounded-xl font-display mt-3" data-i18n="wh.fulfillSend">Surtir</button>
+  </section>
+
   <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50" hidden></div>
 </div>
 
@@ -222,6 +279,7 @@
 <script src="js/roles.js"></script>
 <script src="js/password-gate.js"></script>
 <script src="js/warehouse.js"></script>
+<script src="js/receiving.js"></script>
 <script src="js/warehouse-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>
