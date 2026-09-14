@@ -459,3 +459,53 @@ describe('Guardar una receta', () => {
       .toEqual({ items: [{ supply_id: 'a', quantity: 30 }] });
   });
 });
+
+describe('el anticipo de una noche, desde la pantalla del gerente', () => {
+  const base = {
+    name: 'Sabado', event_date: '2026-12-31',
+    doors_open_at: '2026-12-31T22:00', ticket_price: '150', currency: 'MXN',
+  };
+
+  it('vacio NO se manda: significa "usa el del club"', () => {
+    // Mandar un 0 en su lugar convertiria cada noche normal en una noche que se
+    // aparta gratis. Es el error que cuesta dinero.
+    for (const vacio of ['', '   ', null, undefined]) {
+      const body = M.nightPayload({ ...base, deposit_pct: vacio });
+      expect({ vacio, tiene: 'deposit_pct' in body }).toEqual({ vacio, tiene: false });
+    }
+  });
+
+  it('un numero si se manda, como numero', () => {
+    expect(M.nightPayload({ ...base, deposit_pct: '100' }).deposit_pct).toBe(100);
+    expect(M.nightPayload({ ...base, deposit_pct: 10 }).deposit_pct).toBe(10);
+  });
+
+  it('el CERO se manda: es una noche que se aparta sin cobrar', () => {
+    const body = M.nightPayload({ ...base, deposit_pct: '0' });
+    expect(body.deposit_pct).toBe(0);
+  });
+
+  it('vacio es valido: el campo es opcional', () => {
+    const ayer = new Date('2026-01-01');
+    for (const vacio of ['', undefined, null]) {
+      const errores = M.validateNight({ ...base, deposit_pct: vacio }, ayer);
+      expect(errores.deposit_pct).toBeUndefined();
+    }
+  });
+
+  it('un porcentaje imposible se detiene ANTES de mandarlo', () => {
+    const ayer = new Date('2026-01-01');
+    for (const malo of ['101', '-5', 'muchos', '1000']) {
+      const errores = M.validateNight({ ...base, deposit_pct: malo }, ayer);
+      expect({ malo, error: errores.deposit_pct }).toEqual({ malo, error: 'night.errDeposit' });
+    }
+  });
+
+  it('0 y 100 son los limites y los dos pasan', () => {
+    const ayer = new Date('2026-01-01');
+    for (const bueno of ['0', '100', 50]) {
+      const errores = M.validateNight({ ...base, deposit_pct: bueno }, ayer);
+      expect({ bueno, error: errores.deposit_pct }).toEqual({ bueno, error: undefined });
+    }
+  });
+});

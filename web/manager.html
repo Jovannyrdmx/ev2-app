@@ -229,9 +229,23 @@
               <p class="field-error" data-error="closes_at" hidden></p>
             </div>
           </div>
-          <div>
-            <label class="label" for="n-deadline" data-i18n="night.deadline">Minutos para llegar antes de soltar la mesa</label>
-            <input id="n-deadline" type="number" min="15" max="720" step="15" class="field" value="180">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label" for="n-deadline" data-i18n="night.deadline">Minutos para llegar antes de soltar la mesa</label>
+              <input id="n-deadline" type="number" min="15" max="720" step="15" class="field" value="180">
+            </div>
+            <div>
+              <label class="label" for="n-deposit" data-i18n="night.deposit">Anticipo de esta noche (%)</label>
+              <!--
+                Vacio = se usa el anticipo del club. NO es lo mismo que 0: una noche
+                sin nada capturado cobra lo de siempre, y una de 0% se aparta sin
+                cobrar. Por eso el campo nace vacio y no en un numero.
+              -->
+              <input id="n-deposit" type="number" min="0" max="100" step="5" class="field"
+                     placeholder="—" data-i18n-placeholder="night.depositHint">
+              <p id="n-deposit-note" class="text-[11px] text-white/40 mt-1" data-i18n="night.depositNote">Si lo dejas vacío se cobra el anticipo normal del club.</p>
+              <p class="field-error" data-error="deposit_pct" hidden></p>
+            </div>
           </div>
           <div class="grid grid-cols-2 gap-2">
             <button type="button" id="btn-night-cancel" class="card rounded-lg py-2 text-sm" data-i18n="manager.cancel">Cancelar</button>

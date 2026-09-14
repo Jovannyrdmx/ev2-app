@@ -300,6 +300,15 @@
     const price = Number(f.ticket_price);
     if (!Number.isFinite(price) || price < 0) errors.ticket_price = 'night.errPrice';
 
+    // El anticipo de la noche es OPCIONAL: vacio significa "el del club". Solo se
+    // valida cuando el gerente escribio algo, y ahi si tiene que ser un porcentaje
+    // de verdad -- un 150% capturado de prisa se le cobraria a cada mesa.
+    const dep = f.deposit_pct;
+    if (dep !== undefined && dep !== null && String(dep).trim() !== '') {
+      const pct = Number(dep);
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) errors.deposit_pct = 'night.errDeposit';
+    }
+
     return errors;
   }
 
@@ -321,6 +330,13 @@
     }
     const description = String(form.description || '').trim();
     if (description) body.description = description.slice(0, 2000);
+    // El anticipo de la noche solo se manda si el gerente escribio algo. Vacio
+    // quiere decir "usa el del club", y mandar un 0 en su lugar convertiria cada
+    // noche normal en una noche que se aparta gratis.
+    const dep = form.deposit_pct;
+    if (dep !== undefined && dep !== null && String(dep).trim() !== '') {
+      body.deposit_pct = Number(dep);
+    }
     return body;
   }
 

@@ -835,7 +835,7 @@
 
   const NIGHT_FIELDS = {
     name: 'n-name', event_date: 'n-date', doors_open_at: 'n-doors',
-    closes_at: 'n-closes', ticket_price: 'n-price',
+    closes_at: 'n-closes', ticket_price: 'n-price', deposit_pct: 'n-deposit',
   };
 
   function clearNightErrors() {
@@ -869,6 +869,9 @@
       closes_at: $('n-closes').value,
       ticket_price: $('n-price').value,
       arrival_deadline_minutes: $('n-deadline').value,
+      // Vacio se manda como vacio, no como cero: `nightPayload` decide que eso
+      // significa "usa el anticipo del club" y ni siquiera manda el campo.
+      deposit_pct: $('n-deposit').value,
       currency: state.currency,
     };
     const errors = EV2Manager.validateNight(form, new Date());
@@ -880,6 +883,7 @@
       $('night-form').reset();
       $('n-deadline').value = '180';
       $('n-price').value = '0';
+      $('n-deposit').value = '';
       $('night-form').hidden = true;
       toast(t('night.created'), 'ok');
       await loadAll();

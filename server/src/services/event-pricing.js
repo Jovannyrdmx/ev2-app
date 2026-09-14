@@ -22,8 +22,11 @@ const { ApiError } = require('../middleware/errors');
  */
 async function getEventPricing({ nightclubId, eventId, runner = pool }) {
   const event = await runner.query(
+    // `deposit_pct` va aquí a proposito: sin el, el `event` que sale de esta
+    // funcion no lo trae y la sobrescritura de la noche se ignora EN SILENCIO --
+    // la cotizacion cobraria el anticipo del club y nadie se enteraria.
     `SELECT id, name, event_date, doors_open_at, closes_at, ticket_price, currency,
-            arrival_deadline_minutes, status
+            arrival_deadline_minutes, status, deposit_pct
        FROM events_calendar WHERE id = $1 AND nightclub_id = $2`,
     [eventId, nightclubId],
   );
@@ -124,4 +127,32 @@ function round(n) {
   return Number(Number(n).toFixed(2));
 }
 
-module.exports = { getEventPricing, zoneFor, quote, arrivalDeadline, round };
+/**
+ * El anticipo que le toca a una noche, en por ciento.
+ *
+ * La noche manda sobre la regla del club: un 31 de diciembre puede pedir el 100%
+ * y un martes de temporada baja el 10%, sin mover la lista vigente ni tener que
+ * acordarse de volverla a poner (migración 020).
+ *
+ * `null` en el evento significa "usa la regla del club", NO "cero por ciento".
+ * Distinguir esas dos cosas es todo el punto de la columna: confundirlas
+ * regala mesas, porque una noche sin nada especial pasaría a apartarse gratis.
+ * De ahí el `== null` en vez de un `||`: con `||`, un 0 legítimamente capturado
+ * por el gerente —"esta noche se aparta sin anticipo"— se caería a la regla del
+ * club y cobraría el 30%.
+ */
+function depositPctFor(event, rules) {
+  const delEvento = event && event.deposit_pct;
+  if (delEvento != null && delEvento !== '') return Number(delEvento);
+  const delClub = rules && rules.deposit_pct;
+  return delClub == null ? 0 : Number(delClub);
+}
+
+/** El monto del anticipo de un total, con el porcentaje que le toca a esa noche. */
+function depositFor(total, event, rules) {
+  return round(Number(total) * depositPctFor(event, rules) / 100);
+}
+
+module.exports = {
+  getEventPricing, zoneFor, quote, arrivalDeadline, round, depositPctFor, depositFor,
+};

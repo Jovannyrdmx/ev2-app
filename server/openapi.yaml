@@ -7387,6 +7387,13 @@ components:
         currency: { $ref: '#/components/schemas/Currency' }
         arrival_deadline_minutes: { type: integer }
         arrival_deadline: { type: string, format: date-time }
+        deposit_pct:
+          type: [number, 'null']
+          description: |
+            El anticipo de ESTA noche, en por ciento. `null` significa que se usa el
+            del club (`reservation_rules.deposit_pct`), y es distinto de `0`, que
+            significa que esta noche se aparta sin cobrar nada.
+
         status: { type: string, enum: [draft, published, cancelled, finished] }
         description: { type: [string, 'null'] }
         cover_image_url: { type: [string, 'null'] }
@@ -7414,6 +7421,22 @@ components:
           maximum: 720
           default: 180
           description: Minutos desde la apertura para llegar; despues la mesa se libera sin reembolso.
+        deposit_pct:
+          type: [number, 'null']
+          minimum: 0
+          maximum: 100
+          description: |
+            Sobrescribe el anticipo del club **solo para esta noche** (migración 020):
+            un 31 de diciembre puede pedir el 100% -- una mesa que se cae esa noche no
+            se vuelve a vender -- y un martes de temporada baja el 10%, sin mover la
+            lista vigente ni tener que acordarse de volverla a poner.
+
+            Omitirlo, o mandarlo como `null`, devuelve la noche al anticipo del club.
+            Eso **no** es lo mismo que `0`: cero es una noche que se aparta sin cobrar.
+
+            El monto se congela en la reservación al reservar, así que cambiarlo
+            después no altera lo ya vendido; cuando hay mesas apartadas, la respuesta
+            del PATCH lo avisa en la cabecera `X-Warning`.
         status: { type: string, enum: [draft, published, cancelled], default: draft }
         description: { type: string, maxLength: 2000 }
         cover_image_url: { type: string, format: uri, maxLength: 500 }

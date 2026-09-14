@@ -117,7 +117,9 @@ describe('Eventos', () => {
     const res = await api().patch(url(`/events/${ev.body.event.id}`)).set(auth(manager))
       .send({ ticket_price: 999 });
     expect(res.status).toBe(200);
-    expect(res.headers['x-warning']).toMatch(/keep the price agreed/);
+    // El aviso ahora nombra tambien el anticipo: los dos se congelan en la
+    // reservacion, y cambiar cualquiera de los dos no toca lo ya vendido.
+    expect(res.headers['x-warning']).toMatch(/keep the price and deposit agreed/);
   });
 
   it('no borra un evento con reservaciones activas', async () => {

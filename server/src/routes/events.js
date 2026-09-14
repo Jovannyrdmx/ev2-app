@@ -19,6 +19,8 @@ router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
 const EVENT_SELECT = `
   SELECT e.id, e.name, e.slug, e.event_date, e.doors_open_at, e.closes_at,
          e.ticket_price, e.currency, e.arrival_deadline_minutes, e.status,
+         -- El anticipo de ESTA noche. NULL = se usa la regla del club.
+         e.deposit_pct,
          e.description, e.cover_image_url, e.created_at, e.updated_at,
          (e.doors_open_at + make_interval(mins => e.arrival_deadline_minutes)) AS arrival_deadline,
          COALESCE(r.reservations, 0)::int AS reservations_count,
@@ -87,6 +89,10 @@ const eventBody = z.object({
   ticket_price: z.number().min(0),
   currency: currency.default('MXN'),
   arrival_deadline_minutes: z.number().int().min(15).max(720).default(180),
+  // El anticipo de esta noche. `null` lo devuelve a la regla del club, y es
+  // distinto de 0 ("esta noche se aparta sin anticipo"): por eso es nullable y
+  // no solo opcional.
+  deposit_pct: z.number().min(0).max(100).nullable().optional(),
   status: z.enum(['draft', 'published', 'cancelled']).default('draft'),
   description: z.string().trim().max(2000).optional(),
   cover_image_url: z.string().url().max(500).optional(),
@@ -104,11 +110,12 @@ router.post('/nightclubs/:nightclubId/events',
       const { rows } = await pool.query(
         `INSERT INTO events_calendar (nightclub_id, name, slug, event_date, doors_open_at, closes_at,
                                       ticket_price, currency, arrival_deadline_minutes, status,
-                                      description, cover_image_url, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+                                      description, cover_image_url, deposit_pct, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
         [req.params.nightclubId, b.name, slugify(b.name), b.event_date, b.doors_open_at,
           b.closes_at || null, b.ticket_price, b.currency, b.arrival_deadline_minutes,
-          b.status, b.description || null, b.cover_image_url || null, req.user.id],
+          b.status, b.description || null, b.cover_image_url || null,
+          b.deposit_pct === undefined ? null : b.deposit_pct, req.user.id],
       );
       const full = await pool.query(`${EVENT_SELECT} WHERE e.id = $1`, [rows[0].id]);
       res.status(201).json({ event: full.rows[0] });
@@ -131,20 +138,35 @@ router.patch('/nightclubs/:nightclubId/events/:eventId',
     if (fields.length === 0) throw ApiError.badRequest('No fields to update');
 
     const current = await pool.query(
-      'SELECT status, ticket_price FROM events_calendar WHERE id = $1 AND nightclub_id = $2',
+      'SELECT status, ticket_price, deposit_pct FROM events_calendar WHERE id = $1 AND nightclub_id = $2',
       [req.params.eventId, req.params.nightclubId]);
     if (current.rowCount === 0) throw ApiError.notFound('Event not found');
 
-    // Changing the ticket price after people have booked would not change what they were
-    // charged (prices are frozen on the reservation), so warn instead of silently allowing it.
-    if (req.body.ticket_price !== undefined
-        && Number(req.body.ticket_price) !== Number(current.rows[0].ticket_price)) {
+    // Changing the ticket price or the deposit after people have booked would not change
+    // what they were charged -- both are frozen onto the reservation -- so warn instead of
+    // silently allowing it. The deposit matters as much as the price here: a manager who
+    // raises it from 30% to 100% for a big night would otherwise assume the twelve tables
+    // already sold now owe the full amount, and they do not.
+    // Comparacion NUMERICA, no de cadenas: Postgres devuelve NUMERIC(5,2) como
+    // '30.00' y el cuerpo trae 30, asi que compararlos como texto avisaba de un
+    // cambio que no ocurrio -- y un aviso que sale siempre es un aviso que nadie
+    // lee. `null` se compara aparte porque "sin anticipo propio" y "0%" son cosas
+    // distintas y ninguna es la otra.
+    const cambia = (campo) => {
+      if (req.body[campo] === undefined) return false;
+      const nuevo = req.body[campo];
+      const viejo = current.rows[0][campo];
+      if (nuevo == null || viejo == null) return (nuevo == null) !== (viejo == null);
+      return Number(nuevo) !== Number(viejo);
+    };
+    if (cambia('ticket_price') || cambia('deposit_pct')) {
       const booked = await pool.query(
         `SELECT count(*)::int AS n FROM reservations
           WHERE event_id = $1 AND status IN ('pending_payment','confirmed','seated')`,
         [req.params.eventId]);
       if (booked.rows[0].n > 0) {
-        res.set('X-Warning', `${booked.rows[0].n} reservation(s) keep the price agreed at booking`);
+        res.set('X-Warning',
+          `${booked.rows[0].n} reservation(s) keep the price and deposit agreed at booking`);
       }
     }
 

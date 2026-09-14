@@ -213,7 +213,7 @@ router.get('/nightclubs/:nightclubId/reservations/availability',
         price: quote.subtotal,
         extra_guests: quote.extra_guests,
         extras_total: quote.extras_total,
-        deposit: eventPricing.round(quote.subtotal * Number(rules.deposit_pct) / 100),
+        deposit: eventPricing.depositFor(quote.subtotal, event, rules),
         currency: quote.currency,
       });
     }
@@ -226,7 +226,9 @@ router.get('/nightclubs/:nightclubId/reservations/availability',
         arrival_deadline: eventPricing.arrivalDeadline(event).toISOString(),
       },
       guests,
-      deposit_pct: Number(rules.deposit_pct),
+      // El de la NOCHE, no el del club: es el que se le va a cobrar y el que la
+      // pantalla tiene que enseñar.
+      deposit_pct: eventPricing.depositPctFor(event, rules),
       tables,
     });
   }));
@@ -325,8 +327,8 @@ async function buildQuote(nightclubId, body, runner = pool) {
     addons,
     discount,
     total,
-    deposit: eventPricing.round(total * Number(rules.deposit_pct) / 100),
-    deposit_pct: Number(rules.deposit_pct),
+    deposit: eventPricing.depositFor(total, event, rules),
+    deposit_pct: eventPricing.depositPctFor(event, rules),
     arrival_deadline: eventPricing.arrivalDeadline(event).toISOString(),
     rules,
     _event: event,
