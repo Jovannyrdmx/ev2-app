@@ -1381,6 +1381,353 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  # ==========================================================================
+  # El corte de la noche y el rol (migración 023)
+  #
+  # Dos cosas que el gerente no podía hacer y son la mitad de su trabajo.
+  #
+  # **El corte** tiene dos formas y la diferencia es todo el punto: `/stats` se
+  # calcula al pedirlo y se mueve durante la noche (el gerente lo mira desde el
+  # teléfono a la una de la mañana); `/close` lo CONGELA. Un reporte que cambia solo
+  # no sirve para comparar dos viernes ni para discutir una cifra con nadie.
+  #
+  # La venta sale de **nuestro POS** (`drink_orders` y `transactions`): el dueño
+  # decidió no hacer la integración con SoftRestaurant por ahora, así que el total
+  # del corte es el total real del club y no una parte.
+  #
+  # **El rol** invierte quién manda: `shift_assignments` es lo que el gerente
+  # planeó, `staff_shifts` es quién de verdad llegó. Son dos tablas a propósito —
+  # si asignar abriera el turno, el sistema diría que alguien está trabajando
+  # cuando todavía viene en camino.
+  # ==========================================================================
+
+  /api/nightclubs/{nightclubId}/nights/{eventId}/stats:
+    get:
+      operationId: getNightclubsByNightclubIdNightsByEventIdStats
+      tags: [Eventos y precios]
+      summary: Cómo va (o cómo salió) una noche
+      description: |
+        Solo gerencia: es información del negocio —cuánto se vendió, qué zona no se
+        llenó, cuánto producto se fue sin venderse— y no tiene por qué verla el piso.
+
+        Se **calcula al pedirlo**, así que durante la noche cambia a cada rato. Eso es
+        lo que se quiere aquí; el corte guardado es `/closing`.
+
+        Tres cosas que este reporte NO hace, y son las que lo vuelven creíble:
+
+        - **Cancelado no es vendido, y no-show no es ocupado.** Una reservación
+          cancelada no cuenta como mesa usada aunque exista la fila; un pedido
+          cancelado no cuenta como venta aunque tenga subtotal.
+        - **Las propinas no son ingreso del club.** Viajan en
+          `revenue.tips_not_club_revenue`, con ese nombre, para que nadie las sume al
+          total por descuido.
+        - **La merma se valúa al costo.** Valuar una botella rota a precio de trago
+          convierte $900 de pérdida en $6,000. La cortesía va aparte: salió del
+          inventario igual, pero el club la autorizó, y mezclarlas hace que una
+          promoción parezca un robo.
+
+        `closed` viene con fecha cuando la noche ya se cerró: los números de arriba
+        pueden diferir del corte guardado (una propina tardía, un pedido entregado
+        después), y decirlo evita que dos cifras distintas parezcan un error.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: El corte, calculado ahora
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stats: { $ref: '#/components/schemas/NightStats' }
+                  closed:
+                    type: [object, 'null']
+                    properties:
+                      id: { type: string, format: uuid }
+                      closed_at: { type: string, format: date-time }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/nights/{eventId}/close:
+    post:
+      operationId: postNightclubsByNightclubIdNightsByEventIdClose
+      tags: [Eventos y precios]
+      summary: Congelar el corte de una noche
+      description: |
+        Calcula el corte y lo **guarda**. Los números no se recalculan al abrir el
+        reporte: si la semana que viene sube el precio de una botella, o alguien
+        corrige una receta, el corte del viernes sigue diciendo lo que dijo el
+        viernes. Es la misma razón por la que una reservación congela su total al
+        apartarse.
+
+        Una noche se cierra **una vez** (409 la segunda): dos cortes de la misma noche
+        significan que ninguno de los dos es el corte. Y no se puede cerrar una noche
+        que todavía no abrió (422) — sería presentar ceros como hechos.
+
+        El corte guardado es de solo inserción: no se edita ni se borra.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 300 }
+      responses:
+        '201':
+          description: Noche cerrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  closing: { $ref: '#/components/schemas/NightClosing' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Esa noche ya está cerrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: Esa noche todavía no empieza
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/nights/{eventId}/closing:
+    get:
+      operationId: getNightclubsByNightclubIdNightsByEventIdClosing
+      tags: [Eventos y precios]
+      summary: El corte guardado de una noche
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: El corte congelado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  closing: { $ref: '#/components/schemas/NightClosing' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Esa noche todavía no se ha cerrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/nights/closings:
+    get:
+      operationId: getNightclubsByNightclubIdNightsClosings
+      tags: [Eventos y precios]
+      summary: Los cortes guardados, para comparar noches
+      description: |
+        De la noche más reciente hacia atrás. Solo cortes **guardados**: comparar el
+        corte en vivo de hoy con el cerrado del viernes compara media noche contra una
+        completa, y el resultado siempre dice que hoy va peor.
+
+        Y solo entre la misma moneda: sumar pesos con dólares da una diferencia cuatro
+        veces más grande de lo que es.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Cortes guardados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  closings:
+                    type: array
+                    items: { $ref: '#/components/schemas/NightClosing' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/nights/{eventId}/roster:
+    get:
+      operationId: getNightclubsByNightclubIdNightsByEventIdRoster
+      tags: [Empleados]
+      summary: El rol de una noche, y lo que quedó sin nadie
+      description: |
+        `gaps` es la mitad del valor de esto: una zona sin mesero no se nota mirando
+        quién está asignado — se nota mirando lo que falta.
+
+        Cada persona trae `on_shift`, porque **asignado y presente son dos cosas
+        distintas** y esta lista es la única que lo dice. Y `role` es el puesto
+        congelado al asignar: si la persona cambió de puesto desde entonces,
+        `role_changed` lo avisa, pero el rol de aquella noche no cambia.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: El rol
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assigned: { type: integer }
+                  on_shift: { type: integer }
+                  assignable_roles: { type: array, items: { type: string } }
+                  roster:
+                    type: array
+                    items: { $ref: '#/components/schemas/RosterEntry' }
+                  gaps:
+                    type: object
+                    properties:
+                      sections: { type: array, items: { type: string } }
+                      bars:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            location_id: { type: string, format: uuid }
+                            name: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: postNightclubsByNightclubIdNightsByEventIdRoster
+      tags: [Empleados]
+      summary: Poner a alguien en el rol
+      description: |
+        **Solo gerencia**: quién atiende qué zona decide las propinas de la noche, y
+        dejarlo abierto es dejar que se reacomode solo.
+
+        **Asignar no abre el turno.** El empleado marca su entrada al llegar, y por eso
+        se puede ver quién no llegó.
+
+        Cada puesto se asigna a lo que de verdad atiende: un **mesero** o una
+        **hostess** a una `section` del plano, y pueden cubrir **varias**; un
+        **bartender** a una barra (`location_id`), y solo a **una** — nadie atiende dos
+        barras a la vez, y decir que sí es cómo se acaba esperando un trago que nadie
+        está preparando. Los demás puestos no se asignan por noche (422, con la lista
+        de los que sí).
+
+        Es idempotente: asignar dos veces lo mismo devuelve 200 con `already: true`
+        —seguramente se tocó dos veces— sin duplicar a la persona en el rol.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, format: uuid }
+                section:
+                  type: string
+                  maxLength: 40
+                  description: 'Zona del plano. Excluyente con `location_id`.'
+                location_id:
+                  type: string
+                  format: uuid
+                  description: 'Barra. Excluyente con `section`.'
+                note: { type: string, maxLength: 200 }
+      responses:
+        '201':
+          description: Asignado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assignment_id: { type: string, format: uuid }
+                  already: { type: boolean }
+                  roster:
+                    type: array
+                    items: { $ref: '#/components/schemas/RosterEntry' }
+        '200':
+          description: Ya estaba asignado ahí
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assignment_id: { type: string, format: uuid }
+                  already: { type: boolean }
+                  roster: { type: array, items: { type: object } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Ese bartender ya está en otra barra esa noche
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: |
+            La persona está dada de baja, su puesto no se asigna por noche, o la zona no
+            existe en el plano (la respuesta trae las que sí existen).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/roster/{assignmentId}:
+    delete:
+      operationId: deleteNightclubsByNightclubIdRosterByAssignmentId
+      tags: [Empleados]
+      summary: Quitar a alguien de un destino
+      description: |
+        Quita solo ese destino: un mesero con dos zonas se queda con la otra. No cierra
+        el turno de quien ya llegó — lo que ya trabajó esa noche no se borra porque se
+        corrija el rol.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: assignmentId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Quitado del rol }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/roster/mine:
+    get:
+      operationId: getNightclubsByNightclubIdRosterMine
+      tags: [Empleados]
+      summary: A qué quedé asignado
+      description: |
+        Cualquier empleado, **solo lo suyo**. Es lo que ve al llegar, en vez de teclear
+        su zona de memoria — que es cómo alguien acaba cobrando las propinas de otra
+        sección.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: event_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Mis asignaciones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assignments:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        event_id: { type: string, format: uuid }
+                        event_name: { type: string }
+                        event_date: { type: string, format: date }
+                        doors_open_at: { type: string, format: date-time }
+                        section: { type: [string, 'null'] }
+                        location_id: { type: [string, 'null'], format: uuid }
+                        location_name: { type: [string, 'null'] }
+                        note: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /api/nightclubs/{nightclubId}/events:
     get:
       operationId: getNightclubsByNightclubIdEvents
@@ -10142,6 +10489,161 @@ components:
           type: [string, 'null']
           format: uuid
           description: El pedido de barra que originó este traspaso, cuando lo hubo.
+
+    NightStats:
+      type: object
+      description: |
+        Cómo va (o cómo salió) una noche, calculado al pedirlo. Las propinas viajan
+        aparte con un nombre que lo grita: no son ingreso del club.
+      properties:
+        event:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            event_date: { type: string, format: date }
+            doors_open_at: { type: string, format: date-time }
+            closes_at: { type: [string, 'null'], format: date-time }
+            status: { type: string }
+            ticket_price: { type: number }
+        window:
+          description: 'De que abren puertas a que cierra. Sin hora de cierre, 12 horas: así un pedido de las 3 a.m. cuenta en la noche del viernes.'
+          type: object
+          properties:
+            from: { type: string, format: date-time }
+            to: { type: string, format: date-time }
+        currency: { type: string }
+        revenue:
+          type: object
+          properties:
+            total: { type: number, description: 'Mesas + barra + puerta. SIN propinas.' }
+            tables: { type: number }
+            bar: { type: number }
+            door: { type: number }
+            deposits: { type: number }
+            refunds: { type: number }
+            tips_not_club_revenue:
+              type: number
+              description: 'Las propinas, aparte y con este nombre para que nadie las sume al total.'
+        attendance:
+          type: object
+          properties:
+            total: { type: integer }
+            door: { type: integer }
+            table_guests: { type: integer }
+        reservations:
+          type: object
+          properties:
+            booked: { type: integer }
+            arrived: { type: integer }
+            no_show: { type: integer }
+            cancelled: { type: integer }
+            guests_arrived: { type: integer }
+            revenue: { type: number }
+            deposits: { type: number }
+            refunds: { type: number }
+        tables:
+          type: object
+          properties:
+            total: { type: integer }
+            used: { type: integer }
+            occupancy: { type: integer }
+        zones:
+          description: 'TODAS las zonas del plano, incluidas las que no vendieron nada: la que no sale del reporte es la que nadie se acuerda de preguntar.'
+          type: array
+          items:
+            type: object
+            properties:
+              section: { type: string }
+              tables_total: { type: integer }
+              tables_used: { type: integer }
+              guests: { type: integer }
+              revenue: { type: number }
+              no_show: { type: integer }
+              occupancy: { type: integer }
+        bar:
+          type: object
+          properties:
+            orders: { type: integer, description: 'Solo los entregados.' }
+            revenue: { type: number }
+            cancelled: { type: integer }
+            cancelled_value: { type: number }
+            by_category: { type: array, items: { type: object } }
+            by_bar:
+              description: 'De qué estante salió el producto, al costo. Sale del kardex, no del pedido.'
+              type: array
+              items: { type: object }
+        door: { type: object }
+        tips: { type: object }
+        shrinkage:
+          type: object
+          description: 'Al costo, nunca al precio de venta. La cortesía va aparte: el club la autorizó.'
+          properties:
+            value: { type: number, description: 'Faltante del conteo + merma. Sin cortesías.' }
+            counted: { type: number }
+            waste: { type: number }
+            courtesy: { type: number }
+        staff:
+          type: object
+          properties:
+            assigned: { type: integer }
+            showed_up: { type: integer, description: 'Asignado y presente son dos cosas distintas.' }
+            people: { type: array, items: { type: object } }
+        per_person: { type: number, description: 'Ticket por persona que entró. 0 sin asistencia, no infinito.' }
+
+    NightClosing:
+      type: object
+      description: |
+        El corte de una noche, congelado al cerrar. Solo inserción: no se edita ni se
+        borra, porque un corte editable no sirve para discutir una cifra con nadie.
+      properties:
+        id: { type: string, format: uuid }
+        event_id: { type: string, format: uuid }
+        event_name: { type: string }
+        event_date: { type: string, format: date }
+        currency: { type: string }
+        revenue_total: { type: number }
+        revenue_bar: { type: number }
+        revenue_door: { type: number }
+        revenue_tables: { type: number }
+        tips_total: { type: number }
+        attendance: { type: integer }
+        reservations_booked: { type: integer }
+        reservations_arrived: { type: integer }
+        reservations_no_show: { type: integer }
+        tables_total: { type: integer }
+        tables_used: { type: integer }
+        orders_count: { type: integer }
+        shrinkage_value: { type: number }
+        detail:
+          type: object
+          description: 'Los bloques de largo variable (zonas, categorías, barras, rol) tal como se vieron al cerrar.'
+        closed_by: { type: [string, 'null'], format: uuid }
+        closed_by_name: { type: [string, 'null'] }
+        closed_at: { type: string, format: date-time }
+        note: { type: [string, 'null'] }
+
+    RosterEntry:
+      type: object
+      description: Una persona en el rol de una noche, con todos sus destinos.
+      properties:
+        user_id: { type: string, format: uuid }
+        display_name: { type: string }
+        role: { type: string, description: 'El puesto CONGELADO al asignar.' }
+        current_role: { type: string }
+        role_changed: { type: boolean, description: 'La persona cambió de puesto desde que se le asignó.' }
+        on_shift: { type: boolean, description: 'Marcó entrada. Asignado no es presente.' }
+        started_at: { type: [string, 'null'], format: date-time }
+        targets:
+          type: array
+          items:
+            type: object
+            properties:
+              assignment_id: { type: string, format: uuid }
+              section: { type: [string, 'null'] }
+              location_id: { type: [string, 'null'], format: uuid }
+              location_name: { type: [string, 'null'] }
+              note: { type: [string, 'null'] }
 
     Supplier:
       type: object

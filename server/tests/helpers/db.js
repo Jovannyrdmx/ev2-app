@@ -14,6 +14,7 @@ const DATA_TABLES = [
   'reservation_addons', 'reservations', 'reservation_discounts', 'reservation_rules',
   'drink_order_items', 'drink_orders', 'supply_movements', 'supply_stock', 'drink_supplies',
   'bar_request_lines', 'bar_requests', 'supply_suppliers', 'suppliers',
+  'night_closings', 'shift_assignments',
   'supplies', 'supply_locations', 'zone_bars', 'delivery_points', 'drinks',
   'flirt_reactions', 'flirts', 'user_blocks', 'user_reports', 'user_preferences',
   'table_occupants', 'tables', 'pricing_rules', 'pos_sync_log', 'pos_integrations',

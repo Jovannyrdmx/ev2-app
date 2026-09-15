@@ -5,7 +5,8 @@
  * y `EV2Roles`. Cubre lo que el dueño dejó para configurar después: conductores, zonas y
  * tarifas del taxi, y los cajones del estacionamiento — más el resumen del turno.
  */
-/* global EV2, EV2Format, EV2Manager, EV2Warehouse, EV2Roles, EV2PasswordGate, EV2StaffAdmin, EV2Payouts */
+/* global EV2, EV2Format, EV2Manager, EV2Warehouse, EV2Roles, EV2PasswordGate, EV2StaffAdmin,
+   EV2Payouts, EV2NightReport, EV2Roster */
 (function () {
   'use strict';
 
@@ -36,6 +37,12 @@
     invLoaded: false,
     invView: 'stock', invSearch: '',
     recipe: null,   // { drink_id, name, price, lines: [{supply_id, quantity}] }
+    // El corte de la noche y el rol. `closings` son los cortes GUARDADOS, los
+    // unicos que se pueden comparar entre si.
+    closings: [],
+    cut: null,      // { night, stats, closed }
+    roster: null,   // { night, roster, gaps, sections, bars }
+    pick: null,     // { section } o { locationId, name }
     realtime: null, busy: false,
   };
   const secret = EV2Manager.createSecretBox();
@@ -210,6 +217,9 @@
       get(`/nightclubs/${club}/supplies`, (d) => { state.supplies = d.supplies || []; }),
       get(`/nightclubs/${club}/recipes`, (d) => { state.recipes = d.recipes || []; }),
       get(`/nightclubs/${club}/supply-movements?limit=60`, (d) => { state.movements = d.movements || []; }),
+      // Los cortes guardados. Van en el mismo lote porque el comparador vive en la
+      // pestana de noches y tiene que estar listo cuando el gerente la abre.
+      get(`/nightclubs/${club}/nights/closings?limit=30`, (d) => { state.closings = d.closings || []; }),
     ]);
     state.invLoaded = true;
     // Las cuentas por verificar se piden por empleado: no hay un listado del club, y
@@ -793,8 +803,443 @@
       if (actions.canDelete) {
         add('night.delete', 'card rounded-lg px-3 py-2 text-sm text-red-300', (b) => deleteNight(night, b));
       }
+      // El corte y el rol viven en la noche a la que pertenecen, no en una pestaña
+      // aparte: el gerente piensa "cómo salió el viernes", no "abre el reporte".
+      add('cut.open', 'card rounded-lg px-3 py-2 text-sm flex-1', () => openCut(night));
+      add('roster.open', 'card rounded-lg px-3 py-2 text-sm flex-1', () => openRoster(night));
+
       if (row.children.length) card.appendChild(row);
       box.appendChild(card);
+    }
+    renderCompare();
+  }
+
+  // ==================================================== el corte de la noche
+
+  async function openCut(night) {
+    state.cut = { night, stats: null, closed: null };
+    $('cut-night').textContent = `${night.name} · ${String(night.event_date).slice(0, 10)}`;
+    $('cut-body').innerHTML = `<p class="text-white/40 text-sm py-8 text-center">${escape(t('manager.loading'))}</p>`;
+    $('cut-error').hidden = true;
+    $('cut-note').value = '';
+    $('cut-sheet').hidden = false;
+
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/nights/${night.id}/stats`);
+      state.cut.stats = data.stats;
+      state.cut.closed = data.closed;
+    } catch (err) {
+      showError(err, $('cut-error'));
+      $('cut-body').innerHTML = '';
+      return;
+    }
+    renderCut();
+  }
+
+  function closeCut() {
+    state.cut = null;
+    $('cut-sheet').hidden = true;
+  }
+
+  function renderCut() {
+    const c = state.cut;
+    if (!c || !c.stats) return;
+    const s = c.stats;
+    const cur = s.currency;
+    const cabeza = EV2NightReport.headline(s);
+    const avisos = EV2NightReport.flags(s);
+    const zonas = EV2NightReport.zonesByRevenue(s);
+    const cats = EV2NightReport.topCategories(s);
+
+    const tile = (valor, etiqueta) => `
+      <div class="stat-card">
+        <div class="stat-number">${escape(valor)}</div>
+        <div class="stat-label">${escape(etiqueta)}</div>
+      </div>`;
+
+    const fila = (izq, der, tono = '') => `
+      <div class="flex justify-between gap-3 text-sm ${tono}">
+        <span class="text-white/60 min-w-0 truncate">${escape(izq)}</span>
+        <span class="shrink-0">${escape(der)}</span>
+      </div>`;
+
+    $('cut-body').innerHTML = `
+      <div class="grid grid-cols-2 gap-2">
+        ${tile(money(cabeza.revenue, cur), t('cut.revenue'))}
+        ${tile(String(cabeza.attendance), t('cut.attendance'))}
+        ${tile(`${cabeza.occupancy}%`, t('cut.occupancy'))}
+        ${tile(money(cabeza.per_person, cur), t('cut.perPerson'))}
+      </div>
+
+      ${avisos.length > 0 ? `
+        <section class="card rounded-xl p-3 space-y-1">
+          <p class="text-xs uppercase tracking-wider text-white/40">${escape(t('cut.watch'))}</p>
+          ${avisos.map((a) => `<p class="text-sm ${
+    a.tone === 'bad' ? 'text-red-300' : a.tone === 'warn' ? 'text-amber-200' : 'text-white/70'
+  }">${escape(flagText(a, cur))}</p>`).join('')}
+        </section>` : ''}
+
+      <section class="card rounded-xl p-3 space-y-1">
+        <p class="text-xs uppercase tracking-wider text-white/40">${escape(t('cut.money'))}</p>
+        ${fila(t('cut.tables'), money(s.revenue.tables, cur))}
+        ${fila(t('cut.bar'), money(s.revenue.bar, cur))}
+        ${fila(t('cut.door'), money(s.revenue.door, cur))}
+        <div class="border-t border-white/10 pt-1 mt-1"></div>
+        ${fila(t('cut.total'), money(s.revenue.total, cur))}
+        ${fila(t('cut.tipsApart'), money(s.revenue.tips_not_club_revenue, cur), 'text-white/40')}
+      </section>
+
+      <section class="card rounded-xl p-3 space-y-1">
+        <p class="text-xs uppercase tracking-wider text-white/40">${escape(t('cut.reservations'))}</p>
+        ${fila(t('cut.booked'), String(s.reservations.booked))}
+        ${fila(t('cut.arrived'), String(s.reservations.arrived))}
+        ${fila(t('cut.noShow'), String(s.reservations.no_show), s.reservations.no_show > 0 ? 'text-amber-200' : '')}
+        ${s.reservations.cancelled > 0 ? fila(t('cut.cancelled'), String(s.reservations.cancelled)) : ''}
+      </section>
+
+      <section class="card rounded-xl p-3 space-y-1">
+        <p class="text-xs uppercase tracking-wider text-white/40">${escape(t('cut.zones'))}</p>
+        ${zonas.map((z) => fila(
+    `${z.section} · ${z.tables_used}/${z.tables_total} (${z.occupancy}%)`,
+    money(z.revenue, cur),
+    z.occupancy < 50 ? 'text-white/50' : '',
+  )).join('')}
+      </section>
+
+      ${cats.length > 0 ? `
+        <section class="card rounded-xl p-3 space-y-1">
+          <p class="text-xs uppercase tracking-wider text-white/40">${escape(t('cut.byCategory'))}</p>
+          ${cats.map((c2) => fila(`${c2.category} · ${c2.units}`, money(c2.revenue, cur))).join('')}
+        </section>` : ''}
+
+      ${(s.bar.by_bar || []).length > 0 ? `
+        <section class="card rounded-xl p-3 space-y-1">
+          <p class="text-xs uppercase tracking-wider text-white/40">${escape(t('cut.byBar'))}</p>
+          ${s.bar.by_bar.map((b) => fila(b.name, t('cut.barCost', { amount: money(b.cost, cur) }))).join('')}
+        </section>` : ''}
+
+      <section class="card rounded-xl p-3 space-y-1">
+        <p class="text-xs uppercase tracking-wider text-white/40">${escape(t('cut.staff'))}</p>
+        ${fila(t('cut.assigned'), String(s.staff.assigned))}
+        ${fila(t('cut.showedUp'), String(s.staff.showed_up),
+    s.staff.showed_up < s.staff.assigned ? 'text-amber-200' : '')}
+        ${(s.tips.by_person || []).slice(0, 5).map((p) => fila(
+    `${p.display_name} · ${t('cut.tips')}`, money(p.total, cur), 'text-white/50',
+  )).join('')}
+      </section>`;
+
+    // El botón de cerrar solo si de verdad se puede: ofrecer uno que va a fallar
+    // es peor que no ofrecerlo.
+    const puede = EV2NightReport.canClose({ stats: s, closed: c.closed });
+    $('btn-cut-save').hidden = !puede.ok;
+    $('cut-note').hidden = !puede.ok;
+    const nota = $('cut-frozen');
+    if (c.closed) {
+      // Los números de arriba son EN VIVO y pueden diferir del corte guardado (una
+      // propina tardía, un pedido que se entregó después). Decirlo evita que dos
+      // cifras distintas parezcan un error del sistema.
+      nota.textContent = t('cut.alreadyClosed', {
+        when: EV2Format.dateTime(c.closed.closed_at),
+      });
+      nota.hidden = false;
+    } else if (!puede.ok) {
+      nota.textContent = t(`cut.cannot.${puede.reason}`);
+      nota.hidden = false;
+    } else {
+      nota.hidden = true;
+    }
+  }
+
+  /** Los avisos del corte, en palabras. Cada uno lleva su número al lado. */
+  function flagText(flag, currency) {
+    if (flag.key === 'no_show') {
+      return t('cut.flag.noShow', {
+        n: flag.count, pct: flag.pct === null ? '—' : `${flag.pct}%`,
+      });
+    }
+    if (flag.key === 'cold_zone') {
+      return t('cut.flag.coldZone', { zone: flag.section, pct: flag.occupancy });
+    }
+    if (flag.key === 'shrinkage') {
+      return t('cut.flag.shrinkage', { amount: money(flag.value, currency) });
+    }
+    if (flag.key === 'cancelled_orders') {
+      return t('cut.flag.cancelled', { n: flag.count, amount: money(flag.value, currency) });
+    }
+    if (flag.key === 'missing_staff') {
+      return t('cut.flag.missingStaff', { n: flag.count, assigned: flag.assigned });
+    }
+    return '';
+  }
+
+  $('btn-cut-close').onclick = closeCut;
+
+  $('btn-cut-save').onclick = async () => {
+    const c = state.cut;
+    if (!c || state.busy) return;
+    if (!window.confirm(t('cut.confirmClose'))) return;
+    state.busy = true;
+    $('btn-cut-save').disabled = true;
+    $('cut-error').hidden = true;
+    try {
+      await api.post(`/nightclubs/${clubId()}/nights/${c.night.id}/close`,
+        { note: $('cut-note').value.trim() || undefined });
+      toast(t('cut.closed'), 'ok');
+      closeCut();
+      await loadAll();
+    } catch (err) {
+      showError(err, $('cut-error'));
+    } finally {
+      state.busy = false;
+      $('btn-cut-save').disabled = false;
+    }
+  };
+
+  // -------------------------------------------------------------- comparar noches
+
+  function renderCompare() {
+    const opciones = EV2NightReport.closingOptions(state.closings);
+    // Con una sola noche cerrada no hay nada que comparar, y el recuadro vacío
+    // solo estorba.
+    $('compare-box').hidden = opciones.length < 2;
+    if (opciones.length < 2) return;
+
+    const pintar = (id, seleccionado) => {
+      $(id).innerHTML = opciones.map((o) => `<option value="${escape(o.event_id)}"
+          ${o.event_id === seleccionado ? 'selected' : ''}>${escape(o.label)}</option>`).join('');
+    };
+    if (!$('compare-a').value) pintar('compare-a', opciones[0].event_id);
+    else pintar('compare-a', $('compare-a').value);
+    if (!$('compare-b').value) pintar('compare-b', opciones[1].event_id);
+    else pintar('compare-b', $('compare-b').value);
+
+    $('compare-a').onchange = renderCompare;
+    $('compare-b').onchange = renderCompare;
+
+    const a = state.closings.find((c) => c.event_id === $('compare-a').value);
+    const b = state.closings.find((c) => c.event_id === $('compare-b').value);
+    const resultado = EV2NightReport.compare(a, b);
+    const caja = $('compare-result');
+
+    if (!resultado) { caja.innerHTML = ''; return; }
+    if (!resultado.comparable) {
+      caja.innerHTML = `<p class="text-sm text-amber-200">${escape(t('cut.notComparable'))}</p>`;
+      return;
+    }
+
+    const CAMPOS = [
+      ['revenue_total', 'cut.total', true],
+      ['attendance', 'cut.attendance', false],
+      ['tables_used', 'cut.tablesUsed', false],
+      ['reservations_no_show', 'cut.noShow', false],
+      ['shrinkage_value', 'cut.shrinkage', true],
+    ];
+    caja.innerHTML = CAMPOS.map(([campo, clave, esDinero]) => {
+      const d = resultado.diff[campo];
+      const signo = d.delta > 0 ? '+' : '';
+      const color = d.delta === 0 ? 'text-white/50'
+        : (campo === 'reservations_no_show' || campo === 'shrinkage_value')
+          ? (d.delta > 0 ? 'text-red-300' : 'text-emerald-300')
+          : (d.delta > 0 ? 'text-emerald-300' : 'text-red-300');
+      const valor = esDinero
+        ? `${signo}${money(d.delta, resultado.currency)}`
+        : `${signo}${d.delta}`;
+      return `<div class="flex justify-between gap-3 text-sm">
+          <span class="text-white/60">${escape(t(clave))}</span>
+          <span class="${color}">${escape(valor)}${d.pct === null ? '' : ` (${signo}${d.pct}%)`}</span>
+        </div>`;
+    }).join('');
+  }
+
+  // ==================================================== el rol de la noche
+
+  async function openRoster(night) {
+    state.roster = { night, roster: [], gaps: { sections: [], bars: [] } };
+    $('roster-night').textContent = `${night.name} · ${String(night.event_date).slice(0, 10)}`;
+    $('roster-error').hidden = true;
+    $('roster-sheet').hidden = false;
+    await reloadRoster();
+  }
+
+  async function reloadRoster() {
+    const r = state.roster;
+    if (!r) return;
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/nights/${r.night.id}/roster`);
+      r.roster = data.roster || [];
+      r.gaps = data.gaps || { sections: [], bars: [] };
+    } catch (err) {
+      showError(err, $('roster-error'));
+      return;
+    }
+    renderRoster();
+  }
+
+  function closeRoster() {
+    state.roster = null;
+    $('roster-sheet').hidden = true;
+  }
+
+  function renderRoster() {
+    const r = state.roster;
+    if (!r) return;
+    const avance = EV2Roster.progress(r);
+    // Todas las zonas del club: las que quedaron sin nadie vienen en `gaps`, y las
+    // que ya tienen gente vienen en el rol. Juntas son el plano completo, así que
+    // una zona vacía no puede desaparecer de la pantalla — que es justo lo que hay
+    // que ver.
+    const zonasConocidas = [...new Set(
+      r.gaps.sections.concat(
+        r.roster.flatMap((p) => (p.targets || []).map((x) => x.section).filter(Boolean)),
+      ),
+    )];
+    const barrasConocidas = r.gaps.bars.concat(
+      r.roster.flatMap((p) => (p.targets || [])
+        .filter((x) => x.location_id)
+        .map((x) => ({ location_id: x.location_id, name: x.location_name }))),
+    );
+    const porDestino = EV2Roster.byTarget({
+      roster: r.roster, sections: zonasConocidas, bars: dedupeBars(barrasConocidas),
+    });
+
+    $('roster-progress').innerHTML = avance.complete
+      ? `<span class="text-emerald-300">${escape(t('roster.complete'))}</span>`
+      : `<span class="text-amber-200">${escape(t('roster.missing', {
+        zones: avance.missing_sections, bars: avance.missing_bars,
+      }))}</span>`;
+
+    const persona = (p) => `
+      <div class="flex items-center justify-between gap-2 text-sm">
+        <span class="min-w-0 truncate">
+          ${escape(p.display_name)}
+          <span class="${p.on_shift ? 'text-emerald-300' : 'text-white/35'} text-[11px]">
+            · ${escape(t(p.on_shift ? 'roster.here' : 'roster.notHere'))}
+          </span>
+        </span>
+        <button class="text-[11px] text-red-300 underline shrink-0"
+                data-unassign="${escape(p.assignment_id)}">${escape(t('roster.remove'))}</button>
+      </div>`;
+
+    const bloque = (titulo, gente, boton) => `
+      <section class="card rounded-xl p-3 space-y-2 ${gente.length === 0 ? 'border-red-400/40' : ''}">
+        <div class="flex items-center justify-between gap-2">
+          <p class="font-display truncate">${escape(titulo)}</p>
+          ${boton}
+        </div>
+        ${gente.length === 0
+    ? `<p class="text-[11px] text-red-300">${escape(t('roster.nobody'))}</p>`
+    : gente.map(persona).join('')}
+      </section>`;
+
+    $('roster-body').innerHTML = [
+      ...porDestino.sections.map((z) => bloque(z.section, z.people,
+        `<button class="chip tap px-3 shrink-0" data-add-section="${escape(z.section)}">+</button>`)),
+      ...porDestino.bars.map((b) => bloque(b.name, b.people,
+        `<button class="chip tap px-3 shrink-0" data-add-bar="${escape(b.location_id)}"
+                 data-bar-name="${escape(b.name)}">+</button>`)),
+    ].join('');
+
+    for (const boton of $('roster-body').querySelectorAll('[data-add-section]')) {
+      boton.onclick = () => openPick({ section: boton.dataset.addSection });
+    }
+    for (const boton of $('roster-body').querySelectorAll('[data-add-bar]')) {
+      boton.onclick = () => openPick({
+        locationId: boton.dataset.addBar, name: boton.dataset.barName,
+      });
+    }
+    for (const boton of $('roster-body').querySelectorAll('[data-unassign]')) {
+      boton.onclick = async () => {
+        try {
+          await api.del(`/nightclubs/${clubId()}/roster/${boton.dataset.unassign}`);
+          await reloadRoster();
+        } catch (err) { showError(err, $('roster-error')); }
+      };
+    }
+  }
+
+  /** Las barras sin repetir, que llegan por dos caminos (huecos y asignadas). */
+  function dedupeBars(bars) {
+    const porId = new Map();
+    for (const bar of bars) if (bar && bar.location_id) porId.set(bar.location_id, bar);
+    return [...porId.values()];
+  }
+
+  $('btn-roster-close').onclick = closeRoster;
+
+  // -------------------------------------------------------- elegir a quién poner
+
+  function openPick(destino) {
+    state.pick = destino;
+    const r = state.roster;
+    if (!r) return;
+    $('pick-where').textContent = destino.section || destino.name;
+
+    // Solo los candidatos del puesto que ESE destino necesita: ofrecer un mesero
+    // para una barra es ofrecer un error.
+    const quiere = destino.section ? 'section' : 'location';
+    const gente = EV2Roster.candidates(state.staff)
+      .filter((p) => EV2Roster.ruleFor(p.role).target === quiere);
+
+    $('pick-list').innerHTML = gente.map((p) => {
+      const problema = EV2Roster.check({
+        person: p,
+        section: destino.section || null,
+        locationId: destino.locationId || null,
+        roster: r.roster,
+      });
+      const bloqueado = problema !== null;
+      return `
+        <button type="button" class="card rounded-xl p-3 w-full text-left ${bloqueado ? 'opacity-50' : ''}"
+                data-pick="${escape(p.id)}" ${bloqueado ? 'disabled' : ''}>
+          <p class="text-sm font-semibold truncate">${escape(p.display_name || '')}</p>
+          <p class="text-[11px] text-white/40">
+            ${escape(EV2Roles.describe(p.role, lang()).label)}
+            ${bloqueado ? ` · ${escape(pickProblemText(problema))}` : ''}
+          </p>
+        </button>`;
+    }).join('');
+
+    $('pick-empty').textContent = gente.length === 0 ? t('roster.noCandidates') : '';
+    $('pick-empty').hidden = gente.length > 0;
+
+    for (const boton of $('pick-list').querySelectorAll('[data-pick]')) {
+      boton.onclick = () => assignPicked(boton.dataset.pick);
+    }
+    $('pick-backdrop').hidden = false;
+    $('pick-sheet').hidden = false;
+  }
+
+  function pickProblemText(problem) {
+    const clave = `roster.err.${problem.code}`;
+    const texto = problem.code === 'only_one_bar'
+      ? t(clave, { name: problem.name, bar: problem.current || '—' })
+      : t(clave, { name: problem.name || '' });
+    return texto === clave ? t('roster.err.generic') : texto;
+  }
+
+  function closePick() {
+    state.pick = null;
+    $('pick-sheet').hidden = true;
+    $('pick-backdrop').hidden = true;
+  }
+
+  $('pick-close').onclick = closePick;
+  $('pick-backdrop').onclick = closePick;
+
+  async function assignPicked(userId) {
+    const destino = state.pick;
+    const r = state.roster;
+    if (!destino || !r) return;
+    try {
+      await api.post(`/nightclubs/${clubId()}/nights/${r.night.id}/roster`,
+        EV2Roster.assignBody({
+          userId, section: destino.section || null, locationId: destino.locationId || null,
+        }));
+      closePick();
+      await reloadRoster();
+    } catch (err) {
+      closePick();
+      showError(err, $('roster-error'));
     }
   }
 

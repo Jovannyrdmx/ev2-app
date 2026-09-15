@@ -256,6 +256,18 @@
 
         <p id="nights-empty" class="text-sm text-white/40 text-center py-6" data-i18n="night.empty" hidden>Todavía no hay ninguna noche. Abre la primera.</p>
         <div id="nights-list" class="space-y-2"></div>
+
+        <!-- Comparar noches cerradas. Solo cortes GUARDADOS: comparar el corte en
+             vivo de hoy con el cerrado del viernes compara media noche contra una
+             completa, y el resultado siempre dice que hoy va peor. -->
+        <section id="compare-box" class="card rounded-xl p-4 space-y-3 mt-4" hidden>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="cut.compare">Comparar noches</p>
+          <div class="grid grid-cols-2 gap-2">
+            <select id="compare-a" class="field"></select>
+            <select id="compare-b" class="field"></select>
+          </div>
+          <div id="compare-result" class="space-y-1 text-sm"></div>
+        </section>
       </div>
 
       <!--
@@ -524,6 +536,71 @@
   </section>
 
   <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50" hidden></div>
+
+  <!-- ==================== EL CORTE DE LA NOCHE ====================
+       Cuatro cifras arriba porque a la una de la mañana, desde un teléfono, un
+       tablero con veinte números no se lee. Lo demás va abajo, para quien lo
+       busque. Y las cosas que salieron mal van con su número al lado, para que no
+       haya que ir a buscarlo. -->
+  <div id="cut-sheet" class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur flex flex-col" hidden>
+    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
+      <div class="min-w-0">
+        <p class="font-display text-lg" data-i18n="cut.title">Corte de la noche</p>
+        <p id="cut-night" class="text-xs text-white/50 truncate">—</p>
+      </div>
+      <button id="btn-cut-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="manager.close">Cerrar</button>
+    </header>
+
+    <div id="cut-body" class="flex-1 overflow-y-auto px-4 py-3 space-y-3"></div>
+
+    <div class="px-4 py-3 border-t border-white/10 space-y-2 bg-black/40">
+      <p id="cut-frozen" class="text-[11px] text-white/40" hidden></p>
+      <input id="cut-note" class="field" maxlength="300" placeholder="Nota del corte (opcional)"
+             data-i18n-placeholder="cut.note">
+      <button id="btn-cut-save" class="ev2-button w-full py-3 rounded-xl font-display"
+              data-i18n="cut.close">Cerrar la noche</button>
+      <p id="cut-error" class="text-sm text-red-300" hidden></p>
+    </div>
+  </div>
+
+  <!-- ==================== EL ROL DE LA NOCHE ====================
+       Se arma por DESTINO y no por persona, porque es como piensa el gerente:
+       "¿quién tiene la Terraza?". Y lo que quedó sin nadie va arriba, en rojo: una
+       zona sin mesero no se nota mirando la lista de asignados. -->
+  <div id="roster-sheet" class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur flex flex-col" hidden>
+    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
+      <div class="min-w-0">
+        <p class="font-display text-lg" data-i18n="roster.title">Rol de la noche</p>
+        <p id="roster-night" class="text-xs text-white/50 truncate">—</p>
+      </div>
+      <button id="btn-roster-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="manager.close">Cerrar</button>
+    </header>
+
+    <div id="roster-progress" class="px-4 py-2 text-sm border-b border-white/10"></div>
+    <div id="roster-body" class="flex-1 overflow-y-auto px-4 py-3 space-y-3"></div>
+
+    <div class="px-4 py-3 border-t border-white/10 space-y-2 bg-black/40">
+      <p class="text-[11px] text-white/40" data-i18n="roster.assignNote">
+        Asignar no abre el turno: el empleado marca su entrada al llegar.
+      </p>
+      <p id="roster-error" class="text-sm text-red-300" hidden></p>
+    </div>
+  </div>
+
+  <!-- Elegir a quién poner en un destino. Nace vacío: se llena con los candidatos
+       del puesto que ese destino necesita. -->
+  <div id="pick-backdrop" class="fixed inset-0 bg-black/70 z-40" hidden></div>
+  <section id="pick-sheet" class="fixed bottom-0 left-0 right-0 z-50 card rounded-t-2xl px-4 pt-3 pb-6 max-w-3xl mx-auto max-h-[80vh] overflow-y-auto" hidden>
+    <div class="flex items-start justify-between mb-2">
+      <div>
+        <p class="font-display text-lg" data-i18n="roster.pick">Poner a alguien</p>
+        <p id="pick-where" class="text-xs text-white/50">—</p>
+      </div>
+      <button id="pick-close" class="text-white/50 px-2" aria-label="Cerrar">✕</button>
+    </div>
+    <div id="pick-list" class="space-y-2"></div>
+    <p id="pick-empty" class="text-sm text-white/40 py-6 text-center" hidden></p>
+  </section>
 </div>
 
 <script src="js/api.js"></script>
@@ -534,6 +611,8 @@
 <script src="js/manager.js"></script>
 <script src="js/staff-admin.js"></script>
 <script src="js/payouts.js"></script>
+<script src="js/night-report.js"></script>
+<script src="js/roster.js"></script>
 <script src="js/manager-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

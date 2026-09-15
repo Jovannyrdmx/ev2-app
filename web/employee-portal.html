@@ -163,6 +163,11 @@
           <span id="shift-state" class="text-xs"></span>
         </div>
         <p id="shift-note" class="text-[11px] text-white/50 leading-snug">—</p>
+        <!-- El lugar que le toca esta noche, puesto por el gerente. Va ANTES del
+             boton de abrir turno porque es lo que la persona necesita saber al
+             llegar: teclear su zona de memoria es como alguien acaba cobrando las
+             propinas de otra seccion. -->
+        <p id="mine-spot" class="text-sm" hidden>—</p>
         <button id="btn-shift" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="shift.start">Abrir turno</button>
       </div>
 
@@ -261,6 +266,7 @@
 <script src="js/earnings.js"></script>
 <script src="js/songs.js"></script>
 <script src="js/shift.js"></script>
+<script src="js/roster.js"></script>
 <script src="js/employee-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>
