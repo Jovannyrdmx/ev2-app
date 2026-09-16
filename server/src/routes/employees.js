@@ -22,6 +22,28 @@ const router = express.Router({ mergeParams: true });
 
 const EMPLOYEE_ROLES = ['waiter', 'bartender', 'dancer', 'dj', 'light_tech', 'valet', 'hostess'];
 
+/**
+ * `manager` se puede dar de alta por aquí, pero solo el administrador puede hacerlo.
+ *
+ * No es simetría con los demás roles: un gerente que puede nombrar gerentes puede
+ * nombrarse un cómplice, y a partir de ahí el permiso de gerente ya no protege nada
+ * —caja, precios, retiros, nómina—. El administrador es el dueño del club, y su rol
+ * no lo da ninguna pantalla: solo `npm run promote` en la consola del servidor.
+ *
+ * `admin` NO está en la lista. Que la única forma de crear un administrador sea tener
+ * acceso a la máquina es justo lo que hace que el rol signifique algo.
+ */
+const MANAGER_ROLE = 'manager';
+const CREATABLE_ROLES = [...EMPLOYEE_ROLES, MANAGER_ROLE];
+
+/** Quien pide el alta o el cambio, ¿puede otorgar este rol? */
+function mayGrant(requester, role) {
+  if (role !== MANAGER_ROLE) return true;
+  return requester && requester.role === 'admin';
+}
+
+const ONLY_ADMIN = 'Solo el administrador puede dar de alta o nombrar gerentes';
+
 const EMPLOYEE_SELECT = `
   SELECT u.id, u.email, u.phone, u.first_name, u.last_name, u.display_name, u.role, u.status,
          u.preferred_currency, u.must_change_password, u.last_login_at, u.created_at,
@@ -49,7 +71,7 @@ router.get('/nightclubs/:nightclubId/employees',
   validate({
     params: z.object({ nightclubId: uuid }),
     query: pagination.extend({
-      role: z.enum(EMPLOYEE_ROLES).optional(),
+      role: z.enum(CREATABLE_ROLES).optional(),
       include_inactive: z.coerce.boolean().default(false),
     }),
   }),
@@ -70,7 +92,7 @@ const employeeCreate = z.object({
   email,
   first_name: z.string().trim().min(1).max(100),
   last_name: z.string().trim().min(1).max(100),
-  role: z.enum(EMPLOYEE_ROLES),
+  role: z.enum(CREATABLE_ROLES),
   country: z.enum(['MX', 'US']).default('MX'),
   birth_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   phone: z.string().trim().max(30).optional(),
@@ -86,6 +108,7 @@ router.post('/nightclubs/:nightclubId/employees',
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
     const b = req.body;
+    if (!mayGrant(req.user, b.role)) throw ApiError.forbidden(ONLY_ADMIN);
     const temp = temporaryPassword();
     const hash = await bcrypt.hash(temp, 10);
 
@@ -115,6 +138,18 @@ router.post('/nightclubs/:nightclubId/employees',
         [user.id, b.employee_code || null, b.country, b.stage_name || null,
           b.hire_date || null, b.phone || null, b.country === 'US' ? 'USD' : 'MXN']);
       await client.query('INSERT INTO user_preferences (user_id) VALUES ($1) ON CONFLICT DO NOTHING', [user.id]);
+
+      // Un alta de mesero no se audita: la lista de personal ya cuenta esa historia.
+      // Un gerente nuevo sí, porque es alguien que a partir de ahora puede mover la
+      // caja y los precios, y seis meses después hay que poder decir quién lo nombró.
+      if (b.role === MANAGER_ROLE) {
+        await client.query(
+          `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
+           VALUES ($1,$2,'manager_created','user',$3,$4,$5)`,
+          [nightclubId, req.user.id, user.id,
+            JSON.stringify({ email: b.email, display_name: `${b.first_name} ${b.last_name}`.trim() }),
+            req.ip || null]);
+      }
       await client.query('COMMIT');
 
       const full = await pool.query(`${EMPLOYEE_SELECT} WHERE u.id = $1`, [user.id]);
@@ -139,7 +174,7 @@ router.get('/nightclubs/:nightclubId/employees/:userId',
   }));
 
 const employeePatch = z.object({
-  role: z.enum(EMPLOYEE_ROLES).optional(),
+  role: z.enum(CREATABLE_ROLES).optional(),
   stage_name: z.string().trim().max(80).nullable().optional(),
   employee_code: z.string().trim().max(30).nullable().optional(),
   hire_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
@@ -154,6 +189,7 @@ router.patch('/nightclubs/:nightclubId/employees/:userId',
   asyncHandler(async (req, res) => {
     const { nightclubId, userId } = req.params;
     const b = req.body;
+    if (!mayGrant(req.user, b.role)) throw ApiError.forbidden(ONLY_ADMIN);
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -163,7 +199,30 @@ router.patch('/nightclubs/:nightclubId/employees/:userId',
         [userId, nightclubId]);
       if (cur.rowCount === 0) throw ApiError.notFound('Employee not found');
 
-      if (b.role) await client.query('UPDATE users SET role = $2, updated_at = now() WHERE id = $1', [userId, b.role]);
+      // Tocar a un gerente es tan delicado como nombrarlo, y por las mismas tres
+      // vías: cambiarle el rol, darlo de baja, o reiniciarle la contraseña —esta
+      // última se la entrega a quien la pidió, así que es tomarle la cuenta—. Si un
+      // gerente pudiera hacerle eso a otro, dos gerentes en desacuerdo se apagarían
+      // el uno al otro a media noche. La gerencia solo la reacomoda el administrador.
+      const esGerente = cur.rows[0].role === MANAGER_ROLE;
+      const tocaLaCuenta = Boolean(b.role) || b.active === false || b.reset_password === true;
+      if (esGerente && tocaLaCuenta && !mayGrant(req.user, MANAGER_ROLE)) {
+        throw ApiError.forbidden(ONLY_ADMIN);
+      }
+
+      if (b.role) {
+        await client.query('UPDATE users SET role = $2, updated_at = now() WHERE id = $1', [userId, b.role]);
+        // Solo cuando la gerencia entra o sale. Mover a alguien de mesero a valet no
+        // necesita rastro; quién nombró al gerente, sí.
+        if (b.role === MANAGER_ROLE || esGerente) {
+          await client.query(
+            `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, before, after, ip)
+             VALUES ($1,$2,'manager_role_changed','user',$3,$4,$5,$6)`,
+            [nightclubId, req.user.id, userId,
+              JSON.stringify({ role: cur.rows[0].role }), JSON.stringify({ role: b.role }),
+              req.ip || null]);
+        }
+      }
       if (b.phone !== undefined) await client.query('UPDATE users SET phone = $2 WHERE id = $1', [userId, b.phone]);
 
       const fields = ['stage_name', 'employee_code', 'hire_date', 'phone'].filter((k) => b[k] !== undefined);

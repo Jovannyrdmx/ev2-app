@@ -523,10 +523,13 @@
   };
   $('btn-staff-cancel').onclick = () => { $('staff-form').hidden = true; clearStaffErrors(); };
 
+  /** El rol de quien está viendo la pantalla: decide qué puede dar de alta. */
+  const myRole = () => (api.session.user && api.session.user.role) || null;
+
   function fillRoleOptions() {
     const select = $('s-role');
     if (select.options.length) return;
-    for (const role of EV2StaffAdmin.EMPLOYEE_ROLES) {
+    for (const role of EV2StaffAdmin.creatableRoles(myRole())) {
       const opt = document.createElement('option');
       opt.value = role;
       opt.textContent = EV2Roles.describe(role, lang()).label;
@@ -571,7 +574,7 @@
     };
     // La edad se comprueba aquí y en el servidor. No es redundancia: dar de alta a un
     // menor como personal de un centro nocturno es el peor error de esta pantalla.
-    const errors = EV2StaffAdmin.validateEmployee(form, new Date());
+    const errors = EV2StaffAdmin.validateEmployee(form, new Date(), myRole());
     if (Object.keys(errors).length) { showStaffErrors(errors); return; }
     clearStaffErrors();
 

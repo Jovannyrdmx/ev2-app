@@ -131,6 +131,9 @@
         <span class="text-xs text-white/50 flex items-center gap-1">
           <span id="rt-dot" class="dot dot-off"></span><span id="rt-text">Conectando…</span>
         </span>
+        <!-- El almacén es otra pantalla, no una pestaña: se usa de pie, con una caja en
+             la mano. Sin esta puerta el gerente tenía que teclear la URL. -->
+        <a id="btn-warehouse" href="almacen.html" class="text-xs text-white/60 px-2" data-i18n-title="manager.openWarehouse" title="Abrir almacén"><i class="fa-solid fa-boxes-stacked"></i></a>
         <button id="btn-refresh" class="text-xs text-white/60 px-2" data-i18n-title="manager.refresh" title="Actualizar"><i class="fa-solid fa-rotate"></i></button>
         <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
         <button id="btn-logout" class="text-xs text-white/60 px-2" data-i18n-title="top.signOut" title="Salir"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
@@ -459,6 +462,14 @@
         corregir una receta sin que yo escribiera un curl.
       -->
       <div id="tab-inventory" class="space-y-4" hidden>
+        <!-- Esta pestaña es para MIRAR: valor, mínimos, recetas, movimientos. Recibir
+             mercancía, surtir barras y contar se hace en el almacén, y este botón es
+             la única señal de que esa pantalla existe. -->
+        <a id="btn-open-warehouse" href="almacen.html" class="ev2-button w-full py-3 rounded-xl font-display flex items-center justify-center gap-2 tap">
+          <i class="fa-solid fa-boxes-stacked"></i><span data-i18n="manager.openWarehouse">Abrir almacén</span>
+        </a>
+        <p class="text-xs text-white/50 -mt-2" data-i18n="manager.warehouseNote">Entradas de mercancía, pedidos de las barras, mermas y conteo.</p>
+
         <div class="grid grid-cols-3 gap-2">
           <div class="stat-card"><div class="stat-number" id="inv-value">—</div><div class="stat-label" data-i18n="inv.value">Valor al costo</div></div>
           <div class="stat-card"><div class="stat-number" id="inv-low">—</div><div class="stat-label" data-i18n="inv.low">Bajo mínimo</div></div>

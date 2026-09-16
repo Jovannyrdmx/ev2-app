@@ -78,6 +78,35 @@ describe('la pestaña de inventario', () => {
     expect(documento().getElementById('recipe-sheet').hasAttribute('hidden')).toBe(true);
   });
 
+  // Esta pestaña solo MIRA el inventario. Recibir mercancía, surtir las barras y contar
+  // se hace en `almacen.html`, y hasta ahora nada en esta pantalla decía que esa
+  // pantalla existe: el gerente tenía que teclear la URL para entrar a su propio
+  // almacén. Son dos puertas a propósito: una en el encabezado, siempre a la vista, y
+  // otra dentro de la pestaña, donde la duda aparece.
+  it('hay una puerta al almacén, en el encabezado y en la pestaña', () => {
+    const doc = documento();
+    for (const id of ['btn-warehouse', 'btn-open-warehouse']) {
+      const puerta = doc.getElementById(id);
+      expect(puerta).not.toBeNull();
+      expect(puerta.tagName).toBe('A');
+      expect(puerta.getAttribute('href')).toBe('almacen.html');
+      expect(puerta.hasAttribute('hidden')).toBe(false);
+    }
+  });
+
+  it('el almacén tiene la vuelta al panel, y nace escondida hasta saber quién entró', () => {
+    const dom = new JSDOM(leer('almacen.html'), { url: 'https://ev2.local/almacen.html' });
+    abiertas.push(dom.window);
+    const volver = dom.window.document.getElementById('btn-back-manager');
+    expect(volver).not.toBeNull();
+    expect(volver.getAttribute('href')).toBe('manager.html');
+    // A un almacenista no se le ofrece una puerta que el servidor le va a cerrar: el
+    // controlador la descubre solo para el gerente y el administrador.
+    expect(volver.hasAttribute('hidden')).toBe(true);
+    const wh = leer('js/warehouse-screen.js');
+    expect(wh).toContain("$('btn-back-manager').hidden");
+  });
+
   it('el aviso de presentaciones sin confirmar nace escondido', () => {
     expect(documento().getElementById('inv-unconfirmed').hasAttribute('hidden')).toBe(true);
   });

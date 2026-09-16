@@ -174,10 +174,17 @@
   }
 
   /** El cuerpo que espera `POST /supply-receipts`. Los renglones vacíos no viajan. */
-  function receiptRequest({ locationId, supplierId, lines, reason }) {
+  function receiptRequest({
+    locationId, supplierId, lines, reason, photoId,
+  }) {
     return {
       location_id: locationId,
       ...(supplierId ? { supplier_id: supplierId } : {}),
+      // La foto del ticket de la que salió esta captura, si hubo una. Amarrarlas es lo
+      // que después contesta "este tequila lo pagamos a 900 o a 1,100" sin buscar el
+      // papel; el servidor además usa eso para no dejar capturar la misma foto dos
+      // veces.
+      ...(photoId ? { photo_id: photoId } : {}),
       ...(reason && String(reason).trim() ? { reason: String(reason).trim() } : {}),
       lines: lines.filter((l) => !isEmptyLine(l)).map((line) => {
         const cuerpo = { supply_id: line.supply_id };

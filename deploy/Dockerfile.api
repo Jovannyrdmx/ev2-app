@@ -7,6 +7,21 @@ RUN npm ci --omit=dev
 FROM node:20-alpine
 ENV NODE_ENV=production
 WORKDIR /app
+
+# Tesseract: lee la foto del ticket o la factura para pre-llenar la entrada de
+# mercancia (docs/DECISIONES.md D45). El paquete de espanol NO es opcional -- una
+# factura mexicana dice "CANTIDAD", "DESCRIPCION", "IMPORTE", y con el modelo ingles
+# solo, las palabras acentuadas se leen mal y la mitad de los renglones se pierden.
+# Sin esto instalado la subida sigue funcionando: la foto se guarda como comprobante,
+# el renglon queda `failed` diciendo que falta el programa, y la captura sigue a mano.
+RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-spa
+
+# Las fotos viven en un volumen, no en la base. Se crea AQUI, y no se deja que Docker
+# lo cree al montar: un volumen nombrado sobre una ruta que no existe en la imagen
+# nace con dueno root, y este contenedor corre como `node`, que entonces no puede
+# escribir y toda subida falla con EACCES.
+RUN mkdir -p /app/var/receipts && chown -R node:node /app/var
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src

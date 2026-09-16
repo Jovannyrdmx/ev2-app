@@ -7241,6 +7241,16 @@ paths:
               properties:
                 location_id: { type: string, format: uuid }
                 supplier_id: { type: string, format: uuid }
+                photo_id:
+                  type: string
+                  format: uuid
+                  description: |
+                    La foto del ticket o la factura de la que salió esta captura, si
+                    hubo una (ver `POST /receipt-photos`). Amarrarlas es lo que después
+                    contesta "este tequila lo pagamos a 900 o a 1,100" sin buscar el
+                    papel. Una foto se usa **una vez**: si ya se capturó, esta entrada
+                    tampoco entra (409), que es la protección contra el doble toque en
+                    un teléfono lento.
                 reason: { type: string, maxLength: 200 }
                 reference_type: { type: string, maxLength: 30 }
                 lines:
@@ -7268,6 +7278,14 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            La `photo_id` que se manda ya se capturó o se descartó. La entrada **no**
+            entró: se comprueba dentro de la misma transacción, justo para que un doble
+            toque no meta la misma entrega dos veces al inventario.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '422':
           description: |
             Hay renglones que no se pueden capturar. `details.lines` los nombra con su
@@ -7341,6 +7359,234 @@ paths:
                         items: { $ref: '#/components/schemas/SupplyMovement' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/receipt-photos:
+    post:
+      operationId: postNightclubsByNightclubIdReceiptPhotos
+      tags: [Inventario]
+      summary: Subir la foto del ticket o la factura
+      description: |
+        Almacén y gerencia. Pasan **dos** cosas, en este orden y nunca al revés:
+
+        1. La foto se **guarda**. Vale por sí sola: es el comprobante de la entrada, lo
+           que después contesta "este tequila lo pagamos a 900 o a 1,100" y lo que
+           permite reclamarle al proveedor.
+        2. Se **intenta** leer con Tesseract, en el servidor (decisión D45: no se manda
+           la factura del club a un servicio de terceros). Si truena, la foto ya está
+           adentro, el renglón queda `failed` **con la razón escrita**, y la captura
+           sigue a mano.
+
+        Lo que se lee **no mueve inventario**. Sale como propuesta en `parsed`, y la
+        entrada se sigue guardando por `POST /supply-receipts`, con una persona que
+        revisó renglón por renglón. Un ticket térmico mal impreso confunde un 8 con un
+        3, y un inventario que se llena solo con eso miente con más confianza que uno
+        vacío.
+
+        Cada renglón propuesto trae la comprobación que hace útil todo esto:
+        `math: "ok"` significa que **cantidad × precio dio el importe impreso**, y eso
+        se verifica solo, sin ver la foto. `mismatch` marca el renglón para que quien
+        captura lo compare con el papel. `one_amount` es el caso en que solo se imprimió
+        una cifra con varias piezas: no se adivina si es el unitario o el importe,
+        porque guardar la lectura equivocada envenena el costo promedio de ese insumo.
+
+        `supply_id` viene lleno solo cuando hay un **ganador claro** por parecido de
+        nombre; con dos insumos parecidos —Don Julio 70 y Don Julio Reposado— se deja en
+        `null` y se mandan los `candidates`, porque elegir mete la botella equivocada al
+        estante y no se descubre hasta el conteo.
+
+        La subida es `multipart/form-data` con el archivo en el campo `photo`. La misma
+        imagen subida dos veces (se compara por contenido, no por nombre de archivo)
+        contesta **200** con `already_uploaded: true` y la foto de antes, en vez de
+        dejar una entrega duplicada esperando a que alguien la capture dos veces.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                  description: 'JPG, PNG, WebP o HEIC. Hasta 12 MB.'
+                supplier_id:
+                  type: string
+                  format: uuid
+                  description: 'Opcional: de quién es la entrega, si ya se sabe.'
+      responses:
+        '201':
+          description: |
+            Foto guardada. Sale **también** cuando la lectura falló: la foto sí se
+            guardó, y eso es lo que se creó. `status` dice qué pasó con la lectura.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photo: { $ref: '#/components/schemas/ReceiptPhoto' }
+        '200':
+          description: Esa misma foto ya estaba subida; se devuelve la de antes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photo: { $ref: '#/components/schemas/ReceiptPhoto' }
+                  already_uploaded: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: 'No llegó imagen, el tipo de archivo no se puede leer, o pesa más de 12 MB.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    get:
+      operationId: getNightclubsByNightclubIdReceiptPhotos
+      tags: [Inventario]
+      summary: Fotos subidas y sin capturar
+      description: |
+        La cola de quien captura. Por omisión **esconde** las ya capturadas y las
+        descartadas: lo que importa es lo que falta, porque una foto pendiente es una
+        entrega que entró al club y todavía no está en el inventario.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, parsed, failed, used, discarded] }
+        - name: include_done
+          in: query
+          schema: { type: boolean, default: false }
+          description: 'Incluye las ya capturadas y las descartadas.'
+      responses:
+        '200':
+          description: Las fotos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photos:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReceiptPhoto' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/receipt-photos/{photoId}:
+    get:
+      operationId: getNightclubsByNightclubIdReceiptPhotosByPhotoId
+      tags: [Inventario]
+      summary: Una foto y lo que se leyó de ella
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: photoId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: La foto
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photo: { $ref: '#/components/schemas/ReceiptPhoto' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/receipt-photos/{photoId}/image:
+    get:
+      operationId: getNightclubsByNightclubIdReceiptPhotosByPhotoIdImage
+      tags: [Inventario]
+      summary: La imagen misma
+      description: |
+        Hace falta: quien revisa los renglones tiene que poder ver el papel, y sin esto
+        tendría que confiar en lo que leyó el programa.
+
+        Va por la API y no como archivo servido directo, para que pase por el token y
+        por la comprobación de club: una foto de una factura trae el RFC del club, el
+        nombre del proveedor y los precios de compra. Se responde con
+        `Cache-Control: private` para que ninguna capa intermedia guarde una copia.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: photoId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: La imagen, con el tipo con el que se subió.
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/receipt-photos/{photoId}/reparse:
+    post:
+      operationId: postNightclubsByNightclubIdReceiptPhotosByPhotoIdReparse
+      tags: [Inventario]
+      summary: Volver a leer una foto que ya está adentro
+      description: |
+        Para el caso real: se sube el ticket, se descubre que tres insumos no estaban en
+        el catálogo, se dan de alta, y ahora el parecido sí los encuentra. Sin esto
+        habría que volver a fotografiar el papel, que a esa hora ya no está.
+
+        Una foto ya capturada no se vuelve a leer (409): volver a leerla no cambiaría la
+        entrada que ya entró.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: photoId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: La foto, con la lectura nueva
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photo: { $ref: '#/components/schemas/ReceiptPhoto' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/receipt-photos/{photoId}/discard:
+    post:
+      operationId: postNightclubsByNightclubIdReceiptPhotosByPhotoIdDiscard
+      tags: [Inventario]
+      summary: Descartar una foto sin capturarla
+      description: |
+        Salió borrosa, o es de una entrega que se devolvió. **No se borra**: la foto es
+        el comprobante, y un comprobante que se puede borrar no es comprobante. Se marca
+        `discarded` y se queda, con el motivo escrito — una foto descartada sin razón
+        deja la duda de si la entrega llegó o no, que es peor que no tener la foto.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: photoId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 200 }
+      responses:
+        '200':
+          description: Foto descartada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photo: { $ref: '#/components/schemas/ReceiptPhoto' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Esa foto no existe, o ya se capturó.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /api/nightclubs/{nightclubId}/bar-requests/suggested:
     get:
@@ -10669,6 +10915,105 @@ components:
         last_receipt_at: { type: [string, 'null'], format: date-time }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    ReceiptPhoto:
+      type: object
+      description: |
+        La foto de un ticket o una factura: el comprobante de una entrada y, si se pudo
+        leer, la propuesta de renglones. `file_path` **nunca** sale: es una ruta del
+        disco del servidor, no le sirve al navegador y sí a quien busque por dónde
+        entrar. La imagen se pide en `/receipt-photos/{photoId}/image`.
+      properties:
+        id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [pending, parsed, failed, used, discarded]
+          description: |
+            `pending` subida y sin leer · `parsed` leída, con renglones por revisar ·
+            `failed` no se pudo leer (`error` dice por qué) · `used` ya se capturó, y
+            `receipt_group` es el lote que salió de ella · `discarded` se descartó sin
+            capturar, y `error` lleva el motivo.
+        mime_type: { type: string }
+        bytes: { type: integer }
+        checksum:
+          type: string
+          description: 'SHA-256 del archivo. Es lo que detecta la misma foto subida dos veces.'
+        error: { type: [string, 'null'] }
+        receipt_group:
+          type: [string, 'null']
+          format: uuid
+          description: |
+            El lote de `supply-receipts` que salió de esta foto. `null` mientras nadie
+            la haya capturado — y una foto vieja con `null` es justo la señal de una
+            entrega que entró al club sin registrarse.
+        supplier_id: { type: [string, 'null'], format: uuid }
+        supplier_name: { type: [string, 'null'] }
+        uploaded_by: { type: string, format: uuid }
+        uploaded_by_name: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+        parsed_at: { type: [string, 'null'], format: date-time }
+        used_at: { type: [string, 'null'], format: date-time }
+        parsed:
+          type: [object, 'null']
+          description: |
+            Lo que se leyó, **crudo y como se leyó**. Es una propuesta, nunca la verdad.
+          properties:
+            text: { type: string, description: 'El texto completo que devolvió el lector.' }
+            document_total: { type: [number, 'null'] }
+            document_subtotal: { type: [number, 'null'] }
+            document_tax: { type: [number, 'null'] }
+            lines_total: { type: number, description: 'La suma de los renglones leídos.' }
+            compared_against:
+              type: [number, 'null']
+              description: |
+                Contra qué se comparó `lines_total`: el subtotal si está, si no el total
+                menos el impuesto. Comparar contra el total daría una alarma falsa en
+                cada factura con IVA, porque los renglones no traen impuesto.
+            total_matches:
+              type: [boolean, 'null']
+              description: |
+                `false` = falta o sobra mercancía leída. Es la única forma de notar un
+                renglón que el lector se comió por completo; mirando la lista de
+                renglones no se ve nada raro.
+            read_at: { type: string, format: date-time }
+            lines:
+              type: array
+              items:
+                type: object
+                properties:
+                  text: { type: string, description: 'El renglón tal como se leyó, para comparar con el papel.' }
+                  description: { type: string }
+                  quantity: { type: [number, 'null'] }
+                  unit_cost: { type: [number, 'null'], description: 'Costo de la presentación completa.' }
+                  line_total: { type: [number, 'null'] }
+                  math:
+                    type: string
+                    enum: [ok, mismatch, derived_total, derived_unit, derived_quantity, one_amount, incomplete]
+                    description: |
+                      `ok` cantidad × precio dio el importe impreso, se comprueba solo ·
+                      `mismatch` no cuadra: un dígito se leyó mal, hay que ver el papel ·
+                      `derived_*` ese dato se calculó, no se leyó ·
+                      `one_amount` solo se imprimió una cifra con varias piezas, así que
+                      el costo se deja vacío en vez de adivinarlo ·
+                      `incomplete` faltan datos por leer.
+                  supply_id:
+                    type: [string, 'null']
+                    format: uuid
+                    description: |
+                      Lleno solo con un ganador claro por parecido de nombre. `null` con
+                      dos insumos parecidos: elegir mete la botella equivocada al estante.
+                  supply_name: { type: [string, 'null'] }
+                  confidence: { type: string, enum: [high, medium, low] }
+                  candidates:
+                    type: array
+                    description: 'Los insumos que se le parecen, con su puntaje, para que escoger sea un toque.'
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        name: { type: string }
+                        package_label: { type: [string, 'null'] }
+                        score: { type: number }
 
     SupplyReceiptBatch:
       type: object

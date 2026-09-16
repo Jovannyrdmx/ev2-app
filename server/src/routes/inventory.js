@@ -24,6 +24,7 @@ const { validate, z, uuid, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const inventory = require('../services/inventory');
 const receiving = require('../services/receiving');
+const receiptPhotos = require('./receipts');
 
 const router = express.Router({ mergeParams: true });
 
@@ -634,6 +635,11 @@ router.post('/nightclubs/:nightclubId/supply-receipts',
       // Opcional a proposito: una entrega de un proveedor que todavia no esta en el
       // catalogo no se puede quedar sin capturar por eso.
       supplier_id: uuid.optional(),
+      // La foto del ticket o la factura de la que salio esta captura, si hubo una.
+      // Amarrarlas es lo que despues contesta "este tequila lo pagamos a 900 o a
+      // 1,100" sin buscar el papel, y lo que evita capturar la misma entrega dos
+      // veces: una foto se usa UNA vez, y el segundo intento choca.
+      photo_id: uuid.optional(),
       lines: z.array(receiptLine).min(1).max(receiving.MAX_LINES),
       reason: z.string().trim().max(200).optional(),
       reference_type: z.string().trim().max(30).optional(),
@@ -644,7 +650,7 @@ router.post('/nightclubs/:nightclubId/supply-receipts',
     const b = req.body;
     const result = await inTransaction(async (client) => {
       const lugar = await findLocation(client, nightclubId, b.location_id);
-      return receiving.receiveBatch(client, {
+      const lote = await receiving.receiveBatch(client, {
         nightclubId,
         locationId: lugar.id,
         supplierId: b.supplier_id || null,
@@ -653,6 +659,15 @@ router.post('/nightclubs/:nightclubId/supply-receipts',
         referenceType: b.reference_type || null,
         userId: req.user.id,
       });
+      // Dentro de la misma transaccion: si la foto ya se habia capturado, la entrada
+      // NO entra. Es la proteccion contra el doble toque en un telefono lento, que de
+      // otro modo mete la misma entrega dos veces al inventario.
+      if (b.photo_id) {
+        await receiptPhotos.markUsed(client, {
+          nightclubId, photoId: b.photo_id, receiptGroup: lote.receipt_group,
+        });
+      }
+      return lote;
     });
     res.status(201).json({ receipt: result });
   }));

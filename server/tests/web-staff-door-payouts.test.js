@@ -106,6 +106,35 @@ describe('El personal, visto por el gerente', () => {
     expect(Admin.validateEmployee(sinTelefono, NOW)).toEqual({});
   });
 
+  // Un gerente que puede nombrar gerentes puede nombrarse un cómplice, y desde ese
+  // momento el permiso de gerente —caja, precios, retiros, nómina— ya no protege nada.
+  it('solo el administrador puede ofrecer el alta de un gerente', () => {
+    expect(Admin.creatableRoles('manager')).not.toContain('manager');
+    expect(Admin.creatableRoles('admin')).toContain('manager');
+    // `admin` no se da por ninguna pantalla: solo desde la consola del servidor.
+    expect(Admin.creatableRoles('admin')).not.toContain('admin');
+    // Sin saber quién mira, la lista es la de piso: equivocarse hacia el lado que da
+    // menos permiso es lo correcto.
+    expect(Admin.creatableRoles(undefined)).toEqual(Admin.EMPLOYEE_ROLES);
+  });
+
+  it('el alta de un gerente se rechaza si quien la captura no es administrador', () => {
+    const gerente = { ...good, role: 'manager' };
+    expect(Admin.validateEmployee(gerente, NOW, 'manager')).toMatchObject({ role: 'staff.errRole' });
+    expect(Admin.validateEmployee(gerente, NOW, 'admin')).toEqual({});
+    // Y `admin` no se captura nunca, ni siendo administrador.
+    expect(Admin.validateEmployee({ ...good, role: 'admin' }, NOW, 'admin'))
+      .toMatchObject({ role: 'staff.errRole' });
+  });
+
+  it('la gerencia sale primero en la lista de personal', () => {
+    const orden = Admin.sortStaff([
+      { id: 1, role: 'waiter', display_name: 'Luis', active: true },
+      { id: 2, role: 'manager', display_name: 'Ana', active: true },
+    ]).map((p) => p.id);
+    expect(orden).toEqual([2, 1]);
+  });
+
   it('el cuerpo del alta NO lleva contraseña: la genera el servidor', () => {
     const body = Admin.employeePayload({ ...good, email: '  ANA@Club.com ' });
     expect(body.email).toBe('ana@club.com');

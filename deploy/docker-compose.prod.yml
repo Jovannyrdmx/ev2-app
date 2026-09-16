@@ -127,6 +127,17 @@ services:
       # diciendo qué falta; correo y contraseña siguen funcionando igual.
       FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
       FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-}
+      # Donde se guardan las fotos de los tickets y las facturas. Es un volumen, no la
+      # base: un club que recibe tres veces por semana junta cientos de fotos de dos
+      # megas, y metidas en Postgres hacen que cada respaldo tarde el triple y que
+      # restaurar la base de un viernes por la noche sea imposible.
+      #
+      # ESTE VOLUMEN VA EN EL RESPALDO. Son comprobantes de compra: sin ellos no hay
+      # con que reclamarle a un proveedor ni con que comprobar a que precio entro una
+      # botella. `docs/DESPLIEGUE.md` lo incluye en el respaldo junto con la base.
+      RECEIPTS_DIR: /app/var/receipts
+    volumes:
+      - receipt_photos:/app/var/receipts
     depends_on:
       postgres:
         condition: service_healthy
@@ -137,7 +148,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512m
+          # 512m con Tesseract adentro: el reconocimiento de una foto grande puede
+          # pedir ~150 MB por unos segundos, y el proceso corre aparte del de Node.
+          memory: 768m
     networks: [ev2]
 
   ws:
@@ -224,5 +237,7 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  # Los comprobantes de las entradas de mercancia. Va en el respaldo (ver arriba).
+  receipt_photos:
   caddy_data:
   caddy_config:

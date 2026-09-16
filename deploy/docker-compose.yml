@@ -62,6 +62,11 @@ services:
       SOFTRESTAURANT11_API_KEY: ${SOFTRESTAURANT11_API_KEY:-}
       SOFTRESTAURANT11_WEBHOOK_SECRET: ${SOFTRESTAURANT11_WEBHOOK_SECRET:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Las fotos de los tickets. Mismo lugar que en produccion, para que probar en
+      # local pruebe de verdad lo que va a correr en el servidor.
+      RECEIPTS_DIR: /app/var/receipts
+    volumes:
+      - receipt_photos:/app/var/receipts
     ports:
       - "${API_PORT:-3000}:3000"
     depends_on:
@@ -141,3 +146,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  receipt_photos:

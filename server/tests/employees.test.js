@@ -90,8 +90,8 @@ describe('Alta de empleados', () => {
   });
 
   it('no permite roles que no son de empleado ni correos repetidos', async () => {
-    expect((await newEmployee({ role: 'manager' })).status).toBe(400);
     expect((await newEmployee({ role: 'guest' })).status).toBe(400);
+    expect((await newEmployee({ role: 'admin' })).status).toBe(400);
     const first = await newEmployee({ email: 'dup@ev2.mx' });
     expect(first.status).toBe(201);
     expect((await newEmployee({ email: 'dup@ev2.mx' })).status).toBe(409);
@@ -107,6 +107,84 @@ describe('Alta de empleados', () => {
     expect(after.body.employees).toHaveLength(0);
     const all = await api().get(url('/employees?role=waiter&include_inactive=true')).set(auth(manager));
     expect(all.body.employees[0]).toMatchObject({ active: false, status: 'blocked' });
+  });
+});
+
+// Un gerente que puede nombrar gerentes puede nombrarse un cómplice, y desde ahí el
+// permiso de gerente —caja, precios, retiros, nómina— ya no protege nada. Estas
+// pruebas cuidan justo esa puerta, en las cuatro formas de abrirla.
+describe('Alta y manejo de gerentes', () => {
+  let admin;
+
+  beforeEach(async () => {
+    admin = await f.createUser(club.id, { role: 'admin', display_name: 'Dueño' });
+  });
+
+  const nuevoGerente = (who, over = {}) => api().post(url('/employees')).set(auth(who)).send({
+    email: `ger-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@ev2.mx`,
+    first_name: 'Ana', last_name: 'Solís', role: 'manager', birth_date: '1990-02-11', ...over,
+  });
+
+  it('un gerente no puede crear otro gerente; el administrador sí', async () => {
+    expect((await nuevoGerente(manager)).status).toBe(403);
+
+    const res = await nuevoGerente(admin);
+    expect(res.status).toBe(201);
+    expect(res.body.employee).toMatchObject({ role: 'manager', active: true, must_change_password: true });
+    expect(res.body.temporary_password).toMatch(/^[A-Za-z0-9]{12}$/);
+
+    // El alta queda en audit_log con quién la hizo: seis meses después hay que poder
+    // decir quién nombró a esta persona.
+    const { rows } = await pool.query(
+      `SELECT actor_id, after FROM audit_log WHERE action = 'manager_created' AND entity_id = $1`,
+      [res.body.employee.id]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actor_id).toBe(admin.id);
+  });
+
+  it('el gerente nuevo aparece en el personal y puede entrar a lo suyo', async () => {
+    const res = await nuevoGerente(admin);
+    const lista = await api().get(url('/employees?role=manager')).set(auth(admin));
+    expect(lista.status).toBe(200);
+    expect(lista.body.employees.map((e) => e.id)).toContain(res.body.employee.id);
+  });
+
+  it('nadie crea administradores por HTTP, ni el administrador', async () => {
+    expect((await nuevoGerente(admin, { role: 'admin' })).status).toBe(400);
+  });
+
+  it('un gerente no toca a otro gerente: ni rol, ni baja, ni contraseña', async () => {
+    const otro = (await nuevoGerente(admin)).body.employee;
+    for (const body of [{ role: 'waiter' }, { active: false }, { reset_password: true }]) {
+      const res = await api().patch(url(`/employees/${otro.id}`)).set(auth(manager)).send(body);
+      expect(res.status).toBe(403);
+    }
+    // Lo que no es la cuenta sí lo puede corregir cualquier gerente.
+    const ok = await api().patch(url(`/employees/${otro.id}`)).set(auth(manager)).send({ phone: '6621234567' });
+    expect(ok.status).toBe(200);
+  });
+
+  it('el administrador sí puede quitar y poner la gerencia, y queda registrado', async () => {
+    const otro = (await nuevoGerente(admin)).body.employee;
+    const baja = await api().patch(url(`/employees/${otro.id}`)).set(auth(admin)).send({ role: 'waiter' });
+    expect(baja.status).toBe(200);
+    expect(baja.body.employee.role).toBe('waiter');
+
+    const alta = await api().patch(url(`/employees/${otro.id}`)).set(auth(admin)).send({ role: 'manager' });
+    expect(alta.body.employee.role).toBe('manager');
+
+    const { rows } = await pool.query(
+      `SELECT before, after FROM audit_log
+        WHERE action = 'manager_role_changed' AND entity_id = $1 ORDER BY id`, [otro.id]);
+    expect(rows.map((r) => [r.before.role, r.after.role]))
+      .toEqual([['manager', 'waiter'], ['waiter', 'manager']]);
+  });
+
+  it('un gerente no se asciende a sí mismo por el parche', async () => {
+    const res = await api().patch(url(`/employees/${waiter.id}`)).set(auth(manager)).send({ role: 'manager' });
+    expect(res.status).toBe(403);
+    const { rows } = await pool.query('SELECT role FROM users WHERE id = $1', [waiter.id]);
+    expect(rows[0].role).toBe('waiter');
   });
 });
 

@@ -14,7 +14,8 @@
  *   - Antes de guardar, se enseña el saldo que va a quedar. Corregir antes es gratis;
  *     corregir después deja un renglón de ajuste que alguien tendrá que explicar.
  */
-/* global EV2, EV2Format, EV2Warehouse, EV2Receiving, EV2Roles, EV2PasswordGate */
+/* global EV2, EV2Format, EV2Warehouse, EV2Receiving, EV2ReceiptReview, EV2Roles,
+   EV2PasswordGate */
 (function () {
   'use strict';
 
@@ -47,6 +48,14 @@
     // todo".
     draft: [],
     draftSupplier: '',
+    // --- la foto del ticket o la factura ---
+    // `photo` es la que se está capturando ahora; `photos` son las subidas que
+    // todavía no se han capturado, que es mercancía dentro del club y fuera del
+    // inventario: lo más importante que esta pantalla puede avisar.
+    photo: null,
+    photos: [],
+    photoBusy: false,
+    photoUrl: null,         // el object URL de la imagen abierta, para liberarlo
     // --- pedidos de las barras ---
     requests: [],
     fulfill: null,          // { request, from, lines }
@@ -106,6 +115,7 @@
   $('btn-wrong-logout').onclick = signOut;
   $('btn-pw-logout').onclick = signOut;
   $('btn-refresh').onclick = () => load();
+  $('photo-viewer-close').onclick = () => closePhotoViewer();
 
   $('btn-lang').onclick = () => {
     EV2Format.setLanguage(EV2Format.otherLanguage());
@@ -177,6 +187,10 @@
     $('screen-wrong-role').hidden = true;
     $('screen-warehouse').hidden = false;
     $('me-name').textContent = (api.session.user && api.session.user.display_name) || '';
+    // La vuelta al panel solo para quien tiene panel. Un almacenista no lo tiene, y un
+    // enlace que lo manda a una pantalla que le dice "rol equivocado" es peor que nada.
+    const role = api.session.user && api.session.user.role;
+    $('btn-back-manager').hidden = !['manager', 'admin'].includes(role);
     await load();
   }
 
@@ -193,7 +207,7 @@
       // Los pedidos pendientes se cargan SIEMPRE, no solo al abrir su pestaña: el
       // número en la pestaña es lo que hace que el almacenista se entere de que la
       // barra pidió algo. Un contador que solo aparece al entrar no avisa de nada.
-      await Promise.all([loadRequests(), loadSuppliers()]);
+      await Promise.all([loadRequests(), loadSuppliers(), loadPhotos()]);
       if (state.tab === 'kardex') await loadMovements();
       if (state.draft.length === 0) state.draft = [EV2Receiving.emptyLine()];
       renderAll();
@@ -464,17 +478,254 @@
 
   // ==================================================== entrada de mercancía en lote
 
-  /** Las opciones del selector de insumo, una sola vez por repintado. */
-  function supplyOptions(selectedId) {
-    return ['<option value="">—</option>'].concat(
-      state.supplies
-        .filter((s) => s.active !== false)
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((s) => `<option value="${escape(s.id)}" ${s.id === selectedId ? 'selected' : ''}>
-            ${escape(s.name)}${s.package_label ? ` · ${escape(s.package_label)}` : ''}
-          </option>`),
-    ).join('');
+  // ------------------------------------------------- la foto del ticket o la factura
+
+  /**
+   * La tarjeta de la foto, arriba de la captura.
+   *
+   * Dos cosas, y el orden en la pantalla dice cuál manda: el botón de la foto arriba,
+   * y debajo, chiquito, que se puede capturar a mano. La foto es lo normal; teclear
+   * quince renglones de pie es lo que se hacía antes.
+   *
+   * Cuando hay fotos subidas y sin capturar, se listan aquí. Una foto pendiente es una
+   * entrega que entró al club y todavía no está en el inventario: es la cosa más
+   * importante que esta pantalla puede decirle a alguien.
+   */
+  function photoCard() {
+    const foto = state.photo;
+    const pendientes = (state.photos || []).filter((p) => !foto || p.id !== foto.id);
+
+    return `
+      <section class="card rounded-xl px-3 py-3 mb-3 space-y-2">
+        <input id="photo-input" type="file" accept="image/*" capture="environment" hidden>
+        <button type="button" id="photo-pick"
+                class="ev2-button w-full py-3 rounded-xl font-display flex items-center justify-center gap-2"
+                ${state.photoBusy ? 'disabled' : ''}>
+          <i class="fa-solid fa-camera"></i>
+          <span>${escape(state.photoBusy ? t('rc.reading') : t('rc.takePhoto'))}</span>
+        </button>
+        <p class="text-[11px] text-white/40">${escape(t('rc.photoHint'))}</p>
+        ${foto ? photoState(foto) : ''}
+        ${pendientes.length ? `
+          <div class="pt-1 border-t border-white/10">
+            <p class="text-[11px] text-amber-300 mb-1">
+              ${escape(t('rc.pendingPhotos', { n: pendientes.length }))}
+            </p>
+            ${pendientes.map((p) => `
+              <div class="flex items-center justify-between gap-2 py-1">
+                <span class="text-xs text-white/60 truncate">
+                  ${escape(EV2Format.dateTime(p.created_at))}
+                  ${p.supplier_name ? `· ${escape(p.supplier_name)}` : ''}
+                </span>
+                <button type="button" class="chip tap px-3 shrink-0" data-photo="open" data-id="${escape(p.id)}">
+                  ${escape(t('rc.use'))}
+                </button>
+              </div>`).join('')}
+          </div>` : ''}
+      </section>`;
+  }
+
+  /** El estado de la foto cargada: qué leyó, qué falta, y qué se puede hacer con ella. */
+  function photoState(foto) {
+    const estado = EV2ReceiptReview.statusOf(foto.status);
+    const resumen = foto.parsed
+      ? EV2ReceiptReview.summary(foto.parsed, state.draft) : null;
+
+    return `
+      <div class="rounded-xl px-3 py-2" style="background:rgba(255,255,255,.04)">
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-xs ${estado.usable ? 'text-lime-300' : 'text-amber-300'}">
+            ${escape(t(estado.key))}
+          </p>
+          <div class="flex gap-1 shrink-0">
+            <button type="button" class="chip tap px-3" data-photo="view">${escape(t('rc.viewPhoto'))}</button>
+            <button type="button" class="chip tap px-3" data-photo="reparse">${escape(t('rc.reread'))}</button>
+            <button type="button" class="chip tap px-3" data-photo="discard">${escape(t('rc.discard'))}</button>
+          </div>
+        </div>
+        ${foto.error ? `<p class="text-[11px] text-pink-300 mt-1">${escape(foto.error)}</p>
+          <p class="text-[11px] text-white/50">${escape(t('rc.failedButSaved'))}</p>` : ''}
+        ${resumen ? `
+          <p class="text-[11px] text-white/60 mt-1">
+            ${escape(t('rc.reviewCount', { n: resumen.lines, review: resumen.to_review }))}
+          </p>
+          ${resumen.total_matches === false ? `
+            <p class="text-[11px] text-amber-300 mt-1">
+              ${escape(t('rc.totalGap', {
+    paper: EV2Format.money(resumen.paper_total, 'MXN'),
+    lines: EV2Format.money(resumen.total, 'MXN'),
+  }))}
+            </p>` : ''}
+          ${resumen.total_matches === true ? `
+            <p class="text-[11px] text-lime-300 mt-1">${escape(t('rc.totalOk'))}</p>` : ''}
+        ` : ''}
+      </div>`;
+  }
+
+  /**
+   * Sube la foto: la guarda y, si se pudo leer, pre-llena los renglones.
+   *
+   * El borrador solo se pisa si está limpio. Perder quince renglones ya capturados
+   * porque alguien tocó la cámara sin querer es exactamente el tipo de cosa que hace
+   * que a la tercera entrega ya nadie capture nada.
+   */
+  async function uploadPhoto(file) {
+    if (!file || state.photoBusy) return;
+    state.photoBusy = true;
+    renderEntry();
+    try {
+      const form = new FormData();
+      form.append('photo', file, file.name || 'ticket.jpg');
+      if (state.draftSupplier) form.append('supplier_id', state.draftSupplier);
+      const data = await api.postForm(`/nightclubs/${clubId()}/receipt-photos`, form);
+      state.photo = data.photo;
+      if (data.already_uploaded) toast(t('rc.alreadyUploaded'), 'warn');
+      applyPhotoToDraft(data.photo);
+      await loadPhotos();
+    } catch (err) {
+      state.photo = null;
+      showError(err, $('entry-error'));
+    } finally {
+      state.photoBusy = false;
+      renderTabs();
+      renderEntry();
+    }
+  }
+
+  /** Pasa lo leído al borrador, si hay algo que pasar y no hay nada que perder. */
+  function applyPhotoToDraft(foto) {
+    const lines = (foto.parsed && foto.parsed.lines) || [];
+    if (lines.length === 0) {
+      toast(t('rc.nothingRead'), 'warn');
+      return;
+    }
+    const limpio = state.draft.every((l) => EV2Receiving.isEmptyLine(l));
+    if (!limpio) { toast(t('rc.draftKept'), 'warn'); return; }
+    state.draft = EV2ReceiptReview.draftFromPhoto(foto.parsed);
+    state.draft.push(EV2Receiving.emptyLine());
+    const resumen = EV2ReceiptReview.summary(foto.parsed, state.draft);
+    toast(t('rc.filled', { n: resumen.lines, review: resumen.to_review }), 'ok');
+  }
+
+  /** Las fotos subidas y todavía sin capturar. */
+  async function loadPhotos() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/receipt-photos?limit=20`);
+      state.photos = data.photos || [];
+    } catch { state.photos = []; }
+  }
+
+  /** Abre la imagen en grande. Con el token puesto: es una factura, no un archivo público. */
+  async function viewPhoto(photoId) {
+    try {
+      const blob = await api.getBlob(`/nightclubs/${clubId()}/receipt-photos/${photoId}/image`);
+      if (state.photoUrl) URL.revokeObjectURL(state.photoUrl);
+      state.photoUrl = URL.createObjectURL(blob);
+      $('photo-viewer-img').src = state.photoUrl;
+      $('photo-viewer-title').textContent = t('rc.viewPhoto');
+      $('photo-viewer').hidden = false;
+    } catch (err) { showError(err, $('entry-error')); }
+  }
+
+  function closePhotoViewer() {
+    $('photo-viewer').hidden = true;
+    $('photo-viewer-img').src = '';
+    if (state.photoUrl) { URL.revokeObjectURL(state.photoUrl); state.photoUrl = null; }
+  }
+
+  function wirePhotoCard() {
+    const input = $('photo-input');
+    const boton = $('photo-pick');
+    if (!input || !boton) return;
+    boton.onclick = () => input.click();
+    input.onchange = () => {
+      const file = input.files && input.files[0];
+      input.value = '';
+      if (file) uploadPhoto(file);
+    };
+
+    for (const el of $('list').querySelectorAll('[data-photo]')) {
+      const accion = el.dataset.photo;
+      if (accion === 'open') {
+        el.onclick = async () => {
+          const foto = (state.photos || []).find((p) => p.id === el.dataset.id);
+          if (!foto) return;
+          state.photo = foto;
+          applyPhotoToDraft(foto);
+          renderEntry();
+        };
+      } else if (accion === 'view') {
+        el.onclick = () => viewPhoto(state.photo.id);
+      } else if (accion === 'reparse') {
+        el.onclick = async () => {
+          if (state.photoBusy) return;
+          state.photoBusy = true;
+          renderEntry();
+          try {
+            const data = await api.post(
+              `/nightclubs/${clubId()}/receipt-photos/${state.photo.id}/reparse`, {});
+            state.photo = data.photo;
+            // Al volver a leer se pisa el borrador a propósito: es lo que se pidió, y
+            // los renglones de antes salieron de esta misma foto.
+            state.draft = [EV2Receiving.emptyLine()];
+            applyPhotoToDraft(data.photo);
+          } catch (err) { showError(err, $('entry-error')); } finally {
+            state.photoBusy = false;
+            renderEntry();
+          }
+        };
+      } else if (accion === 'discard') {
+        el.onclick = async () => {
+          // Se pide el motivo: una foto descartada sin razón deja la duda de si la
+          // entrega llegó o no, que es peor que no tener la foto.
+          const motivo = (prompt(t('rc.discardWhy')) || '').trim();
+          if (motivo.length < 3) return;
+          try {
+            await api.post(
+              `/nightclubs/${clubId()}/receipt-photos/${state.photo.id}/discard`,
+              { reason: motivo });
+            state.photo = null;
+            state.draft = [EV2Receiving.emptyLine()];
+            await loadPhotos();
+            toast(t('rc.discarded'), 'ok');
+          } catch (err) { showError(err, $('entry-error')); } finally { renderEntry(); }
+        };
+      }
+    }
+  }
+
+  const supplyOption = (s, selectedId, marca) => `<option value="${escape(s.id)}"
+      ${s.id === selectedId ? 'selected' : ''}>${marca}${escape(s.name)}${
+  s.package_label ? ` · ${escape(s.package_label)}` : ''}</option>`;
+
+  /**
+   * Las opciones del selector de insumo, una sola vez por repintado.
+   *
+   * `sugeridos` son los que el parecido de nombre encontró al leer la foto del ticket,
+   * y van ARRIBA, marcados. El resto del catálogo va debajo, siempre: el parecido
+   * acierta casi siempre, y cuando no, la lista completa tiene que estar en el mismo
+   * selector y no en otra pantalla, con el camión esperando.
+   */
+  function supplyOptions(selectedId, sugeridos = []) {
+    const propuestos = (sugeridos || [])
+      .map((c) => ({ ...(supplyById(c.id) || { id: c.id, name: c.name }), score: c.score }))
+      .filter((s) => s.id);
+    const vistos = new Set(propuestos.map((s) => s.id));
+    const resto = state.supplies
+      .filter((s) => s.active !== false && !vistos.has(s.id))
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const partes = ['<option value="">—</option>'];
+    if (propuestos.length) {
+      partes.push(`<optgroup label="${escape(t('rc.suggested'))}">`,
+        ...propuestos.map((s) => supplyOption(s, selectedId, '')), '</optgroup>',
+        `<optgroup label="${escape(t('rc.allSupplies'))}">`,
+        ...resto.map((s) => supplyOption(s, selectedId, '')), '</optgroup>');
+    } else {
+      partes.push(...resto.map((s) => supplyOption(s, selectedId, '')));
+    }
+    return partes.join('');
   }
 
   const supplyById = (id) => state.supplies.find((s) => s.id === id) || null;
@@ -499,6 +750,7 @@
     const puedeAltaProveedor = api.hasRole('manager');
 
     $('list').innerHTML = `
+      ${photoCard()}
       <section class="card rounded-xl px-3 py-3 mb-3 space-y-3">
         <div>
           <label class="text-xs text-white/50" data-i18n="wh.entryInto">Entra en</label>
@@ -548,17 +800,41 @@
     wireEntry();
   }
 
+  /**
+   * Lo que se leyó del papel, arriba del renglón: el texto tal cual y qué tan fiable es.
+   *
+   * El texto crudo es lo que hace comparable el renglón con el ticket sin abrir la
+   * foto, y la insignia dice si hay que mirarlo. `ok` significa que cantidad × precio
+   * dio el importe impreso: eso se comprueba solo y no necesita que nadie lo revise.
+   */
+  function readBadge(line) {
+    if (!line.read) return '';
+    const marcas = { high: 'text-lime-300', medium: 'text-amber-300', low: 'text-pink-300' };
+    const tono = marcas[line.read.confidence] || 'text-white/50';
+    const cuadra = line.read.math === 'ok';
+    return `
+      <div class="mb-2 border-l-2 pl-2 ${cuadra ? 'border-lime-400/40' : 'border-pink-400/50'}">
+        <p class="text-[11px] text-white/45 break-words">${escape(line.read.text)}</p>
+        <p class="text-[10px] ${tono}">
+          ${escape(t(`rc.conf.${line.read.confidence}`))}
+          · ${escape(t(`rc.math.${line.read.math}`))}
+        </p>
+      </div>`;
+  }
+
   function entryRow(line, index, problemas) {
     const supply = supplyById(line.supply_id);
     const totales = EV2Receiving.lineTotals(line, supply);
     const malo = problemas.length > 0;
     const unidad = supply ? supply.unit : 'ml';
+    const sugeridos = (line.read && line.read.candidates) || [];
 
     return `
       <article class="card rounded-xl px-3 py-2 ${malo ? 'row-empty' : ''}" data-row="${index}">
+        ${readBadge(line)}
         <div class="flex items-center gap-2 mb-2">
           <select class="field" data-entry="supply" data-index="${index}">
-            ${supplyOptions(line.supply_id)}
+            ${supplyOptions(line.supply_id, sugeridos)}
           </select>
           <button type="button" class="text-white/40 px-2 shrink-0" data-entry="remove"
                   data-index="${index}" aria-label="${escape(t('wh.entryRemoveLine'))}">✕</button>
@@ -603,6 +879,7 @@
 
   function wireEntry() {
     const repintar = () => { renderTabs(); renderEntry(); };
+    wirePhotoCard();
 
     const selector = $('entry-supplier');
     if (selector) {
@@ -686,11 +963,16 @@
         locationId: lugar,
         supplierId: state.draftSupplier || null,
         lines: state.draft,
+        // La foto viaja con la captura para que queden amarradas: el comprobante y el
+        // lote que salio de el. El servidor se niega si esa foto ya se capturo, que es
+        // la proteccion contra el doble toque en un telefono lento.
+        photoId: state.photo ? state.photo.id : null,
       });
       const data = await api.post(`/nightclubs/${clubId()}/supply-receipts`, body);
       toast(t('wh.entrySaved', { n: data.receipt.lines.length }), 'ok');
       state.draft = [EV2Receiving.emptyLine()];
       state.draftSupplier = '';
+      state.photo = null;
       await load();
     } catch (err) {
       showError(err, $('entry-error'));

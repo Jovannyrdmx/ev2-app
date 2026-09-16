@@ -127,6 +127,9 @@
         <p class="text-xs text-white/50"><span id="me-name">—</span></p>
       </div>
       <div class="flex items-center gap-2">
+        <!-- La vuelta al panel. Solo la ve quien vino de ahí (gerente o administrador):
+             a un almacenista no se le ofrece una puerta que el servidor le va a cerrar. -->
+        <a id="btn-back-manager" href="manager.html" class="text-xs text-white/60 px-2 flex items-center gap-1" title="Panel del gerente" data-i18n-title="wh.backManager" hidden><i class="fa-solid fa-chevron-left"></i><span data-i18n="wh.back">Panel</span></a>
         <button id="btn-refresh" class="text-xs text-white/60 px-2" title="Actualizar" data-i18n-title="wh.refresh"><i class="fa-solid fa-rotate"></i></button>
         <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
         <button id="btn-logout" class="text-xs text-white/60 px-2" title="Salir" data-i18n-title="top.signOut"><i class="fa-solid fa-right-from-bracket"></i></button>
@@ -271,6 +274,21 @@
     <button id="fulfill-submit" class="ev2-button w-full py-3 rounded-xl font-display mt-3" data-i18n="wh.fulfillSend">Surtir</button>
   </section>
 
+  <!-- ============ LA FOTO DEL TICKET, EN GRANDE ============
+       Quien revisa los renglones tiene que poder ver el papel. Sin esto tendría que
+       confiar en lo que leyó el programa, que es justo lo que esta pantalla evita.
+       La imagen se pide con el token y se pinta desde un blob: es una factura con el
+       RFC del club y los precios de compra, no un archivo público. -->
+  <div id="photo-viewer" class="fixed inset-0 z-50 bg-black/95 flex flex-col" hidden>
+    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
+      <p class="text-sm text-white/60" id="photo-viewer-title">—</p>
+      <button id="photo-viewer-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="wh.close">Cerrar</button>
+    </header>
+    <div class="flex-1 overflow-auto p-2 flex items-start justify-center">
+      <img id="photo-viewer-img" alt="" class="max-w-full rounded-lg">
+    </div>
+  </div>
+
   <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50" hidden></div>
 </div>
 
@@ -280,6 +298,7 @@
 <script src="js/password-gate.js"></script>
 <script src="js/warehouse.js"></script>
 <script src="js/receiving.js"></script>
+<script src="js/receipt-review.js"></script>
 <script src="js/warehouse-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

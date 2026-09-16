@@ -20,6 +20,28 @@
 
   const EMPLOYEE_ROLES = ['waiter', 'bartender', 'hostess', 'dancer', 'dj', 'light_tech', 'valet'];
 
+  const MANAGER_ROLE = 'manager';
+
+  /**
+   * Qué roles puede dar de alta quien está viendo la pantalla.
+   *
+   * El gerente da de alta piso. Al gerente lo nombra el administrador, y a nadie más:
+   * un gerente que puede crear gerentes puede crearse un cómplice, y desde ese momento
+   * el permiso de gerente —caja, precios, retiros, nómina— ya no protege nada. El
+   * servidor lo revisa otra vez; esto solo evita ofrecer una opción que va a fallar.
+   *
+   * `admin` no aparece nunca: ese rol solo se da desde la consola del servidor
+   * (`npm run promote`), que es lo que lo hace valer algo.
+   */
+  function creatableRoles(viewerRole) {
+    return viewerRole === 'admin'
+      ? EMPLOYEE_ROLES.concat(MANAGER_ROLE)
+      : EMPLOYEE_ROLES.slice();
+  }
+
+  // Para ordenar la lista: la gerencia primero, luego el piso en su orden de siempre.
+  const ROLE_ORDER = [MANAGER_ROLE].concat(EMPLOYEE_ROLES);
+
   const text = (v) => String(v === null || v === undefined ? '' : v).trim();
 
   /**
@@ -36,8 +58,8 @@
       return person.on_shift ? 0 : 1;
     };
     const roleRank = (role) => {
-      const i = EMPLOYEE_ROLES.indexOf(role);
-      return i === -1 ? EMPLOYEE_ROLES.length : i;
+      const i = ROLE_ORDER.indexOf(role);
+      return i === -1 ? ROLE_ORDER.length : i;
     };
     return (staff || [])
       .filter((p) => p && p.id)
@@ -122,14 +144,16 @@
    * centro nocturno, y dar de alta a un menor como personal es el peor error que
    * puede cometer esta pantalla.
    */
-  function validateEmployee(form, now) {
+  function validateEmployee(form, now, viewerRole) {
     const errors = {};
     const f = form || {};
 
     if (!text(f.first_name)) errors.first_name = 'staff.errRequired';
     if (!text(f.last_name)) errors.last_name = 'staff.errRequired';
     if (!EMAIL.test(text(f.email))) errors.email = 'staff.errEmail';
-    if (!EMPLOYEE_ROLES.includes(f.role)) errors.role = 'staff.errRole';
+    // Sin `viewerRole` la lista es la de piso: quien no dijo que es administrador no
+    // lo es, y equivocarse hacia el lado que da menos permiso es lo correcto aquí.
+    if (!creatableRoles(viewerRole).includes(f.role)) errors.role = 'staff.errRole';
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(text(f.birth_date))) {
       errors.birth_date = 'staff.errBirthDate';
@@ -192,6 +216,8 @@
 
   return {
     EMPLOYEE_ROLES,
+    MANAGER_ROLE,
+    creatableRoles,
     MIN_AGE,
     yearsSince,
     sortStaff,
