@@ -11,6 +11,6 @@
   "lang": "es-MX",
   "icons": [
     { "src": "images/favicon-32x32.png", "sizes": "32x32", "type": "image/png" },
-    { "src": "images/ev2-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "images/ev2-logo.svg.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any maskable" }
   ]
 }

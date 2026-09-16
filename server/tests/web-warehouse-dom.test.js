@@ -174,9 +174,11 @@ describe('el almacén tiene su propia puerta', () => {
   });
 
   it('la pantalla queda precargada para poder trabajar con mala señal', () => {
-    const sw = leer('sw.js');
-    expect(sw).toContain('almacen.html');
-    expect(sw).toContain('js/warehouse.js');
-    expect(sw).toContain('js/warehouse-screen.js');
+    // Comprobar TRES nombres a mano es lo que dejó pasar cinco archivos nuevos sin que
+    // nadie lo notara: la app abría sin señal y la pestaña de Entrada se quedaba en
+    // blanco, en la bodega, que es donde peor entra la señal. La comprobación de
+    // verdad —cada `<script>` de esta página contra la lista del service worker— vive
+    // en `web-pwa.test.js` y se hace sola.
+    expect(leer('sw.js')).toContain('almacen.html');
   });
 });

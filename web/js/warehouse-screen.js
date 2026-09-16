@@ -20,6 +20,19 @@
   'use strict';
 
   const $ = (id) => document.getElementById(id);
+
+  /**
+   * Cablea un elemento que puede no estar todavía, y dice si lo encontró.
+   *
+   * Para los elementos que se agregaron en un paso posterior al del HTML que ya está
+   * en el teléfono de alguien. El resto sigue usando `$(...)` directo a propósito: si
+   * falta el botón de salir, la pantalla está tan rota que callarlo no ayuda.
+   */
+  function on(id, event, handler) {
+    const el = $(id);
+    if (el) el[event] = handler;
+    return Boolean(el);
+  }
   const meta = (name, fallback) => {
     const el = document.querySelector(`meta[name="${name}"]`);
     return (el && el.content) || fallback;
@@ -115,7 +128,11 @@
   $('btn-wrong-logout').onclick = signOut;
   $('btn-pw-logout').onclick = signOut;
   $('btn-refresh').onclick = () => load();
-  $('photo-viewer-close').onclick = () => closePhotoViewer();
+  // Con `on` y no con `$(...).onclick` directo: este archivo y `almacen.html` viajan
+  // por separado, y un navegador puede quedarse con el HTML de ayer y el JavaScript de
+  // hoy (o al revés). Si un id no existe todavía, lo que se pierde es ESE botón; con el
+  // acceso directo se cae el archivo entero al cargar y la pantalla no abre siquiera.
+  on('photo-viewer-close', 'onclick', () => closePhotoViewer());
 
   $('btn-lang').onclick = () => {
     EV2Format.setLanguage(EV2Format.otherLanguage());
@@ -617,6 +634,9 @@
 
   /** Abre la imagen en grande. Con el token puesto: es una factura, no un archivo público. */
   async function viewPhoto(photoId) {
+    // Mismo caso que arriba: el visor vive en el HTML y este archivo puede llegar
+    // antes. Se avisa y se sigue, en vez de tirar un error que nadie va a leer.
+    if (!$('photo-viewer')) { toast(t('rc.viewerMissing'), 'warn'); return; }
     try {
       const blob = await api.getBlob(`/nightclubs/${clubId()}/receipt-photos/${photoId}/image`);
       if (state.photoUrl) URL.revokeObjectURL(state.photoUrl);

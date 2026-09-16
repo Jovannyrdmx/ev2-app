@@ -11,7 +11,11 @@
  */
 'use strict';
 
-const VERSION = 'ev2-v7';
+// Se sube en CADA despliegue que cambie la cascara. La busqueda va por red primero,
+// asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
+// vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
+// existe.
+const VERSION = 'ev2-v8';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -32,7 +36,18 @@ const SHELL = [
   // El almacen se cuenta en una bodega, que es donde peor entra la senal de todo el
   // edificio: si esta pantalla no abre sin red, el conteo se hace en papel.
   'js/warehouse.js', 'js/warehouse-screen.js',
-  'images/favicon-32x32.png', 'images/ev2-logo.svg',
+  // Faltaban cinco, de cuatro pasos distintos, y el efecto era el mismo en todos: la
+  // pantalla abria sin senal y la pestana que dependia de ese archivo se quedaba en
+  // blanco. El peor era el almacen: se cuenta en una bodega, que es donde peor entra
+  // la senal del edificio. `tests/web-pwa.test.js` ahora compara esta lista contra los
+  // <script> de cada pagina, para que no vuelva a quedarse atras en silencio.
+  'js/receiving.js', 'js/receipt-review.js', 'js/roster.js', 'js/night-report.js',
+  'js/social-login.js',
+  // El nombre del logo lleva la extension doble ('...svg.png') porque el archivo que
+  // se puso es un PNG. Apuntar a 'ev2-logo.svg' -- que no existe -- dejaba la app sin
+  // icono grande al agregarla a la pantalla de inicio, y el service worker fallaba al
+  // guardarlo en silencio.
+  'images/favicon-32x32.png', 'images/ev2-logo.svg.png',
 ];
 
 self.addEventListener('install', (event) => {
