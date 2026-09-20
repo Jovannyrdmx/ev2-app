@@ -31,6 +31,10 @@ const f = require('./helpers/factories');
 const ocr = require('../src/services/receipt-ocr');
 
 const FIXTURE = path.join(__dirname, 'fixtures', 'factura-proveedor.jpg');
+// Un TICKET, que es otro problema que una factura: angosto, impresion termica gris y
+// gastada, papel curvado, fotografiado torcido sobre una mesa oscura. Y sobre todo:
+// con el renglon PARTIDO en dos, que es lo que rompio esto en el club de verdad.
+const TICKET = path.join(__dirname, 'fixtures', 'ticket-termico.jpg');
 
 /**
  * ¿Está Tesseract con español en esta máquina?
@@ -149,6 +153,59 @@ describe('Un renglón del ticket', () => {
       'Av. Obregon 1420, Nogales, Son.',
     ];
     expect(noSon.filter((linea) => ocr.parseLine(linea) !== null)).toEqual([]);
+  });
+});
+
+describe('El renglón partido de un ticket angosto', () => {
+  /**
+   * Este es el defecto que hizo que en el club la foto no llenara nada, y no era la
+   * calidad de la imagen: era el FORMATO del papel. Un ticket térmico mide ocho
+   * centímetros y no le caben el nombre y las columnas de precio en la misma línea.
+   */
+  const TERMICO = [
+    '6  TEQ DON JULIO 70 690ML',
+    '        1150.00      6900.00',
+    '24 RON BACARDI BCO 750ML',
+    '         285.00      6840.00',
+    'SUBTOTAL',
+    '             13740.00',
+  ].join('\n');
+
+  it('une el nombre con las cifras que vienen abajo', () => {
+    const renglones = ocr.parseReceipt(TERMICO);
+    expect(renglones).toHaveLength(2);
+    expect(renglones[0]).toMatchObject({
+      quantity: 6, unit_cost: 1150, line_total: 6900, math: 'ok',
+    });
+    expect(renglones[0].description).toBe('TEQ DON JULIO 70 690ML');
+    expect(renglones[1]).toMatchObject({ quantity: 24, unit_cost: 285, math: 'ok' });
+  });
+
+  it('el pie partido también se junta, y por eso se reconoce y se descarta', () => {
+    // Sin unirlo, "SUBTOTAL" se va solo y la cifra de abajo entra como un producto.
+    expect(ocr.documentTotals(ocr.joinWrappedLines(TERMICO)).subtotal).toBe(13740);
+    expect(ocr.parseReceipt(TERMICO).some((l) => /subtotal/i.test(l.description))).toBe(false);
+  });
+
+  it('NO junta dos renglones de mercancía seguidos', () => {
+    // La regla es estrecha a propósito: solo se une con un renglón de PURAS cifras.
+    const seguidos = '6 CERVEZA CORONA 355 ML 25.50 153.00\n4 JUGO PIÑA 1L 42.00 168.00';
+    const renglones = ocr.parseReceipt(seguidos);
+    expect(renglones).toHaveLength(2);
+    expect(renglones.map((l) => l.quantity)).toEqual([6, 4]);
+  });
+
+  it('un renglón suelto de cifras, sin nombre arriba, no inventa un producto', () => {
+    expect(ocr.parseReceipt('1150.00 6900.00')).toEqual([]);
+  });
+
+  it('descarta el pie que el lector mordió, por su forma', () => {
+    // "TOTAL" leído como "'OTAL" se le escapa a la lista de palabras. Una sola
+    // palabra, un solo importe y ninguna cantidad es una etiqueta, no mercancía.
+    expect(ocr.parseLine("'OTAL 32336.16")).toBeNull();
+    expect(ocr.parseLine('SUBTOTAI 27876.00')).toBeNull();
+    // Y la mercancía de verdad, que se describe con varias palabras, sigue pasando.
+    expect(ocr.parseLine('CERVEZA CORONA 355ML 25.50')).not.toBeNull();
   });
 });
 
@@ -372,6 +429,28 @@ describe('Leer una foto real', () => {
     expect(leido.lines).toHaveLength(5);
     expect(leido.lines.filter((l) => l.supply_id).length).toBe(0);
     expect(leido.lines.every((l) => l.confidence === 'low')).toBe(true);
+  });
+
+  siOCR('lee un ticket térmico curvado y torcido, con el renglón partido', async () => {
+    // La prueba que faltaba. Todo lo que se había probado eran facturas anchas de hoja
+    // carta, generadas limpias: por eso esto llegó al club roto.
+    const texto = await ocr.ocrText(TICKET);
+    const renglones = ocr.parseReceipt(texto);
+
+    // Cuatro de los cinco productos salen completos y con la cuenta comprobada. El
+    // quinto pierde sus cifras en la foto —el papel está gastado ahí— y sale MARCADO,
+    // que es lo correcto: se teclea a mano, no se inventa.
+    const cuadran = renglones.filter((l) => l.math === 'ok');
+    expect(cuadran.length).toBeGreaterThanOrEqual(4);
+    expect(cuadran[0]).toMatchObject({ quantity: 6, unit_cost: 1150, line_total: 6900 });
+    expect(renglones.every((l) => l.math === 'ok' || l.confidence !== 'high')).toBe(true);
+
+    // Y ningún renglón del pie se coló como producto.
+    const nombres = renglones.map((l) => ocr.norm(l.description));
+    expect(nombres.filter((n) => /total|iva|gracias/.test(n))).toEqual([]);
+
+    // El subtotal impreso se encuentra aunque venga partido en dos renglones.
+    expect(ocr.documentTotals(ocr.joinWrappedLines(texto)).subtotal).toBe(27876);
   });
 
   it('dice claramente cuando el programa no está instalado', async () => {

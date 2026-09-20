@@ -178,6 +178,9 @@
       'wh.back': 'Panel',
       'wh.backManager': 'Volver al panel del gerente',
       'wh.close': 'Cerrar',
+      'wh.noCatalogTitle': 'Este club todavía no tiene insumos dados de alta.',
+      'wh.noCatalogHelp': 'Sin catálogo no se puede capturar una entrada ni emparejar lo que se lea de una foto. Se carga una sola vez, desde el servidor, con «npm run seed:supplies».',
+      'rc.noCatalog': 'Se leyeron los renglones, pero el club no tiene insumos dados de alta con qué emparejarlos.',
       // --- la foto del ticket o la factura (D45) ---
       'rc.takePhoto': 'Foto del ticket o la factura',
       'rc.reading': 'Leyendo la foto…',
@@ -1461,6 +1464,9 @@
       'wh.back': 'Panel',
       'wh.backManager': "Back to the manager's panel",
       'wh.close': 'Close',
+      'wh.noCatalogTitle': 'This club has no supplies registered yet.',
+      'wh.noCatalogHelp': 'Without a catalogue there is no way to capture a receipt or match what a photo reads. It is loaded once, from the server, with "npm run seed:supplies".',
+      'rc.noCatalog': 'The lines were read, but the club has no supplies registered to match them against.',
       // --- the ticket or invoice photo (D45) ---
       'rc.takePhoto': 'Photo of the ticket or invoice',
       'rc.reading': 'Reading the photo…',

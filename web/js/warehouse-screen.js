@@ -495,6 +495,25 @@
 
   // ==================================================== entrada de mercancía en lote
 
+  /**
+   * El aviso de que el club no tiene catálogo.
+   *
+   * Sin insumos dados de alta, la captura no puede funcionar y la foto tampoco: el
+   * selector sale vacío y ningún renglón leído encuentra a qué producto corresponde.
+   * Pero la pantalla se veía IGUAL que cuando el parecido de nombre simplemente falla,
+   * y son dos problemas distintos: este se arregla cargando el catálogo, y hasta que no
+   * se cargue no hay nada más que hacer aquí. Decirlo ahorra la tarde de buscar el
+   * error en otro lado.
+   */
+  function catalogoVacio() {
+    if (state.supplies.length > 0) return '';
+    return `
+      <section class="card rounded-xl px-3 py-3 mb-3 border border-pink-400/50">
+        <p class="text-sm text-pink-200 font-display">${escape(t('wh.noCatalogTitle'))}</p>
+        <p class="text-[11px] text-white/60 mt-1">${escape(t('wh.noCatalogHelp'))}</p>
+      </section>`;
+  }
+
   // ------------------------------------------------- la foto del ticket o la factura
 
   /**
@@ -616,6 +635,9 @@
       toast(t('rc.nothingRead'), 'warn');
       return;
     }
+    // Se leyeron renglones pero el club no tiene con qué emparejarlos. Sin este aviso
+    // parece que el lector falló, cuando lo que falta es el catálogo.
+    if (foto.parsed && foto.parsed.catalog_size === 0) toast(t('rc.noCatalog'), 'warn');
     const limpio = state.draft.every((l) => EV2Receiving.isEmptyLine(l));
     if (!limpio) { toast(t('rc.draftKept'), 'warn'); return; }
     state.draft = EV2ReceiptReview.draftFromPhoto(foto.parsed);
@@ -770,6 +792,7 @@
     const puedeAltaProveedor = api.hasRole('manager');
 
     $('list').innerHTML = `
+      ${catalogoVacio()}
       ${photoCard()}
       <section class="card rounded-xl px-3 py-3 mb-3 space-y-3">
         <div>

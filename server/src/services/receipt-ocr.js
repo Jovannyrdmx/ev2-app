@@ -308,6 +308,13 @@ function parseLine(raw) {
     .replace(/^[\s.:,;|*-]+|[\s.:,;|*-]+$/g, '');
   if (!hasWords(desc)) return null;
 
+  // Un pie de ticket que el lector mordió. `NOT_A_LINE` busca las palabras completas,
+  // así que "TOTAL" leído como "'OTAL" se le escapa y entra como si fuera un producto
+  // de 32,336 pesos. Esto lo atrapa por la FORMA y no por la palabra: una sola
+  // palabra, un solo importe y ninguna cantidad es una etiqueta de pie; la mercancía
+  // de verdad se describe con varias palabras ("RON BACARDI BLANCO 750ML").
+  if (quantity === null && importes.length === 1 && !/\s/.test(desc)) return null;
+
   // El último importe es el de la línea, el anterior el unitario. Con uno solo no se
   // sabe cuál es, y la cuenta de `reconcile` lo decide.
   let unitCost = null;
@@ -367,9 +374,58 @@ function reconcile(line) {
   return { ...line, math: 'incomplete' };
 }
 
-/** El texto completo → los renglones que parecen mercancía, ya comprobados. */
+/** ¿Este renglón son puras cifras, sin nada que se pueda llamar nombre? */
+const onlyAmounts = (linea) => /\d/.test(linea)
+  && (linea.match(/[a-záéíóúñ]/gi) || []).length < 3;
+
+/**
+ * Junta el renglón partido en dos que imprime un ticket angosto.
+ *
+ * Un ticket térmico mide ocho centímetros: no le caben el nombre y las columnas de
+ * precio en la misma línea, así que los parte:
+ *
+ *     6  TEQ DON JULIO 70 690ML
+ *             1,150.00      6,900.00
+ *
+ * Sin juntarlos, el de arriba queda sin costo y el de abajo se tira por no tener
+ * letras — que es exactamente "tomé la foto y no se llenó nada". Una factura de hoja
+ * carta no tiene este problema y por eso no se vio antes: es el formato del papel lo
+ * que cambia, no la calidad de la foto.
+ *
+ * La regla es estrecha a propósito: solo se une un renglón CON palabras y SIN cifras
+ * de cola con el que le sigue si ese es PURAS cifras. Dos renglones de mercancía
+ * seguidos no se tocan, y un renglón suelto de cifras que no viene detrás de un
+ * nombre se queda solo, donde `parseLine` lo descarta por no tener descripción.
+ */
+function joinWrappedLines(text) {
+  const crudas = String(text || '').split(/\r?\n/)
+    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .filter((l) => l.length > 0);
+
+  const out = [];
+  for (let i = 0; i < crudas.length; i += 1) {
+    const actual = crudas[i];
+    const siguiente = crudas[i + 1];
+    if (hasWords(actual) && siguiente !== undefined && onlyAmounts(siguiente)
+      && !onlyAmounts(actual)) {
+      out.push(`${actual} ${siguiente}`);
+      i += 1;
+    } else {
+      out.push(actual);
+    }
+  }
+  return out.join('\n');
+}
+
+/**
+ * El texto completo → los renglones que parecen mercancía, ya comprobados.
+ *
+ * Se juntan los renglones partidos ANTES de decidir qué es mercancía y qué no: el pie
+ * de un ticket angosto también viene partido ("SUBTOTAL" y abajo la cifra), y unirlo
+ * primero es lo que permite reconocerlo y descartarlo.
+ */
 function parseReceipt(text) {
-  const renglones = String(text || '').split(/\r?\n/);
+  const renglones = joinWrappedLines(text).split('\n');
   const out = [];
   for (const raw of renglones) {
     const line = parseLine(raw);
@@ -552,6 +608,15 @@ async function readReceipt(client, { nightclubId, imagePath, langs }) {
   const text = await ocrText(imagePath, langs ? { langs } : {});
   const renglones = parseReceipt(text);
 
+  // Cuántos insumos hay con qué emparejar. Sin esto, un club cuyo catálogo nunca se
+  // cargó ve exactamente lo mismo que uno donde el parecido de nombre falló: renglones
+  // sin insumo y ninguna explicación. Son dos problemas muy distintos —uno se arregla
+  // con `npm run seed:supplies` y el otro no— y la pantalla tiene que poder decir cuál.
+  const { rows: cuantos } = await client.query(
+    'SELECT count(*)::int AS n FROM supplies WHERE nightclub_id = $1 AND active',
+    [nightclubId]);
+  const catalogo = cuantos[0].n;
+
   const lines = [];
   for (const line of renglones) {
     // En serie y no en paralelo: son quince consultas cortas contra un índice, y
@@ -567,13 +632,16 @@ async function readReceipt(client, { nightclubId, imagePath, langs }) {
     });
   }
 
-  const pie = documentTotals(text);
+  // Sobre el texto YA unido: en un ticket angosto el pie también viene partido
+  // ("SUBTOTAL" arriba y la cifra abajo), y sin unirlo primero no se encuentra.
+  const pie = documentTotals(joinWrappedLines(text));
   const contra = comparableTotal(pie);
   const suma = lines.reduce((acc, l) => acc + (l.line_total || 0), 0);
 
   return {
     text,
     lines,
+    catalog_size: catalogo,
     document_total: pie.total,
     document_subtotal: pie.subtotal,
     document_tax: pie.tax,
@@ -640,6 +708,7 @@ module.exports = {
   fixDigits,
   parseLine,
   parseReceipt,
+  joinWrappedLines,
   reconcile,
   documentTotal,
   documentTotals,
