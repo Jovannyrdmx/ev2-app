@@ -30,10 +30,26 @@
    * `requiresReference` es lo que hace auditable el corte: sin el folio del voucher, un
    * cobro con terminal es la palabra del mesero contra el estado de cuenta del banco.
    */
+  /**
+   * Cómo se cobra en la mesa.
+   *
+   * `mercadopago_point` no es un pago manual como los otros dos: no registra dinero que
+   * ya cambió de manos, sino que le dice a la terminal del club que cobre (D47). Por eso
+   * no pide folio — no hay nada que teclear — y por eso `isTerminal` existe: la pantalla
+   * tiene que mandarlo por otra ruta y quedarse esperando la tarjeta.
+   *
+   * Vive en la MISMA lista que efectivo y terminal-del-banco a propósito. Para el mesero
+   * es la misma pregunta de siempre —¿con qué me paga?— y partirla en dos botones en
+   * pantallas distintas sería inventar una diferencia que al cliente no le importa.
+   */
   const METHODS = [
-    { key: 'cash', requiresReference: false },
-    { key: 'card_terminal', requiresReference: true },
+    { key: 'cash', requiresReference: false, isTerminal: false },
+    { key: 'mercadopago_point', requiresReference: false, isTerminal: true },
+    { key: 'card_terminal', requiresReference: true, isTerminal: false },
   ];
+
+  /** Si ese método lo cobra la terminal por su cuenta en vez de registrarse a mano. */
+  const isTerminalMethod = (key) => Boolean((METHODS.find((m) => m.key === key) || {}).isTerminal);
 
   const methodKeys = () => METHODS.map((m) => m.key);
   const methodFor = (key) => METHODS.find((m) => m.key === key) || null;
@@ -132,13 +148,19 @@
    *
    * `null` significa que se puede.
    */
-  function chargeBlocker({ order, method, reference }) {
+  function chargeBlocker({ order, method, reference, terminals }) {
     if (!order || !order.transaction_id) return 'no_charge';
     if (order.payment_status === 'paid') return 'already_paid';
     const found = methodFor(method);
     if (!found) return 'no_method';
     if (found.requiresReference && !String(reference == null ? '' : reference).trim()) {
       return 'no_reference';
+    }
+    // Cobrar con una terminal que no existe deja al mesero tocando un botón que falla
+    // desde el servidor. Si no hay ninguna dada de alta, se dice aquí.
+    if (found.isTerminal && terminals !== undefined
+      && !(terminals || []).some((t) => t && t.active !== false)) {
+      return 'no_terminal';
     }
     return null;
   }
@@ -250,6 +272,7 @@
     METHODS,
     methodKeys,
     methodFor,
+    isTerminalMethod,
     servableTables,
     deliveryPoints,
     orderPayload,

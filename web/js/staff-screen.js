@@ -4,7 +4,7 @@
  * Conecta el DOM con `EV2` (API y socket), `EV2Staff` (charolas, ocupación, propinas)
  * y `EV2Roles`. Las decisiones viven en `staff-floor.js` y están probadas ahí.
  */
-/* global EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan,
+/* global EV2TerminalCharge, EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan,
           EV2Client, EV2DrinkArt, EV2OrderTaking */
 (function () {
   'use strict';
@@ -35,7 +35,7 @@
   const state = {
     tab: 'trays', orders: [], tables: [], stats: null, tips: [],
     employee: null, currency: 'MXN', realtime: null, busy: new Set(), arrived: new Set(),
-    reservations: [], doorSearch: '',
+    reservations: [], doorSearch: '', terminals: [],
     doorSummary: null,
     drinks: [],
     // Lo que el mesero está levantando ahora mismo. `order` se llena cuando el pedido
@@ -196,6 +196,10 @@
           (d) => { state.reservations = d.reservations || []; })
         : Promise.resolve(),
       isDoorRole() ? loadDoorSummary() : Promise.resolve(),
+      // Las terminales del club. Si no hay ninguna, el método de tarjeta se ofrece
+      // igual pero dice por qué no se puede, en vez de fallar desde el servidor con el
+      // cliente enfrente.
+      get(`/nightclubs/${club}/payment-terminals`, (d) => { state.terminals = d.terminals || []; }),
     ]);
     // El botón de la cámara solo aparece si este teléfono de verdad puede leer un
     // QR. Enseñarlo y que falle al tocarlo es peor que no enseñarlo: en la puerta
@@ -1291,15 +1295,54 @@
     }
   }
 
+  /**
+   * El cuadro de la terminal. Se arma una sola vez, la primera que hace falta: la
+   * mayoría de los turnos cobran en efectivo y no tienen por qué pagar el costo de un
+   * trozo de pantalla que nunca se abre.
+   */
+  let terminalSheet = null;
+  function sheet() {
+    if (!terminalSheet) {
+      terminalSheet = EV2TerminalCharge.createSheet({
+        api,
+        clubId,
+        t,
+        money: (a, c) => EV2Format.money(a, c || state.currency),
+        errorMessage: (err) => EV2Format.errorMessage(err),
+        onPaid: async () => {
+          toast(t('take.charged'), 'ok');
+          await Promise.all([loadOrders(), loadTables()]);
+        },
+        onClose: () => { closeTake(); },
+      });
+    }
+    return terminalSheet;
+  }
+
   async function chargeTake() {
     const take = state.take;
     const method = $('take-method').value;
     const reference = $('take-reference').value;
-    const blocker = EV2OrderTaking.chargeBlocker({ order: take.order, method, reference });
+    const blocker = EV2OrderTaking.chargeBlocker({
+      order: take.order, method, reference, terminals: state.terminals,
+    });
     if (blocker) { takeError(`take.blocked.${blocker}`); return; }
 
     take.sending = true;
     try {
+      if (EV2OrderTaking.isTerminalMethod(method)) {
+        // Otra ruta y otra espera: aquí no se registra un pago, se le pide a la terminal
+        // que cobre. La pantalla se queda mirando hasta que Mercado Pago conteste.
+        const terminal = EV2TerminalCharge.pickTerminal(
+          state.terminals, EV2TerminalCharge.recordada());
+        const res = await api.post(`/nightclubs/${clubId()}/terminal-charges`, {
+          transaction_id: take.order.transaction_id,
+          terminal_id: terminal.id,
+        });
+        EV2TerminalCharge.recordar(terminal.id);
+        sheet().watch(res.charge);
+        return;
+      }
       await api.post(`/nightclubs/${clubId()}/manual-payments/register`,
         EV2OrderTaking.chargePayload({ order: take.order, method, reference }));
       toast(t('take.charged'), 'ok');
@@ -1383,6 +1426,9 @@
     rt.on('resync_required', async () => { banner(t('banner.updating')); await loadAll(); banner(null); });
 
     rt.on('event', async (message) => {
+      // El cobro con terminal se entera por aquí antes que por la consulta: son los
+      // segundos en que alguien está mirando la pantalla con el cliente enfrente.
+      if (terminalSheet) terminalSheet.onEvent(message);
       // La puerta escucha el mismo socket: una reservación nueva o un cambio de
       // estado tiene que aparecer sin que la anfitriona jale la pantalla.
       if (EV2Door.affectsDoor(message)) {

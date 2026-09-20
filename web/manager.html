@@ -360,6 +360,28 @@
         retiro para siempre.
       -->
       <div id="tab-payouts" class="space-y-3" hidden>
+        <!--
+          Las terminales del club (D47). Va ARRIBA de todo lo demas en esta pestana a
+          proposito: es lo primero que hay que hacer para poder cobrar con tarjeta, y
+          una terminal sin dar de alta no da ningun error visible -- simplemente no
+          aparece la opcion en la barra ni en el piso.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="term.title">Terminales</p>
+            <button id="btn-term-discover" class="card rounded-lg px-3 py-2 text-xs" data-i18n="term.discover">Buscar en Mercado Pago</button>
+          </div>
+          <p id="term-not-configured" class="text-sm text-amber-300" hidden></p>
+          <p id="term-empty" class="text-sm text-white/40" data-i18n="term.none" hidden>Todavía no hay ninguna terminal dada de alta.</p>
+          <div id="term-list" class="space-y-2"></div>
+
+          <div id="term-found-block" class="border-t border-white/5 pt-3 space-y-2" hidden>
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="term.found">Terminales de la cuenta</p>
+            <div id="term-found" class="space-y-2"></div>
+          </div>
+          <p id="term-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
         <div class="card rounded-xl p-4 space-y-2">
           <div class="flex justify-between items-baseline">
             <span class="text-sm text-white/60" data-i18n="pay.owed">Se debe</span>
@@ -636,6 +658,7 @@
 <script src="js/roles.js"></script>
 <script src="js/password-gate.js"></script>
 <script src="js/warehouse.js"></script>
+<script src="js/terminal-charge.js"></script>
 <script src="js/manager.js"></script>
 <script src="js/staff-admin.js"></script>
 <script src="js/payouts.js"></script>

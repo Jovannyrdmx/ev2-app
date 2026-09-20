@@ -47,6 +47,9 @@
   };
   const secret = EV2Manager.createSecretBox();
 
+  // Las terminales del club y lo que Mercado Pago dice que hay en la cuenta (D47).
+  const terminals = { mine: [], found: [], provider: null };
+
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
   const lang = () => EV2Format.getLanguage();
   const money = (amount, currency) => EV2Format.money(amount, currency || state.currency);
@@ -203,6 +206,7 @@
         if (found.length && !found.includes(state.currency)) [state.currency] = found;
       }),
       get(`/nightclubs/${club}/drivers?include_inactive=true&limit=200`, (d) => { state.drivers = d.drivers || []; }),
+      loadTerminals(),
       get(`/nightclubs/${club}/taxi-settings`, (d) => { state.taxiSettings = d.settings; }),
       get(`/nightclubs/${club}/taxi-fares?include_inactive=false`, (d) => { state.fares = d.fares || []; }),
       get(`/nightclubs/${club}/valet-settings`, (d) => { state.valetSettings = d.settings; }),
@@ -603,6 +607,164 @@
       await loadAll();
     } catch (err) { showError(err); }
   };
+
+  // ---------------------------------------------------------------- terminales (D47)
+
+  /**
+   * Las terminales del club.
+   *
+   * Es lo primero que hay que hacer para cobrar con tarjeta, y también el diagnóstico
+   * cuando "toco cobrar y no pasa nada": el modo de operación se enseña aquí, porque una
+   * terminal en STANDALONE ignora al sistema sin decir una palabra.
+   */
+  async function loadTerminals() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/payment-terminals`);
+      terminals.mine = data.terminals || [];
+      terminals.provider = data.provider || null;
+    } catch {
+      terminals.mine = [];
+    }
+    renderTerminals();
+  }
+
+  const MODE_KEY = {
+    PDV: 'term.modePDV', STANDALONE: 'term.modeStandalone', UNDEFINED: 'term.modeUnknown',
+  };
+
+  function renderTerminals() {
+    const aviso = $('term-not-configured');
+    const prov = terminals.provider;
+    // Sin credenciales no hay nada que buscar ni que dar de alta, y decirlo aquí evita
+    // que el gerente toque un botón que solo sabe fallar.
+    const falta = prov && !prov.configured;
+    aviso.hidden = !falta;
+    if (falta) aviso.textContent = t('term.notConfigured', { missing: (prov.missing || []).join(', ') });
+    $('btn-term-discover').disabled = Boolean(falta);
+
+    $('term-empty').hidden = terminals.mine.length > 0;
+    const box = $('term-list');
+    box.innerHTML = '';
+    for (const term of terminals.mine) {
+      const card = document.createElement('div');
+      card.className = 'flex items-center justify-between gap-3 card rounded-lg px-3 py-2';
+      if (term.active === false) card.style.opacity = '.55';
+
+      const left = document.createElement('div');
+      left.className = 'min-w-0';
+      const name = document.createElement('p');
+      name.className = 'font-display truncate';
+      name.textContent = term.label;
+      const mode = document.createElement('p');
+      mode.className = 'text-[11px]';
+      mode.style.color = term.operating_mode === 'PDV'
+        ? 'var(--ev2-lime)' : term.operating_mode === 'STANDALONE' ? '#fca5a5' : 'rgba(255,255,255,.4)';
+      mode.textContent = t(MODE_KEY[term.operating_mode] || 'term.modeUnknown');
+      left.append(name, mode);
+
+      const acciones = document.createElement('div');
+      acciones.className = 'flex gap-2 shrink-0';
+      if (term.operating_mode !== 'PDV') {
+        const fix = document.createElement('button');
+        fix.className = 'card rounded-lg px-3 py-2 text-xs';
+        fix.textContent = t('term.fixMode');
+        fix.onclick = () => patchTerminal(term.id, { set_pdv: true }, fix, 'term.restart');
+        acciones.appendChild(fix);
+      }
+      const baja = document.createElement('button');
+      baja.className = `card rounded-lg px-3 py-2 text-xs ${term.active === false ? '' : 'text-red-300'}`;
+      baja.textContent = t(term.active === false ? 'term.reactivate' : 'term.deactivate');
+      baja.onclick = () => patchTerminal(term.id, { active: term.active === false }, baja, 'term.saved');
+      acciones.appendChild(baja);
+
+      card.append(left, acciones);
+      box.appendChild(card);
+    }
+  }
+
+  async function patchTerminal(id, body, button, okKey) {
+    button.disabled = true;
+    $('term-error').hidden = true;
+    try {
+      await api.patch(`/nightclubs/${clubId()}/payment-terminals/${id}`, body);
+      toast(t(okKey), 'ok');
+      await loadTerminals();
+    } catch (err) {
+      showError(err, $('term-error'));
+      button.disabled = false;
+    }
+  }
+
+  $('btn-term-discover').onclick = async () => {
+    const b = $('btn-term-discover');
+    b.disabled = true;
+    $('term-error').hidden = true;
+    try {
+      const data = await api.post(`/nightclubs/${clubId()}/payment-terminals/discover`, {});
+      terminals.found = data.terminals || [];
+      renderFoundTerminals();
+    } catch (err) {
+      showError(err, $('term-error'));
+    } finally {
+      b.disabled = false;
+    }
+  };
+
+  function renderFoundTerminals() {
+    $('term-found-block').hidden = terminals.found.length === 0;
+    const box = $('term-found');
+    box.innerHTML = '';
+    for (const found of terminals.found) {
+      const fila = document.createElement('div');
+      fila.className = 'card rounded-lg px-3 py-2 space-y-2';
+
+      const id = document.createElement('p');
+      id.className = 'text-[11px] text-white/40 break-all';
+      id.textContent = found.external_id;
+      fila.appendChild(id);
+
+      if (found.registered) {
+        const ya = document.createElement('p');
+        ya.className = 'text-xs';
+        ya.style.color = 'var(--ev2-lime)';
+        ya.textContent = t('term.registered');
+        fila.appendChild(ya);
+      } else {
+        const linea = document.createElement('div');
+        linea.className = 'flex gap-2';
+        const input = document.createElement('input');
+        input.className = 'field flex-1';
+        input.maxLength = 60;
+        input.placeholder = t('term.label');
+        const alta = document.createElement('button');
+        alta.className = 'ev2-button rounded-lg px-3 py-2 text-xs shrink-0';
+        alta.textContent = t('term.register');
+        alta.onclick = async () => {
+          const label = input.value.trim();
+          // Sin nombre no se da de alta: un número de serie no es un nombre que el
+          // personal pueda usar a las dos de la mañana.
+          if (!label) { input.classList.add('bad'); return; }
+          alta.disabled = true;
+          $('term-error').hidden = true;
+          try {
+            await api.post(`/nightclubs/${clubId()}/payment-terminals`, {
+              external_id: found.external_id, label, set_pdv: true,
+            });
+            toast(t('term.restart'), 'ok');
+            terminals.found = [];
+            $('term-found-block').hidden = true;
+            await loadTerminals();
+          } catch (err) {
+            showError(err, $('term-error'));
+            alta.disabled = false;
+          }
+        };
+        linea.append(input, alta);
+        fila.appendChild(linea);
+      }
+      box.appendChild(fila);
+    }
+  }
 
   // ---------------------------------------------------------------- pagos
 

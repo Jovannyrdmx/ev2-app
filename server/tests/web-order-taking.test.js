@@ -127,7 +127,28 @@ describe('qué falta antes de poder cobrar', () => {
 
   it('una transferencia no se puede cerrar en la mesa', () => {
     expect(Take.chargeBlocker({ order, method: 'spei', reference: 'ABC' })).toBe('no_method');
-    expect(Take.methodKeys()).toEqual(['cash', 'card_terminal']);
+    // En la mesa solo se cierra lo que se liquida ahí mismo: el dinero en la mano, el
+    // voucher del banco, o la terminal del club cobrando sola (D47). Una transferencia
+    // la confirma el gerente contra el estado de cuenta.
+    expect(Take.methodKeys()).toEqual(['cash', 'mercadopago_point', 'card_terminal']);
+  });
+
+  it('el cobro con terminal no pide folio, y no se puede sin terminal dada de alta', () => {
+    // No hay folio que teclear: lo que hay es una terminal que cobra sola. Y ofrecer el
+    // método sin ninguna terminal dada de alta deja al mesero tocando un botón que solo
+    // sabe fallar desde el servidor, con el cliente enfrente.
+    expect(Take.isTerminalMethod('mercadopago_point')).toBe(true);
+    expect(Take.isTerminalMethod('card_terminal')).toBe(false);
+    expect(Take.methodFor('mercadopago_point').requiresReference).toBe(false);
+
+    expect(Take.chargeBlocker({ order, method: 'mercadopago_point', terminals: [] }))
+      .toBe('no_terminal');
+    expect(Take.chargeBlocker({ order, method: 'mercadopago_point', terminals: [{ id: 'a', active: false }] }))
+      .toBe('no_terminal');
+    expect(Take.chargeBlocker({ order, method: 'mercadopago_point', terminals: [{ id: 'a' }] }))
+      .toBe(null);
+    // Sin pasar la lista se comporta como antes: quien no la conoce no bloquea nada.
+    expect(Take.chargeBlocker({ order, method: 'mercadopago_point' })).toBe(null);
   });
 
   it('no se cobra dos veces lo ya pagado', () => {

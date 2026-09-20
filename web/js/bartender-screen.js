@@ -5,7 +5,7 @@
  * abrir esto). Las decisiones —qué carril, qué botón, qué hace un evento— viven en
  * `bar-queue.js` y están probadas ahí.
  */
-/* global EV2, EV2Format, EV2Bar, EV2Client, EV2OrderTaking, EV2Receiving, EV2Roles, EV2PasswordGate */
+/* global EV2TerminalCharge, EV2, EV2Format, EV2Bar, EV2Client, EV2OrderTaking, EV2Receiving, EV2Roles, EV2PasswordGate */
 (function () {
   'use strict';
 
@@ -33,6 +33,7 @@
     bars: [], barId: null,
     // La venta en la barra: la carta de ESA barra y el carrito de quien esta enfrente.
     drinks: [], sale: { open: false, cart: null, search: '', sending: false },
+    terminals: [],
   };
   const BAR_KEY = 'ev2.bar.location';
 
@@ -188,6 +189,7 @@
     $('screen-bar').hidden = false;
     $('me-name').textContent = (api.session.user && api.session.user.display_name) || '';
     await loadBars();
+    await loadTerminals();
     await loadQueue();
     // Lo pedido y todavía no surtido, para que el número del botón avise en cuanto
     // se abre la pantalla y nadie pida dos veces lo mismo.
@@ -196,6 +198,38 @@
     // El reloj de espera avanza solo: sin esto, "hace 2 min" se queda en 2 min toda la
     // noche y el color deja de avisar.
     setInterval(renderAll, 30000);
+  }
+
+  /**
+   * Las terminales del club, para poder cobrar con tarjeta desde la barra.
+   *
+   * Un fallo aquí NO tumba la pantalla: sin terminales el cantinero sigue cobrando en
+   * efectivo, que es como se cobra la mayoría de las noches.
+   */
+  async function loadTerminals() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/payment-terminals`);
+      state.terminals = data.terminals || [];
+    } catch { state.terminals = []; }
+  }
+
+  /**
+   * El cuadro de la espera de la terminal. Se arma la primera vez que hace falta.
+   */
+  let terminalSheet = null;
+  function sheet() {
+    if (!terminalSheet) {
+      terminalSheet = EV2TerminalCharge.createSheet({
+        api,
+        clubId,
+        t,
+        money: (a, c) => EV2Format.money(a, c || 'MXN'),
+        errorMessage: (err) => EV2Format.errorMessage(err),
+        onPaid: async () => { closeSale(); await loadQueue(); },
+        onClose: async () => { await loadQueue(); },
+      });
+    }
+    return terminalSheet;
   }
 
   /**
@@ -470,6 +504,7 @@
     });
 
     rt.on('event', async (message) => {
+      if (terminalSheet) terminalSheet.onEvent(message);
       const change = EV2Bar.applyEvent(state.orders, message);
       if (!change.changed) return;
       if (change.fetch) {
@@ -630,8 +665,23 @@
 
       // Un producto de precio cero no genera cobro: ya esta listo para preparar.
       if (order.transaction_id) {
-        const chargeBlocker = EV2OrderTaking.chargeBlocker({ order, method, reference });
+        const chargeBlocker = EV2OrderTaking.chargeBlocker({
+          order, method, reference, terminals: state.terminals,
+        });
         if (chargeBlocker) { saleError(`take.blocked.${chargeBlocker}`); return; }
+        if (EV2OrderTaking.isTerminalMethod(method)) {
+          // El pedido YA existe; lo que falta es que la tarjeta pase. La cola se recarga
+          // al cerrar el cuadro: si no pasa, el pedido queda ahí con su "sin pagar".
+          const terminal = EV2TerminalCharge.pickTerminal(
+            state.terminals, EV2TerminalCharge.recordada());
+          const res = await api.post(`/nightclubs/${clubId()}/terminal-charges`, {
+            transaction_id: order.transaction_id,
+            terminal_id: terminal.id,
+          });
+          EV2TerminalCharge.recordar(terminal.id);
+          sheet().watch(res.charge);
+          return;
+        }
         await api.post(`/nightclubs/${clubId()}/manual-payments/register`,
           EV2OrderTaking.chargePayload({ order, method, reference }));
       }
