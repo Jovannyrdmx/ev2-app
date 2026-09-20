@@ -109,7 +109,17 @@ async function applySideEffects(client, tx, nightclubId) {
  * confirmation and by a staff member registering cash already in hand, so both leave
  * exactly the same trail.
  */
-async function settle(client, { payment, reviewerId, nightclubId }) {
+/**
+ * Marca pagado un cobro del libro y suelta lo que dependía de él.
+ *
+ * `provider`/`providerRef` son para el cobro con terminal (D47): ahí no hay un gerente
+ * revisando un estado de cuenta, hay una pasarela que ya contestó, y el libro tiene que
+ * decir cuál fue y con qué folio. Sin ellos se comporta como siempre — efectivo o
+ * manual—, que es lo que usan las tres rutas que ya existían.
+ */
+async function settle(client, {
+  payment, reviewerId, nightclubId, provider = null, providerRef = null,
+}) {
   const txRes = await client.query(
     `SELECT id, type, amount::text AS amount, currency, status, reference_type, reference_id,
             payer_user_id
@@ -138,10 +148,13 @@ async function settle(client, { payment, reviewerId, nightclubId }) {
 
   await client.query(
     `UPDATE transactions
-        SET status = 'paid', provider = $2, confirmed_by = $3, confirmed_at = now(),
-            updated_at = now()
+        SET status = 'paid', provider = $2::text, confirmed_by = $3,
+            provider_ref = COALESCE($4::text, provider_ref),
+            confirmed_at = now(), updated_at = now()
       WHERE id = $1`,
-    [tx.id, CASH_METHODS.includes(payment.method) ? 'cash' : 'manual', reviewerId]);
+    [tx.id,
+      provider || (CASH_METHODS.includes(payment.method) ? 'cash' : 'manual'),
+      reviewerId, providerRef]);
 
   const { reservation, order } = await applySideEffects(client, tx, nightclubId);
   return { tx, reservation, order };

@@ -9,12 +9,14 @@ const { pool } = require('./db/pool');
 const { redis } = require('./db/redis');
 const { EventRelay } = require('./realtime/relay');
 const paymentConfig = require('./config/payments');
+const terminalCharges = require('./services/terminal-charges');
 
 const PORT = Number(process.env.PORT || 3000);
 
 const app = createApp();
 const server = http.createServer(app);
 let relay = null;
+let sweepTimer = null;
 
 async function start() {
   try {
@@ -44,6 +46,23 @@ async function start() {
     process.exit(1);
   }
 
+  // El repaso de los cobros con terminal (D47). El webhook es de Mercado Pago, no
+  // nuestro: una noche de mala señal no puede dejar un cobro en el limbo con el cliente
+  // ya pagado y el mesero mirando "esperando". Solo lo corre el líder del relay — no por
+  // corrección (aplicar dos veces el mismo resultado no cobra dos veces, `apply()` lo
+  // impide) sino para no preguntarle a Mercado Pago una vez por instancia.
+  if (paymentConfig.mercadoPagoConfig().configured && relay && relay.isLeader) {
+    const cada = Number(process.env.MERCADOPAGO_SWEEP_MS || 15000);
+    sweepTimer = setInterval(() => {
+      terminalCharges.sweep(pool).catch((err) => {
+        console.error('Terminal charge sweep failed:', err.message);
+      });
+    }, cada);
+    // No mantiene vivo el proceso: si todo lo demás terminó, esto no debe estorbar.
+    if (sweepTimer.unref) sweepTimer.unref();
+    console.log(`Terminal charges: backup poll every ${Math.round(cada / 1000)}s`);
+  }
+
   const pay = paymentConfig.status();
   for (const p of pay.providers) {
     console.log(p.configured
@@ -62,6 +81,7 @@ async function shutdown(signal) {
   shuttingDown = true;
   console.log(`${signal} received, shutting down...`);
   server.close();
+  if (sweepTimer) clearInterval(sweepTimer);
   if (relay) await relay.stop().catch(() => {});
   await Promise.allSettled([redis.quit(), pool.end()]);
   process.exit(0);

@@ -3526,6 +3526,346 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '422': { $ref: '#/components/responses/Unprocessable' }
 
+  /api/nightclubs/{nightclubId}/payment-terminals:
+    get:
+      operationId: listPaymentTerminals
+      tags: [Pagos]
+      summary: Las terminales del club
+      description: |
+        El personal ve solo las activas; el gerente, todas. `operating_mode` es lo último
+        que Mercado Pago reportó: una terminal en `STANDALONE` **ignora en silencio** las
+        órdenes de la API, y es el motivo número uno de "toco cobrar y no pasa nada".
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Las terminales
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  terminals:
+                    type: array
+                    items: { $ref: '#/components/schemas/PaymentTerminal' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: registerPaymentTerminal
+      tags: [Pagos]
+      summary: Dar de alta una terminal
+      description: |
+        Con `set_pdv` (por omisión, sí) la pasa a modo PDV en Mercado Pago antes de
+        guardarla: una terminal recién sacada de la caja viene en STANDALONE y no obedece
+        a nadie. Hay que **reiniciarla** después para que el cambio surta efecto.
+
+        El nombre es lo que el personal va a leer: "Barra", "Mesero 1", "Puerta". Ni el
+        nombre ni el aparato se pueden repetir dentro de un club.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [external_id, label]
+              properties:
+                external_id: { type: string, example: NEWLAND_N950__N950NCB801293324 }
+                label: { type: string, maxLength: 60, example: Barra }
+                sort_order: { type: integer, minimum: 0, maximum: 999 }
+                set_pdv: { type: boolean, default: true }
+      responses:
+        '201':
+          description: Terminal dada de alta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  terminal: { $ref: '#/components/schemas/PaymentTerminal' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '501':
+          description: Mercado Pago no está configurado en este servidor
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/payment-terminals/discover:
+    post:
+      operationId: discoverPaymentTerminals
+      tags: [Pagos]
+      summary: Preguntarle a Mercado Pago qué terminales tiene la cuenta
+      description: |
+        No da de alta nada: enseña lo que hay, con `registered` marcando las que este club
+        ya tiene, para que el gerente les ponga nombre. Solo gerencia.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Lo que contestó Mercado Pago
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  terminals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        external_id: { type: string }
+                        operating_mode: { type: string, enum: [PDV, STANDALONE, UNDEFINED] }
+                        registered: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502':
+          description: Mercado Pago contestó con un error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/payment-terminals/{terminalId}:
+    patch:
+      operationId: updatePaymentTerminal
+      tags: [Pagos]
+      summary: Renombrar, dar de baja o repasar el modo de una terminal
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: terminalId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string, maxLength: 60 }
+                active: { type: boolean }
+                sort_order: { type: integer }
+                set_pdv: { type: boolean }
+      responses:
+        '200':
+          description: Terminal actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  terminal: { $ref: '#/components/schemas/PaymentTerminal' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/terminal-charges:
+    post:
+      operationId: startTerminalCharge
+      tags: [Pagos]
+      summary: Cobrar un renglón del libro en la terminal
+      description: |
+        Despierta la terminal con el monto. **Contesta en cuanto Mercado Pago acepta la
+        orden, NO cuando el cliente paga**: esperar aquí a que alguien saque la tarjeta
+        sería una conexión colgada por cada cobro de la noche, y perder el cobro entero
+        cuando la señal del club parpadea. El resultado llega por el socket
+        (`terminal_charge_updated`) o consultando la ruta de abajo.
+
+        El monto NO se manda: sale del renglón del libro (`transaction_id`). Es lo que
+        hace que nadie pueda teclear una cifra distinta de la que se debe.
+
+        Un `504` significa **"no sabemos"**, no "no se cobró": la orden puede existir del
+        otro lado. El cobro se queda abierto y el repaso de respaldo lo resuelve con la
+        misma llave de idempotencia. No se reintenta a mano — eso es lo que cobra dos veces.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transaction_id, terminal_id]
+              properties:
+                transaction_id: { type: string, format: uuid }
+                terminal_id: { type: string, format: uuid }
+      responses:
+        '201':
+          description: La terminal está esperando la tarjeta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  charge: { $ref: '#/components/schemas/TerminalCharge' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            Ese renglón ya está pagado, o ya tiene otra terminal esperando. Lo segundo es
+            deliberado: dos meseros cobrando lo mismo es el cliente pagando dos veces.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: La terminal está en STANDALONE o dada de baja
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '501':
+          description: Mercado Pago no está configurado (o falta declarar MERCADOPAGO_ENV)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '503':
+          description: Las credenciales declaradas no coinciden con la cuenta real
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '504':
+          description: Mercado Pago no contestó. El cobro puede existir; se consulta, no se repite.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/terminal-charges/{chargeId}:
+    get:
+      operationId: getTerminalCharge
+      tags: [Pagos]
+      summary: Cómo va ese cobro
+      description: |
+        Si el cobro sigue esperando, esta ruta le pregunta a Mercado Pago antes de
+        contestar: quien la abre es alguien mirando una pantalla que no cambia, y el
+        webhook pudo no llegar. `is_final` dice si ya se puede dejar de mirar.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: chargeId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: El cobro
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  charge: { $ref: '#/components/schemas/TerminalCharge' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/terminal-charges/{chargeId}/cancel:
+    post:
+      operationId: cancelTerminalCharge
+      tags: [Pagos]
+      summary: Cancelar un cobro que la terminal todavía no cobró
+      description: |
+        Se cancela **primero** del lado de Mercado Pago. Al revés, la terminal se quedaría
+        encendida pidiendo una tarjeta por un cobro que el sistema ya dio por muerto — y
+        alguien la pasaría.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: chargeId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Cancelado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  charge: { $ref: '#/components/schemas/TerminalCharge' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Ese cobro ya terminó y no se puede cancelar
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/terminal-charges/{chargeId}/simulate:
+    post:
+      operationId: simulateTerminalCharge
+      tags: [Pagos]
+      summary: Simular el resultado (SOLO con credenciales de prueba)
+      description: |
+        Existe para poder probar el camino completo del dinero sin una terminal en la
+        mano. Con credenciales de producción contesta 403 — dejarlo disponible ahí sería
+        dejar en el código un botón llamado "dar por pagado" apuntando a la pasarela.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: chargeId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [processed, failed, canceled, expired, action_required]
+                status_detail: { type: string }
+                payment_method_id: { type: string, default: visa }
+                payment_method_type: { type: string, default: credit_card }
+      responses:
+        '202':
+          description: Simulación aceptada. El resultado llega por webhook, como el real.
+        '403':
+          description: No se simula con credenciales de producción
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: Ese cobro nunca llegó a Mercado Pago
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/payments/mercadopago/webhook:
+    post:
+      operationId: mercadoPagoWebhook
+      tags: [Pagos]
+      summary: Notificación de Mercado Pago
+      description: |
+        **Pública**: la llama un servidor de Mercado Pago, no un navegador. Dos cosas la
+        hacen segura, y ninguna es la firma:
+
+        1. El cuerpo **no se cree**. Solo se lee de él el id de la orden, y con ese id se
+           vuelve a pedir `GET /v1/orders/{id}` con nuestro propio token. Cualquiera puede
+           mandar un JSON que diga "pagado"; nadie puede hacer que la API de Mercado Pago
+           lo confirme.
+        2. El id tiene que corresponder a un cobro que este club empezó.
+
+        La firma (`x-signature`) se comprueba y se **anota** en la bitácora del cobro, pero
+        no decide. Hay un motivo concreto: hoy su validación en la Orders API tiene un
+        desacuerdo abierto en los propios SDK de Mercado Pago sobre cómo se arma el texto
+        firmado. Colgar el cobro de ella sería dejar que un defecto ajeno le diga al club
+        que un pago real no ocurrió.
+
+        **Siempre contesta 200**, incluso con una orden desconocida o si la consulta falla:
+        cualquier otra cosa hace que Mercado Pago reintente toda la noche.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action: { type: string, example: order.processed }
+                type: { type: string, example: order }
+                data:
+                  type: object
+                  properties:
+                    id: { type: string }
+      responses:
+        '200':
+          description: Recibida. El cuerpo dice si se aplicó, se ignoró o se dejó al repaso.
+
   /api/employees/me:
     get:
       operationId: getEmployeesMe
@@ -8717,6 +9057,62 @@ components:
     Role:
       type: string
       enum: [guest, waiter, bartender, dancer, dj, light_tech, valet, hostess, manager, admin]
+
+    PaymentTerminal:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        external_id:
+          type: string
+          description: 'Como la llama Mercado Pago: tipo y número de serie.'
+        label:
+          type: string
+          description: Como la llama el personal. Un número de serie es inusable de madrugada.
+        operating_mode:
+          type: string
+          enum: [PDV, STANDALONE, UNDEFINED]
+          description: PDV es el único en el que obedece a la API.
+        active: { type: boolean }
+        sort_order: { type: integer }
+
+    TerminalCharge:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        transaction_id: { type: string, format: uuid }
+        amount: { type: string, example: '450.00' }
+        currency: { type: string, example: MXN }
+        status:
+          type: string
+          enum: [creating, waiting, action_required, processed, failed, canceled, expired, refunded, error]
+          description: |
+            El vocabulario es el de Mercado Pago a propósito — `processed` es su palabra
+            para "el dinero pasó" — salvo `error`, que es nuestro y significa que no
+            llegamos a saberlo. Un `error` hay que mirarlo en el panel de Mercado Pago.
+        status_detail: { type: [string, 'null'] }
+        card:
+          type: [object, 'null']
+          properties:
+            brand: { type: string, example: visa }
+            type: { type: string, example: credit_card }
+            installments: { type: integer }
+        terminal:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            label: { type: string }
+        started_by:
+          type: object
+          description: 'Quién tocó cobrar. Nadie aprobó nada: lo aprobó la tarjeta.'
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+        expires_at: { type: [string, 'null'], format: date-time }
+        settled_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        is_final:
+          type: boolean
+          description: Si la pantalla ya puede dejar de mirar.
 
     User:
       type: object

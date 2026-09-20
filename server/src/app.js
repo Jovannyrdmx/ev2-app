@@ -171,6 +171,18 @@ function createApp() {
   app.use('/api/auth/oauth/handoff', authLimiter);
   app.use('/api/auth/oauth/complete', authLimiter);
 
+  // El webhook de Mercado Pago (D47). Es público y lo llama un servidor ajeno, así que
+  // sí lleva límite — pero holgado, y por una razón: Mercado Pago REINTENTA hasta que
+  // le contestamos 200. Un límite apretado convertiría un pico de cobros en un montón
+  // de notificaciones rechazadas que vuelven a llegar, que es cómo un límite pensado
+  // para proteger acaba tirando los cobros de la noche.
+  app.use('/api/payments/mercadopago/webhook', rateLimit({
+    windowMs: 60 * 1000,
+    limit: Number(process.env.MERCADOPAGO_WEBHOOK_RATE_LIMIT_PER_MIN || 300),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  }));
+
   app.use('/api/auth', authRoutes);
   app.use('/api', nightclubRoutes);
   app.use('/api', drinkRoutes);
