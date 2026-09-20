@@ -26,6 +26,7 @@
       // que su sesión terminó cuando lo que pasó es que se equivocó de contraseña lo
       // manda a buscar el problema donde no está.
       'error.badLogin': 'Correo o contraseña incorrectos.',
+      'error.badPin': 'PIN incorrecto.',
       'error.forbidden': 'No tienes permiso para hacer esto.',
       'error.not_found': 'No encontramos eso.',
       'error.conflict': 'Alguien se adelantó. Vuelve a intentar.',
@@ -1342,6 +1343,7 @@
       'error.network': 'Could not reach the server. Check your connection; if you have internet, the server is not responding.',
       'error.unauthorized': 'Your session ended. Please sign in again.',
       'error.badLogin': 'Wrong email or password.',
+      'error.badPin': 'Wrong PIN.',
       'error.forbidden': "You don't have permission to do this.",
       'error.not_found': "We couldn't find that.",
       'error.conflict': 'Someone got there first. Try again.',
@@ -2760,6 +2762,10 @@
     // responde 'unauthorized' para los dos casos, así que la pantalla es la única que
     // sabe cuál es; sin esto el texto es literalmente falso.
     if (opts && opts.context === 'login' && err.status === 401) return t('error.badLogin');
+    // Lo mismo con el teclado del personal. Sin esto, un dedo equivocado recibe
+    // "tu sesión terminó, vuelve a entrar" -- que no significa nada para alguien que
+    // todavía no ha entrado, y manda a buscar el problema donde no está.
+    if (opts && opts.context === 'pin' && err.status === 401) return t('error.badPin');
 
     // El mensaje del servidor viene en español y suele decir *por qué* mejor que uno
     // genérico. En inglés no sirve: está en español, así que se usa el catálogo.

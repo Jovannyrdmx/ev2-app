@@ -4,13 +4,15 @@
 corto y sirve para otra cosa: **la lista exacta de lo que falta hoy**, en orden, con
 lo que hay que ver en cada paso para saber si funcionó.
 
-La rama `fase5/inventario-por-barra` lleva **tres commits** sin subir:
+La rama `fase5/inventario-por-barra` lleva **dos commits** sin subir:
 
 | Commit | Qué trae |
 |---|---|
-| `e2f4c95` | Venta directa en la barra y el editor de recetas del gerente |
-| `09ee7d1` | Un pase firmado por invitado, y la identificación antes del escaneo |
-| `e95772b` | `/api/health` alcanzable desde fuera, `TRUST_PROXY_HOPS=2`, y dos herramientas de diagnóstico |
+| `316bec4` | El ticket térmico parte cada renglón en dos, y mi lector daba por hecho que no |
+| `d93d8ed` | El personal entra con un PIN de 6 dígitos; el cliente sigue con su correo (D46) |
+
+El segundo es el único de los dos que **pide variables nuevas en el `.env`** (paso 3)
+y trae una **migración** (paso 4).
 
 ---
 
@@ -38,10 +40,10 @@ cd ~/ev2-app
 
 git fetch origin
 git checkout fase5/inventario-por-barra
-git log --oneline -1         # TIENE que decir e95772b
+git log --oneline -1         # TIENE que decir d93d8ed
 ```
 
-Si no dice `e95772b`, el paso 1 no llegó. No sigas.
+Si no dice `d93d8ed`, el paso 1 no llegó. No sigas.
 
 ---
 
@@ -63,7 +65,44 @@ Si entras por `www.ev2.systems`, entonces `ALLOWED_ORIGINS=https://ev2.systems,h
 **y** hay que agregar `www` al `deploy/Caddyfile`, porque hoy solo certifica el
 dominio sin `www`. Dímelo y te paso el cambio.
 
-**No hace falta ninguna variable nueva** para lo de estos tres commits.
+### Dos variables NUEVAS para el acceso con PIN
+
+Sin la primera, la pantalla del personal contesta "el acceso por PIN no está
+configurado" y nadie entra con PIN. Con ella mal puesta, es peor: **cambiarla
+después invalida todos los PIN de golpe**, así que se pone una vez y se deja.
+
+```bash
+# a) genera la llave (en el servidor, una sola vez)
+openssl rand -base64 48
+
+# b) pégala en el .env, en la raíz del repo
+nano .env
+```
+
+```
+# La llave con la que se busca un PIN por índice. Nunca viaja a la base: quien se
+# lleve un respaldo NO se lleva los PIN. Mínimo 32 caracteres.
+PIN_LOOKUP_KEY=<lo que escupió el openssl>
+
+# La red desde la que el gerente puede entrar con PIN. IPs sueltas o bloques CIDR.
+# VACÍA = la gerencia entra SOLO con correo y contraseña, desde donde sea.
+# El personal de piso NO depende de esto: ellos entran con su PIN desde donde estén.
+CLUB_NETWORKS=
+```
+
+Para llenar `CLUB_NETWORKS` necesitas la IP pública del internet del club. Desde
+una computadora conectada al wifi del club:
+
+```bash
+curl -s https://api.ipify.org
+```
+
+Si el proveedor le cambia la IP al club cada cierto tiempo (es lo normal en un
+internet doméstico), esa línea se queda vieja sin avisar y el gerente deja de
+entrar con PIN desde adentro. **Déjala vacía si no estás seguro**: el gerente
+entra con su correo y contraseña igual, y eso no bloquea a nadie del piso.
+
+No hace falta ninguna otra variable.
 
 ---
 
@@ -74,7 +113,7 @@ docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d --build
 docker compose --env-file .env -f deploy/docker-compose.prod.yml logs api | grep -i migrat
 ```
 
-Tienes que ver `Applying 019_guest_passes.sql ... ok`. Las migraciones corren
+Tienes que ver `Applying 025_employee_pin.sql ... ok`. Las migraciones corren
 solas al arrancar la API; los **seeds no**, y por eso van aparte:
 
 ```bash
@@ -126,6 +165,42 @@ history -d $(history 1)
 `must_change_password=true` es deliberado: al entrar, el sistema te obliga a
 cambiarla por una que solo sepas tú, así que la que acabas de teclear en la
 terminal deja de servir.
+
+---
+
+## 6-bis. Tu cuenta a admin, y dar de alta al personal con PIN
+
+**Primero tu cuenta.** Crear gerentes lo puede hacer únicamente un `admin`, y a
+`admin` solo se llega desde la consola del servidor — a propósito: si se pudiera
+por HTTP, cualquiera que se robe una sesión de gerente se haría admin.
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api \
+  npm run promote -- --email TU_CORREO --role admin
+```
+
+**Luego el personal.** En `manager.html` → pestaña *Personal* → **Nuevo**. Al
+guardar sale un recuadro verde con el **PIN de un solo uso**. Ese PIN se enseña
+**una sola vez y no se puede volver a consultar**: si se cierra el recuadro sin
+anotarlo, hay que darle *Reiniciar PIN* y entregar uno nuevo.
+
+Tres cosas que conviene saber antes de dar de alta a cuarenta personas:
+
+- El personal de piso (mesero, cantinero, anfitriona, DJ, valet…) nace **sin
+  contraseña**. El PIN es su única forma de entrar. No tienen nada que "olvidar".
+- Un **gerente** nuevo recibe las dos cosas: PIN (para dentro del club) y
+  contraseña temporal (para desde fuera). Salen las dos en el mismo recuadro.
+- Al entrar por primera vez, el sistema le **obliga a cambiar el PIN** antes de
+  dejarle hacer nada, y el nuevo no puede ser el que le diste. A partir de ahí el
+  PIN de esa persona no lo sabe nadie más, ni tú.
+
+**Cómo entra el empleado:** abre la misma dirección del club, toca **Trabajo
+aquí** y teclea sus seis dígitos. No hay correo que escribir. El aparato recuerda
+cuál de las dos puertas se usó, así que la tableta de la barra abre siempre en el
+teclado y el teléfono de un cliente siempre en el formulario.
+
+Si alguien pierde su PIN o se va del club, es la misma pantalla: *Reiniciar PIN*
+(el anterior deja de servir en ese instante) o *Dar de baja*.
 
 ---
 

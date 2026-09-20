@@ -305,7 +305,9 @@
       pin.busy = false;
       renderPin();
       const el = $('pin-error');
-      el.textContent = EV2Format.errorMessage(err);
+      // `context: 'pin'` para que un 401 diga "PIN incorrecto" y no "tu sesión
+      // terminó": quien acaba de teclear mal no tenía ninguna sesión que terminar.
+      el.textContent = EV2Format.errorMessage(err, { context: 'pin' });
       el.hidden = false;
     }
   }
