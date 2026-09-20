@@ -117,12 +117,66 @@ services:
       # enlace a donde ese cliente quiera, saliendo con la cara del club.
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-https://${EV2_DOMAIN}}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # ---------------------------------------------------------------- acceso
+      # La llave con la que se busca un PIN por indice (D46). SIN ESTO NO HAY PINES:
+      # no se le puede generar uno a un empleado nuevo y nadie del piso puede entrar.
+      #
+      # Faltaba aqui, y ese es un defecto con una forma muy fea: la variable esta en el
+      # .env, el gerente la ve puesta, y el servidor insiste en que falta. No se ve en
+      # desarrollo -- ahi `dotenv` lee el .env entero -- solo en el servidor.
+      PIN_LOOKUP_KEY: ${PIN_LOOKUP_KEY:-}
+      # La red del club, para que la gerencia entre con PIN estando adentro. Vacia = la
+      # gerencia entra solo con correo y contrasena. El piso no depende de esto.
+      CLUB_NETWORKS: ${CLUB_NETWORKS:-}
+      TERMS_VERSION: ${TERMS_VERSION:-}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-}
+      JWT_REFRESH_TTL_DAYS: ${JWT_REFRESH_TTL_DAYS:-}
+      # ---------------------------------------------------------------- limites
+      # Todos tienen un valor por omision en el codigo. Viajan igual para que se puedan
+      # ajustar desde el .env sin reconstruir la imagen -- que es justo lo que alguien
+      # va a intentar la noche que un limite estorbe.
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-}
+      AUTH_RATE_LIMIT_PER_MIN: ${AUTH_RATE_LIMIT_PER_MIN:-}
+      PIN_RATE_LIMIT_PER_MIN: ${PIN_RATE_LIMIT_PER_MIN:-}
+      PASS_RATE_LIMIT_PER_MIN: ${PASS_RATE_LIMIT_PER_MIN:-}
+      POS_AGENT_RATE_LIMIT_PER_MIN: ${POS_AGENT_RATE_LIMIT_PER_MIN:-}
+      TAXI_VERIFY_RATE_LIMIT_PER_MIN: ${TAXI_VERIFY_RATE_LIMIT_PER_MIN:-}
+      MERCADOPAGO_WEBHOOK_RATE_LIMIT_PER_MIN: ${MERCADOPAGO_WEBHOOK_RATE_LIMIT_PER_MIN:-}
+      DB_POOL_MAX: ${DB_POOL_MAX:-}
+      SERVE_API_DOCS: ${SERVE_API_DOCS:-}
+      # ---------------------------------------------------------------- lectura de tickets
+      OCR_TIMEOUT_MS: ${OCR_TIMEOUT_MS:-}
+      TESSERACT_BIN: ${TESSERACT_BIN:-}
+      TESSERACT_LANGS: ${TESSERACT_LANGS:-}
+      RECEIPT_MAX_BYTES: ${RECEIPT_MAX_BYTES:-}
       # SEED_PASSWORD NO se pasa: el seed de desarrollo crea cuentas con contraseña
       # conocida y aquí no debe poder correr ni por accidente.
+      # Las llaves de las pasarelas. Vacias = la pasarela se reporta "no configurada" y
+      # las rutas de cobro contestan 501 diciendo QUE falta; el cobro manual y el
+      # efectivo siguen funcionando igual.
+      #
+      # Los nombres tienen que ser EXACTAMENTE los que lee `config/payments.js`. Aqui
+      # decia `STRIPE_PUBLIC_KEY` y el codigo lee `STRIPE_PUBLISHABLE_KEY`, asi que
+      # Stripe nunca se habria dado por configurado en produccion por mucho que la
+      # llave estuviera en el .env -- y el sintoma habria sido "falta
+      # STRIPE_PUBLISHABLE_KEY" con la llave puesta delante.
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
-      STRIPE_PUBLIC_KEY: ${STRIPE_PUBLIC_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       MERCADOPAGO_ACCESS_TOKEN: ${MERCADOPAGO_ACCESS_TOKEN:-}
       MERCADOPAGO_PUBLIC_KEY: ${MERCADOPAGO_PUBLIC_KEY:-}
+      # Cual de las dos cuentas es, test o live. Sin esto el servidor NO cobra: hoy el
+      # token de prueba y el de produccion empiezan igual (APP_USR) y adivinar mal es
+      # cobrarle a una tarjeta real creyendo que es un ensayo. Faltaba aqui, asi que
+      # las llaves habrian llegado al contenedor y el cobro habria contestado "falta
+      # MERCADOPAGO_ENV" sin que nadie entendiera por que.
+      MERCADOPAGO_ENV: ${MERCADOPAGO_ENV:-}
+      MERCADOPAGO_WEBHOOK_SECRET: ${MERCADOPAGO_WEBHOOK_SECRET:-}
+      # Cuanto vive una orden en la terminal, y cada cuanto se repasan los cobros sin
+      # noticias. Los valores por omision estan en el codigo; esto es para poder
+      # ajustarlos sin reconstruir la imagen.
+      MERCADOPAGO_ORDER_TTL_S: ${MERCADOPAGO_ORDER_TTL_S:-}
+      MERCADOPAGO_SWEEP_MS: ${MERCADOPAGO_SWEEP_MS:-}
       # Entrar con Facebook. Vacías = el botón no se pinta y la ruta contesta 501
       # diciendo qué falta; correo y contraseña siguen funcionando igual.
       FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
@@ -165,6 +219,11 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET es obligatorio en .env}
+      # Los ajustes del socket. Con valor por omision en el codigo; viajan para poder
+      # subirlos desde el .env la noche que hagan falta.
+      WS_HEARTBEAT_MS: ${WS_HEARTBEAT_MS:-}
+      WS_MAX_CONNECTIONS_PER_USER: ${WS_MAX_CONNECTIONS_PER_USER:-}
+      WS_RESUME_MAX_EVENTS: ${WS_RESUME_MAX_EVENTS:-}
       # ws.js valida cada conexión contra la tabla users, así que necesita la base
       # igual que la API. Sin esto arranca, falla el SELECT 1 y se reinicia en bucle.
       DB_USER: ${DB_USER:-postgres}
