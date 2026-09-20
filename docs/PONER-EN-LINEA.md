@@ -4,14 +4,15 @@
 corto y sirve para otra cosa: **la lista exacta de lo que falta hoy**, en orden, con
 lo que hay que ver en cada paso para saber si funcionó.
 
-La rama `fase5/inventario-por-barra` lleva **dos commits** sin subir:
+La rama `fase5/inventario-por-barra` lleva **tres commits** sin subir:
 
 | Commit | Qué trae |
 |---|---|
 | `316bec4` | El ticket térmico parte cada renglón en dos, y mi lector daba por hecho que no |
 | `d93d8ed` | El personal entra con un PIN de 6 dígitos; el cliente sigue con su correo (D46) |
+| `3d27533` | Un PIN mal tecleado decía "tu sesión terminó", y no era cierto |
 
-El segundo es el único de los dos que **pide variables nuevas en el `.env`** (paso 3)
+El segundo es el único de los tres que **pide variables nuevas en el `.env`** (paso 3)
 y trae una **migración** (paso 4).
 
 ---
@@ -40,10 +41,11 @@ cd ~/ev2-app
 
 git fetch origin
 git checkout fase5/inventario-por-barra
-git log --oneline -1         # TIENE que decir d93d8ed
+git log --oneline -1         # tiene que decir lo MISMO que en tu PC
 ```
 
-Si no dice `d93d8ed`, el paso 1 no llegó. No sigas.
+Antes de salir de tu PC, corre ahí `git log --oneline -1` y anota lo que diga.
+Si en el servidor sale otra cosa, el paso 1 no llegó. No sigas.
 
 ---
 
