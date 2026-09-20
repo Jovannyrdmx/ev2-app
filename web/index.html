@@ -127,10 +127,48 @@
       <p id="club-city" class="text-white/50 text-sm" data-i18n="auth.city">Nogales, Sonora</p>
     </div>
 
-    <div class="flex mb-6 text-sm">
+    <!--
+      Quién eres, antes de nada. Son dos puertas distintas y no dos maneras de abrir la
+      misma: el cliente entra con su correo, y quien trabaja aquí con un PIN de seis
+      dígitos que teclea de pie en la barra, con una mano y sin luz. Mezclarlas obligaba
+      al empleado a escribir un correo y una contraseña larga en esa situación.
+
+      Cuál sale primero se recuerda EN ESTE APARATO: la tableta de la barra la usan
+      cuarenta personas por turno y ninguna debería tener que tocar "trabajo aquí" cada
+      vez. El teléfono de un cliente abre en cliente para siempre.
+    -->
+    <div id="access-switch" class="flex gap-2 mb-5">
+      <button id="mode-client" class="flex-1 py-2 rounded-xl text-sm tab-active font-semibold" data-i18n="pin.modeClient">Soy cliente</button>
+      <button id="mode-staff" class="flex-1 py-2 rounded-xl text-sm text-white/50" data-i18n="pin.modeStaff">Trabajo aquí</button>
+    </div>
+
+    <div id="auth-tabs" class="flex mb-6 text-sm">
       <button id="tab-login" class="flex-1 py-2 tab-active font-semibold" data-i18n="auth.signin">Entrar</button>
       <button id="tab-register" class="flex-1 py-2 text-white/50" data-i18n="auth.signup">Crear cuenta</button>
     </div>
+
+    <!-- ---------------------------- EL TECLADO ----------------------------
+      Puntos y no números: esto se usa con gente al lado y la pantalla a la vista de
+      todos. Se manda solo al sexto dígito, sin botón de "entrar": un toque menos en la
+      oscuridad, y equivocarse solo cuesta volver a empezar.
+    -->
+    <div id="pin-pad" class="space-y-5" hidden>
+      <div class="text-center">
+        <p id="pin-title" class="font-display text-xl ev2-gradient" data-i18n="pin.title">Tu PIN</p>
+        <p id="pin-note" class="text-sm text-white/60 mt-1" data-i18n="pin.note">Teclea tus 6 dígitos.</p>
+      </div>
+      <div id="pin-dots" class="flex justify-center gap-3" aria-hidden="true"></div>
+      <div id="pin-keys" class="grid grid-cols-3 gap-3"></div>
+      <p id="pin-error" class="text-sm text-red-300 text-center" hidden></p>
+      <div id="pin-extra" class="text-center space-y-2">
+        <button type="button" id="btn-use-password" class="text-sm text-white/50 underline" data-i18n="pin.usePassword">Entrar con correo y contraseña</button>
+        <p class="text-[11px] text-white/35 leading-snug" data-i18n="pin.managerNote">La gerencia entra con PIN dentro del club. Desde fuera, con su correo y contraseña.</p>
+      </div>
+      <button type="button" id="btn-pin-cancel" class="w-full text-sm text-white/50 underline" data-i18n="top.signOut" hidden>Salir</button>
+    </div>
+
+    <!-- El regreso al teclado, para el gerente que entró a la pantalla de contraseña. -->
+    <button type="button" id="btn-use-pin" class="mt-3 text-sm text-white/50 underline" data-i18n="pin.usePin" hidden>Entrar con PIN</button>
 
     <form id="form-login" class="space-y-3">
       <input id="login-email" type="email" autocomplete="email" required placeholder="Correo" data-i18n-placeholder="auth.email"
@@ -830,6 +868,7 @@
 <script src="js/api.js"></script>
 <script src="js/format.js"></script>
 <script src="js/roles.js"></script>
+<script src="js/pin-pad.js"></script>
 <script src="js/floor-map.js"></script>
 <script src="js/taxi-ride.js"></script>
 <script src="js/tipping.js"></script>

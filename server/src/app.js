@@ -139,6 +139,26 @@ function createApp() {
 
   app.use('/api', generalLimiter);
   app.use('/api/guest-passes', passLimiter);
+  // El PIN necesita un límite MUCHO más apretado que el de la contraseña, y la razón
+  // es aritmética: seis dígitos son un millón de combinaciones, y con 40 empleados
+  // cada intento a ciegas le atina a alguien con probabilidad 1 en 25,000. Con los 10
+  // por minuto del límite normal, un solo atacante tendría ~44% de probabilidad de
+  // entrar en un día. Con 5 por minuto y el freno por club de `services/pins.js`
+  // encima, baja a ~3% y sigue bajando mientras el ataque siga.
+  //
+  // Los dos límites hacen falta: este acota a UNA conexión, y el de `pins.js` acota el
+  // total del club, que es lo único que sirve contra alguien con diez conexiones.
+  const pinLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: Number(process.env.PIN_RATE_LIMIT_PER_MIN || 5),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  });
+  app.use('/api/auth/pin-login', pinLimiter);
+  // Cambiar el PIN también se limita, y no por comodidad: como los PIN son únicos en
+  // el club, un empleado con sesión podría averiguar los de los demás probando cuáles
+  // le rechazan. Con cinco intentos por minuto eso deja de ser practicable.
+  app.use('/api/auth/pin', pinLimiter);
   app.use('/api/auth/login', authLimiter);
   app.use('/api/auth/register', authLimiter);
   app.use('/api/auth/refresh', authLimiter);

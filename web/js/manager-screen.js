@@ -147,6 +147,12 @@
   };
 
   async function afterSignIn() {
+    // El PIN se cambia donde está el teclado, no aquí (D46): mientras no lo cambie, el
+    // servidor le bloquea todas las rutas y esta pantalla solo sabría dar errores.
+    if (EV2PasswordGate.mustChangePin(api.session.user)) {
+      location.href = EV2PasswordGate.PIN_PAGE;
+      return;
+    }
     if (EV2PasswordGate.isRequired(api.session.user)) { showPasswordGate(); return; }
     const role = api.session.user && api.session.user.role;
     if (!MANAGER_ROLES.includes(role)) {
@@ -482,6 +488,12 @@
           patchEmployee(person, { reset_password: true }, 'staff.tempPassword', b);
         });
       }
+      if (actions.canResetPin) {
+        add('staff.resetPin', 'card rounded-lg px-3 py-2 text-sm flex-1', (b) => {
+          if (!window.confirm(t('staff.confirmResetPin'))) return;
+          patchEmployee(person, { reset_pin: true }, 'staff.tempPin', b);
+        });
+      }
       if (actions.canDeactivate) {
         add('staff.deactivate', 'card rounded-lg px-3 py-2 text-sm text-red-300', (b) => {
           if (!window.confirm(t('staff.confirmDeactivate'))) return;
@@ -503,8 +515,9 @@
       const data = await api.patch(`/nightclubs/${clubId()}/employees/${person.id}`, body);
       // La contraseña temporal viaja UNA vez, en esta respuesta. Si la pantalla la
       // pierde, no hay forma de recuperarla y hay que volver a reiniciarla.
-      if (data.temporary_password) {
-        secret.hold(EV2StaffAdmin.displayFor(person).primary, data.temporary_password);
+      if (data.temporary_password || data.pin) {
+        secret.hold(EV2StaffAdmin.displayFor(person).primary,
+          { pin: data.pin, password: data.temporary_password });
       } else {
         toast(t(message), 'ok');
       }
@@ -583,7 +596,10 @@
         EV2StaffAdmin.employeePayload(form));
       $('staff-form').reset();
       $('staff-form').hidden = true;
-      secret.hold(EV2StaffAdmin.displayFor(data.employee || form).primary, data.temporary_password);
+      // Las dos cosas viajan UNA vez, en esta respuesta. El de piso recibe solo PIN;
+      // un gerente nuevo recibe las dos, porque entra por las dos puertas.
+      secret.hold(EV2StaffAdmin.displayFor(data.employee || form).primary,
+        { pin: data.pin, password: data.temporary_password });
       await loadAll();
     } catch (err) { showError(err); }
   };
@@ -1450,10 +1466,15 @@
   function renderSecret() {
     const held = secret.peek();
     $('secret-box').hidden = !held;
-    if (held) {
-      $('secret-who').textContent = held.who;
-      $('secret-value').textContent = held.password;
-    }
+    if (!held) return;
+    $('secret-who').textContent = held.who;
+    // Cada renglón sale solo si hay algo que enseñar: el personal de piso recibe PIN y
+    // nada más, y un recuadro con "Contraseña temporal: —" invita a buscarla.
+    $('secret-pin-row').hidden = !held.pin;
+    if (held.pin) $('secret-pin').textContent = held.pin;
+    $('secret-password-row').hidden = !held.password;
+    if (held.password) $('secret-value').textContent = held.password;
+    $('secret-both').hidden = !(held.pin && held.password);
   }
   $('btn-secret-ok').onclick = () => { secret.clear(); renderSecret(); };
 

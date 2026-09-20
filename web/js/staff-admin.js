@@ -92,12 +92,17 @@
     const active = p.active !== false;
     return {
       canEdit: active,
-      canResetPassword: active,
+      // El personal de piso ya no tiene contraseña (D46): su cuenta nace con
+      // `password_hash` en nulo y entra solo con PIN. Ofrecer "reiniciar contraseña"
+      // ahí es ofrecer reiniciar algo que no existe.
+      canResetPassword: active && p.has_password !== false,
+      canResetPin: active && p.has_pin !== false,
       canDeactivate: active,
       canReactivate: !active,
       // Reiniciar la contraseña de quien ya la tiene pendiente no aporta nada: ya está
       // esperando a cambiarla y le daríamos una temporal nueva por gusto.
       passwordPending: Boolean(p.must_change_password),
+      pinPending: Boolean(p.must_change_pin),
     };
   }
 

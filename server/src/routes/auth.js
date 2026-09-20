@@ -13,6 +13,8 @@ const {
 const crypto = require('crypto');
 const oauthConfig = require('../config/oauth');
 const oauth = require('../services/oauth');
+const pins = require('../services/pins');
+const clubNetwork = require('../services/club-network');
 
 const router = express.Router();
 
@@ -40,6 +42,11 @@ function publicUser(u) {
     locale: u.locale,
     preferred_currency: u.preferred_currency,
     must_change_password: !!u.must_change_password,
+    // La pantalla necesita saberlo para abrir la puerta de cambio de PIN antes que
+    // ninguna otra cosa. `has_pin` le dice si esa persona entra por PIN, para no
+    // ofrecerle cambiar algo que no tiene.
+    must_change_pin: !!u.must_change_pin,
+    has_pin: !!u.pin_lookup,
   };
 }
 
@@ -189,6 +196,129 @@ router.post('/password', authenticate,
     res.json({
       changed: true,
       access_token: signAccessToken({ ...req.user, must_change_password: false }),
+      token_type: 'Bearer',
+      expires_in: ACCESS_TTL,
+      refresh_token: refresh.token,
+    });
+  }));
+
+// ============================================================ acceso por PIN (D46)
+//
+// El personal de piso entra con seis digitos y nada mas: sin numero de empleado y sin
+// escoger su nombre de una lista. Es lo mas rapido con las manos ocupadas, y el costo
+// de esa comodidad -- que el PIN sea UNICO en el club y que cada intento a ciegas le
+// atine a ALGUIEN con probabilidad 1 en 25,000 -- lo paga `services/pins.js` con un
+// freno que se cuenta por club. Ahi esta explicado; aqui solo se usa.
+
+const pinLoginSchema = z.object({
+  nightclub_slug: z.string().trim().min(1).max(100),
+  pin: z.string().regex(/^\d{6}$/, 'El PIN son 6 dígitos'),
+});
+
+router.post('/pin-login', validate({ body: pinLoginSchema }), asyncHandler(async (req, res) => {
+  if (!pins.isConfigured()) {
+    throw ApiError.notImplemented('El acceso por PIN no está configurado en este servidor '
+      + '(falta PIN_LOOKUP_KEY en el .env)');
+  }
+
+  const club = await pool.query('SELECT id FROM nightclubs WHERE slug = $1',
+    [req.body.nightclub_slug]);
+  if (club.rowCount === 0) throw ApiError.unauthorized('PIN incorrecto');
+  const nightclubId = club.rows[0].id;
+
+  const { user } = await pins.attemptLogin(pool, {
+    nightclubId, pin: req.body.pin, ip: req.ip || null,
+  });
+
+  // UN solo mensaje para todo: PIN que no es de nadie, cuenta bloqueada, rol que no
+  // entra por aqui. Cualquier diferencia entre esos casos convierte esta ruta en una
+  // forma de averiguar PINes ajenos de a uno por intento.
+  if (!user) throw ApiError.unauthorized('PIN incorrecto');
+
+  // La gerencia, solo desde la red del club. Aqui SI se distingue el mensaje: quien
+  // llego hasta aca ya demostro saber un PIN valido, asi que no hay nada que filtrar,
+  // y un gerente que no entiende por que su PIN no sirve desde su casa merece que se
+  // lo digan.
+  const esGerencia = user.role === 'manager' || user.role === 'admin';
+  if (esGerencia && !clubNetwork.isInsideClub(req.ip)) {
+    throw ApiError.forbidden(clubNetwork.isConfigured()
+      ? 'La gerencia entra con PIN solo desde la red del club. Desde fuera, usa tu correo y contraseña.'
+      : 'El acceso con PIN para la gerencia no está habilitado en este servidor. Usa tu correo y contraseña.');
+  }
+
+  // Una sola sesion abierta (decision del dueno). Ademas de lo que pidio, esto es una
+  // alarma: si alguien le atina a un PIN, al empleado real se le cierra la sesion y lo
+  // NOTA. Es la unica senal que tiene el club de que un PIN se filtro.
+  await revokeAllRefreshTokens(user.id);
+
+  await pool.query('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]);
+  const refresh = await issueRefreshToken(user.id, req.headers['user-agent']);
+
+  res.json({
+    user: publicUser(user),
+    access_token: signAccessToken(user),
+    token_type: 'Bearer',
+    expires_in: ACCESS_TTL,
+    refresh_token: refresh.token,
+  });
+}));
+
+/**
+ * Cambiar el PIN.
+ *
+ * El PIN actual se pide SALVO cuando el sistema esta obligando a cambiarlo -- ahi la
+ * persona acaba de teclearlo para entrar y volver a pedirselo no comprueba nada.
+ */
+router.post('/pin', authenticate,
+  validate({
+    body: z.object({
+      current_pin: z.string().regex(/^\d{6}$/).optional(),
+      new_pin: z.string().regex(/^\d{6}$/, 'El PIN son 6 dígitos'),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      'SELECT id, birth_date, pin_hash, must_change_pin FROM users WHERE id = $1',
+      [req.user.id]);
+    const user = rows[0];
+
+    // El PIN de un solo uso lo conoce quien lo entrego. Si "cambiarlo" pudiera dejarlo
+    // igual, seguiria siendo de dos personas -- que es exactamente lo que este paso
+    // existe para terminar. No se pide el actual (la persona acaba de teclearlo para
+    // entrar); solo se comprueba que el nuevo no sea ese mismo.
+    if (user.pin_hash && user.must_change_pin) {
+      const mismo = await bcrypt.compare(req.body.new_pin, user.pin_hash);
+      if (mismo) {
+        throw ApiError.unprocessable('El PIN nuevo tiene que ser distinto del que te dieron');
+      }
+    }
+
+    if (user.pin_hash && !user.must_change_pin) {
+      if (!req.body.current_pin) throw ApiError.unprocessable('Falta tu PIN actual');
+      const ok = await bcrypt.compare(req.body.current_pin, user.pin_hash);
+      if (!ok) throw ApiError.unauthorized('El PIN actual no es correcto');
+      if (req.body.current_pin === req.body.new_pin) {
+        throw ApiError.unprocessable('El PIN nuevo tiene que ser distinto del actual');
+      }
+    }
+
+    const result = await pins.changePin(pool, { user, newPin: req.body.new_pin });
+    if (!result.ok) {
+      // `unavailable` junta "es demasiado obvio" y "ya lo tiene alguien" en UN solo
+      // mensaje, a proposito: como los PIN son unicos en el club, decir "ese ya esta
+      // en uso" seria revelarle a quien pregunta el PIN de otra persona.
+      if (result.code === 'unavailable') {
+        throw ApiError.unprocessable('Esa combinación no se puede usar. Escoge otra: '
+          + 'evita números seguidos, repetidos y tu fecha de nacimiento.');
+      }
+      throw ApiError.unprocessable('El PIN son 6 dígitos');
+    }
+
+    await revokeAllRefreshTokens(req.user.id);
+    const refresh = await issueRefreshToken(req.user.id, req.headers['user-agent']);
+    res.json({
+      changed: true,
+      access_token: signAccessToken({ ...req.user, must_change_pin: false }),
       token_type: 'Bearer',
       expires_in: ACCESS_TTL,
       refresh_token: refresh.token,

@@ -5,7 +5,8 @@
  * `EV2Map` (plano) y `EV2Roles` (a dónde va cada rol). Ninguna decisión de negocio vive
  * aquí: si algo hay que probar, va en esos módulos.
  */
-/* global EV2, EV2Format, EV2Client, EV2Map, EV2Roles, EV2Taxi, EV2DrinkArt, EV2Social */
+/* global EV2, EV2Format, EV2Client, EV2Map, EV2Roles, EV2Taxi, EV2DrinkArt, EV2Social,
+   EV2PinPad */
 (function () {
   'use strict';
 
@@ -96,17 +97,261 @@
 
   // ---------------------------------------------------------------- entrar
 
-  function switchAuthTab(which) {
-    const login = which === 'login';
-    $('form-login').hidden = !login;
-    $('form-register').hidden = login;
-    $('tab-login').className = `flex-1 py-2 ${login ? 'tab-active font-semibold' : 'text-white/50'}`;
-    $('tab-register').className = `flex-1 py-2 ${login ? 'text-white/50' : 'tab-active font-semibold'}`;
+  /**
+   * Cuál de las dos puertas está abierta.
+   *
+   * `mode`   — quién dice ser: cliente (correo) o personal (PIN).
+   * `tab`    — dentro de cliente: entrar o crear cuenta.
+   * `staffPassword` — el gerente que está fuera del club y necesita su contraseña.
+   * `change` — el sistema está obligando a cambiar el PIN; manda sobre todo lo demás.
+   */
+  const access = { mode: 'client', tab: 'login', staffPassword: false, change: false };
+
+  const ACCESS_KEY = 'ev2.access';
+  /** Recordar cuál puerta se usó no es una decisión de seguridad: no guarda ni quién ni el PIN. */
+  function rememberedMode() {
+    try { return EV2PinPad.initialMode(localStorage.getItem(ACCESS_KEY)); } catch { return 'client'; }
+  }
+  function rememberMode(mode) {
+    try { localStorage.setItem(ACCESS_KEY, mode); } catch { /* modo privado: da igual */ }
+  }
+
+  const ON = 'flex-1 py-2 rounded-xl text-sm tab-active font-semibold';
+  const OFF = 'flex-1 py-2 rounded-xl text-sm text-white/50';
+
+  function renderAccess() {
+    const cambio = access.change;
+    const staff = access.mode === 'staff';
+    const cliente = !cambio && !staff;
+    const teclado = cambio || (staff && !access.staffPassword);
+    const conPassword = !cambio && (cliente ? access.tab === 'login' : access.staffPassword);
+
+    $('access-switch').hidden = cambio;
+    $('mode-client').className = staff ? OFF : ON;
+    $('mode-staff').className = staff ? ON : OFF;
+
+    $('auth-tabs').hidden = !cliente;
+    $('form-login').hidden = !conPassword;
+    $('form-register').hidden = !(cliente && access.tab === 'register');
+    $('tab-login').className = `flex-1 py-2 ${access.tab === 'login' ? 'tab-active font-semibold' : 'text-white/50'}`;
+    $('tab-register').className = `flex-1 py-2 ${access.tab === 'register' ? 'tab-active font-semibold' : 'text-white/50'}`;
+
+    $('pin-pad').hidden = !teclado;
+    $('pin-extra').hidden = cambio;
+    $('btn-pin-cancel').hidden = !cambio;
+    $('btn-use-pin').hidden = !(staff && access.staffPassword);
+
     $('auth-error').hidden = true;
+    renderSocialButtons();
+    if (teclado) renderPin();
+  }
+
+  function switchAuthTab(which) {
+    access.tab = which === 'register' ? 'register' : 'login';
+    renderAccess();
+  }
+
+  function switchMode(mode) {
+    access.mode = EV2PinPad.initialMode(mode);
+    access.staffPassword = false;
+    rememberMode(access.mode);
+    resetPin();
+    renderAccess();
   }
 
   $('tab-login').onclick = () => switchAuthTab('login');
   $('tab-register').onclick = () => switchAuthTab('register');
+  $('mode-client').onclick = () => switchMode('client');
+  $('mode-staff').onclick = () => switchMode('staff');
+  $('btn-use-password').onclick = () => { access.staffPassword = true; renderAccess(); };
+  $('btn-use-pin').onclick = () => { access.staffPassword = false; resetPin(); renderAccess(); };
+
+  // ---------------------------------------------------------------- el teclado del PIN
+
+  /**
+   * `step` es en qué va: 'login' (entrar), 'new' (escoge el suyo), 'repeat' (lo confirma).
+   * `first` guarda el primero mientras se teclea el segundo, y `busy` apaga las teclas
+   * mientras el servidor contesta — sin eso, dos toques nerviosos mandan dos intentos y
+   * el segundo cuenta como fallo en el freno del club.
+   */
+  const pin = { step: 'login', value: '', first: null, busy: false };
+
+  function resetPin() {
+    pin.step = access.change ? 'new' : 'login';
+    pin.value = '';
+    pin.first = null;
+    pin.busy = false;
+    $('pin-error').hidden = true;
+  }
+
+  const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'clear', '0', 'back'];
+
+  function buildKeys() {
+    const box = $('pin-keys');
+    box.innerHTML = '';
+    for (const key of KEYS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.key = key;
+      if (key === 'clear' || key === 'back') {
+        b.className = 'py-4 rounded-xl card text-sm text-white/60';
+        b.textContent = t(key === 'clear' ? 'pin.clear' : 'pin.back');
+      } else {
+        b.className = 'py-4 rounded-xl card font-display text-2xl';
+        b.textContent = key;
+      }
+      b.onclick = () => pressKey(key);
+      box.appendChild(b);
+    }
+  }
+
+  function renderPin() {
+    const titles = {
+      login: ['pin.title', 'pin.note'],
+      new: ['pin.changeTitle', 'pin.newStep'],
+      repeat: ['pin.changeTitle', 'pin.repeatStep'],
+    }[pin.step] || ['pin.title', 'pin.note'];
+    // Se les quita la marca de idioma: el texto ya no sale del HTML sino del paso en
+    // que va, y `applyTo` lo sobrescribiría al cambiar de idioma.
+    $('pin-title').removeAttribute('data-i18n');
+    $('pin-note').removeAttribute('data-i18n');
+    $('pin-title').textContent = t(titles[0]);
+    $('pin-note').textContent = pin.busy
+      ? t(pin.step === 'login' ? 'pin.signingIn' : 'pin.changing')
+      : t(titles[1]);
+
+    const dots = $('pin-dots');
+    dots.innerHTML = '';
+    for (const lleno of EV2PinPad.dots(pin.value)) {
+      const d = document.createElement('span');
+      d.className = 'w-3.5 h-3.5 rounded-full';
+      d.style.background = lleno ? 'var(--ev2-cyan)' : 'rgba(255,255,255,.15)';
+      dots.appendChild(d);
+    }
+    for (const b of $('pin-keys').querySelectorAll('button')) b.disabled = pin.busy;
+
+    if (access.change) {
+      $('pin-note').classList.add('text-white/60');
+      $('pin-extra').hidden = true;
+    }
+  }
+
+  function pinError(key) {
+    const el = $('pin-error');
+    el.textContent = t(key);
+    el.hidden = false;
+  }
+
+  function pressKey(key) {
+    if (pin.busy) return;
+    $('pin-error').hidden = true;
+    pin.value = EV2PinPad.press(pin.value, key);
+    renderPin();
+    // Se manda solo al sexto: un toque menos, y equivocarse solo cuesta empezar de nuevo.
+    if (EV2PinPad.isComplete(pin.value)) advance();
+  }
+
+  // El teclado físico de la tableta de la barra cuenta igual que los botones.
+  document.addEventListener('keydown', (ev) => {
+    if ($('pin-pad').hidden || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    if (/^\d$/.test(ev.key)) { ev.preventDefault(); pressKey(ev.key); return; }
+    if (ev.key === 'Backspace') { ev.preventDefault(); pressKey('back'); }
+    if (ev.key === 'Escape') { ev.preventDefault(); pressKey('clear'); }
+  });
+
+  function advance() {
+    if (pin.step === 'login') { pinLogin(); return; }
+    if (pin.step === 'new') {
+      // Las mismas reglas que el servidor. Aquí solo para no hacerle esperar un viaje
+      // completo a alguien que está de pie en la barra escogiendo su PIN.
+      const problema = EV2PinPad.validateNew(pin.value, null, {});
+      if (problema) { pinError(problema); pin.value = ''; renderPin(); return; }
+      pin.first = pin.value;
+      pin.value = '';
+      pin.step = 'repeat';
+      renderPin();
+      return;
+    }
+    if (pin.value !== pin.first) {
+      // Se vuelve al principio y no solo al segundo intento: si los dos no coinciden,
+      // no se sabe cuál de los dos era el que quería.
+      pinError('pin.errMismatch');
+      pin.first = null;
+      pin.value = '';
+      pin.step = 'new';
+      renderPin();
+      return;
+    }
+    savePin();
+  }
+
+  async function pinLogin() {
+    pin.busy = true;
+    renderPin();
+    const tecleado = pin.value;
+    try {
+      const data = await api.post('/auth/pin-login', {
+        nightclub_slug: CLUB_SLUG, pin: tecleado,
+      });
+      api.signInWith(data);
+      pin.value = '';
+      pin.busy = false;
+      if (api.session.user && api.session.user.must_change_pin) { startPinChange(); return; }
+      await afterSignIn();
+    } catch (err) {
+      // Se borra SIEMPRE: dejar en pantalla un PIN que no sirvió invita a mandarlo otra
+      // vez igual, y cada intento cuenta en el freno del club.
+      pin.value = '';
+      pin.busy = false;
+      renderPin();
+      const el = $('pin-error');
+      el.textContent = EV2Format.errorMessage(err);
+      el.hidden = false;
+    }
+  }
+
+  function startPinChange() {
+    access.change = true;
+    resetPin();
+    renderAccess();
+    $('screen-auth').hidden = false;
+    $('screen-app').hidden = true;
+    $('screen-staff').hidden = true;
+  }
+
+  async function savePin() {
+    pin.busy = true;
+    renderPin();
+    try {
+      const data = await api.post('/auth/pin', { new_pin: pin.value });
+      // El servidor cierra todas las sesiones al cambiarlo y devuelve unas llaves
+      // nuevas. `must_change_pin` ya viene en falso dentro del token; se pone también
+      // en el usuario guardado para que la pantalla no vuelva a abrir esta puerta.
+      api.signInWith(Object.assign({}, data, {
+        user: Object.assign({}, api.session.user, { must_change_pin: false }),
+      }));
+      access.change = false;
+      resetPin();
+      renderAccess();
+      toast(t('pin.done'), 'ok');
+      await afterSignIn();
+    } catch (err) {
+      pin.busy = false;
+      pin.first = null;
+      pin.value = '';
+      pin.step = 'new';
+      renderPin();
+      const el = $('pin-error');
+      el.textContent = EV2Format.errorMessage(err);
+      el.hidden = false;
+    }
+  }
+
+  $('btn-pin-cancel').onclick = async () => {
+    access.change = false;
+    resetPin();
+    await signOut();
+  };
 
   $('form-login').onsubmit = async (ev) => {
     ev.preventDefault();
@@ -207,7 +452,10 @@
         },
       }));
     }
-    $('social-block').hidden = socialProviders.length === 0 || !$('social-finish').hidden;
+    // Los botones de Facebook son del cliente: no tienen nada que hacer sobre el
+    // teclado del personal ni encima de un cambio de PIN obligado.
+    $('social-block').hidden = socialProviders.length === 0 || !$('social-finish').hidden
+      || access.mode !== 'client' || access.change;
   }
 
   /**
@@ -261,6 +509,12 @@
     $('form-login').hidden = true;
     $('form-register').hidden = true;
     $('social-block').hidden = true;
+    $('auth-tabs').hidden = true;
+    // Quien viene de Facebook es un cliente a medio registrar: ni el teclado del
+    // personal ni el botón de cambiar de puerta tienen sentido encima de esto.
+    $('access-switch').hidden = true;
+    $('pin-pad').hidden = true;
+    $('btn-use-pin').hidden = true;
     $('social-finish').hidden = false;
     $('screen-auth').hidden = false;
   }
@@ -289,7 +543,6 @@
     socialCompletionToken = null;
     $('social-finish').hidden = true;
     switchAuthTab('login');
-    renderSocialButtons();
   };
 
   /**
@@ -402,6 +655,8 @@
     if (!$('screen-app').hidden) { renderFloor(); renderTaxi(); }
     if (!$('screen-staff').hidden) renderStaffPending();
     renderSocialButtons();
+    // El teclado se vuelve a armar: las teclas de borrar y limpiar llevan texto.
+    if (!$('screen-auth').hidden) { buildKeys(); renderAccess(); }
     if (!$('social-panel').hidden) loadSocialPanel();
     setConnection(lastConnection.on, lastConnection.key);
     hub.emit('language', lang());
@@ -420,6 +675,11 @@
    * dejarlo en la del invitado o mandarlo a un archivo con datos inventados.
    */
   async function afterSignIn() {
+    // Antes que el rol y antes que nada: el servidor le bloquea TODAS las rutas menos
+    // /auth/pin, /auth/password, /auth/logout y /auth/me. Mandarlo a su pantalla sin
+    // cambiar el PIN es mandarlo a una pantalla que solo sabe dar errores.
+    if (api.session.user && api.session.user.must_change_pin) { startPinChange(); return; }
+
     const role = api.session.user && api.session.user.role;
     const decision = EV2Roles.route(role, location.pathname, lang());
 
@@ -1190,6 +1450,11 @@
     EV2Format.setLanguage(EV2Format.getLanguage());
     EV2Format.applyTo(document);
     $('btn-lang').textContent = EV2Format.otherLanguage().toUpperCase();
+    // Cuál de las dos puertas se abre primero, antes de pintar nada: en la tableta de
+    // la barra la de siempre es la del personal.
+    access.mode = rememberedMode();
+    buildKeys();
+    renderAccess();
     try {
       const data = await api.get(`/nightclubs/by-slug/${encodeURIComponent(CLUB_SLUG)}`);
       state.club = data.nightclub;

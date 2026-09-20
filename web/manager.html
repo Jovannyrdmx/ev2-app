@@ -94,6 +94,11 @@
       <input id="login-password" type="password" autocomplete="current-password" required placeholder="Contraseña" data-i18n-placeholder="auth.password" class="field">
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.enter">Entrar al club</button>
     </form>
+    <!-- El personal de piso ya no tiene contraseña: entra con su PIN, y el teclado
+         está en la pantalla de acceso. Sin este enlace, quien abre esta página
+         directamente se queda mirando un formulario que no puede llenar. -->
+    <a href="index.html" class="block mt-4 text-center text-sm text-white/50 underline"
+       data-i18n="pin.usePin">Entrar con PIN</a>
     <p id="auth-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
   </section>
 
@@ -144,9 +149,21 @@
 
     <!-- La contraseña temporal se muestra UNA vez: no se puede perder en un render. -->
     <div id="secret-box" class="m-4 rounded-xl p-4" style="background:rgba(0,255,0,.08);border:2px solid var(--ev2-lime)" hidden>
-      <p class="text-xs uppercase tracking-wider" style="color:var(--ev2-lime)"><span data-i18n="manager.tempPassword">Contraseña temporal</span> — <span id="secret-who"></span></p>
-      <p id="secret-value" class="font-display text-2xl tracking-wider my-2 select-all">—</p>
-      <p class="text-[11px] text-white/60" data-i18n="manager.tempPasswordNote">Anótala ahora: solo se muestra una vez.</p>
+      <p class="text-xs uppercase tracking-wider" style="color:var(--ev2-lime)"><span id="secret-who"></span></p>
+
+      <!-- El PIN va primero: es lo que esa persona va a teclear esta noche en la barra. -->
+      <div id="secret-pin-row" hidden>
+        <p class="text-[11px] uppercase tracking-wider text-white/50 mt-2" data-i18n="manager.tempPin">PIN de un solo uso</p>
+        <p id="secret-pin" class="font-display text-3xl tracking-[.3em] select-all">—</p>
+      </div>
+
+      <div id="secret-password-row" hidden>
+        <p class="text-[11px] uppercase tracking-wider text-white/50 mt-2" data-i18n="manager.tempPassword">Contraseña temporal</p>
+        <p id="secret-value" class="font-display text-2xl tracking-wider select-all">—</p>
+      </div>
+
+      <p id="secret-both" class="text-[11px] text-white/60 mt-2" data-i18n="manager.pinAndPassword" hidden>El PIN es para entrar en el club. La contraseña, desde fuera.</p>
+      <p class="text-[11px] text-white/60 mt-1" data-i18n="manager.tempPasswordNote">Anótala ahora: solo se muestra una vez.</p>
       <button id="btn-secret-ok" class="ev2-button rounded-lg px-4 py-2 mt-3 text-sm" data-i18n="manager.gotIt">Ya la anoté</button>
     </div>
 

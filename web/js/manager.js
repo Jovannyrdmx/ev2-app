@@ -208,9 +208,20 @@
   function createSecretBox() {
     let current = null;
     return {
-      hold(who, password) {
-        if (!password) return null;
-        current = { who, password, at: Date.now() };
+      /**
+       * Lo que el servidor manda UNA vez y ya no se puede volver a pedir.
+       *
+       * Acepta un texto suelto (la contraseña temporal de siempre) o `{ password, pin }`,
+       * porque desde D46 un gerente nuevo recibe las dos cosas a la vez: el PIN para
+       * entrar dentro del club y la contraseña para entrar desde fuera. Enseñar solo una
+       * dejaría la otra perdida para siempre.
+       */
+      hold(who, secrets) {
+        const s = typeof secrets === 'string' ? { password: secrets } : (secrets || {});
+        const password = s.password || null;
+        const pin = s.pin || null;
+        if (!password && !pin) return null;
+        current = { who, password, pin, at: Date.now() };
         return current;
       },
       peek: () => current,

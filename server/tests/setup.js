@@ -7,4 +7,9 @@ process.env.SERVE_API_DOCS = 'false';
 // Rate limits must not interfere with tests that hammer the same endpoint.
 process.env.RATE_LIMIT_PER_MIN = '100000';
 process.env.AUTH_RATE_LIMIT_PER_MIN = '100000';
+// El acceso por PIN necesita su llave; sin ella el servicio se niega a arrancar, que
+// es justo lo que debe hacer en producción.
+process.env.PIN_LOOKUP_KEY = process.env.PIN_LOOKUP_KEY
+  || 'test-pin-lookup-key-0123456789-0123456789-abcdef';
+process.env.PIN_RATE_LIMIT_PER_MIN = '100000';
 process.env.DB_NAME = process.env.TEST_DB_NAME || 'ev2_test';

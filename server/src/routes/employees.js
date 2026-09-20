@@ -17,6 +17,7 @@ const { validate, z, uuid, email, currency, pagination } = require('../middlewar
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const banking = require('../services/banking');
 const { temporaryPassword } = require('../services/credentials');
+const pins = require('../services/pins');
 
 const router = express.Router({ mergeParams: true });
 
@@ -47,6 +48,10 @@ const ONLY_ADMIN = 'Solo el administrador puede dar de alta o nombrar gerentes';
 const EMPLOYEE_SELECT = `
   SELECT u.id, u.email, u.phone, u.first_name, u.last_name, u.display_name, u.role, u.status,
          u.preferred_currency, u.must_change_password, u.last_login_at, u.created_at,
+         (u.pin_lookup IS NOT NULL) AS has_pin, u.must_change_pin, u.pin_issued_at,
+         -- El personal de piso nace sin contrasena (D46). La pantalla lo necesita para
+         -- no ofrecer "reiniciar contrasena" a quien no tiene ninguna.
+         (u.password_hash IS NOT NULL) AS has_password,
          p.employee_code, p.country, p.stage_name, p.avatar_url, p.hire_date, p.active,
          p.preferred_payout_currency, p.deactivated_at,
          (s.id IS NOT NULL) AS on_shift,
@@ -109,8 +114,21 @@ router.post('/nightclubs/:nightclubId/employees',
     const { nightclubId } = req.params;
     const b = req.body;
     if (!mayGrant(req.user, b.role)) throw ApiError.forbidden(ONLY_ADMIN);
-    const temp = temporaryPassword();
-    const hash = await bcrypt.hash(temp, 10);
+    if (!pins.isConfigured()) {
+      throw ApiError.notImplemented('Falta PIN_LOOKUP_KEY en el .env del servidor: '
+        + 'sin ella no se le puede generar un PIN a un empleado nuevo.');
+    }
+
+    // El piso entra SOLO con PIN (D46), así que su cuenta nace sin contraseña: no es
+    // que tenga una que nadie usa, es que no tiene. `password_hash` en NULL cierra
+    // `/auth/login` para esa persona de raíz, y no hay nada que se pueda filtrar ni
+    // apuntar en un papel pegado a la barra.
+    //
+    // La gerencia sí lleva contraseña temporal además del PIN, porque desde fuera del
+    // club el PIN no le sirve y necesita cómo entrar.
+    const esGerencia = b.role === MANAGER_ROLE;
+    const temp = esGerencia ? temporaryPassword() : null;
+    const hash = temp ? await bcrypt.hash(temp, 10) : null;
 
     const client = await pool.connect();
     try {
@@ -121,11 +139,12 @@ router.post('/nightclubs/:nightclubId/employees',
           `INSERT INTO users (nightclub_id, email, phone, password_hash, first_name, last_name, display_name,
                               role, birth_date, age_verified, preferred_currency, must_change_password,
                               created_by, terms_version, terms_accepted_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,$10,true,$11,NULL,NULL)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,$10,$12,$11,NULL,NULL)
            RETURNING id`,
           [nightclubId, b.email, b.phone || null, hash, b.first_name, b.last_name,
             b.stage_name || `${b.first_name} ${b.last_name}`.trim(), b.role, b.birth_date,
-            b.preferred_currency || (b.country === 'US' ? 'USD' : 'MXN'), req.user.id]);
+            b.preferred_currency || (b.country === 'US' ? 'USD' : 'MXN'), req.user.id,
+            Boolean(temp)]);
         user = created.rows[0];
       } catch (err) {
         if (err.code === '23505') throw ApiError.conflict('Ya existe una cuenta con ese correo');
@@ -138,6 +157,12 @@ router.post('/nightclubs/:nightclubId/employees',
         [user.id, b.employee_code || null, b.country, b.stage_name || null,
           b.hire_date || null, b.phone || null, b.country === 'US' ? 'USD' : 'MXN']);
       await client.query('INSERT INTO user_preferences (user_id) VALUES ($1) ON CONFLICT DO NOTHING', [user.id]);
+
+      // El PIN de un solo uso. Sale de aquí en claro UNA vez y no se vuelve a poder
+      // leer: lo que queda guardado es el cifrado y la huella con la que se busca.
+      const pin = await pins.issuePin(client, {
+        userId: user.id, birthDate: b.birth_date, issuedBy: req.user.id,
+      });
 
       // Un alta de mesero no se audita: la lista de personal ya cuenta esa historia.
       // Un gerente nuevo sí, porque es alguien que a partir de ahora puede mover la
@@ -153,8 +178,13 @@ router.post('/nightclubs/:nightclubId/employees',
       await client.query('COMMIT');
 
       const full = await pool.query(`${EMPLOYEE_SELECT} WHERE u.id = $1`, [user.id]);
-      // The temporary password travels exactly once, here. It is never stored in clear.
-      res.status(201).json({ employee: full.rows[0], temporary_password: temp });
+      // El PIN y la contraseña temporal viajan exactamente una vez, aquí. Ninguno se
+      // guarda en claro, y la pantalla tiene que enseñarlos antes de repintar nada.
+      res.status(201).json({
+        employee: full.rows[0],
+        pin,
+        ...(temp ? { temporary_password: temp } : {}),
+      });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       throw err;
@@ -181,6 +211,10 @@ const employeePatch = z.object({
   phone: z.string().trim().max(30).nullable().optional(),
   active: z.boolean().optional(),
   reset_password: z.boolean().optional(),
+  // Le genera un PIN nuevo, de un solo uso, como el del alta. Es lo que se hace cuando
+  // alguien olvida el suyo: no hay forma de recuperarlo —no se guarda en claro— así
+  // que se tira y se entrega otro.
+  reset_pin: z.boolean().optional(),
 }).refine((b) => Object.keys(b).length > 0, { message: 'No fields to update' });
 
 router.patch('/nightclubs/:nightclubId/employees/:userId',
@@ -205,7 +239,8 @@ router.patch('/nightclubs/:nightclubId/employees/:userId',
       // gerente pudiera hacerle eso a otro, dos gerentes en desacuerdo se apagarían
       // el uno al otro a media noche. La gerencia solo la reacomoda el administrador.
       const esGerente = cur.rows[0].role === MANAGER_ROLE;
-      const tocaLaCuenta = Boolean(b.role) || b.active === false || b.reset_password === true;
+      const tocaLaCuenta = Boolean(b.role) || b.active === false
+        || b.reset_password === true || b.reset_pin === true;
       if (esGerente && tocaLaCuenta && !mayGrant(req.user, MANAGER_ROLE)) {
         throw ApiError.forbidden(ONLY_ADMIN);
       }
@@ -233,6 +268,21 @@ router.patch('/nightclubs/:nightclubId/employees/:userId',
       }
       if (b.stage_name) {
         await client.query('UPDATE users SET display_name = $2 WHERE id = $1', [userId, b.stage_name]);
+      }
+
+      let pinOut = null;
+      if (b.reset_pin) {
+        if (!pins.isConfigured()) {
+          throw ApiError.notImplemented('Falta PIN_LOOKUP_KEY en el .env del servidor');
+        }
+        const { rows: quien } = await client.query(
+          'SELECT birth_date FROM users WHERE id = $1', [userId]);
+        pinOut = await pins.issuePin(client, {
+          userId, birthDate: quien[0].birth_date, issuedBy: req.user.id,
+        });
+        // Se cierran sus sesiones: si pidió PIN nuevo porque olvidó el suyo, bien; y
+        // si lo pidió porque alguien más lo supo, esto es lo que saca a ese alguien.
+        await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [userId]);
       }
 
       let temporaryPasswordOut = null;
@@ -263,6 +313,8 @@ router.patch('/nightclubs/:nightclubId/employees/:userId',
       const full = await pool.query(`${EMPLOYEE_SELECT} WHERE u.id = $1`, [userId]);
       const out = { employee: full.rows[0] };
       if (temporaryPasswordOut) out.temporary_password = temporaryPasswordOut;
+      // Igual que el del alta: viaja una vez y no se vuelve a poder leer.
+      if (pinOut) out.pin = pinOut;
       res.json(out);
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});

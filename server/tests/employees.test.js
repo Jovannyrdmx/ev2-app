@@ -62,17 +62,19 @@ describe('Validación bancaria', () => {
 });
 
 describe('Alta de empleados', () => {
-  it('el gerente da de alta y recibe la contraseña temporal una sola vez', async () => {
+  it('el gerente da de alta y recibe el PIN una sola vez', async () => {
     const res = await newEmployee({ stage_name: 'Pete', country: 'MX' });
     expect(res.status).toBe(201);
     expect(res.body.employee).toMatchObject({
       role: 'bartender', country: 'MX', stage_name: 'Pete', display_name: 'Pete',
-      must_change_password: true, active: true, preferred_currency: 'MXN',
+      active: true, preferred_currency: 'MXN', has_pin: true, must_change_pin: true,
     });
-    expect(res.body.temporary_password).toMatch(/^[A-Za-z0-9]{12}$/);
-    // Nada la guarda en claro.
-    const { rows } = await pool.query('SELECT password_hash FROM users WHERE id = $1', [res.body.employee.id]);
-    expect(rows[0].password_hash).not.toContain(res.body.temporary_password);
+    expect(res.body.pin).toMatch(/^\d{6}$/);
+    // Nada lo guarda en claro: ni el cifrado ni la huella con la que se busca.
+    const { rows } = await pool.query(
+      'SELECT pin_hash, pin_lookup FROM users WHERE id = $1', [res.body.employee.id]);
+    expect(rows[0].pin_hash).not.toContain(res.body.pin);
+    expect(rows[0].pin_lookup).not.toContain(res.body.pin);
   });
 
   it('un empleado de EE. UU. nace con moneda USD', async () => {
@@ -188,60 +190,184 @@ describe('Alta y manejo de gerentes', () => {
   });
 });
 
-describe('Contraseña temporal', () => {
-  it('con la temporal solo se puede entrar a cambiarla', async () => {
-    const created = await newEmployee({ email: 'pete@ev2.mx' });
-    const session = await login('pete@ev2.mx', created.body.temporary_password);
+/**
+ * El PIN de un solo uso del alta (D46).
+ *
+ * Lo que cambió: el piso ya NO recibe contraseña temporal. Su cuenta nace sin
+ * contraseña —literalmente, `password_hash` en NULL— y con un PIN de seis dígitos que
+ * sirve para entrar una vez y obliga a cambiarlo. Es la decisión del dueño, y estas
+ * pruebas cuidan las dos mitades: que el PIN funcione, y que la puerta de la
+ * contraseña quede CERRADA de verdad para esa persona.
+ */
+describe('El PIN de un solo uso', () => {
+  const pinLogin = (pin) => api().post('/api/auth/pin-login')
+    .send({ nightclub_slug: 'ev2-emp', pin });
+
+  it('el alta entrega un PIN, y NO una contraseña, para el piso', async () => {
+    const created = await newEmployee({ email: 'pin1@ev2.mx' });
+    expect(created.status).toBe(201);
+    expect(created.body.pin).toMatch(/^\d{6}$/);
+    expect(created.body.temporary_password).toBeUndefined();
+
+    // Sin contraseña en la base: `/auth/login` no es una puerta para esta persona,
+    // ni con la contraseña correcta, porque no hay ninguna correcta.
+    const { rows } = await pool.query('SELECT password_hash FROM users WHERE id = $1',
+      [created.body.employee.id]);
+    expect(rows[0].password_hash).toBeNull();
+    expect((await login('pin1@ev2.mx', 'loquesea')).status).toBe(401);
+  });
+
+  it('con el PIN del alta solo se puede entrar a cambiarlo', async () => {
+    const created = await newEmployee({ email: 'pin2@ev2.mx' });
+    const session = await pinLogin(created.body.pin);
     expect(session.status).toBe(200);
-    expect(session.body.user.must_change_password).toBe(true);
+    expect(session.body.user.must_change_pin).toBe(true);
     const token = { Authorization: `Bearer ${session.body.access_token}` };
 
     const blocked = await api().get('/api/employees/me').set(token);
     expect(blocked.status).toBe(403);
+    expect(blocked.body.error.code).toBe('pin_change_required');
+
+    // El PIN actual NO se pide aquí: acaba de teclearlo para entrar.
+    const change = await api().post('/api/auth/pin').set(token).send({ new_pin: '481937' });
+    expect(change.status).toBe(200);
+
+    const me = await api().get('/api/employees/me')
+      .set({ Authorization: `Bearer ${change.body.access_token}` });
+    expect(me.status).toBe(200);
+    // Y el PIN viejo ya no sirve; el nuevo sí.
+    expect((await pinLogin(created.body.pin)).status).toBe(401);
+    expect((await pinLogin('481937')).status).toBe(200);
+  });
+
+  it('rechaza los PIN obvios y la fecha de nacimiento, con UN solo mensaje', async () => {
+    const created = await newEmployee({ email: 'pin3@ev2.mx', birth_date: '1996-05-04' });
+    const session = await pinLogin(created.body.pin);
+    const token = { Authorization: `Bearer ${session.body.access_token}` };
+
+    for (const malo of ['123456', '000000', '121212', '040596']) {
+      // eslint-disable-next-line no-await-in-loop
+      const res = await api().post('/api/auth/pin').set(token).send({ new_pin: malo });
+      expect({ malo, status: res.status }).toEqual({ malo, status: 422 });
+    }
+  });
+
+  it('un PIN ocupado se rechaza SIN decir que está ocupado', async () => {
+    // Es la fuga propia de los PIN únicos: si el mensaje dijera "ese ya está en uso",
+    // le acabaría de revelar a quien pregunta el PIN de otra persona. Débil y ocupado
+    // comparten el mismo mensaje exactamente por eso.
+    const uno = await newEmployee({ email: 'pin4@ev2.mx' });
+    const otro = await newEmployee({ email: 'pin5@ev2.mx' });
+
+    const sesion = await pinLogin(otro.body.pin);
+    const token = { Authorization: `Bearer ${sesion.body.access_token}` };
+    const ocupado = await api().post('/api/auth/pin').set(token).send({ new_pin: uno.body.pin });
+    const debil = await api().post('/api/auth/pin').set(token).send({ new_pin: '123456' });
+
+    expect(ocupado.status).toBe(422);
+    expect(ocupado.body.error.message).toBe(debil.body.error.message);
+    expect(ocupado.body.error.message).not.toMatch(/uso|ocupad|exist/i);
+  });
+
+  it('el gerente puede regenerarlo, y eso cierra las sesiones', async () => {
+    const created = await newEmployee({ email: 'pin6@ev2.mx' });
+    const primera = await pinLogin(created.body.pin);
+    expect(primera.status).toBe(200);
+
+    const reset = await api().patch(url(`/employees/${created.body.employee.id}`))
+      .set(auth(manager)).send({ reset_pin: true });
+    expect(reset.status).toBe(200);
+    expect(reset.body.pin).toMatch(/^\d{6}$/);
+    expect(reset.body.pin).not.toBe(created.body.pin);
+
+    expect((await pinLogin(created.body.pin)).status).toBe(401);
+    expect((await api().post('/api/auth/refresh')
+      .send({ refresh_token: primera.body.refresh_token })).status).toBe(401);
+    expect((await pinLogin(reset.body.pin)).status).toBe(200);
+  });
+
+  it('una sola sesión abierta: entrar cierra la anterior', async () => {
+    // Lo pidió el dueño, y de paso es la única alarma que tiene el club: si alguien le
+    // atina a un PIN, al empleado real se le cierra la sesión y lo NOTA.
+    const created = await newEmployee({ email: 'pin7@ev2.mx' });
+    const primera = await pinLogin(created.body.pin);
+    const segunda = await pinLogin(created.body.pin);
+    expect(segunda.status).toBe(200);
+
+    expect((await api().post('/api/auth/refresh')
+      .send({ refresh_token: primera.body.refresh_token })).status).toBe(401);
+    expect((await api().post('/api/auth/refresh')
+      .send({ refresh_token: segunda.body.refresh_token })).status).toBe(200);
+  });
+
+  it('un empleado dado de baja no entra con su PIN', async () => {
+    const created = await newEmployee({ email: 'pin8@ev2.mx' });
+    await api().patch(url(`/employees/${created.body.employee.id}`)).set(auth(manager))
+      .send({ active: false });
+    // 401 y no 403: el mensaje es el mismo que el de un PIN que no es de nadie. Una
+    // respuesta distinta le diría a quien prueba que ese PIN SÍ existe.
+    const res = await pinLogin(created.body.pin);
+    expect(res.status).toBe(401);
+
+    await api().patch(url(`/employees/${created.body.employee.id}`)).set(auth(manager))
+      .send({ active: true });
+    expect((await pinLogin(created.body.pin)).status).toBe(200);
+  });
+
+  it('un PIN que no es de nadie y uno de otro club suenan igual', async () => {
+    const otro = await f.createNightclub({ slug: 'ev2-emp-2' });
+    const ajeno = await f.createUser(otro.id, { role: 'manager' });
+    const suyo = await api().post(`/api/nightclubs/${otro.id}/employees`).set(auth(ajeno)).send({
+      email: 'ajeno@ev2.mx', first_name: 'Ana', last_name: 'Paz',
+      role: 'waiter', birth_date: '1995-03-03',
+    });
+    const inventado = await pinLogin('481937');
+    const deOtroClub = await pinLogin(suyo.body.pin);
+    expect(inventado.status).toBe(401);
+    expect(deOtroClub.status).toBe(401);
+    expect(deOtroClub.body.error.message).toBe(inventado.body.error.message);
+  });
+});
+
+describe('La contraseña de la gerencia', () => {
+  it('un gerente nuevo recibe contraseña temporal Y PIN', async () => {
+    // Necesita las dos: el PIN para el club, la contraseña para entrar desde fuera.
+    const admin = await f.createUser(club.id, { role: 'admin' });
+    const res = await api().post(url('/employees')).set(auth(admin)).send({
+      email: 'ger@ev2.mx', first_name: 'Ana', last_name: 'Solís',
+      role: 'manager', birth_date: '1990-02-11',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.pin).toMatch(/^\d{6}$/);
+    expect(res.body.temporary_password).toMatch(/^[A-Za-z0-9]{12}$/);
+    expect((await login('ger@ev2.mx', res.body.temporary_password)).status).toBe(200);
+  });
+
+  it('con la temporal solo se puede entrar a cambiarla', async () => {
+    const admin = await f.createUser(club.id, { role: 'admin' });
+    const created = await api().post(url('/employees')).set(auth(admin)).send({
+      email: 'ger2@ev2.mx', first_name: 'Ana', last_name: 'Solís',
+      role: 'manager', birth_date: '1990-02-11',
+    });
+    const session = await login('ger2@ev2.mx', created.body.temporary_password);
+    expect(session.body.user.must_change_password).toBe(true);
+    const token = { Authorization: `Bearer ${session.body.access_token}` };
+
+    const blocked = await api().get('/api/auth/oauth/linked').set(token);
+    expect(blocked.status).toBe(403);
     expect(blocked.body.error.code).toBe('password_change_required');
+
+    expect((await api().post('/api/auth/password').set(token)
+      .send({ current_password: 'incorrecta', new_password: 'MiClaveNueva99' })).status).toBe(401);
+    expect((await api().post('/api/auth/password').set(token)
+      .send({
+        current_password: created.body.temporary_password,
+        new_password: created.body.temporary_password,
+      })).status).toBe(422);
 
     const change = await api().post('/api/auth/password').set(token)
       .send({ current_password: created.body.temporary_password, new_password: 'MiClaveNueva99' });
     expect(change.status).toBe(200);
-    expect(change.body.access_token).toBeTruthy();
-
-    const me = await api().get('/api/employees/me').set({ Authorization: `Bearer ${change.body.access_token}` });
-    expect(me.status).toBe(200);
-    expect(me.body.employee.must_change_password).toBe(false);
-  });
-
-  it('exige la contraseña actual y una distinta', async () => {
-    const created = await newEmployee({ email: 'pete2@ev2.mx' });
-    const session = await login('pete2@ev2.mx', created.body.temporary_password);
-    const token = { Authorization: `Bearer ${session.body.access_token}` };
-    expect((await api().post('/api/auth/password').set(token)
-      .send({ current_password: 'incorrecta', new_password: 'MiClaveNueva99' })).status).toBe(401);
-    expect((await api().post('/api/auth/password').set(token)
-      .send({ current_password: created.body.temporary_password, new_password: created.body.temporary_password })).status).toBe(422);
-    expect((await api().post('/api/auth/password').set(token)
-      .send({ current_password: created.body.temporary_password, new_password: 'corta' })).status).toBe(400);
-  });
-
-  it('el gerente puede reiniciarla y cierra las sesiones', async () => {
-    const created = await newEmployee({ email: 'pete3@ev2.mx' });
-    const first = await login('pete3@ev2.mx', created.body.temporary_password);
-    const reset = await api().patch(url(`/employees/${created.body.employee.id}`)).set(auth(manager))
-      .send({ reset_password: true });
-    expect(reset.status).toBe(200);
-    expect(reset.body.temporary_password).toMatch(/^[A-Za-z0-9]{12}$/);
-    expect(reset.body.temporary_password).not.toBe(created.body.temporary_password);
-
-    expect((await login('pete3@ev2.mx', created.body.temporary_password)).status).toBe(401);
-    expect((await api().post('/api/auth/refresh').send({ refresh_token: first.body.refresh_token })).status).toBe(401);
-    expect((await login('pete3@ev2.mx', reset.body.temporary_password)).status).toBe(200);
-  });
-
-  it('un empleado dado de baja no puede entrar', async () => {
-    const created = await newEmployee({ email: 'pete4@ev2.mx' });
-    await api().patch(url(`/employees/${created.body.employee.id}`)).set(auth(manager)).send({ active: false });
-    expect((await login('pete4@ev2.mx', created.body.temporary_password)).status).toBe(403);
-    await api().patch(url(`/employees/${created.body.employee.id}`)).set(auth(manager)).send({ active: true });
-    expect((await login('pete4@ev2.mx', created.body.temporary_password)).status).toBe(200);
   });
 });
 

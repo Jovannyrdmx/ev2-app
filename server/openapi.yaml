@@ -3408,6 +3408,124 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '422': { $ref: '#/components/responses/Unprocessable' }
 
+  /api/auth/pin-login:
+    post:
+      operationId: postAuthPinLogin
+      tags: [Autenticación]
+      summary: Entrar con el PIN de 6 dígitos (personal)
+      description: |
+        La puerta del personal (D46). El PIN es único dentro del club, así que identifica
+        por sí solo: no se manda correo ni número de empleado.
+
+        Pública y sin sesión, como `/api/auth/login`. Tres cosas que no se ven en el
+        esquema y hay que saber:
+
+        - **Un solo mensaje para todo lo que falla.** PIN que no es de nadie, cuenta dada
+          de baja, rol que no entra por aquí: todo responde 401 con el mismo texto.
+          Cualquier diferencia convertiría esta ruta en una forma de averiguar PINes
+          ajenos de a uno por intento.
+        - **El freno es por club, no por cuenta ni por IP.** A partir de 30 fallos en 10
+          minutos en ese club cada intento tarda 2 s, y a partir de 100, 5 s. Nunca
+          bloquea: dejar fuera al turno entero la noche del sábado es peor que el ataque.
+        - **La gerencia solo desde la red del club** (`CLUB_NETWORKS` en el `.env`). Desde
+          fuera, `manager` y `admin` reciben 403 y entran con correo y contraseña. Ahí sí
+          se distingue el mensaje: quien llegó hasta ese punto ya demostró saber un PIN
+          válido, así que no hay nada que filtrar.
+
+        Entrar **cierra las demás sesiones** de esa persona: es lo que el dueño pidió, y
+        además es la única señal que tiene el club de que un PIN se filtró — al empleado
+        real se le cae la sesión y lo nota.
+
+        Si el servidor no tiene `PIN_LOOKUP_KEY`, responde 501 diciéndolo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nightclub_slug, pin]
+              properties:
+                nightclub_slug: { type: string, example: ev2 }
+                pin: { type: string, pattern: '^\d{6}$', example: '481937' }
+      responses:
+        '200':
+          description: Sesión abierta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+                  access_token: { type: string }
+                  token_type: { type: string, example: Bearer }
+                  expires_in: { type: string }
+                  refresh_token: { type: string }
+        '401':
+          description: |
+            PIN incorrecto. Mismo cuerpo para todos los motivos, a propósito.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Gerencia fuera de la red del club
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '501':
+          description: El servidor no tiene configurado el acceso por PIN
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/auth/pin:
+    post:
+      operationId: postAuthPin
+      tags: [Autenticación]
+      summary: Cambiar el PIN
+      description: |
+        `current_pin` se exige **salvo** cuando el sistema está obligando al cambio
+        (`must_change_pin`): ahí la persona acaba de teclearlo para entrar y volver a
+        pedírselo no comprueba nada. Lo que sí se comprueba en ese caso es que el nuevo no
+        sea el mismo de un solo uso que entregó el gerente — si no, ese PIN seguiría
+        siendo de dos personas.
+
+        Un PIN se rechaza con 422 si son menos de 6 dígitos, si es demasiado obvio
+        (seguidos, repetidos, patrones), si es la fecha de nacimiento de esa persona, o si
+        **ya lo tiene alguien más en el club**. Los dos últimos casos comparten mensaje con
+        el de "demasiado obvio": como los PIN son únicos, decir "ese ya está en uso" le
+        revelaría a quien pregunta el PIN de otra persona.
+
+        Cambiarlo cierra las demás sesiones y devuelve tokens nuevos. Mientras
+        `must_change_pin` esté activo, cualquier otra ruta responde 403 con código
+        `pin_change_required`.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_pin]
+              properties:
+                current_pin: { type: string, pattern: '^\d{6}$' }
+                new_pin: { type: string, pattern: '^\d{6}$' }
+      responses:
+        '200':
+          description: PIN cambiado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  changed: { type: boolean }
+                  access_token: { type: string }
+                  token_type: { type: string, example: Bearer }
+                  expires_in: { type: string }
+                  refresh_token: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
   /api/employees/me:
     get:
       operationId: getEmployeesMe
@@ -8612,6 +8730,18 @@ components:
         role: { $ref: '#/components/schemas/Role' }
         locale: { type: string, example: es-MX }
         preferred_currency: { $ref: '#/components/schemas/Currency' }
+        # Las tres puertas cerradas que la pantalla tiene que reconocer antes de mandar
+        # a nadie a trabajar: mientras una de las dos primeras esté activa, el servidor
+        # responde 403 a TODO lo demás.
+        must_change_password:
+          type: boolean
+          description: Entró con una contraseña temporal y debe cambiarla antes de nada.
+        must_change_pin:
+          type: boolean
+          description: Entró con el PIN de un solo uso y debe escoger el suyo (D46).
+        has_pin:
+          type: boolean
+          description: Si esta persona entra por PIN. El personal de piso, sí; un cliente, no.
 
     RegisterRequest:
       type: object
