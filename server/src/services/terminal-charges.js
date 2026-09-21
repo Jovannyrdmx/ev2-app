@@ -22,9 +22,13 @@
  * ---------------------------------------------------------------------------
  * Si la red se cae entre nuestra petición y su respuesta, la orden puede existir del
  * otro lado. Por eso la llave de idempotencia se guarda ANTES de llamar: el repaso de
- * respaldo vuelve a mandar la MISMA petición con la MISMA llave, y Mercado Pago
- * devuelve la orden que ya había en vez de crear otra. Reintentar sin esa llave es
+ * respaldo (`sweep`) vuelve a mandar la MISMA petición con la MISMA llave, y Mercado
+ * Pago devuelve la orden que ya había en vez de crear otra. Reintentar sin esa llave es
  * cobrarle dos veces a alguien que está de pie frente a ti.
+ *
+ * Ese reintento estuvo prometido aquí y sin escribir durante un día entero: la llave se
+ * guardaba y nunca se volvía a usar. Un comentario que promete una protección que no
+ * existe es peor que no tenerla, porque quien lo lee deja de buscar el problema ahí.
  */
 'use strict';
 
@@ -225,6 +229,24 @@ async function push(pool, { charge, tx, terminal, nightclubId }) {
  * segundo intento encuentra el cobro ya en estado final y se sale.
  */
 async function apply(pool, { chargeId, read, source, requestId = null, rawPayload = null }) {
+  // Lo que Mercado Pago dijo se anota ANTES de abrir la transacción, con su propia
+  // conexión. No es un detalle de orden: si lo de abajo falla y se deshace, este
+  // renglón tiene que sobrevivir.
+  //
+  // Aquí había un defecto que encontré revisando: este `record` vivía DENTRO de la
+  // transacción, así que cuando `settle()` reventaba —porque el renglón ya lo había
+  // pagado alguien en efectivo— el ROLLBACK borraba el cobro Y el recibo de Mercado
+  // Pago. Un cargo real a una tarjeta sin rastro en la tabla que la migración 026
+  // promete como única respuesta a "me cobró dos veces".
+  await record(pool, {
+    chargeId,
+    source,
+    action: `reported_${read.status || 'unknown'}`,
+    status: read.status || null,
+    requestId,
+    payload: rawPayload || read,
+  });
+
   const client = await pool.connect();
   let outcome = null;
   try {
@@ -257,9 +279,10 @@ async function apply(pool, { chargeId, read, source, requestId = null, rawPayloa
       [charge.id, status, read.status_detail, read.payment_method_type,
         read.payment_method_id, read.installments, read.external_order_id]);
 
+    // Sin `requestId`: ese ya lo lleva el renglón de arriba, y el índice único
+    // (cobro, notificación) haría que este se perdiera en silencio.
     await record(client, {
-      chargeId: charge.id, source, action: `status_${status}`, status, requestId,
-      payload: rawPayload || read,
+      chargeId: charge.id, source, action: `status_${status}`, status,
     });
 
     if (status === 'processed') {
@@ -301,6 +324,23 @@ async function apply(pool, { chargeId, read, source, requestId = null, rawPayloa
     return { charge, changed: true, status, outcome };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    // La tarjeta SÍ cobró y no pudimos asentarlo. El caso típico es que el renglón ya
+    // estuviera pagado por otra vía. Da igual el motivo: hay dinero cobrado que el
+    // libro no refleja, y eso tiene que quedar marcado y visible en vez de perderse
+    // con el ROLLBACK. Se escribe con `pool`, fuera de la transacción que acaba de
+    // deshacerse.
+    if (read && read.status === 'processed') {
+      await pool.query(
+        `UPDATE terminal_charges
+            SET status = 'error', status_detail = $2::text, updated_at = now()
+          WHERE id = $1 AND status NOT IN ('processed','refunded')`,
+        [chargeId, `cobrado pero no se pudo asentar: ${String(err.message).slice(0, 50)}`],
+      ).catch(() => {});
+      await record(pool, {
+        chargeId, source, action: 'settle_failed', status: 'error',
+        payload: { message: err.message, code: err.code || null, read },
+      });
+    }
     throw err;
   } finally {
     client.release();
@@ -346,13 +386,15 @@ async function announce({ nightclubId, chargeId, status, outcome, startedBy }) {
  */
 async function sweep(pool, { limit = 20 } = {}) {
   const { rows } = await pool.query(
-    `SELECT id, nightclub_id, transaction_id, terminal_id, external_order_id,
-            idempotency_key, amount::text AS amount, currency, status, started_by,
-            created_at, expires_at
-       FROM terminal_charges
-      WHERE status IN ('creating','waiting','action_required')
-        AND (last_polled_at IS NULL OR last_polled_at < now() - interval '10 seconds')
-      ORDER BY created_at
+    `SELECT c.id, c.nightclub_id, c.transaction_id, c.terminal_id, c.external_order_id,
+            c.idempotency_key, c.amount::text AS amount, c.currency, c.status,
+            c.started_by, c.created_at, c.expires_at,
+            t.external_id AS terminal_external_id
+       FROM terminal_charges c
+       JOIN payment_terminals t ON t.id = c.terminal_id
+      WHERE c.status IN ('creating','waiting','action_required')
+        AND (c.last_polled_at IS NULL OR c.last_polled_at < now() - interval '10 seconds')
+      ORDER BY c.created_at
       LIMIT $1`,
     [limit]);
   // Sin FOR UPDATE a propósito: fuera de una transacción explícita ese bloqueo dura lo
@@ -368,21 +410,56 @@ async function sweep(pool, { limit = 20 } = {}) {
     await pool.query('UPDATE terminal_charges SET last_polled_at = now() WHERE id = $1', [charge.id]);
     try {
       if (!charge.external_order_id) {
-        // Nunca supimos su id. Dentro de la ventana no se hace nada: la llamada original
-        // puede seguir en vuelo, y preguntar no ayuda porque no hay por qué preguntar.
+        // Nunca supimos su id: la llamada original se cortó a media respuesta. Dentro de
+        // la ventana no se hace nada, porque esa llamada puede seguir en vuelo.
         const edad = Date.now() - new Date(charge.created_at).getTime();
         if (edad < RECOVERY_WINDOW_MS) continue;
-        await pool.query(
-          `UPDATE terminal_charges SET status = 'error', status_detail = $2::text,
-                  updated_at = now()
-            WHERE id = $1 AND status = 'creating'`,
-          [charge.id, 'sin respuesta de Mercado Pago al crearlo']);
-        await record(pool, {
-          chargeId: charge.id, source: 'poll', action: 'gave_up', status: 'error',
-          payload: { idempotency_key: charge.idempotency_key },
-        });
-        results.push({ id: charge.id, status: 'error' });
-        continue;
+
+        // Pasada la ventana, se vuelve a mandar la MISMA petición con la MISMA llave.
+        // Esto es lo que el encabezado de este archivo prometía y NO existía: la llave
+        // se guardaba y nunca se volvía a usar, así que el cobro se marcaba `error`, y
+        // `error` no está en el índice único — el mesero podía empezar un segundo cobro
+        // con la primera orden todavía viva en la terminal. Mercado Pago devuelve la
+        // orden que ya existe en vez de crear otra, que es justo para lo que sirve.
+        try {
+          const order = await mp.createPointOrder({
+            terminalExternalId: charge.terminal_external_id,
+            amount: charge.amount,
+            currency: charge.currency,
+            externalReference: charge.id,
+            idempotencyKey: charge.idempotency_key,
+            expirationSeconds: EXPIRATION_SECONDS,
+          });
+          const leida = mp.readOrder(order);
+          await pool.query(
+            `UPDATE terminal_charges
+                SET external_order_id = $2::text, status = 'waiting', updated_at = now()
+              WHERE id = $1 AND status = 'creating'`,
+            [charge.id, leida.external_order_id]);
+          await record(pool, {
+            chargeId: charge.id, source: 'poll', action: 'recovered', status: 'waiting',
+            payload: order,
+          });
+          results.push({ id: charge.id, status: 'waiting', recovered: true });
+          continue;
+        } catch (err) {
+          // Sigue sin contestar. Solo se da por perdido cuando la orden ya no puede
+          // estar viva en la terminal: mientras pueda estarlo, soltar el índice sería
+          // permitir un segundo cobro encima del primero.
+          const vencida = edad > (EXPIRATION_SECONDS * 1000) + RECOVERY_WINDOW_MS;
+          await record(pool, {
+            chargeId: charge.id, source: 'poll', action: 'recover_failed',
+            payload: { message: err.message, expired: vencida },
+          });
+          if (!vencida) continue;
+          await pool.query(
+            `UPDATE terminal_charges SET status = 'error', status_detail = $2::text,
+                    updated_at = now()
+              WHERE id = $1 AND status = 'creating'`,
+            [charge.id, 'sin respuesta de Mercado Pago al crearlo']);
+          results.push({ id: charge.id, status: 'error' });
+          continue;
+        }
       }
 
       const order = await mp.getOrder(charge.external_order_id);

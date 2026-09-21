@@ -679,8 +679,11 @@ router.post('/nightclubs/:nightclubId/taxi/rides',
     const acceptedAt = terms ? new Date() : null;
 
     if (b.client_request_id) {
-      const existing = await pool.query(`${RIDE_SELECT} WHERE r.client_request_id = $1`,
-        [b.client_request_id]);
+      // Con el filtro por club: sin él, una clave de otro club devolvía su viaje con el
+      // conductor, la placa y el folio del comprobante de salida.
+      const existing = await pool.query(
+        `${RIDE_SELECT} WHERE r.client_request_id = $1 AND r.nightclub_id = $2`,
+        [b.client_request_id, nightclubId]);
       if (existing.rowCount > 0) {
         return res.status(200).json({ ride: presentRide(existing.rows[0], 'guest'), idempotent: true });
       }

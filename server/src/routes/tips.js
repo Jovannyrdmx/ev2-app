@@ -275,10 +275,15 @@ router.post('/nightclubs/:nightclubId/tips',
     const b = req.body;
     if (b.to_user_id === req.user.id) throw ApiError.unprocessable('No puedes darte propina a ti mismo');
 
-    const dup = await pool.query(`${TIP_SELECT} WHERE t.client_request_id = $1`, [b.client_request_id]);
+    // Dos arreglos en tres líneas. El filtro por club, y `tipForRecipient`: este camino
+    // devolvía la fila CRUDA, así que el reintento de una propina anónima destapaba
+    // quién la mandó — justo lo que esa función existe para tapar.
+    const dup = await pool.query(
+      `${TIP_SELECT} WHERE t.client_request_id = $1 AND t.nightclub_id = $2`,
+      [b.client_request_id, nightclubId]);
     if (dup.rowCount > 0) {
       res.set('Idempotent-Replay', 'true');
-      return res.status(200).json({ tip: dup.rows[0] });
+      return res.status(200).json({ tip: tipForRecipient(dup.rows[0]) });
     }
 
     const staff = await tippableStaff(nightclubId, b.to_user_id);
@@ -482,7 +487,9 @@ router.post('/nightclubs/:nightclubId/staff/:userId/drinks',
     const { nightclubId, userId } = req.params;
     const b = req.body;
 
-    const dup = await pool.query(`${STAFF_DRINK_SELECT} WHERE sd.client_request_id = $1`, [b.client_request_id]);
+    const dup = await pool.query(
+      `${STAFF_DRINK_SELECT} WHERE sd.client_request_id = $1 AND sd.nightclub_id = $2`,
+      [b.client_request_id, nightclubId]);
     if (dup.rowCount > 0) {
       res.set('Idempotent-Replay', 'true');
       return res.status(200).json({ staff_drink: dup.rows[0] });
@@ -675,8 +682,10 @@ router.post('/nightclubs/:nightclubId/song-requests',
     const b = req.body;
 
     const dup = await pool.query(
-      `${SONG_SELECT} WHERE s.id = (SELECT song_request_id FROM song_request_votes WHERE client_request_id = $1)`,
-      [b.client_request_id]);
+      `${SONG_SELECT} WHERE s.nightclub_id = $2
+          AND s.id = (SELECT song_request_id FROM song_request_votes
+                       WHERE client_request_id = $1)`,
+      [b.client_request_id, nightclubId]);
     if (dup.rowCount > 0) {
       res.set('Idempotent-Replay', 'true');
       return res.status(200).json({ song_request: dup.rows[0], merged: null });

@@ -291,8 +291,11 @@ router.post('/nightclubs/:nightclubId/valet/tickets',
     if (!settings.enabled) throw ApiError.unprocessable('El servicio de valet está desactivado');
 
     if (b.client_request_id) {
+      // Con el filtro por club: sin él, una clave de otro club devolvía su ticket con
+      // placa, teléfono y nombre del dueño.
       const existing = await pool.query(
-        `${TICKET_SELECT} WHERE t.client_request_id = $1`, [b.client_request_id]);
+        `${TICKET_SELECT} WHERE t.client_request_id = $1 AND t.nightclub_id = $2`,
+        [b.client_request_id, nightclubId]);
       if (existing.rowCount > 0) {
         return res.status(200).json({
           ticket: presentTicket(existing.rows[0], 'staff'), idempotent: true,

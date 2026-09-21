@@ -913,59 +913,6 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /api/nightclubs/{nightclubId}/inventory:
-    get:
-      operationId: getNightclubsByNightclubIdInventory
-      tags: [Bebidas]
-      summary: Existencias
-      description: Requiere rol `bartender` o `manager`. Ordena primero lo que está bajo mínimo.
-      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
-      responses:
-        '200':
-          description: Inventario
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  inventory:
-                    type: array
-                    items: { $ref: '#/components/schemas/InventoryItem' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  /api/nightclubs/{nightclubId}/inventory/{drinkId}:
-    put:
-      operationId: putNightclubsByNightclubIdInventoryByDrinkId
-      tags: [Bebidas]
-      summary: Ajuste manual de existencias
-      description: |
-        Requiere rol `manager`. En operación normal el inventario se sincroniza desde el
-        POS (fase 4); este ajuste es para correcciones puntuales.
-      parameters:
-        - { $ref: '#/components/parameters/NightclubId' }
-        - { $ref: '#/components/parameters/DrinkId' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [quantity]
-              properties:
-                quantity: { type: number, minimum: 0 }
-                low_stock_threshold: { type: number, minimum: 0 }
-      responses:
-        '200':
-          description: Existencias actualizadas
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  inventory: { $ref: '#/components/schemas/InventoryItem' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
   /api/nightclubs/{nightclubId}/tables:
     get:
       operationId: getNightclubsByNightclubIdTables
@@ -3659,6 +3606,133 @@ paths:
                 properties:
                   terminal: { $ref: '#/components/schemas/PaymentTerminal' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/cover-prices:
+    get:
+      operationId: listCoverPrices
+      tags: [Puerta]
+      summary: Los covers del club
+      description: |
+        El catálogo de entradas. La puerta lo lee para cobrar sin teclear el precio; el
+        gerente ve también los dados de baja.
+
+        **Nace vacío a propósito.** Antes los tres covers del club vivían escritos dentro
+        de `web/js/staff-screen.js` y el servidor aceptaba cualquier precio que llegara,
+        porque no tenía con qué compararlo. Mientras esté vacío la puerta sigue cobrando
+        con el precio tecleado y esa venta queda marcada `price_source: manual`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Los covers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cover_prices:
+                    type: array
+                    items: { $ref: '#/components/schemas/CoverPrice' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createCoverPrice
+      tags: [Puerta]
+      summary: Dar de alta un cover
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, amount]
+              properties:
+                name: { type: string, maxLength: 40, example: COVER }
+                amount: { type: number, minimum: 0 }
+                currency: { type: string, enum: [MXN, USD] }
+                sort_order: { type: integer }
+      responses:
+        '201':
+          description: Cover dado de alta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cover_price: { $ref: '#/components/schemas/CoverPrice' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/cover-prices/{coverId}:
+    patch:
+      operationId: updateCoverPrice
+      tags: [Puerta]
+      summary: Cambiar o dar de baja un cover
+      description: |
+        Cambiar el precio NO toca las entradas ya vendidas: cada una guarda su
+        `unit_price` en la fila. Subirlo a media noche cobra distinto de ahí en adelante,
+        nunca hacia atrás.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: coverId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 40 }
+                amount: { type: number, minimum: 0 }
+                active: { type: boolean }
+                sort_order: { type: integer }
+      responses:
+        '200':
+          description: Cover actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cover_price: { $ref: '#/components/schemas/CoverPrice' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/reservations/{reservationId}/pass:
+    get:
+      operationId: getReservationPass
+      tags: [Puerta]
+      summary: El pase del titular de una reservación
+      description: |
+        Lo abre el titular desde su pantalla, o la puerta. A cualquier otro le contesta
+        404 — neutro, sin decir si la reservación existe.
+
+        Estaba implementada y usada por `web/js/booking-screen.js`, y no figuraba en este
+        contrato: una ruta viva que el contrato no menciona se rompe sin que nadie lo note
+        en el diff de la especificación.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: reservationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: El pase, con su QR
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pass:
+                    type: object
+                    properties:
+                      code: { type: string }
+                      qr: { type: string, description: PNG en data URI }
+                      used_at: { type: [string, 'null'], format: date-time }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /api/nightclubs/{nightclubId}/terminal-charges:
@@ -9057,6 +9131,18 @@ components:
     Role:
       type: string
       enum: [guest, waiter, bartender, dancer, dj, light_tech, valet, hostess, manager, admin]
+
+    CoverPrice:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name:
+          type: string
+          description: Como lo llama la puerta.
+        amount: { type: string, example: '300.00' }
+        currency: { type: string, example: MXN }
+        active: { type: boolean }
+        sort_order: { type: integer }
 
     PaymentTerminal:
       type: object

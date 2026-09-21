@@ -29,6 +29,9 @@
     valetSettings: null, spots: [], occupancy: null,
     reports: [], reportFilter: null,
     nights: [], staff: [], withdrawals: [], accounts: [],
+    // El catálogo de covers del club. Vacío significa que la puerta todavía teclea el
+    // precio; en cuanto tiene uno, el servidor deja de aceptar importes sueltos.
+    covers: [],
     // Inventario: lo que el gerente mira, no lo que el almacen opera.
     supplies: [], locations: [], recipes: [], movements: [],
     // Hasta que el inventario llegue de la API, la pestana NO pinta ceros: un
@@ -207,6 +210,7 @@
       }),
       get(`/nightclubs/${club}/drivers?include_inactive=true&limit=200`, (d) => { state.drivers = d.drivers || []; }),
       loadTerminals(),
+      loadCovers(),
       get(`/nightclubs/${club}/taxi-settings`, (d) => { state.taxiSettings = d.settings; }),
       get(`/nightclubs/${club}/taxi-fares?include_inactive=false`, (d) => { state.fares = d.fares || []; }),
       get(`/nightclubs/${club}/valet-settings`, (d) => { state.valetSettings = d.settings; }),
@@ -284,27 +288,116 @@
   }
 
 
-  /**
-   * Los covers que cobra la caja, de un toque.
-   *
-   * Salen del catálogo real (seeds/data/ev2-menu.json). Están aquí y no pedidos al
-   * servidor porque son tres números que cambian una vez al año, y porque el formulario
-   * tiene que servir aunque la pantalla se abra sin señal.
-   */
-  const COVERS = [{"name": "COVER", "price": 150.0}, {"name": "COVER S", "price": 100.0}, {"name": "COVER 50", "price": 50.0}];
+  // ---------------------------------------------------------------- los covers del club
 
+  /**
+   * El catálogo de covers.
+   *
+   * Antes eran tres precios escritos dentro de este archivo y de `staff-screen.js`, y el
+   * servidor asentaba en el libro el importe que la puerta tecleara sin compararlo con
+   * nada: quien cobraba ponía el precio y el corte cuadraba contra su propio número.
+   * Ahora los pone el gerente aquí y el servidor los verifica en cada entrada.
+   */
+  async function loadCovers() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/cover-prices`);
+      state.covers = data.cover_prices || [];
+    } catch {
+      state.covers = [];
+    }
+    renderCovers();
+  }
+
+  function renderCovers() {
+    $('cover-empty').hidden = state.covers.length > 0;
+    const box = $('cover-list');
+    box.innerHTML = '';
+    for (const cover of state.covers) {
+      const card = document.createElement('div');
+      card.className = 'flex items-center justify-between gap-3 card rounded-lg px-3 py-2';
+      if (!cover.active) card.style.opacity = '.55';
+
+      const left = document.createElement('div');
+      left.className = 'min-w-0';
+      const name = document.createElement('p');
+      name.className = 'font-display truncate';
+      name.textContent = cover.name;
+      const amount = document.createElement('p');
+      amount.className = 'text-[11px] text-white/50';
+      amount.textContent = EV2Format.money(cover.amount, cover.currency);
+      left.append(name, amount);
+
+      const acciones = document.createElement('div');
+      acciones.className = 'flex gap-2 shrink-0';
+      const cambiar = document.createElement('button');
+      cambiar.className = 'card rounded-lg px-3 py-2 text-xs';
+      cambiar.textContent = t('cover.change');
+      cambiar.onclick = () => {
+        // Cambiar el precio NO toca lo ya vendido: cada entrada guarda el suyo.
+        const dicho = window.prompt(t('cover.newAmount', { name: cover.name }), cover.amount);
+        if (dicho === null) return;
+        const monto = Number(dicho);
+        if (!(monto >= 0)) { showError(new Error(t('cover.errAmount')), $('cover-error')); return; }
+        patchCover(cover.id, { amount: monto }, cambiar);
+      };
+      const baja = document.createElement('button');
+      baja.className = `card rounded-lg px-3 py-2 text-xs ${cover.active ? 'text-red-300' : ''}`;
+      baja.textContent = t(cover.active ? 'cover.deactivate' : 'cover.reactivate');
+      baja.onclick = () => patchCover(cover.id, { active: !cover.active }, baja);
+      acciones.append(cambiar, baja);
+
+      card.append(left, acciones);
+      box.appendChild(card);
+    }
+  }
+
+  async function patchCover(id, body, button) {
+    button.disabled = true;
+    $('cover-error').hidden = true;
+    try {
+      await api.patch(`/nightclubs/${clubId()}/cover-prices/${id}`, body);
+      toast(t('cover.saved'), 'ok');
+      await loadCovers();
+    } catch (err) {
+      showError(err, $('cover-error'));
+      button.disabled = false;
+    }
+  }
+
+  $('cover-form').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const b = $('btn-cover-add');
+    b.disabled = true;
+    $('cover-error').hidden = true;
+    try {
+      await api.post(`/nightclubs/${clubId()}/cover-prices`, {
+        name: $('cover-name').value.trim(),
+        amount: Number($('cover-amount').value),
+        sort_order: state.covers.length,
+      });
+      $('cover-name').value = '';
+      $('cover-amount').value = '';
+      await loadCovers();
+    } catch (err) {
+      showError(err, $('cover-error'));
+    } finally {
+      b.disabled = false;
+    }
+  };
+
+  /** Los covers del club, de un toque, para no teclear la tarifa de la noche. */
   function renderCoverQuick() {
     const box = $('n-price-quick');
-    if (!box || box.dataset.filled === '1') return;
-    for (const cover of COVERS) {
+    if (!box) return;
+    box.innerHTML = '';
+    for (const cover of state.covers.filter((c) => c.active)) {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'px-2 py-1 rounded-lg text-[11px] card';
-      b.textContent = `${cover.name} · ${EV2Format.money(cover.price, 'MXN')}`;
-      b.onclick = () => { $('n-price').value = String(cover.price); };
+      b.textContent = `${cover.name} · ${EV2Format.money(cover.amount, cover.currency)}`;
+      b.onclick = () => { $('n-price').value = String(cover.amount); };
       box.appendChild(b);
     }
-    box.dataset.filled = '1';
   }
 
   // ---------------------------------------------------------------- reportes

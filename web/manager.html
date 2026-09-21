@@ -211,6 +211,32 @@
         de la semana, y hasta ahora no había forma de hacerlo desde ninguna pantalla.
       -->
       <div id="tab-nights" class="space-y-3" hidden>
+        <!--
+          Los covers del club. Hasta la revisión del 2026-09-20 estos tres precios vivían
+          escritos dentro del JavaScript de dos pantallas, y el servidor asentaba en el
+          libro el importe que la puerta tecleara, sin compararlo con nada. Mientras esta
+          lista esté vacía la puerta sigue tecleando (y queda marcado así en el corte);
+          en cuanto tenga un cover, el precio deja de escribirse a mano.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="cover.title">Covers del club</p>
+          <p class="text-[11px] text-white/40" data-i18n="cover.why">Mientras no haya ninguno, la puerta teclea el precio y el corte lo marca como tecleado.</p>
+          <p id="cover-empty" class="text-sm text-white/40" data-i18n="cover.none" hidden>Todavía no hay ningún cover dado de alta.</p>
+          <div id="cover-list" class="space-y-2"></div>
+          <form id="cover-form" class="grid grid-cols-5 gap-2 items-end border-t border-white/5 pt-3">
+            <div class="col-span-3">
+              <label class="label" for="cover-name" data-i18n="cover.name">Cómo se llama</label>
+              <input id="cover-name" class="field" maxlength="40" placeholder="COVER" required>
+            </div>
+            <div>
+              <label class="label" for="cover-amount" data-i18n="cover.amount">Cuánto</label>
+              <input id="cover-amount" type="number" min="0" step="10" class="field" required>
+            </div>
+            <button id="btn-cover-add" type="submit" class="ev2-button rounded-xl py-2 text-xs font-display" data-i18n="cover.add">Agregar</button>
+          </form>
+          <p id="cover-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
         <button id="btn-new-night" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="night.new">Abrir una noche</button>
 
         <form id="night-form" class="card rounded-xl p-4 space-y-3" hidden>

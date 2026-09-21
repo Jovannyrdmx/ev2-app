@@ -533,6 +533,91 @@ router.post('/nightclubs/:nightclubId/door/passes/contingency',
     }
   }));
 
+// ------------------------------------------------------------------ los covers del club
+
+/**
+ * El catálogo de entradas (migración 027).
+ *
+ * Nace vacío a propósito. Antes los tres covers del club vivían escritos dentro de
+ * `web/js/staff-screen.js` —$150, $100, $50— y el servidor aceptaba cualquier número
+ * que llegara, porque no tenía con qué compararlo. Inventar aquí esos tres precios
+ * sería mudar el mismo defecto de archivo.
+ */
+router.get('/nightclubs/:nightclubId/cover-prices',
+  requireRole(...DOOR_ROLES),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const gerente = req.user.role === 'manager' || req.user.role === 'admin';
+    const { rows } = await pool.query(
+      `SELECT id, name, amount::text AS amount, currency, active, sort_order
+         FROM cover_prices
+        WHERE nightclub_id = $1 AND ($2::boolean OR active)
+        ORDER BY active DESC, sort_order, name`,
+      [req.params.nightclubId, gerente]);
+    res.json({ cover_prices: rows });
+  }));
+
+router.post('/nightclubs/:nightclubId/cover-prices',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      name: z.string().trim().min(1).max(40),
+      amount: z.number().min(0).max(100000),
+      currency: z.enum(['MXN', 'USD']).default('MXN'),
+      sort_order: z.number().int().min(0).max(999).default(0),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const b = req.body;
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO cover_prices (nightclub_id, name, amount, currency, sort_order, updated_by)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         RETURNING id, name, amount::text AS amount, currency, active, sort_order`,
+        [req.params.nightclubId, b.name, b.amount, b.currency, b.sort_order, req.user.id]);
+      res.status(201).json({ cover_price: rows[0] });
+    } catch (err) {
+      if (err.code === '23505') throw ApiError.conflict('Ya hay un cover con ese nombre');
+      throw err;
+    }
+  }));
+
+/**
+ * Cambiar un cover.
+ *
+ * El precio se puede corregir, y eso NO toca las entradas ya vendidas: cada una guarda
+ * su `unit_price` en la fila. Subir el cover a media noche cobra distinto de ahí en
+ * adelante, no hacia atrás.
+ */
+router.patch('/nightclubs/:nightclubId/cover-prices/:coverId',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid, coverId: uuid }),
+    body: z.object({
+      name: z.string().trim().min(1).max(40).optional(),
+      amount: z.number().min(0).max(100000).optional(),
+      active: z.boolean().optional(),
+      sort_order: z.number().int().min(0).max(999).optional(),
+    }).refine((v) => Object.keys(v).length > 0, { message: 'No hay nada que cambiar' }),
+  }),
+  asyncHandler(async (req, res) => {
+    const b = req.body;
+    const { rows } = await pool.query(
+      `UPDATE cover_prices
+          SET name = COALESCE($3::text, name),
+              amount = COALESCE($4::numeric, amount),
+              active = COALESCE($5::boolean, active),
+              sort_order = COALESCE($6::int, sort_order),
+              updated_by = $7, updated_at = now()
+        WHERE id = $1 AND nightclub_id = $2
+        RETURNING id, name, amount::text AS amount, currency, active, sort_order`,
+      [req.params.coverId, req.params.nightclubId, b.name ?? null, b.amount ?? null,
+        b.active ?? null, b.sort_order ?? null, req.user.id]);
+    if (rows.length === 0) throw ApiError.notFound('Ese cover no existe');
+    res.json({ cover_price: rows[0] });
+  }));
+
 // ------------------------------------------------------------------ vender la entrada
 
 const admissionSchema = z.object({
@@ -540,7 +625,13 @@ const admissionSchema = z.object({
   kind: z.enum(['general', 'vip_extra']),
   reservation_id: uuid.optional(),
   quantity: z.number().int().min(1).max(50).default(1),
-  unit_price: z.number().min(0).max(100000),
+  // Cuál de los covers del club. Es la forma correcta de vender una entrada
+  // general: el precio sale del catálogo y no de lo que teclee quien cobra.
+  cover_price_id: uuid.optional(),
+  // El precio tecleado. Ya NO se cree por sí solo (ver `resolvePrice`): solo se
+  // acepta cuando el club todavía no tiene covers dados de alta, y entonces queda
+  // marcado como `manual` para que el corte lo distinga.
+  unit_price: z.number().min(0).max(100000).optional(),
   currency: z.enum(['MXN', 'USD']).default('MXN'),
   payment_method: z.enum(['cash', 'card', 'transfer', 'courtesy']).default('cash'),
   notes: z.string().trim().max(200).optional(),
@@ -552,17 +643,118 @@ const admissionSchema = z.object({
   message: 'Un extra VIP va contra una reservación', path: ['reservation_id'],
 });
 
+/**
+ * De dónde sale el precio de una entrada.
+ *
+ * Esta función existe por un defecto que costaba dinero todas las noches: la ruta
+ * aceptaba `unit_price` del cuerpo y lo asentaba en el libro sin compararlo con nada.
+ * Quien cobra ponía el precio, y al cierre la caja cuadraba contra un total que él
+ * mismo había escrito.
+ *
+ * El orden es deliberado:
+ *
+ *   1. `cover_price_id` — el catálogo del club. Es la forma correcta.
+ *   2. Un extra VIP se cobra a la tarifa de ESA noche (`events_calendar.ticket_price`),
+ *      que es la misma que usa la cotización de la reservación para las personas de
+ *      más. Si las dos no salieran del mismo sitio, un extra comprado en la puerta y
+ *      uno reservado costarían distinto.
+ *   3. Tecleado — solo si el club no tiene covers dados de alta todavía. Se marca
+ *      `manual` y se guarda así en la fila y en el libro.
+ *
+ * Un precio tecleado que NO coincide con el del catálogo se rechaza: puede ser un
+ * descuento legítimo, pero esa decisión es del gerente y tiene que quedar escrita,
+ * no resuelta en la puerta tecleando otro número.
+ */
+async function resolvePrice(client, { nightclubId, body }) {
+  if (body.cover_price_id) {
+    const { rows } = await client.query(
+      `SELECT id, name, amount::text AS amount, currency, active
+         FROM cover_prices WHERE id = $1 AND nightclub_id = $2`,
+      [body.cover_price_id, nightclubId]);
+    if (rows.length === 0) throw ApiError.notFound('Ese cover no existe');
+    const cover = rows[0];
+    if (!cover.active) throw ApiError.unprocessable(`El cover "${cover.name}" está dado de baja`);
+    if (body.unit_price !== undefined
+      && Number(body.unit_price).toFixed(2) !== Number(cover.amount).toFixed(2)) {
+      throw ApiError.unprocessable(
+        `El cover "${cover.name}" cuesta ${cover.amount}, no ${body.unit_price}. `
+        + 'Un precio distinto lo autoriza el gerente, no la puerta.',
+        { expected: cover.amount, sent: String(body.unit_price) });
+    }
+    return {
+      unitPrice: Number(cover.amount), currency: cover.currency,
+      source: 'catalog', coverPriceId: cover.id,
+    };
+  }
+
+  if (body.kind === 'vip_extra' && body.reservation_id) {
+    const { rows } = await client.query(
+      `SELECT e.ticket_price::text AS ticket_price, e.currency
+         FROM reservations r JOIN events_calendar e ON e.id = r.event_id
+        WHERE r.id = $1 AND r.nightclub_id = $2`,
+      [body.reservation_id, nightclubId]);
+    if (rows.length > 0 && rows[0].ticket_price !== null) {
+      const noche = rows[0];
+      if (body.unit_price !== undefined
+        && Number(body.unit_price).toFixed(2) !== Number(noche.ticket_price).toFixed(2)) {
+        throw ApiError.unprocessable(
+          `Un extra de esta noche cuesta ${noche.ticket_price}, no ${body.unit_price}.`,
+          { expected: noche.ticket_price, sent: String(body.unit_price) });
+      }
+      return {
+        unitPrice: Number(noche.ticket_price), currency: noche.currency || body.currency,
+        source: 'event', coverPriceId: null,
+      };
+    }
+  }
+
+  // El club todavía no tiene catálogo. Se acepta lo tecleado para no dejar la puerta
+  // sin poder vender, y se marca para que se vea en el corte.
+  const { rows } = await client.query(
+    'SELECT count(*)::int AS n FROM cover_prices WHERE nightclub_id = $1 AND active',
+    [nightclubId]);
+  if (rows[0].n > 0) {
+    throw ApiError.unprocessable(
+      'Escoge uno de los covers del club. El precio ya no se teclea en la puerta.',
+      { covers_registered: rows[0].n });
+  }
+  if (body.unit_price === undefined) {
+    throw ApiError.unprocessable('Falta el precio: escoge un cover o captura el importe');
+  }
+  return {
+    unitPrice: body.unit_price, currency: body.currency, source: 'manual', coverPriceId: null,
+  };
+}
+
 router.post('/nightclubs/:nightclubId/door/admissions',
   requireRole(...DOOR_ROLES),
   validate({ params: z.object({ nightclubId: uuid }), body: admissionSchema }),
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
     const b = req.body;
-    const total = Math.round(b.unit_price * b.quantity * 100) / 100;
+
+    // El doble toque de la puerta. Con mal wifi la pantalla se queda pensando y el
+    // cadenero toca otra vez: sin esto son dos entradas, dos renglones en el libro y
+    // dos juegos de QR válidos, y al cierre la caja aparece corta por la diferencia.
+    // La clave estaba declarada en el esquema desde el principio y nunca se leía.
+    if (b.client_request_id) {
+      const yaEsta = await pool.query(
+        `SELECT id, kind, quantity, unit_price::text, total::text, currency,
+                payment_method, reservation_id, created_at
+           FROM door_admissions WHERE client_request_id = $1 AND nightclub_id = $2`,
+        [b.client_request_id, nightclubId]);
+      if (yaEsta.rowCount > 0) {
+        res.set('Idempotent-Replay', 'true');
+        return res.status(200).json({ admission: yaEsta.rows[0], passes: [], idempotent: true });
+      }
+    }
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      const precio = await resolvePrice(client, { nightclubId, body: b });
+      const total = Math.round(precio.unitPrice * b.quantity * 100) / 100;
 
       if (b.reservation_id) {
         const r = await client.query(
@@ -580,11 +772,14 @@ router.post('/nightclubs/:nightclubId/door/admissions',
                                      provider, reference_type, metadata)
            VALUES ($1,'cover','in',$2,$3,'paid',$4,'door_admission',$5)
            RETURNING id`,
-          [nightclubId, total, b.currency,
+          [nightclubId, total, precio.currency,
             b.payment_method === 'cash' ? 'cash' : 'manual',
             JSON.stringify({
               kind: b.kind, quantity: b.quantity, payment_method: b.payment_method,
               reservation_id: b.reservation_id || null, sold_by: req.user.id,
+              // De dónde salió el precio. Un 'manual' en el corte es un renglón que
+              // alguien tecleó, y eso se puede mirar.
+              price_source: precio.source,
             })],
         );
         transactionId = tx.rows[0].id;
@@ -593,13 +788,15 @@ router.post('/nightclubs/:nightclubId/door/admissions',
       const { rows } = await client.query(
         `INSERT INTO door_admissions (nightclub_id, event_id, kind, reservation_id, quantity,
                                       unit_price, total, currency, payment_method,
-                                      transaction_id, sold_by, notes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                                      transaction_id, sold_by, notes,
+                                      client_request_id, price_source, cover_price_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::text,$15)
          RETURNING id, kind, quantity, unit_price::text, total::text, currency,
-                   payment_method, reservation_id, created_at`,
+                   payment_method, reservation_id, price_source, created_at`,
         [nightclubId, b.event_id || null, b.kind, b.reservation_id || null, b.quantity,
-          b.unit_price, total, b.currency, b.payment_method, transactionId,
-          req.user.id, b.notes || null],
+          precio.unitPrice, total, precio.currency, b.payment_method, transactionId,
+          req.user.id, b.notes || null,
+          b.client_request_id || null, precio.source, precio.coverPriceId],
       );
 
       // Cada extra pagado se lleva su propio QR. Sin esto, "pagué dos extras" se
@@ -635,6 +832,19 @@ router.post('/nightclubs/:nightclubId/door/admissions',
       });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
+      // Los dos toques llegaron a la vez y el índice único paró al segundo. No es un
+      // error para quien está en la puerta: la entrada SÍ se vendió.
+      if (err.code === '23505' && b.client_request_id) {
+        const yaEsta = await pool.query(
+          `SELECT id, kind, quantity, unit_price::text, total::text, currency,
+                  payment_method, reservation_id, created_at
+             FROM door_admissions WHERE client_request_id = $1 AND nightclub_id = $2`,
+          [b.client_request_id, nightclubId]);
+        if (yaEsta.rowCount > 0) {
+          res.set('Idempotent-Replay', 'true');
+          return res.status(200).json({ admission: yaEsta.rows[0], passes: [], idempotent: true });
+        }
+      }
       throw err;
     } finally {
       client.release();

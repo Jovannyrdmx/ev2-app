@@ -12,7 +12,11 @@ const router = express.Router({ mergeParams: true });
 
 // What the club actually keeps out of the ledger, versus what only passes through it
 // on its way to a person (see the dashboard query below).
-const CLUB_REVENUE_TYPES = ['drink_order', 'bottle_service', 'reservation_deposit',
+// `cover` entró al libro en la migración 016 y nadie lo agregó aquí, así que toda la
+// venta de la puerta —muy probablemente la mayor línea de efectivo de la noche—
+// desaparecía del total del tablero sin aparecer en ninguna otra parte. El gerente
+// decidía sobre un número al que le faltaba eso.
+const CLUB_REVENUE_TYPES = ['drink_order', 'bottle_service', 'cover', 'reservation_deposit',
   'reservation_balance', 'valet', 'adjustment'];
 const STAFF_INCOME_TYPES = ['tip', 'song_request'];
 

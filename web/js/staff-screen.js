@@ -23,20 +23,19 @@
   const FLOOR_ROLES = ['waiter', 'hostess', 'manager', 'admin'];
   const PASSWORD_GATE_HIDES = ['screen-auth', 'screen-wrong-role', 'screen-floor'];
 
-  // Los covers reales del club (seeds/data/ev2-menu.json). Van aquí y no pedidos al
-  // servidor porque son tres números que cambian una vez al año, y la puerta tiene
-  // que funcionar aunque la pantalla se abra sin señal.
-  const COVERS = [
-    { name: 'COVER', price: 150 },
-    { name: 'COVER S', price: 100 },
-    { name: 'COVER 50', price: 50 },
-  ];
-
   const state = {
     tab: 'trays', orders: [], tables: [], stats: null, tips: [],
     employee: null, currency: 'MXN', realtime: null, busy: new Set(), arrived: new Set(),
     reservations: [], doorSearch: '', terminals: [],
     doorSummary: null,
+    // El catálogo de covers del club. Antes eran tres números escritos en este archivo:
+    // el cadenero cobraba $300 y tecleaba 150, y el corte cuadraba contra un total que
+    // él mismo había puesto. Ahora los pone el gerente y el servidor los verifica.
+    covers: [],
+    // El cover escogido y la clave del intento. La clave se conserva entre toques y solo
+    // se renueva cuando una venta termina: así el segundo toque del mismo cobro
+    // devuelve la MISMA entrada en vez de vender otra.
+    sell: { coverId: null, requestId: null },
     drinks: [],
     // Lo que el mesero está levantando ahora mismo. `order` se llena cuando el pedido
     // ya existe en el servidor y solo falta cobrarlo: mientras esté ahí, cerrar la hoja
@@ -196,6 +195,13 @@
           (d) => { state.reservations = d.reservations || []; })
         : Promise.resolve(),
       isDoorRole() ? loadDoorSummary() : Promise.resolve(),
+      // Los covers del club. Sin catálogo la puerta sigue vendiendo con el importe
+      // tecleado (y el servidor lo marca como tecleado); con catálogo, el precio deja
+      // de escribirse a mano.
+      isDoorRole()
+        ? get(`/nightclubs/${club}/cover-prices`,
+          (d) => { state.covers = (d.cover_prices || []).filter((c) => c.active); })
+        : Promise.resolve(),
       // Las terminales del club. Si no hay ninguna, el método de tarjeta se ofrece
       // igual pero dice por qué no se puede, en vez de fallar desde el servidor con el
       // cliente enfrente.
@@ -602,19 +608,39 @@
     select.dataset.filled = '1';
   }
 
-  /** Los covers reales del club, de un toque: en la puerta nadie teclea 150. */
+  /**
+   * Los covers del club, de un toque.
+   *
+   * Se pintan del catálogo que da el servidor, no de una lista escrita aquí. Escoger uno
+   * manda su id y ningún importe: el precio lo pone el catálogo y la puerta no lo teclea.
+   * Mientras el club no cargue ninguno, el campo del importe sigue sirviendo.
+   */
   function renderCoversRapidos() {
     const box = $('sell-quick');
-    if (!box || box.dataset.filled === '1') return;
-    for (const cover of COVERS) {
+    if (!box) return;
+    box.innerHTML = '';
+    const precio = $('sell-price');
+    const hayCatalogo = state.covers.length > 0;
+    if (precio) {
+      precio.readOnly = hayCatalogo;
+      precio.classList.toggle('opacity-60', hayCatalogo);
+      precio.placeholder = hayCatalogo ? t('sell.pickCover') : '';
+    }
+    for (const cover of state.covers) {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'px-2 py-1 rounded-lg text-[11px] card';
-      b.textContent = `${cover.name} · ${EV2Format.money(cover.price, 'MXN')}`;
-      b.onclick = () => { $('sell-price').value = String(cover.price); renderVenta(); };
+      const elegido = state.sell.coverId === cover.id;
+      b.className = `px-2 py-1 rounded-lg text-[11px] card${elegido ? ' active' : ''}`;
+      b.setAttribute('aria-pressed', elegido ? 'true' : 'false');
+      b.textContent = `${cover.name} · ${EV2Format.money(cover.amount, cover.currency)}`;
+      b.onclick = () => {
+        state.sell.coverId = elegido ? null : cover.id;
+        $('sell-price').value = elegido ? '' : String(cover.amount);
+        renderCoversRapidos();
+        renderVenta();
+      };
       box.appendChild(b);
     }
-    box.dataset.filled = '1';
   }
 
   async function vender(kind) {
@@ -622,13 +648,21 @@
     error.hidden = true;
     const reservationId = scan.last ? scan.last.reservationId : null;
     const problema = EV2DoorScan.sellBlocker(kind, {
-      unitPrice: $('sell-price').value, reservationId,
+      unitPrice: $('sell-price').value,
+      reservationId,
+      coverPriceId: state.sell.coverId,
+      covers: state.covers,
     });
     if (problema) { error.textContent = t(problema); error.hidden = false; return; }
 
+    // La clave del intento se crea una vez y se conserva: si el primer toque se queda
+    // pensando y el cadenero toca otra vez, el servidor devuelve la MISMA entrada.
+    if (!state.sell.requestId) state.sell.requestId = EV2.uuid();
     const body = EV2DoorScan.admissionPayload(kind, {
       quantity: $('sell-qty').value,
       unitPrice: $('sell-price').value,
+      coverPriceId: state.sell.coverId,
+      clientRequestId: state.sell.requestId,
       method: $('sell-method').value,
       reservationId,
     });
@@ -638,6 +672,8 @@
       const data = await api.post(`/nightclubs/${clubId()}/door/admissions`, body);
       toast(t('sell.done', { total: money(data.admission.total, data.admission.currency) }), 'ok');
       $('sell-qty').value = '1';
+      // La venta terminó: la siguiente persona es otra entrada y necesita otra clave.
+      state.sell.requestId = null;
       renderVenta();
       await loadDoorSummary();
     } catch (err) {

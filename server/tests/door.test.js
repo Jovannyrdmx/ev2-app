@@ -336,3 +336,148 @@ describe('el aforo', () => {
     expect(res.body.inside).toBe(30);
   });
 });
+
+// ---------------------------------------------------------------- el precio y el doble toque
+
+describe('El precio del cover ya no se teclea', () => {
+  /**
+   * Nace de un defecto que costaba dinero todas las noches: la ruta aceptaba
+   * `unit_price` del cuerpo y lo asentaba en el libro sin compararlo con nada. El cover
+   * son $300, el cadenero cobra $300 y teclea 150 — y al cierre la caja CUADRA, contra
+   * un total que él mismo escribió.
+   */
+  async function altaCover(name = 'COVER', amount = 300) {
+    const res = await api().post(url('/cover-prices')).set(auth(manager))
+      .send({ name, amount });
+    expect(res.status).toBe(201);
+    return res.body.cover_price;
+  }
+
+  it('con catálogo, el precio sale del catálogo y no de lo que se teclee', async () => {
+    const cover = await altaCover('COVER', 300);
+    const res = await api().post(url('/door/admissions')).set(auth(hostess))
+      .send({ kind: 'general', quantity: 2, cover_price_id: cover.id, payment_method: 'cash' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.admission.total).toBe('600.00');
+    expect(res.body.admission.price_source).toBe('catalog');
+    const { rows } = await pool.query(
+      "SELECT amount::text FROM transactions WHERE type = 'cover'");
+    expect(rows[0].amount).toBe('600.00');
+  });
+
+  it('teclear un precio DISTINTO del catálogo se rechaza, y dice el correcto', async () => {
+    // Puede ser un descuento legítimo. Esa decisión es del gerente y tiene que quedar
+    // escrita, no resolverse en la puerta tecleando otro número.
+    const cover = await altaCover('COVER', 300);
+    const res = await api().post(url('/door/admissions')).set(auth(hostess))
+      .send({ kind: 'general', quantity: 1, cover_price_id: cover.id, unit_price: 150 });
+    expect(res.status).toBe(422);
+    expect(res.body.error.message).toMatch(/300/);
+    const { rows } = await pool.query("SELECT count(*)::int AS n FROM transactions WHERE type = 'cover'");
+    expect(rows[0].n).toBe(0);
+  });
+
+  it('con catálogo dado de alta, ya NO se acepta un precio suelto', async () => {
+    await altaCover('COVER', 300);
+    const res = await api().post(url('/door/admissions')).set(auth(hostess))
+      .send({ kind: 'general', quantity: 1, unit_price: 150 });
+    expect(res.status).toBe(422);
+    expect(res.body.error.message).toMatch(/covers del club/i);
+  });
+
+  it('sin catálogo todavía, la puerta sigue vendiendo — y queda marcado como tecleado', async () => {
+    // Un club que actualiza a media noche no se puede quedar sin poder cobrar. Pero la
+    // venta queda distinguible en el corte.
+    const res = await api().post(url('/door/admissions')).set(auth(hostess))
+      .send({ kind: 'general', quantity: 1, unit_price: 150 });
+    expect(res.status).toBe(201);
+    expect(res.body.admission.price_source).toBe('manual');
+    const { rows } = await pool.query(
+      "SELECT metadata->>'price_source' AS src FROM transactions WHERE type = 'cover'");
+    expect(rows[0].src).toBe('manual');
+  });
+
+  it('un cover dado de baja no se puede cobrar', async () => {
+    const cover = await altaCover('COVER S', 100);
+    await api().patch(url(`/cover-prices/${cover.id}`)).set(auth(manager)).send({ active: false });
+    const res = await api().post(url('/door/admissions')).set(auth(hostess))
+      .send({ kind: 'general', quantity: 1, cover_price_id: cover.id });
+    expect(res.status).toBe(422);
+  });
+
+  it('solo el gerente da de alta covers; la puerta los lee', async () => {
+    expect((await api().post(url('/cover-prices')).set(auth(hostess))
+      .send({ name: 'MÍO', amount: 1 })).status).toBe(403);
+    await altaCover();
+    expect((await api().get(url('/cover-prices')).set(auth(hostess))).status).toBe(200);
+  });
+
+  it('cambiar el precio NO toca lo ya vendido', async () => {
+    const cover = await altaCover('COVER', 300);
+    await api().post(url('/door/admissions')).set(auth(hostess))
+      .send({ kind: 'general', quantity: 1, cover_price_id: cover.id });
+    await api().patch(url(`/cover-prices/${cover.id}`)).set(auth(manager)).send({ amount: 500 });
+
+    const { rows } = await pool.query(
+      "SELECT amount::text FROM transactions WHERE type = 'cover'");
+    expect(rows[0].amount).toBe('300.00');
+  });
+});
+
+describe('El doble toque de la puerta', () => {
+  it('la misma clave NO vende dos veces', async () => {
+    // Con mal wifi la pantalla se queda pensando y el cadenero toca otra vez. Sin esto
+    // son dos entradas, dos renglones en el libro y dos juegos de QR — y al cierre la
+    // caja aparece corta por la diferencia, que se la carga él.
+    const clave = require('crypto').randomUUID();
+    const cuerpo = {
+      kind: 'general', quantity: 2, unit_price: 150, payment_method: 'cash',
+      client_request_id: clave,
+    };
+    const uno = await api().post(url('/door/admissions')).set(auth(hostess)).send(cuerpo);
+    const dos = await api().post(url('/door/admissions')).set(auth(hostess)).send(cuerpo);
+
+    expect(uno.status).toBe(201);
+    expect(dos.status).toBe(200);
+    expect(dos.body.idempotent).toBe(true);
+    expect(dos.body.admission.id).toBe(uno.body.admission.id);
+
+    const libro = await pool.query(
+      "SELECT count(*)::int AS n, sum(amount)::text AS total FROM transactions WHERE type = 'cover'");
+    expect(libro.rows[0].n).toBe(1);
+    expect(libro.rows[0].total).toBe('300.00');
+    const entradas = await pool.query('SELECT count(*)::int AS n FROM door_admissions');
+    expect(entradas.rows[0].n).toBe(1);
+  });
+
+  it('dos toques a la vez tampoco: el índice único para al segundo', async () => {
+    const clave = require('crypto').randomUUID();
+    const cuerpo = {
+      kind: 'general', quantity: 1, unit_price: 150, client_request_id: clave,
+    };
+    const [a, b] = await Promise.all([
+      api().post(url('/door/admissions')).set(auth(hostess)).send(cuerpo),
+      api().post(url('/door/admissions')).set(auth(hostess)).send(cuerpo),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([200, 201]);
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM door_admissions');
+    expect(rows[0].n).toBe(1);
+  });
+
+  it('un extra VIP repetido tampoco emite dos juegos de pases', async () => {
+    const r = await reservar();
+    const clave = require('crypto').randomUUID();
+    const cuerpo = {
+      kind: 'vip_extra', reservation_id: r.id, quantity: 2, unit_price: 100,
+      client_request_id: clave,
+    };
+    const uno = await api().post(url('/door/admissions')).set(auth(hostess)).send(cuerpo);
+    await api().post(url('/door/admissions')).set(auth(hostess)).send(cuerpo);
+    expect(uno.status).toBe(201);
+
+    const pases = await pool.query(
+      'SELECT count(*)::int AS n FROM guest_passes WHERE admission_id IS NOT NULL');
+    expect(pases.rows[0].n).toBe(2);
+  });
+});

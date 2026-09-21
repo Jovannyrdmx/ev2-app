@@ -123,3 +123,51 @@ describe('vender la entrada', () => {
     expect(Scan.admissionPayload('general', { unitPrice: 150 }).payment_method).toBe('cash');
   });
 });
+
+// ---------------------------------------------------------------- el precio y el doble toque
+
+describe('el precio ya no lo pone la puerta', () => {
+  it('con un cover escogido viaja su id y NINGÚN importe', () => {
+    // Es la diferencia entera: el servidor busca el precio en su catálogo en vez de
+    // creerse el número que venga en el cuerpo.
+    const body = Scan.admissionPayload('general', {
+      quantity: 2, unitPrice: 150, coverPriceId: 'c-1',
+    });
+    expect(body.cover_price_id).toBe('c-1');
+    expect(body.unit_price).toBeUndefined();
+  });
+
+  it('con catálogo cargado, no se puede vender sin escoger uno', () => {
+    const covers = [{ id: 'c-1', name: 'COVER', amount: '150.00' }];
+    expect(Scan.sellBlocker('general', { unitPrice: 150, covers })).toBe('sell.errPickCover');
+    expect(Scan.sellBlocker('general', { unitPrice: 150, covers, coverPriceId: 'c-1' })).toBeNull();
+  });
+
+  it('sin catálogo todavía, la puerta sigue vendiendo con el importe tecleado', () => {
+    // Un club que aún no carga sus covers no se puede quedar sin poder cobrar.
+    expect(Scan.sellBlocker('general', { unitPrice: 150, covers: [] })).toBeNull();
+    expect(Scan.sellBlocker('general', { unitPrice: '', covers: [] })).toBe('sell.errPrice');
+  });
+
+  it('un extra VIP se cobra a la tarifa de la noche, no a lo que se teclee', () => {
+    const covers = [{ id: 'c-1', name: 'COVER', amount: '150.00' }];
+    expect(Scan.sellBlocker('vip_extra', { reservationId: 'r1', covers })).toBeNull();
+    expect(Scan.sellBlocker('vip_extra', { covers })).toBe('sell.errNoPass');
+  });
+});
+
+describe('el doble toque de la puerta', () => {
+  it('la clave del intento viaja en el cuerpo', () => {
+    // Sin ella, la pantalla que se queda pensando con mal wifi vende dos entradas y
+    // emite dos juegos de QR válidos.
+    const body = Scan.admissionPayload('general', {
+      quantity: 1, unitPrice: 150, clientRequestId: 'req-1',
+    });
+    expect(body.client_request_id).toBe('req-1');
+  });
+
+  it('sin clave no se inventa ninguna: la decide la pantalla, no este módulo', () => {
+    const body = Scan.admissionPayload('general', { quantity: 1, unitPrice: 150 });
+    expect('client_request_id' in body).toBe(false);
+  });
+});

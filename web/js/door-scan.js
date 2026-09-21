@@ -198,15 +198,28 @@
    * cobrar: en la puerta el importe se dice en voz alta antes de que la persona
    * saque el dinero.
    */
-  function admissionPayload(kind, { quantity, unitPrice, method, reservationId, notes }) {
+  function admissionPayload(kind, {
+    quantity, unitPrice, coverPriceId, clientRequestId, method, reservationId, notes,
+  }) {
     const cantidad = Math.min(50, Math.max(1, Math.round(Number(quantity) || 1)));
-    const precio = Math.max(0, Number(unitPrice) || 0);
     const body = {
       kind,
       quantity: cantidad,
-      unit_price: Math.round(precio * 100) / 100,
       payment_method: method || 'cash',
     };
+    // El precio ya no lo pone quien cobra. Con un cover del catálogo escogido se manda
+    // SU id y ningún importe: el servidor lo busca y asienta ese. Teclear sigue siendo
+    // posible solo mientras el club no tenga catálogo, y el servidor lo marca `manual`.
+    if (coverPriceId) {
+      body.cover_price_id = coverPriceId;
+    } else if (unitPrice !== '' && unitPrice !== null && unitPrice !== undefined
+      && Number.isFinite(Number(unitPrice))) {
+      const precio = Math.max(0, Number(unitPrice));
+      body.unit_price = Math.round(precio * 100) / 100;
+    }
+    // La clave del doble toque. Con mal wifi la pantalla se queda pensando y el cadenero
+    // toca otra vez: la misma clave devuelve la MISMA entrada en vez de vender dos.
+    if (clientRequestId) body.client_request_id = clientRequestId;
     if (kind === 'vip_extra') body.reservation_id = reservationId;
     const nota = String(notes || '').trim();
     if (nota) body.notes = nota.slice(0, 200);
@@ -220,10 +233,22 @@
     return (centavos / 100).toFixed(2);
   }
 
-  /** Por qué NO se puede vender todavía. Devuelve la clave del motivo o null. */
-  function sellBlocker(kind, { unitPrice, reservationId }) {
-    if (!(Number(unitPrice) >= 0) || unitPrice === '' || unitPrice === null) return 'sell.errPrice';
+  /**
+   * Por qué NO se puede vender todavía. Devuelve la clave del motivo o null.
+   *
+   * `covers` es el catálogo del club tal como lo devuelve `GET /cover-prices`. Si tiene
+   * algo, el precio deja de teclearse: hay que escoger uno. Si está vacío —un club que
+   * todavía no lo carga— la puerta sigue vendiendo con el importe tecleado, porque
+   * dejarla sin vender por una tabla vacía sería peor que el defecto que esto arregla.
+   */
+  function sellBlocker(kind, { unitPrice, reservationId, coverPriceId, covers }) {
     if (kind === 'vip_extra' && !reservationId) return 'sell.errNoPass';
+    if (coverPriceId) return null;
+    // Un extra VIP se cobra a la tarifa de ESA noche, que la pone el evento y no la
+    // puerta: aquí no se exige nada más que el pase.
+    if (kind === 'vip_extra') return null;
+    if (Array.isArray(covers) && covers.length > 0) return 'sell.errPickCover';
+    if (!(Number(unitPrice) >= 0) || unitPrice === '' || unitPrice === null) return 'sell.errPrice';
     return null;
   }
 

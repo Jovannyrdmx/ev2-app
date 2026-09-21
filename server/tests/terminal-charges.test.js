@@ -17,6 +17,7 @@ const crypto = require('crypto');
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const terminalCharges = require('../src/services/terminal-charges');
 
 let club; let manager; let waiter; let guest;
 
@@ -523,5 +524,121 @@ describe('Las credenciales', () => {
     expect(res.status).toBe(501);
     expect(res.body.error.message).toMatch(/MERCADOPAGO_ACCESS_TOKEN/);
     process.env.MERCADOPAGO_ACCESS_TOKEN = antes;
+  });
+});
+
+// ---------------------------------------------------------------- el doble cobro
+
+describe('Que no se cobre dos veces', () => {
+  it('con la terminal esperando la tarjeta, NO se puede cobrar en efectivo', async () => {
+    // El caso real: la terminal tarda, el cliente saca billetes, el mesero cobra en
+    // efectivo y se olvida de cancelar el cobro. La tarjeta pasa treinta segundos
+    // después y el cliente pagó dos veces.
+    const t = await altaTerminal();
+    const tx = await cobroPendiente('450.00');
+    expect((await empezar(tx, t)).status).toBe(201);
+
+    const efectivo = await api()
+      .post(`/api/nightclubs/${club.id}/manual-payments/register`)
+      .set(await tokenDe(waiter))
+      .send({
+        transaction_id: tx.id, method: 'cash', amount: 450, currency: 'MXN',
+      });
+
+    expect(efectivo.status).toBe(409);
+    // El mensaje tiene que decir el nombre de la terminal: en una barra con tres, saber
+    // cuál es la que hay que cancelar es la diferencia entre resolverlo y no.
+    expect(efectivo.body.error.message).toMatch(/Barra/);
+    expect(efectivo.body.error.details.terminal_charge_id).toBeTruthy();
+    expect((await estadoDe(tx.id)).status).toBe('pending');
+  });
+
+  it('cancelado el cobro de la terminal, el efectivo ya pasa', async () => {
+    const t = await altaTerminal();
+    const tx = await cobroPendiente('450.00');
+    const creado = await empezar(tx, t);
+    await api()
+      .post(`/api/nightclubs/${club.id}/terminal-charges/${creado.body.charge.id}/cancel`)
+      .set(await tokenDe(waiter)).send({});
+
+    const efectivo = await api()
+      .post(`/api/nightclubs/${club.id}/manual-payments/register`)
+      .set(await tokenDe(waiter))
+      .send({ transaction_id: tx.id, method: 'cash', amount: 450, currency: 'MXN' });
+
+    expect(efectivo.status).toBe(201);
+    expect((await estadoDe(tx.id)).status).toBe('paid');
+  });
+
+  it('si la tarjeta cobró y el libro no lo aceptó, queda la evidencia', async () => {
+    // Lo peor que puede pasar: hay dinero cobrado al cliente y el sistema no lo refleja.
+    // El ROLLBACK de la transacción borraría hasta el rastro de que pasó, así que el
+    // renglón de evidencia se escribe FUERA de ella.
+    const t = await altaTerminal();
+    const tx = await cobroPendiente('450.00');
+    const creado = await empezar(tx, t);
+    const chargeId = creado.body.charge.id;
+    const { rows } = await pool.query(
+      'SELECT external_order_id FROM terminal_charges WHERE id = $1', [chargeId]);
+    const orderId = rows[0].external_order_id;
+
+    // El renglón se cancela por otra vía: asentar el pago va a reventar dentro de la
+    // transacción, que es justo lo que se quiere provocar.
+    await pool.query("UPDATE transactions SET status = 'cancelled' WHERE id = $1", [tx.id]);
+
+    resolverOrden(orderId, 'processed');
+    await notificar(orderId);
+
+    const cobro = (await pool.query(
+      'SELECT status, status_detail FROM terminal_charges WHERE id = $1', [chargeId])).rows[0];
+    expect(cobro.status).toBe('error');
+    expect(cobro.status_detail).toMatch(/cobrado pero no se pudo asentar/);
+
+    const evidencia = await pool.query(
+      `SELECT action FROM terminal_charge_events
+        WHERE charge_id = $1 AND action = 'settle_failed'`, [chargeId]);
+    expect(evidencia.rowCount).toBe(1);
+  });
+
+  it('el cobro que nunca devolvió id se reintenta con LA MISMA llave', async () => {
+    // La llamada original se cortó a media respuesta: puede haber una orden viva en la
+    // terminal con un id que nunca supimos. Reintentar con otra llave sería despertarla
+    // dos veces; con la misma, Mercado Pago devuelve la que ya existe.
+    const t = await altaTerminal();
+    const tx = await cobroPendiente('450.00');
+    mpFake.failNext = 'abort';
+    const res = await empezar(tx, t);
+    expect(res.status).toBe(504);
+
+    const { rows } = await pool.query(
+      `SELECT id, status, external_order_id, idempotency_key
+         FROM terminal_charges WHERE transaction_id = $1`, [tx.id]);
+    expect(rows[0].status).toBe('creating');
+    expect(rows[0].external_order_id).toBeNull();
+    const llave = rows[0].idempotency_key;
+
+    // Dentro de la ventana no se toca: la petición original puede seguir en vuelo.
+    mpFake.calls = [];
+    expect(await terminalCharges.sweep(pool)).toEqual([]);
+    expect(mpFake.calls.filter((c) => c.path === '/v1/orders')).toHaveLength(0);
+
+    // Pasada la ventana, se reintenta.
+    await pool.query(
+      `UPDATE terminal_charges
+          SET created_at = now() - interval '5 minutes', last_polled_at = NULL
+        WHERE id = $1`, [rows[0].id]);
+    const repaso = await terminalCharges.sweep(pool);
+
+    expect(repaso).toEqual([{ id: rows[0].id, status: 'waiting', recovered: true }]);
+    const reintento = mpFake.calls.filter((c) => c.path === '/v1/orders');
+    expect(reintento).toHaveLength(1);
+    expect(reintento[0].idempotency).toBe(llave);
+
+    const despues = (await pool.query(
+      'SELECT status, external_order_id FROM terminal_charges WHERE id = $1', [rows[0].id])).rows[0];
+    expect(despues.status).toBe('waiting');
+    expect(despues.external_order_id).toBeTruthy();
+    // Y el libro sigue sin moverse: nadie ha pagado todavía.
+    expect((await estadoDe(tx.id)).status).toBe('pending');
   });
 });

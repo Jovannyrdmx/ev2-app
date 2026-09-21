@@ -179,6 +179,29 @@ async function loadPayableTransaction(client, { transactionId, nightclubId, user
   if (!payments.OPEN_TX_STATUSES.includes(tx.status)) {
     throw ApiError.conflict(`El cobro está '${tx.status}' y ya no admite pago`);
   }
+
+  // Y la otra vía. Esto cierra un cobro doble real:
+  //
+  //   El mesero toca cobrar con terminal, la terminal se enciende. El cliente dice
+  //   "mejor efectivo". Se registra el efectivo y el renglón queda pagado — pero la
+  //   terminal SIGUE encendida, porque nadie la apagó. El siguiente que pase una
+  //   tarjeta ahí paga la misma cuenta otra vez, y ese cargo es real.
+  //
+  // El `FOR UPDATE` de arriba serializa las dos vías sobre el mismo renglón, así que
+  // esta comprobación no tiene carrera: o llega primero el efectivo y el cobro con
+  // terminal ve el renglón pagado, o llega primero la terminal y el efectivo ve esto.
+  const enTerminal = await client.query(
+    `SELECT c.id, t.label FROM terminal_charges c
+       JOIN payment_terminals t ON t.id = c.terminal_id
+      WHERE c.transaction_id = $1
+        AND c.status IN ('creating','waiting','action_required')`,
+    [tx.id]);
+  if (enTerminal.rowCount > 0) {
+    throw ApiError.conflict(
+      `Ese cobro tiene la terminal "${enTerminal.rows[0].label}" esperando la tarjeta. `
+      + 'Cancélalo ahí antes de cobrar de otra forma, o la terminal cobra otra vez.',
+      { terminal_charge_id: enTerminal.rows[0].id });
+  }
   return { tx, payer };
 }
 
@@ -204,8 +227,12 @@ router.post('/nightclubs/:nightclubId/manual-payments',
     }
 
     if (b.client_request_id) {
-      const existing = await pool.query(`${payments.PAYMENT_SELECT} WHERE p.client_request_id = $1`,
-        [b.client_request_id]);
+      // El filtro por club NO sobra: `client_request_id` lo escoge el cliente y viaja
+      // en el cuerpo. Sin él, quien conozca una clave de otro club recibía su pago
+      // completo, con folio bancario y los nombres de quien lo declaró y lo revisó.
+      const existing = await pool.query(
+        `${payments.PAYMENT_SELECT} WHERE p.client_request_id = $1 AND p.nightclub_id = $2`,
+        [b.client_request_id, nightclubId]);
       if (existing.rowCount > 0) {
         return res.status(200).json({
           payment: payments.present(existing.rows[0], isManager(req.user) ? 'manager' : 'guest'),
