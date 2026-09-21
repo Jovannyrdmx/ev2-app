@@ -3755,6 +3755,43 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
 
   /api/nightclubs/{nightclubId}/terminal-charges:
+    get:
+      operationId: listTerminalCharges
+      tags: [Pagos]
+      summary: Los cobros con terminal del club, con sus devoluciones
+      description: |
+        Solo el gerente. Del más nuevo al más viejo; por omisión, las últimas 24 horas.
+        Es de donde sale el botón de devolver (D49).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: hours, in: query, schema: { type: integer, minimum: 1, maximum: 2160, default: 24 } }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [processed, refunded, failed, canceled, expired, error, waiting, creating, action_required]
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+      responses:
+        '200':
+          description: Los cobros
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  charges:
+                    type: array
+                    items:
+                      allOf:
+                        - { $ref: '#/components/schemas/TerminalCharge' }
+                        - type: object
+                          properties:
+                            refunds:
+                              type: array
+                              items: { $ref: '#/components/schemas/TerminalRefund' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       operationId: startTerminalCharge
       tags: [Pagos]
@@ -3858,6 +3895,11 @@ paths:
         Se cancela **primero** del lado de Mercado Pago. Al revés, la terminal se quedaría
         encendida pidiendo una tarjeta por un cobro que el sistema ya dio por muerto — y
         alguien la pasaría.
+
+        Se manda `x-allow-cancelable-status: at_terminal`: sin esa cabecera Mercado Pago
+        solo cancela órdenes en `created`, y se negaba justo cuando la terminal ya
+        enseñaba el monto. Si aun así se niega, se lee la orden: si la tarjeta pasó en el
+        último segundo, contesta 409 y el cobro queda **pagado**, no cancelado.
       security: [{ bearerAuth: [] }]
       parameters:
         - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3873,7 +3915,73 @@ paths:
                   charge: { $ref: '#/components/schemas/TerminalCharge' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: Ese cobro ya terminó y no se puede cancelar
+          description: Ese cobro ya terminó, o la tarjeta pasó mientras se cancelaba
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: Mercado Pago no dejó cancelarlo; hay que cancelarlo en la terminal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/terminal-charges/{chargeId}/refund:
+    post:
+      operationId: refundTerminalCharge
+      tags: [Pagos]
+      summary: Devolver un cobro con terminal, completo
+      description: |
+        Solo el gerente, y siempre con motivo. `POST /v1/orders/{id}/refund` de Mercado
+        Pago con cuerpo vacío (devolución total) y `X-Idempotency-Key` guardada antes.
+
+        **Solo el total, a propósito (D49).** Un renglón "pagado en parte" deja el corte
+        descuadrado en lugares que hoy no saben restar, y en una disco el caso real es el
+        cobro equivocado o el doble.
+
+        En el libro: el renglón cobrado pasa a `refunded` (sale del ingreso) y la salida
+        se asienta en su propio renglón `refund`/`out`. Lo que se asienta es siempre la
+        diferencia contra lo ya devuelto, así que el webhook `order.refunded` de la misma
+        devolución no la asienta dos veces. Una devolución hecha desde el panel de
+        Mercado Pago también se asienta, marcada como `external`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: nightclubId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: chargeId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 5, maxLength: 280, example: Se cobró dos veces a la mesa 12 }
+      responses:
+        '200':
+          description: Mercado Pago aceptó la devolución y quedó asentada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TerminalRefundResult' }
+        '202':
+          description: |
+            Mercado Pago no contestó a tiempo. Quedó pedida y el repaso la reintenta con
+            la MISMA llave, que Mercado Pago respeta 24 horas.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TerminalRefundResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            No se puede: el cobro no está pagado, ya está devuelto, ya hay una devolución
+            en vuelo, o Mercado Pago la rechazó (sin saldo, fuera de los 90 días…).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: Pasaron más de 90 días desde el cobro
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -9218,6 +9326,49 @@ components:
         is_final:
           type: boolean
           description: Si la pantalla ya puede dejar de mirar.
+        at_terminal:
+          type: boolean
+          description: |
+            Mercado Pago dice `at_terminal`: la terminal ya enseña el monto. Para esta base
+            sigue siendo `waiting`; esto es lo que le dice al mesero que ya no es la red.
+        tip_amount:
+          type: [string, 'null']
+          description: Lo que la terminal cobró encima como propina. NO entra al libro del club.
+          example: '50.00'
+        refunded_amount: { type: string, example: '0.00' }
+        refundable:
+          type: boolean
+          description: Si el gerente puede devolverlo desde el sistema.
+
+    TerminalRefund:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        amount: { type: string, example: '450.00' }
+        currency: { type: string, example: MXN }
+        source:
+          type: string
+          enum: [staff, external]
+          description: '`external`: se hizo desde el panel o la terminal de Mercado Pago.'
+        reason: { type: [string, 'null'] }
+        status: { type: string, enum: [requested, processing, processed, failed] }
+        status_detail: { type: [string, 'null'] }
+        requested_by: { type: [string, 'null'], description: Nombre de quien la pidió. }
+        created_at: { type: string, format: date-time }
+
+    TerminalRefundResult:
+      type: object
+      properties:
+        refund_id: { type: string, format: uuid }
+        outcome: { type: string, enum: [accepted, pending, synced] }
+        charge:
+          allOf:
+            - { $ref: '#/components/schemas/TerminalCharge' }
+            - type: object
+              properties:
+                refunds:
+                  type: array
+                  items: { $ref: '#/components/schemas/TerminalRefund' }
 
     User:
       type: object

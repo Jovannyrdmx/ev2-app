@@ -819,7 +819,11 @@ router.get('/nightclubs/:nightclubId/terminal-charges/:chargeId',
       try {
         const order = await mercadopago.getOrder(row.external_order_id);
         const read = mercadopago.readOrder(order);
-        if (read && read.status && read.status !== row.status) {
+        // `status_detail` también cuenta: `created` → `at_terminal` es el mismo
+        // "esperando" para esta base, pero es lo que le dice al mesero que la terminal ya
+        // enseña el cobro.
+        if (read && read.status
+          && (read.status !== row.status || read.status_detail !== row.status_detail)) {
           const applied = await terminalCharges.apply(pool, {
             chargeId, read, source: 'poll', rawPayload: order,
           });
@@ -862,7 +866,40 @@ router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/cancel',
       // Se cancela PRIMERO del lado de Mercado Pago. Al revés, la terminal se quedaría
       // encendida pidiendo una tarjeta por un cobro que el sistema ya dio por muerto —
       // y alguien la pasaría.
-      await mercadopago.cancelOrder(charge.external_order_id);
+      try {
+        await mercadopago.cancelOrder(charge.external_order_id);
+      } catch (err) {
+        // No dejó cancelar. El motivo que más importa es que la tarjeta YA pasó en el
+        // último segundo: se lee la orden y se asienta lo que diga, en vez de enseñar un
+        // error y dejar al mesero creyendo que no cobró.
+        let read = null;
+        try {
+          const order = await mercadopago.getOrder(charge.external_order_id);
+          read = mercadopago.readOrder(order);
+          if (read) {
+            const applied = await terminalCharges.apply(pool, {
+              chargeId, read, source: 'staff', rawPayload: order,
+            });
+            if (applied.changed) {
+              await terminalCharges.announce({
+                nightclubId, chargeId, status: applied.status,
+                outcome: applied.outcome, startedBy: charge.started_by,
+              });
+            }
+          }
+        } catch { /* si tampoco contesta la consulta, vale el error original */ }
+        if (read && read.status === 'processed') {
+          throw ApiError.conflict('No se canceló: la tarjeta YA pasó. El cobro quedó pagado.');
+        }
+        if (read && read.is_final) {
+          const { rows } = await pool.query(
+            `${terminalCharges.CHARGE_SELECT} WHERE c.id = $1`, [chargeId]);
+          return res.json({ charge: terminalCharges.present(rows[0]), changed: false });
+        }
+        throw new ApiError(err.status === 504 ? 504 : 422, 'cancel_refused',
+          'Mercado Pago no dejó cancelar el cobro. Cancélalo en la terminal (la X o el '
+          + `botón rojo): el sistema se entera solo. (Mercado Pago: ${err.message})`);
+      }
     }
     const applied = await terminalCharges.apply(pool, {
       chargeId, read: { status: 'canceled', status_detail: 'cancelado desde el sistema' },
@@ -882,6 +919,77 @@ router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/cancel',
  * crea el cobro, se simula "aprobado", y se comprueba que el libro se movió. Sin esto,
  * probar el camino del dinero exigiría hardware.
  */
+/**
+ * Los cobros con terminal del club, del más nuevo al más viejo. Solo el gerente.
+ *
+ * Es la única vista de "qué se cobró con tarjeta" que tiene el sistema, y es de donde
+ * sale el botón de devolver. Sin ella, un cobro equivocado solo se podía devolver desde
+ * el panel de Mercado Pago, y el libro no se enteraba.
+ */
+router.get('/nightclubs/:nightclubId/terminal-charges',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: z.object({
+      // Por omisión, las últimas 24 horas: la noche de hoy y la de ayer.
+      hours: z.coerce.number().int().min(1).max(24 * 90).default(24),
+      status: z.enum(['processed', 'refunded', 'failed', 'canceled', 'expired', 'error',
+        'waiting', 'creating', 'action_required']).optional(),
+      limit: z.coerce.number().int().min(1).max(200).default(100),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const { hours, status, limit } = req.query;
+    const { rows } = await pool.query(
+      `${terminalCharges.CHARGE_SELECT}
+        WHERE c.nightclub_id = $1
+          AND c.created_at > now() - make_interval(hours => $2)
+          AND ($3::text IS NULL OR c.status = $3::text)
+        ORDER BY c.created_at DESC
+        LIMIT $4`,
+      [nightclubId, hours, status ?? null, limit]);
+    const devoluciones = await terminalCharges.refundsOf(pool, rows.map((r) => r.id));
+    res.json({
+      charges: rows.map((r) => ({
+        ...terminalCharges.present(r), refunds: devoluciones.get(r.id) || [],
+      })),
+    });
+  }));
+
+/**
+ * Devolver un cobro con terminal, completo. Solo el gerente, y siempre con motivo.
+ *
+ * Solo el total, a propósito (D49): el parcial existe en la API de Mercado Pago, pero un
+ * renglón "pagado en parte" deja el corte descuadrado en lugares que hoy no saben
+ * restar. En una disco el caso real es el cobro equivocado o el doble, que se devuelve
+ * completo.
+ */
+router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/refund',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid, chargeId: uuid }),
+    body: z.object({
+      // Obligatorio: dinero que sale sin que nadie pueda decir por qué es lo primero que
+      // se pregunta en una auditoría.
+      reason: z.string().trim().min(5, 'Escribe por qué se devuelve (mínimo 5 letras)').max(280),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, chargeId } = req.params;
+    const result = await terminalCharges.requestRefund(pool, {
+      nightclubId, chargeId, userId: req.user.id, reason: req.body.reason,
+    });
+    const { rows } = await pool.query(`${terminalCharges.CHARGE_SELECT} WHERE c.id = $1`, [chargeId]);
+    const devoluciones = await terminalCharges.refundsOf(pool, [chargeId]);
+    // 202 cuando Mercado Pago no contestó a tiempo: está pedido, y el repaso lo termina.
+    res.status(result.status === 'pending' ? 202 : 200).json({
+      refund_id: result.refundId,
+      outcome: result.status,
+      charge: { ...terminalCharges.present(rows[0]), refunds: devoluciones.get(chargeId) || [] },
+    });
+  }));
+
 router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/simulate',
   requireRole('manager'),
   validate({

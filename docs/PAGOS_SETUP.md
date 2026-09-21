@@ -90,6 +90,20 @@ tu `.env` y pega los valores.
    mandarlo, Mercado Pago avisa por el webhook y el cobro se cierra solo en la pantalla,
    sin recargar. Ese es el ensayo completo de punta a punta.
 
+6. **Cancelar y devolver.**
+
+   - *Cancelar* sirve mientras la tarjeta no pase, **aunque la terminal ya enseñe el
+     monto**. Si Mercado Pago aun así se niega, la pantalla lo dice y hay que
+     cancelarlo en la propia terminal; el sistema se entera solo.
+   - *Devolver* es del gerente: Pagos → **Cobros con terminal** → *Devolver*. Pide el
+     motivo (se guarda con su nombre) y confirma con el monto y la tarjeta. Devuelve el
+     cobro **completo**, dentro de los 90 días que da Mercado Pago. En el libro, el
+     cobro sale del ingreso y la devolución queda como salida en su propio renglón.
+   - Una devolución hecha desde el **panel de Mercado Pago** también llega al libro, por
+     el webhook, marcada como externa.
+   - Si la terminal cobró **propina**, se ve en el cobro y en su lista, pero no entra al
+     ingreso del club.
+
 Mercado Pago es el que habilita **OXXO y SPEI**, que en México es lo que más se va a usar.
 
 ## Cómo saber si quedó

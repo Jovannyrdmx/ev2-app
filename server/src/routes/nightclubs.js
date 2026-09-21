@@ -109,7 +109,7 @@ router.get('/nightclubs/:nightclubId/dashboard',
   validate({ params: z.object({ nightclubId: uuid }) }),
   asyncHandler(async (req, res) => {
     const id = req.params.nightclubId;
-    const [tables, orders, revenue, staff] = await Promise.all([
+    const [tables, orders, revenue, staff, partialRefunds] = await Promise.all([
       pool.query(
         `SELECT count(*)::int AS total,
                 count(*) FILTER (WHERE status = 'occupied')::int AS occupied,
@@ -143,12 +143,37 @@ router.get('/nightclubs/:nightclubId/dashboard',
         [id, CLUB_REVENUE_TYPES, STAFF_INCOME_TYPES]),
       pool.query(
         `SELECT count(*)::int AS on_shift FROM staff_shifts WHERE nightclub_id = $1 AND ended_at IS NULL`, [id]),
+      // Lo devuelto EN PARTE (D49). Una devolución completa ya saca el renglón original
+      // del ingreso, porque lo pasa a `refunded`; restarla aquí también sería contarla
+      // dos veces. Una parcial deja el original en `paid` por el total, así que solo esa
+      // se resta. El JOIN con el original en `paid` es lo que distingue una de la otra
+      // en cualquier orden en que hayan pasado.
+      pool.query(
+        `SELECT r.currency, COALESCE(sum(r.amount), 0)::numeric(12,2)::text AS refunded
+           FROM transactions r JOIN transactions o ON o.id = r.reference_id
+          WHERE r.nightclub_id = $1 AND r.type = 'refund' AND r.direction = 'out'
+            AND r.status = 'paid' AND r.reference_type = 'transaction'
+            AND o.status = 'paid' AND o.type = ANY($2::text[])
+            AND r.created_at > date_trunc('day', now() - interval '6 hours')
+          GROUP BY r.currency`,
+        [id, CLUB_REVENUE_TYPES]),
     ]);
+
+    const devuelto = new Map(partialRefunds.rows.map((r) => [r.currency, Number(r.refunded)]));
+    const revenueToday = revenue.rows.map((row) => {
+      const menos = devuelto.get(row.currency) || 0;
+      if (!menos) return row;
+      return {
+        ...row,
+        total: (Math.round((Number(row.total) - menos) * 100) / 100).toFixed(2),
+        refunded_partial: menos.toFixed(2),
+      };
+    });
 
     res.json({
       tables: tables.rows[0],
       orders: orders.rows[0],
-      revenue_today: revenue.rows,
+      revenue_today: revenueToday,
       staff: staff.rows[0],
       generated_at: new Date().toISOString(),
     });

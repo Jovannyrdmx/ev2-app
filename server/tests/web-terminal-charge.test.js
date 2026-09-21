@@ -186,3 +186,46 @@ describe('El panel del gerente y sus terminales', () => {
     expect(leer('sw.js')).toContain("'js/terminal-charge.js'");
   });
 });
+
+describe('Lo que la guía de Point añade a la espera', () => {
+  it('con la terminal ya mostrando el cobro, el titular lo dice', () => {
+    expect(T.headline('waiting', { at_terminal: true }).key).toBe('pay.termAtTerminal');
+    expect(T.headline('waiting', { at_terminal: false }).key).toBe('pay.termWaiting');
+    // Sin el cobro a la mano sigue funcionando como antes.
+    expect(T.headline('waiting').key).toBe('pay.termWaiting');
+  });
+
+  it('los detalles documentados salen en español; los demás, tal cual', () => {
+    expect(T.detailKey('bad_filled_card_data')).toBe('pay.detBadCard');
+    expect(T.detailKey('insufficient_amount')).toBe('pay.detInsufficient');
+    expect(T.detailKey('un_codigo_que_no_conocemos')).toBeNull();
+    expect(T.detailKey(null)).toBeNull();
+  });
+
+  it('cada texto nuevo existe en los dos idiomas', () => {
+    const claves = ['pay.termAtTerminal', 'pay.termTip', ...Object.values(T.DETAIL_KEYS)];
+    for (const lang of ['es', 'en']) {
+      catalogo.setLanguage(lang);
+      expect({ lang, faltan: claves.filter((k) => catalogo.t(k) === k) }).toEqual({ lang, faltan: [] });
+    }
+  });
+
+  it('la propina se enseña en el cobro pagado', () => {
+    const dom = new JSDOM('<!doctype html><body></body>');
+    const hoja = T.createSheet({
+      document: dom.window.document,
+      api: { get: () => new Promise(() => {}), post: () => Promise.resolve({}) },
+      clubId: () => 'c', t: (k, v) => (v ? `${k}:${JSON.stringify(v)}` : k),
+      money: (a) => `$${a}`, errorMessage: (e) => e.message,
+    });
+    hoja.watch({
+      id: 'x', status: 'processed', status_detail: 'accredited', amount: '450.00',
+      currency: 'MXN', tip_amount: '50.00', terminal: { label: 'Barra' },
+    });
+    const detalle = dom.window.document.getElementById('term-detail').textContent;
+    expect(detalle).toMatch(/pay\.detAccredited/);
+    expect(detalle).toMatch(/pay\.termTip.*\$50\.00/);
+    hoja.close();
+    dom.window.close();
+  });
+});

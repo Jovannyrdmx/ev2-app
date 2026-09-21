@@ -91,9 +91,12 @@ function assertModeMatches(body, declared) {
  * quien llama decide, porque un 404 al consultar una orden y un 404 al cancelarla no
  * significan lo mismo.
  */
-async function request(method, path, { body, idempotencyKey, expectLiveMode = true } = {}) {
+async function request(method, path, {
+  body, idempotencyKey, expectLiveMode = true, extraHeaders = {},
+} = {}) {
   const mp = assertUsable();
   const headers = {
+    ...extraHeaders,
     Authorization: `Bearer ${token()}`,
     Accept: 'application/json',
   };
@@ -184,6 +187,20 @@ async function setOperatingMode(externalId, mode = 'PDV') {
 // ---------------------------------------------------------------- cobrar
 
 /**
+ * La vigencia de la orden en ISO 8601, como la documenta Mercado Pago: mínimo `PT30S`,
+ * máximo `PT3H`. Se normaliza a horas/minutos/segundos (`PT3M`, `PT1M30S`) porque así
+ * vienen todos sus ejemplos: `PT180S` es ISO válido, pero no hay por qué apostar a que
+ * su validador lo acepte en plena barra.
+ */
+function isoDuration(seconds) {
+  const total = Math.max(30, Math.min(10800, Math.round(Number(seconds) || 0)));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  return `PT${h ? `${h}H` : ''}${m ? `${m}M` : ''}${sec ? `${sec}S` : ''}`;
+}
+
+/**
  * Despertar la terminal con un monto.
  *
  * `amount` viaja como texto con DOS decimales exactos, que es lo que la API exige. Se
@@ -199,7 +216,7 @@ async function createPointOrder({
     external_reference: externalReference,
     // Corto a propósito: una orden viva es una terminal ocupada. Si el cliente no paga
     // en tres minutos, vence sola y el mesero puede volver a cobrar sin llamar a nadie.
-    expiration_time: `PT${Math.max(30, Math.min(10800, expirationSeconds))}S`,
+    expiration_time: isoDuration(expirationSeconds),
     transactions: {
       payments: [{ amount: Number(amount).toFixed(2) }],
     },
@@ -229,13 +246,67 @@ async function getOrder(orderId) {
   return body;
 }
 
-/** Cancelar una orden que todavía no se cobró. */
+/**
+ * Cancelar una orden que todavía no se cobró.
+ *
+ * `x-allow-cancelable-status: at_terminal` NO es opcional en la práctica. Sin esa
+ * cabecera Mercado Pago solo cancela órdenes en `created`, y una orden pasa a
+ * `at_terminal` en cuanto la terminal la enseña — que es justo el momento en el que el
+ * cliente dice "mejor en efectivo". Sin ella, cancelar fallaba exactamente cuando más
+ * hacía falta, y el mesero se quedaba con la terminal pidiendo una tarjeta.
+ */
 async function cancelOrder(orderId, idempotencyKey = crypto.randomUUID()) {
   const { status, body } = await request(
-    'POST', `/v1/orders/${encodeURIComponent(orderId)}/cancel`, { idempotencyKey });
+    'POST', `/v1/orders/${encodeURIComponent(orderId)}/cancel`, {
+      idempotencyKey, extraHeaders: { 'x-allow-cancelable-status': 'at_terminal' },
+    });
   if (status === 200 || status === 201) return body;
   throw new ApiError(status === 404 ? 404 : 502, 'mercadopago_error',
-    describeError(status, body), { status });
+    describeError(status, body), { status, body });
+}
+
+/**
+ * Los códigos de error de un reembolso que documenta Mercado Pago, dichos para quien
+ * está frente a la pantalla. El código original se conserva en `details`.
+ */
+const REFUND_ERRORS = {
+  refund_period_exceeded: 'Ya pasaron más de 90 días desde el cobro: Mercado Pago ya no permite devolverlo.',
+  insufficient_money_for_refund: 'La cuenta de Mercado Pago no tiene saldo suficiente para devolver este cobro.',
+  order_already_refunded: 'Mercado Pago dice que este cobro ya estaba devuelto.',
+  cannot_refund_order: 'Mercado Pago no permite devolver este cobro.',
+  payment_not_refundable: 'Mercado Pago no permite devolver este pago.',
+  max_refunds_exceeded: 'Este cobro ya tiene el máximo de devoluciones que permite Mercado Pago.',
+  partial_refund_forbidden_with_tips: 'Un cobro con propina solo se puede devolver completo.',
+  refund_amount_exceeds: 'Lo que se quiere devolver es más de lo que se cobró.',
+};
+
+function refundErrorCode(body) {
+  if (!body) return null;
+  if (Array.isArray(body.errors) && body.errors.length) return body.errors[0].code || null;
+  return body.code || body.error || null;
+}
+
+/**
+ * Devolver una orden cobrada, completa.
+ *
+ * Solo el reembolso total, a propósito (ver D49): el parcial existe en la API, pero un
+ * cobro que queda "pagado" por una parte deja el corte de la noche descuadrado en
+ * lugares que hoy no saben restar, y en una disco el caso real es el cobro equivocado
+ * o el doble, que se devuelve completo.
+ *
+ * La llave de idempotencia la pone quien llama y se guarda antes: Mercado Pago la
+ * respeta 24 horas, y es lo único que permite reintentar un reembolso cuya respuesta se
+ * perdió sin devolver el dinero dos veces.
+ */
+async function refundOrder(orderId, { idempotencyKey }) {
+  const { status, body } = await request(
+    'POST', `/v1/orders/${encodeURIComponent(orderId)}/refund`, { idempotencyKey });
+  if (status === 200 || status === 201) return body;
+  const code = refundErrorCode(body);
+  const message = (code && REFUND_ERRORS[code]) || describeError(status, body);
+  const http = status === 404 ? 404 : status === 409 || status === 428 ? 409 : 502;
+  throw new ApiError(http, code === 'order_already_refunded' ? 'already_refunded' : 'mercadopago_refund_error',
+    message, { status, code });
 }
 
 /**
@@ -302,6 +373,19 @@ function verifySignature({ signatureHeader, requestId, dataId, secret }) {
 const FINAL_STATUSES = ['processed', 'failed', 'canceled', 'expired', 'refunded'];
 
 /**
+ * Los estados de Mercado Pago que para este sistema son "sigue esperando".
+ *
+ * `created` (recién creada) y `at_terminal` (la terminal ya la muestra) son los dos
+ * primeros pasos de TODA orden según la guía de Point. Esta tabla no los aceptaba
+ * (migración 026), y cada vez que la consulta o el repaso los leían, el UPDATE chocaba
+ * con el CHECK, la excepción se tragaba en silencio y el cobro seguía "esperando" sin
+ * que nadie supiera que la terminal ya lo tenía en pantalla.
+ */
+const PENDING_STATUSES = ['created', 'at_terminal'];
+
+const money2 = (v) => (v === null || v === undefined || v === '' ? null : Number(v).toFixed(2));
+
+/**
  * La orden de Mercado Pago traducida a lo que esta base guarda.
  *
  * Se lee con tolerancia a propósito: si un campo opcional cambia de sitio, el cobro se
@@ -310,18 +394,40 @@ const FINAL_STATUSES = ['processed', 'failed', 'canceled', 'expired', 'refunded'
  */
 function readOrder(order) {
   if (!order) return null;
-  const payment = (((order.transactions || {}).payments || [])[0]) || {};
+  const tx = order.transactions || {};
+  const payment = ((tx.payments || [])[0]) || {};
+  const refunds = (tx.refunds || []).map((r) => ({
+    id: r.id || null,
+    transaction_id: r.transaction_id || null,
+    amount: money2(r.amount),
+    status: r.status || null,
+  }));
+  // Lo devuelto: lo que diga el pago, o la suma de sus reembolsos si no lo dice.
+  const devueltoPorLista = refunds.reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
+  const refunded = payment.refunded_amount != null
+    ? Number(payment.refunded_amount) : devueltoPorLista;
+
+  const mpStatus = order.status || null;
+  const status = PENDING_STATUSES.includes(mpStatus) ? 'waiting' : mpStatus;
   return {
     external_order_id: order.id || null,
-    status: order.status || null,
-    status_detail: order.status_detail || payment.status_detail || null,
-    amount: order.total_amount || payment.amount || null,
-    paid_amount: order.total_paid_amount || null,
+    // En el vocabulario de esta base. `mp_status` es lo que dijo Mercado Pago tal cual.
+    status,
+    mp_status: mpStatus,
+    at_terminal: mpStatus === 'at_terminal',
+    status_detail: order.status_detail || payment.status_detail
+      || (PENDING_STATUSES.includes(mpStatus) ? mpStatus : null),
+    amount: money2(order.total_amount || payment.amount),
+    paid_amount: money2(payment.paid_amount != null ? payment.paid_amount : order.total_paid_amount),
+    tip_amount: money2(payment.tip_amount),
+    refunded_amount: money2(refunded) || '0.00',
+    refunds,
+    payment_transaction_id: payment.id || null,
     payment_method_type: (payment.payment_method || {}).type || null,
     payment_method_id: (payment.payment_method || {}).id || null,
     installments: (payment.payment_method || {}).installments || null,
     live_mode: typeof order.live_mode === 'boolean' ? order.live_mode : null,
-    is_final: FINAL_STATUSES.includes(order.status),
+    is_final: FINAL_STATUSES.includes(mpStatus),
   };
 }
 
@@ -338,6 +444,10 @@ module.exports = {
   createPointOrder,
   getOrder,
   cancelOrder,
+  refundOrder,
+  isoDuration,
+  PENDING_STATUSES,
+  REFUND_ERRORS,
   simulateOrderEvent,
   verifySignature,
   readOrder,

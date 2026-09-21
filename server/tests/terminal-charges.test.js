@@ -34,6 +34,7 @@ function fakeFetch(url, opts = {}) {
   const body = opts.body ? JSON.parse(opts.body) : null;
   mpFake.calls.push({
     method, path, body, idempotency: (opts.headers || {})['X-Idempotency-Key'] || null,
+    headers: opts.headers || {},
   });
 
   if (mpFake.failNext) {
@@ -78,8 +79,43 @@ function fakeFetch(url, opts = {}) {
   if (method === 'POST' && cancelar) {
     const order = mpFake.orders.get(decodeURIComponent(cancelar[1]));
     if (!order) return Promise.resolve(respuesta(404, { message: 'not found' }));
+    // Como lo documenta Mercado Pago: sin la cabecera, solo cancela lo que sigue en
+    // `created`. Una orden que la terminal ya enseña se niega.
+    const permite = (opts.headers || {})['x-allow-cancelable-status'] === 'at_terminal';
+    if (order.status === 'at_terminal' && !permite) {
+      return Promise.resolve(respuesta(409, { errors: [{ code: 'cannot_cancel_order', message: 'Order status at_terminal can not be canceled' }] }));
+    }
+    if (!['created', 'at_terminal'].includes(order.status)) {
+      return Promise.resolve(respuesta(409, { errors: [{ code: 'cannot_cancel_order', message: `Order status ${order.status} can not be canceled` }] }));
+    }
     order.status = 'canceled';
     return Promise.resolve(respuesta(200, order));
+  }
+  const devolver = /^\/v1\/orders\/([^/]+)\/refund$/.exec(path);
+  if (method === 'POST' && devolver) {
+    const order = mpFake.orders.get(decodeURIComponent(devolver[1]));
+    if (!order) return Promise.resolve(respuesta(404, { errors: [{ code: 'order_not_found' }] }));
+    const llave = (opts.headers || {})['X-Idempotency-Key'];
+    mpFake.refundKeys = mpFake.refundKeys || new Map();
+    if (mpFake.refundKeys.has(llave)) return Promise.resolve(respuesta(201, mpFake.refundKeys.get(llave)));
+    if (order.status === 'refunded') {
+      return Promise.resolve(respuesta(409, { errors: [{ code: 'order_already_refunded', message: 'already refunded' }] }));
+    }
+    if (order.status !== 'processed') {
+      return Promise.resolve(respuesta(409, { errors: [{ code: 'cannot_refund_order', message: 'cannot refund' }] }));
+    }
+    const pago = order.transactions.payments[0];
+    const total = (Number(pago.paid_amount || order.total_paid_amount)).toFixed(2);
+    pago.refunded_amount = total;
+    order.status = 'refunded';
+    order.status_detail = 'refunded';
+    order.transactions.refunds = [{
+      id: `REF${crypto.randomBytes(5).toString('hex').toUpperCase()}`,
+      transaction_id: pago.id, amount: total, status: 'processing',
+    }];
+    const copia = JSON.parse(JSON.stringify(order));
+    mpFake.refundKeys.set(llave, copia);
+    return Promise.resolve(respuesta(201, copia));
   }
   const eventos = /^\/v1\/orders\/([^/]+)\/events$/.exec(path);
   if (method === 'POST' && eventos) {
@@ -122,7 +158,9 @@ function resolverOrden(orderId, status, extra = {}) {
       ? (extra.paid ?? order.total_amount) : null,
     transactions: {
       payments: [{
+        id: order._payId || (order._payId = `PAY${crypto.randomBytes(6).toString('hex').toUpperCase()}`),
         amount: order.total_amount,
+        ...(extra.tip ? { tip_amount: extra.tip } : {}),
         payment_method: { id: 'visa', type: 'credit_card', installments: 1 },
       }],
     },
@@ -148,6 +186,7 @@ beforeEach(async () => {
   mpFake.orders.clear();
   mpFake.calls = [];
   mpFake.failNext = null;
+  mpFake.refundKeys = new Map();
   mpFake.terminals = [
     { id: 'NEWLAND_N950__SBX0000001', operating_mode: 'PDV' },
     { id: 'NEWLAND_N950__N950NCB801293324', operating_mode: 'STANDALONE' },
@@ -720,5 +759,246 @@ describe('Dar de alta una terminal nunca deja al gerente atorado', () => {
     const { rows } = await pool.query(
       'SELECT operating_mode FROM payment_terminals WHERE id = $1', [t.id]);
     expect(rows[0].operating_mode).toBe('STANDALONE');
+  });
+});
+
+// ---------------------------------------------------------------- contra la guía de Point
+
+describe('Lo que la guía de Point dice y faltaba', () => {
+  /** Empieza un cobro y devuelve { t, tx, chargeId, orderId }. */
+  async function cobroVivo(amount = '450.00') {
+    const t = await altaTerminal();
+    const tx = await cobroPendiente(amount);
+    const creado = await empezar(tx, t);
+    expect(creado.status).toBe(201);
+    const { rows } = await pool.query(
+      'SELECT external_order_id FROM terminal_charges WHERE id = $1', [creado.body.charge.id]);
+    return { t, tx, chargeId: creado.body.charge.id, orderId: rows[0].external_order_id };
+  }
+  const verCobro = async (chargeId) => api()
+    .get(`/api/nightclubs/${club.id}/terminal-charges/${chargeId}`).set(await tokenDe(waiter));
+  const pagado = async (orderId, extra) => { resolverOrden(orderId, 'processed', extra); await notificar(orderId); };
+  const devolver = async (chargeId, quien = manager, reason = 'Se cobró dos veces a la mesa 12') => api()
+    .post(`/api/nightclubs/${club.id}/terminal-charges/${chargeId}/refund`)
+    .set(await tokenDe(quien)).send({ reason });
+  const libro = async (txId) => (await pool.query(
+    `SELECT id, type, direction, amount::text AS amount, status, reference_id
+       FROM transactions WHERE id = $1 OR reference_id = $1 ORDER BY created_at`, [txId])).rows;
+
+  it('la vigencia viaja como ISO 8601 normalizado (PT3M, no PT180S)', async () => {
+    await cobroVivo();
+    const creada = mpFake.calls.find((c) => c.path === '/v1/orders');
+    expect(creada.body.expiration_time).toBe('PT3M');
+  });
+
+  it('"at_terminal" ya no revienta: el cobro sigue esperando y dice que la terminal lo tiene', async () => {
+    // Antes el CHECK de la tabla no aceptaba ese estado: cada consulta chocaba y la
+    // excepción se tragaba en silencio.
+    const { chargeId, orderId } = await cobroVivo();
+    mpFake.orders.get(orderId).status = 'at_terminal';
+    mpFake.orders.get(orderId).status_detail = 'at_terminal';
+
+    const res = await verCobro(chargeId);
+    expect(res.status).toBe(200);
+    expect(res.body.charge.status).toBe('waiting');
+    expect(res.body.charge.at_terminal).toBe(true);
+    expect(res.body.charge.is_final).toBe(false);
+  });
+
+  it('el repaso tampoco se atora con "created" ni con "at_terminal"', async () => {
+    const { chargeId, orderId } = await cobroVivo();
+    await pool.query("UPDATE terminal_charges SET last_polled_at = NULL WHERE id = $1", [chargeId]);
+    mpFake.orders.get(orderId).status = 'at_terminal';
+    await terminalCharges.sweep(pool);
+    const fallos = await pool.query(
+      "SELECT 1 FROM terminal_charge_events WHERE charge_id = $1 AND action = 'poll_failed'", [chargeId]);
+    expect(fallos.rowCount).toBe(0);
+  });
+
+  it('cancelar funciona aunque la terminal YA muestre el cobro', async () => {
+    // Es el momento en que el cliente dice "mejor en efectivo". Sin la cabecera
+    // `x-allow-cancelable-status`, Mercado Pago se negaba justo ahí.
+    const { chargeId, orderId } = await cobroVivo();
+    mpFake.orders.get(orderId).status = 'at_terminal';
+    const res = await api()
+      .post(`/api/nightclubs/${club.id}/terminal-charges/${chargeId}/cancel`)
+      .set(await tokenDe(waiter)).send({});
+    expect(res.status).toBe(200);
+    expect(res.body.charge.status).toBe('canceled');
+    const llamada = mpFake.calls.find((c) => c.path.endsWith('/cancel'));
+    expect(llamada.headers['x-allow-cancelable-status']).toBe('at_terminal');
+  });
+
+  it('si la tarjeta pasó en el último segundo, cancelar NO lo da por cancelado', async () => {
+    const { tx, chargeId, orderId } = await cobroVivo();
+    resolverOrden(orderId, 'processed'); // pagó, y el webhook todavía no llega
+    const res = await api()
+      .post(`/api/nightclubs/${club.id}/terminal-charges/${chargeId}/cancel`)
+      .set(await tokenDe(waiter)).send({});
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toMatch(/YA pasó/);
+    expect((await estadoDe(tx.id)).status).toBe('paid');
+  });
+
+  it('una propina en la terminal no convierte el cobro en "monto distinto"', async () => {
+    const { tx, chargeId, orderId } = await cobroVivo('450.00');
+    await pagado(orderId, { paid: '500.00', tip: '50.00' });
+    expect((await estadoDe(tx.id)).status).toBe('paid');
+    const res = await verCobro(chargeId);
+    expect(res.body.charge.status).toBe('processed');
+    expect(res.body.charge.tip_amount).toBe('50.00');
+  });
+
+  it('pero una diferencia que NO es la propina sigue siendo descuadre', async () => {
+    const { tx, orderId } = await cobroVivo('450.00');
+    await pagado(orderId, { paid: '520.00', tip: '50.00' });
+    expect((await estadoDe(tx.id)).status).toBe('pending');
+  });
+
+  it('devolver: Mercado Pago lo devuelve y el libro asienta la SALIDA', async () => {
+    const { tx, chargeId, orderId } = await cobroVivo('450.00');
+    await pagado(orderId);
+
+    const res = await devolver(chargeId);
+    expect(res.status).toBe(200);
+    expect(res.body.charge.status).toBe('refunded');
+    expect(res.body.charge.refunded_amount).toBe('450.00');
+    expect(res.body.charge.refunds).toHaveLength(1);
+    expect(res.body.charge.refunds[0].reason).toMatch(/dos veces/);
+
+    // El renglón original sale del ingreso, y la salida queda en su propio renglón.
+    const filas = await libro(tx.id);
+    expect(filas.find((r) => r.id === tx.id).status).toBe('refunded');
+    const salida = filas.filter((r) => r.type === 'refund');
+    expect(salida).toHaveLength(1);
+    expect(salida[0]).toMatchObject({ direction: 'out', amount: '450.00', status: 'paid' });
+
+    const pedida = mpFake.calls.find((c) => c.path.endsWith('/refund'));
+    expect(pedida.idempotency).toMatch(/^[0-9a-f-]{36}$/);
+    expect(pedida.body).toBeNull(); // total: cuerpo vacío, como dice la guía
+  });
+
+  it('su webhook de la misma devolución NO la asienta dos veces', async () => {
+    const { tx, chargeId, orderId } = await cobroVivo();
+    await pagado(orderId);
+    await devolver(chargeId);
+    await notificar(orderId, { action: 'order.refunded' });
+    await notificar(orderId, { action: 'order.refunded' });
+
+    expect((await libro(tx.id)).filter((r) => r.type === 'refund')).toHaveLength(1);
+    const reembolsos = await pool.query('SELECT source FROM terminal_refunds WHERE charge_id = $1', [chargeId]);
+    expect(reembolsos.rows.map((r) => r.source)).toEqual(['staff']);
+  });
+
+  it('una devolución hecha desde el panel de Mercado Pago también se asienta', async () => {
+    // Antes este aviso llegaba a un cobro "ya terminado" y se tiraba.
+    const { tx, chargeId, orderId } = await cobroVivo();
+    await pagado(orderId);
+    const order = mpFake.orders.get(orderId);
+    order.status = 'refunded';
+    order.transactions.payments[0].refunded_amount = '450.00';
+    order.transactions.refunds = [{ id: 'REFPANEL1', amount: '450.00', status: 'processed' }];
+    await notificar(orderId, { action: 'order.refunded' });
+
+    expect((await estadoDe(tx.id)).status).toBe('refunded');
+    const r = await pool.query('SELECT source, status, amount::text AS amount FROM terminal_refunds WHERE charge_id = $1', [chargeId]);
+    expect(r.rows).toEqual([{ source: 'external', status: 'processed', amount: '450.00' }]);
+  });
+
+  it('una devolución PARCIAL desde el panel: el original sigue pagado y el tablero la resta', async () => {
+    const { tx, orderId } = await cobroVivo('450.00');
+    await pagado(orderId);
+    await pool.query("UPDATE transactions SET type = 'drink_order' WHERE id = $1", [tx.id]);
+    const order = mpFake.orders.get(orderId);
+    order.transactions.payments[0].refunded_amount = '100.00';
+    order.transactions.refunds = [{ id: 'REFPARC1', amount: '100.00', status: 'processed' }];
+    await notificar(orderId, { action: 'order.refunded' });
+
+    expect((await estadoDe(tx.id)).status).toBe('paid');
+    const salida = (await libro(tx.id)).filter((r) => r.type === 'refund');
+    expect(salida.map((r) => r.amount)).toEqual(['100.00']);
+
+    const tablero = await api().get(`/api/nightclubs/${club.id}/dashboard`).set(await tokenDe(manager));
+    const mxn = tablero.body.revenue_today.find((r) => r.currency === 'MXN');
+    expect(mxn.total).toBe('350.00');
+    expect(mxn.refunded_partial).toBe('100.00');
+  });
+
+  it('dos gerentes tocando "devolver" a la vez: solo una llega a Mercado Pago', async () => {
+    const { chargeId, orderId } = await cobroVivo();
+    await pagado(orderId);
+    const [a, b] = await Promise.all([devolver(chargeId), devolver(chargeId)]);
+    expect([a.status, b.status].sort()).toEqual([200, 409]);
+    expect(mpFake.calls.filter((c) => c.path.endsWith('/refund'))).toHaveLength(1);
+  });
+
+  it('solo el gerente devuelve, siempre con motivo, y solo lo que la tarjeta ya pagó', async () => {
+    const { chargeId, orderId } = await cobroVivo();
+    expect((await devolver(chargeId)).status).toBe(409); // todavía no se paga
+    await pagado(orderId);
+    expect((await devolver(chargeId, waiter)).status).toBe(403);
+    expect((await devolver(chargeId, manager, 'no')).status).toBe(400);
+    expect((await devolver(chargeId)).status).toBe(200);
+    const otraVez = await devolver(chargeId);
+    expect(otraVez.status).toBe(409);
+    expect(otraVez.body.error.message).toMatch(/ya está devuelto/);
+  });
+
+  it('si Mercado Pago se niega, lo dice en español y se puede reintentar después', async () => {
+    const { tx, chargeId, orderId } = await cobroVivo();
+    await pagado(orderId);
+    mpFake.failNext = { status: 428, body: { errors: [{ code: 'insufficient_money_for_refund', message: 'no money' }] } };
+    const res = await devolver(chargeId);
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toMatch(/saldo suficiente/);
+    expect((await estadoDe(tx.id)).status).toBe('paid');
+
+    // Una fallida no bloquea la siguiente.
+    expect((await devolver(chargeId)).status).toBe(200);
+  });
+
+  it('si la respuesta se pierde, queda pedida y el repaso la termina con LA MISMA llave', async () => {
+    const { tx, chargeId, orderId } = await cobroVivo();
+    await pagado(orderId);
+    mpFake.failNext = 'abort';
+    const res = await devolver(chargeId);
+    expect(res.status).toBe(202);
+    expect(res.body.outcome).toBe('pending');
+    expect((await estadoDe(tx.id)).status).toBe('paid');
+
+    const { rows } = await pool.query(
+      "SELECT idempotency_key FROM terminal_refunds WHERE charge_id = $1", [chargeId]);
+    await pool.query(
+      "UPDATE terminal_refunds SET last_attempt_at = now() - interval '5 minutes' WHERE charge_id = $1", [chargeId]);
+    await terminalCharges.sweep(pool);
+
+    expect((await estadoDe(tx.id)).status).toBe('refunded');
+    const reintentos = mpFake.calls.filter((c) => c.path.endsWith('/refund'));
+    expect(reintentos).toHaveLength(2);
+    expect(reintentos[1].idempotency).toBe(rows[0].idempotency_key);
+  });
+
+  it('la lista de cobros es del gerente, con sus devoluciones', async () => {
+    const { chargeId, orderId } = await cobroVivo();
+    await pagado(orderId);
+    await devolver(chargeId);
+    const lista = await api().get(`/api/nightclubs/${club.id}/terminal-charges`).set(await tokenDe(manager));
+    expect(lista.status).toBe(200);
+    const este = lista.body.charges.find((c) => c.id === chargeId);
+    expect(este.status).toBe('refunded');
+    expect(este.refunds).toHaveLength(1);
+    expect((await api().get(`/api/nightclubs/${club.id}/terminal-charges`)
+      .set(await tokenDe(waiter))).status).toBe(403);
+  });
+
+  it('el corte de la noche enseña lo devuelto con tarjeta, aparte', async () => {
+    const stats = require('../src/services/night-stats');
+    const { chargeId, orderId } = await cobroVivo();
+    await pagado(orderId);
+    await devolver(chargeId);
+    const r = await stats.cardRefunds({
+      nightclubId: club.id, from: new Date(Date.now() - 3600e3), to: new Date(Date.now() + 3600e3),
+    });
+    expect(r).toEqual({ total: 450, count: 1 });
   });
 });

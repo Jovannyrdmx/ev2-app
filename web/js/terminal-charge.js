@@ -45,10 +45,14 @@
    * `error` es "no sabemos qué pasó, NO vuelvas a cobrar sin revisar" — porque puede
    * haber un cargo del otro lado.
    */
-  function headline(status) {
+  function headline(status, charge) {
     switch (String(status)) {
       case 'creating': return { key: 'pay.termStarting', tone: 'wait' };
-      case 'waiting': return { key: 'pay.termWaiting', tone: 'wait' };
+      // `at_terminal`: Mercado Pago dice que la terminal ya enseña el monto. Distinguirlo
+      // de "enviando" le dice al mesero que el problema ya no es la red.
+      case 'waiting': return {
+        key: charge && charge.at_terminal ? 'pay.termAtTerminal' : 'pay.termWaiting', tone: 'wait',
+      };
       case 'action_required': return { key: 'pay.termAction', tone: 'wait' };
       case 'processed': return { key: 'pay.termPaid', tone: 'ok' };
       case 'failed': return { key: 'pay.termFailed', tone: 'bad' };
@@ -58,6 +62,25 @@
       default: return { key: 'pay.termUnknown', tone: 'bad' };
     }
   }
+
+  /**
+   * El detalle de Mercado Pago, dicho en español cuando es uno de los documentados.
+   *
+   * Si no está en la lista se enseña tal cual: dice más que cualquier texto nuestro, y
+   * es lo que el cliente va a preguntar. La lista es corta a propósito: solo los que
+   * aparecen en la guía de Point, para no traducir mal un código que no conocemos.
+   */
+  const DETAIL_KEYS = {
+    accredited: 'pay.detAccredited',
+    bad_filled_card_data: 'pay.detBadCard',
+    insufficient_amount: 'pay.detInsufficient',
+    canceled_by_api: 'pay.detCanceledApi',
+    at_terminal: 'pay.detAtTerminal',
+    created: 'pay.detCreated',
+    refunded: 'pay.detRefunded',
+    expired: 'pay.detExpired',
+  };
+  const detailKey = (detail) => DETAIL_KEYS[String(detail || '')] || null;
 
   /** Cuánto le queda a la orden antes de vencer, en segundos. Nunca negativo. */
   function secondsLeft(expiresAt, now = Date.now()) {
@@ -141,7 +164,7 @@
     const estado = { chargeId: null, status: null, started: 0, timer: null, expiresAt: null };
 
     function pintar(charge) {
-      const head = headline(charge.status);
+      const head = headline(charge.status, charge);
       estado.status = charge.status;
       estado.expiresAt = charge.expires_at || estado.expiresAt;
 
@@ -150,9 +173,15 @@
       $('term-headline').textContent = t(head.key);
       $('term-headline').style.color = head.tone === 'ok' ? 'var(--ev2-lime)'
         : head.tone === 'bad' ? '#fca5a5' : '';
-      // El detalle que manda Mercado Pago (por qué se rechazó) se enseña tal cual: dice
-      // más que cualquier texto nuestro, y es lo que el cliente va a preguntar.
-      $('term-detail').textContent = charge.status_detail || '';
+      // El detalle que manda Mercado Pago (por qué se rechazó): en español si es uno de
+      // los documentados, tal cual si no. Y la propina, si el cliente la dejó en la
+      // terminal: es dinero de alguien y tiene que verse.
+      const dk = detailKey(charge.status_detail);
+      const partes = [dk ? t(dk) : (charge.status_detail || '')];
+      if (isPaid(charge.status) && Number(charge.tip_amount) > 0) {
+        partes.push(t('pay.termTip', { tip: deps.money(charge.tip_amount, charge.currency) }));
+      }
+      $('term-detail').textContent = partes.filter(Boolean).join(' · ');
       $('term-spinner').hidden = isFinal(charge.status);
 
       const quedan = secondsLeft(estado.expiresAt);
@@ -231,6 +260,6 @@
 
   return {
     FINAL, REMEMBER_KEY, isFinal, isPaid, headline, secondsLeft, pollDelay, canCancel,
-    pickTerminal, recordar, recordada, createSheet,
+    pickTerminal, recordar, recordada, createSheet, DETAIL_KEYS, detailKey,
   };
 }));

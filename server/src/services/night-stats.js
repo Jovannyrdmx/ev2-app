@@ -249,6 +249,24 @@ async function door({ nightclubId, eventId, runner = pool }) {
 }
 
 /**
+ * Lo devuelto con tarjeta en la ventana de la noche (D49).
+ *
+ * Va aparte y con nombre, igual que las propinas, y NO se resta de la venta: el corte
+ * cuenta lo que se vendió, y una devolución no dice si lo vendido se entregó o no
+ * (el cobro equivocado sí se sirvió; el doble no). Restarlo sería decidir eso por el
+ * gerente. Enseñarlo junto al total es lo que le deja decidir a él.
+ */
+async function cardRefunds({ nightclubId, from, to, runner = pool }) {
+  const { rows } = await runner.query(
+    `SELECT COALESCE(sum(amount), 0)::float8 AS total, count(*)::int AS count
+       FROM terminal_refunds
+      WHERE nightclub_id = $1 AND status IN ('processing','processed')
+        AND created_at >= $2 AND created_at < $3`,
+    [nightclubId, from, to]);
+  return { total: money(rows[0].total), count: int(rows[0].count) };
+}
+
+/**
  * Propinas de la noche, y a quién le tocaron.
  *
  * Van en el corte pero NO en el ingreso del club: son de la persona. Sumarlas al
@@ -357,7 +375,7 @@ async function staff({ nightclubId, eventId, from, to, runner = pool }) {
 async function nightStats({ nightclubId, eventId, runner = pool }) {
   const { night, from, to } = await loadNight({ nightclubId, eventId, runner });
 
-  const [res, zonas, barra, puerta, propinas, merma, personal] = await Promise.all([
+  const [res, zonas, barra, puerta, propinas, merma, personal, devuelto] = await Promise.all([
     reservations({ nightclubId, eventId, runner }),
     zones({ nightclubId, eventId, runner }),
     bar({ nightclubId, from, to, runner }),
@@ -365,6 +383,7 @@ async function nightStats({ nightclubId, eventId, runner = pool }) {
     tips({ nightclubId, from, to, runner }),
     shrinkage({ nightclubId, from, to, runner }),
     staff({ nightclubId, eventId, from, to, runner }),
+    cardRefunds({ nightclubId, from, to, runner }),
   ]);
 
   const tablesTotal = zonas.reduce((n, z) => n + z.tables_total, 0);
@@ -395,6 +414,9 @@ async function nightStats({ nightclubId, eventId, runner = pool }) {
       refunds: res.refunds,
       // Aparte y con nombre, para que nadie lo sume al total por descuido.
       tips_not_club_revenue: propinas.total,
+      // Aparte también, y sin restar: ver `cardRefunds`.
+      card_refunds: devuelto.total,
+      card_refunds_count: devuelto.count,
     },
     attendance: {
       // Los que entraron pagando puerta más los invitados que llegaron con mesa.
@@ -449,6 +471,9 @@ function closingRow(stats) {
       staff: stats.staff,
       per_person: stats.per_person,
       window: stats.window,
+      card_refunds: {
+        total: stats.revenue.card_refunds, count: stats.revenue.card_refunds_count,
+      },
     },
   };
 }
@@ -516,6 +541,7 @@ module.exports = {
   zones,
   bar,
   door,
+  cardRefunds,
   tips,
   shrinkage,
   staff,

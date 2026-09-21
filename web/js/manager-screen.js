@@ -53,7 +53,7 @@
   // Las terminales del club y lo que Mercado Pago dice que hay en la cuenta (D47).
   // `warnings`: por qué una terminal quedó dada de alta sin poder cobrar, por id. Vive en
   // memoria a propósito: la verdad del modo está en el servidor, esto es solo la razón.
-  const terminals = { mine: [], found: [], provider: null, warnings: {} };
+  const terminals = { mine: [], found: [], provider: null, warnings: {}, charges: [] };
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
   const lang = () => EV2Format.getLanguage();
@@ -212,6 +212,7 @@
       }),
       get(`/nightclubs/${club}/drivers?include_inactive=true&limit=200`, (d) => { state.drivers = d.drivers || []; }),
       loadTerminals(),
+      loadTerminalCharges(),
       loadCovers(),
       get(`/nightclubs/${club}/taxi-settings`, (d) => { state.taxiSettings = d.settings; }),
       get(`/nightclubs/${club}/taxi-fares?include_inactive=false`, (d) => { state.fares = d.fares || []; }),
@@ -938,6 +939,110 @@
       box.appendChild(fila);
     }
   }
+
+  // ---------------------------------------------------------------- cobros con terminal (D49)
+
+  /**
+   * Los cobros con terminal de las últimas 24 horas, y el botón de devolver.
+   *
+   * Devolver es dinero que sale: se pide el motivo (se guarda con el nombre de quien lo
+   * hizo) y se confirma con el monto y la tarjeta a la vista. Solo el cobro completo, a
+   * propósito: ver D49.
+   */
+  async function loadTerminalCharges() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/terminal-charges?hours=24`);
+      terminals.charges = data.charges || [];
+    } catch {
+      terminals.charges = [];
+    }
+    renderTerminalCharges();
+  }
+
+  const TCH_COLOR = { processed: 'var(--ev2-lime)', refunded: '#fcd34d', error: '#fca5a5', failed: '#fca5a5' };
+
+  function renderTerminalCharges() {
+    const lista = terminals.charges || [];
+    $('tch-empty').hidden = lista.length > 0;
+    const box = $('tch-list');
+    box.innerHTML = '';
+    for (const c of lista) {
+      const card = document.createElement('div');
+      card.className = 'card rounded-lg px-3 py-2 space-y-2';
+
+      const fila = document.createElement('div');
+      fila.className = 'flex items-center justify-between gap-3';
+      const left = document.createElement('div');
+      left.className = 'min-w-0';
+      const monto = document.createElement('p');
+      monto.className = 'font-display';
+      monto.textContent = money(c.amount, c.currency);
+      const estado = document.createElement('p');
+      estado.className = 'text-[11px]';
+      estado.style.color = TCH_COLOR[c.status] || 'rgba(255,255,255,.5)';
+      const partes = [t(`tch.status.${c.status}`)];
+      if (c.card) partes.push(`${c.card.brand}`);
+      if (Number(c.tip_amount) > 0) partes.push(t('tch.tip', { tip: money(c.tip_amount, c.currency) }));
+      estado.textContent = partes.join(' · ');
+      const quien = document.createElement('p');
+      quien.className = 'text-[11px] text-white/40 truncate';
+      const hora = new Date(c.created_at).toLocaleTimeString(lang() === 'en' ? 'en-US' : 'es-MX',
+        { hour: '2-digit', minute: '2-digit' });
+      quien.textContent = `${hora} · ${c.terminal ? c.terminal.label : ''} · ${t('tch.by', { name: (c.started_by && c.started_by.name) || '' })}`;
+      left.append(monto, estado, quien);
+      fila.appendChild(left);
+
+      const nota = document.createElement('p');
+      nota.className = 'text-xs text-red-300';
+      nota.hidden = true;
+
+      if (c.refundable) {
+        const devolver = document.createElement('button');
+        devolver.className = 'card rounded-lg px-3 py-2 text-xs text-red-300 shrink-0';
+        devolver.textContent = t('tch.refund');
+        devolver.onclick = () => refundCharge(c, devolver, nota);
+        fila.appendChild(devolver);
+      }
+      card.appendChild(fila);
+
+      for (const r of c.refunds || []) {
+        const linea = document.createElement('p');
+        linea.className = 'text-[11px] text-white/50';
+        const who = r.source === 'external' ? t('tch.external') : (r.requested_by || '');
+        linea.textContent = `${t('tch.refundedBy', { amount: money(r.amount, r.currency), who })}${r.reason ? ` — ${r.reason}` : ''}`;
+        card.appendChild(linea);
+      }
+      card.appendChild(nota);
+      box.appendChild(card);
+    }
+  }
+
+  async function refundCharge(c, button, nota) {
+    nota.hidden = true;
+    const total = money(Number(c.amount) + Number(c.tip_amount || 0), c.currency);
+    const motivo = window.prompt(t('tch.reason', { amount: total }), '');
+    if (motivo === null) return;
+    if (motivo.trim().length < 5) { avisar(nota, t('tch.errReason')); return; }
+    const tarjeta = c.card ? c.card.brand : '';
+    if (!window.confirm(t('tch.confirm', { amount: total, card: tarjeta }))) return;
+
+    const listo = ocupado(button, 'tch.refunding');
+    try {
+      const data = await api.post(`/nightclubs/${clubId()}/terminal-charges/${c.id}/refund`, {
+        reason: motivo.trim(),
+      });
+      toast(t(data.outcome === 'pending' ? 'tch.pending' : 'tch.done'), 'ok');
+      await loadTerminalCharges();
+    } catch (err) {
+      listo();
+      avisar(nota, EV2Format.errorMessage(err));
+    }
+  }
+
+  $('btn-tch-reload').onclick = async () => {
+    const listo = ocupado($('btn-tch-reload'), 'tch.reload');
+    try { await loadTerminalCharges(); } finally { listo(); }
+  };
 
   // ---------------------------------------------------------------- pagos
 
