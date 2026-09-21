@@ -362,10 +362,10 @@ describe('Reservación por noche', () => {
     expect(res.status).toBe(422);
   });
 
-  it('respeta la anticipación mínima', async () => {
+  it('ya no exige anticipación: una hora antes de abrir se reserva (regla quitada el 2026-09-21)', async () => {
     const ev = await makeEvent({ hoursAhead: 1 });
     const res = await book(ev.body.event.id, roja.id, 8);
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(201);
   });
 
   it('suma botellas y extras del catálogo por su código', async () => {

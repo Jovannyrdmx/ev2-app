@@ -812,7 +812,7 @@
       'book.errNoTable': 'Escoge una mesa.',
       'book.errGuests': 'Dinos cuántas personas van.',
       'book.errMinParty': 'El mínimo son {min} personas.',
-      'book.errClosed': 'Las reservaciones de esa noche ya cerraron.',
+      'book.errClosed': 'Esa noche ya terminó: ya no admite reservaciones.',
       'book.depositNote': 'El cobro del anticipo con tarjeta se conecta en la fase de pagos. Por ahora la mesa queda apartada y el club confirma contigo.',
       // ---------------------------------------------------------------- noches
       'night.tab': 'Noches',
@@ -2226,7 +2226,7 @@
       'book.errNoTable': 'Pick a table.',
       'book.errGuests': 'Tell us how many people are coming.',
       'book.errMinParty': 'The minimum is {min} people.',
-      'book.errClosed': 'Bookings for that night are closed.',
+      'book.errClosed': 'That night is over: it no longer takes bookings.',
       'book.depositNote': 'Card charges for the deposit arrive with the payments phase. For now the table is held and the club confirms with you.',
       // ---------------------------------------------------------------- nights
       'night.tab': 'Nights',

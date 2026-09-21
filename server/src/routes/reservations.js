@@ -29,7 +29,6 @@ const DEFAULT_RULES = {
   deposit_pct: 30,
   base_price_per_hour: 0,
   currency: 'MXN',
-  min_advance_hours: 2,
   max_duration_minutes: 360,
   cancellation_windows: [
     { hours: 48, refund_pct: 100 },
@@ -64,6 +63,21 @@ async function getBookableEvent(nightclubId, eventId, runner = pool) {
   if (event.status === 'cancelled') throw ApiError.unprocessable('Ese evento fue cancelado');
   if (event.status === 'finished') throw ApiError.unprocessable('Ese evento ya terminó');
   return event;
+}
+
+/**
+ * Las reservaciones de una noche están abiertas hasta que la noche TERMINA.
+ *
+ * Antes cerraban `min_advance_hours` (2 por omisión) antes de abrir las puertas. El
+ * dueño decidió el 2026-09-21 quitar esa regla: una mesa se puede reservar siempre,
+ * incluso con el evento en curso, mientras nadie más la tenga. Lo que evita que dos
+ * personas se queden con la misma mesa no es un horario: es `availableTables()` y el
+ * índice único de la tabla de reservaciones.
+ */
+function assertNightNotOver(event) {
+  if (eventPricing.nightIsOver(event)) {
+    throw ApiError.unprocessable('Esa noche ya terminó: ya no admite reservaciones.');
+  }
 }
 
 const RESERVATION_SELECT = `
@@ -109,7 +123,6 @@ router.put('/nightclubs/:nightclubId/reservations/rules',
       deposit_pct: z.number().min(0).max(100).optional(),
       base_price_per_hour: z.number().min(0).optional(),
       currency: z.enum(['MXN', 'USD']).optional(),
-      min_advance_hours: z.number().int().min(0).optional(),
       max_duration_minutes: z.number().int().min(30).max(720).optional(),
       cancellation_windows: z.array(z.object({
         hours: z.number().min(0),
@@ -125,18 +138,18 @@ router.put('/nightclubs/:nightclubId/reservations/rules',
     }
     const { rows } = await pool.query(
       `INSERT INTO reservation_rules (nightclub_id, min_party_size, max_party_size, deposit_pct,
-                                      base_price_per_hour, currency, min_advance_hours,
+                                      base_price_per_hour, currency,
                                       max_duration_minutes, cancellation_windows)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        ON CONFLICT (nightclub_id) DO UPDATE SET
          min_party_size = EXCLUDED.min_party_size, max_party_size = EXCLUDED.max_party_size,
          deposit_pct = EXCLUDED.deposit_pct, base_price_per_hour = EXCLUDED.base_price_per_hour,
-         currency = EXCLUDED.currency, min_advance_hours = EXCLUDED.min_advance_hours,
+         currency = EXCLUDED.currency,
          max_duration_minutes = EXCLUDED.max_duration_minutes,
          cancellation_windows = EXCLUDED.cancellation_windows, updated_at = now()
        RETURNING *`,
       [req.params.nightclubId, merged.min_party_size, merged.max_party_size, merged.deposit_pct,
-        merged.base_price_per_hour, merged.currency, merged.min_advance_hours,
+        merged.base_price_per_hour, merged.currency,
         merged.max_duration_minutes, JSON.stringify(merged.cancellation_windows)],
     );
     res.json({ rules: rows[0] });
@@ -187,11 +200,7 @@ router.get('/nightclubs/:nightclubId/reservations/availability',
     if (!isStaff && event.status !== 'published') throw ApiError.notFound('Event not found');
 
     const rules = await getRules(nightclubId);
-    const hoursAhead = (new Date(event.doors_open_at).getTime() - Date.now()) / 3_600_000;
-    if (hoursAhead < Number(rules.min_advance_hours)) {
-      throw ApiError.unprocessable(
-        `Las reservaciones cierran ${rules.min_advance_hours} horas antes de abrir`);
-    }
+    assertNightNotOver(event);
 
     const { zones } = await eventPricing.getEventPricing({ nightclubId, eventId });
     const byZone = new Map(zones.map((z) => [z.section, z]));
@@ -223,7 +232,7 @@ router.get('/nightclubs/:nightclubId/reservations/availability',
         id: event.id, name: event.name, event_date: event.event_date,
         doors_open_at: event.doors_open_at, ticket_price: event.ticket_price,
         currency: event.currency,
-        arrival_deadline: eventPricing.arrivalDeadline(event).toISOString(),
+        arrival_deadline: eventPricing.bookingArrivalDeadline(event).toISOString(),
       },
       guests,
       // El de la NOCHE, no el del club: es el que se le va a cobrar y el que la
@@ -329,7 +338,7 @@ async function buildQuote(nightclubId, body, runner = pool) {
     total,
     deposit: eventPricing.depositFor(total, event, rules),
     deposit_pct: eventPricing.depositPctFor(event, rules),
-    arrival_deadline: eventPricing.arrivalDeadline(event).toISOString(),
+    arrival_deadline: eventPricing.bookingArrivalDeadline(event).toISOString(),
     rules,
     _event: event,
     _zone: zone,
@@ -400,17 +409,11 @@ router.post('/nightclubs/:nightclubId/reservations',
       // the price list sets it ("Zona Azul: 10 personas, 2 extras" = up to 12) and
       // eventPricing.quote() already enforced it above.
 
-      const hoursAhead = (new Date(event.doors_open_at).getTime() - Date.now()) / 3_600_000;
-      if (hoursAhead < Number(rules.min_advance_hours)) {
-        throw ApiError.unprocessable(
-          `Las reservaciones cierran ${rules.min_advance_hours} horas antes de abrir`);
-      }
+      assertNightNotOver(event);
 
       // The night, not a time range: starts when doors open and ends when the club closes.
       const startsAt = new Date(event.doors_open_at);
-      const endsAt = event.closes_at
-        ? new Date(event.closes_at)
-        : new Date(startsAt.getTime() + 8 * 3_600_000);
+      const endsAt = eventPricing.nightEnd(event);
       const durationMinutes = Math.max(30, Math.round((endsAt - startsAt) / 60_000));
 
       let reservation;

@@ -2077,7 +2077,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422':
-          description: Fuera de las reglas del club (anticipación mínima)
+          description: La noche ya terminó (las reservaciones están abiertas hasta el cierre, incluso con el evento en curso)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -9941,7 +9941,10 @@ components:
         deposit_pct: { type: string, example: '30.00' }
         base_price_per_hour: { $ref: '#/components/schemas/Money' }
         currency: { $ref: '#/components/schemas/Currency' }
-        min_advance_hours: { type: integer }
+        min_advance_hours:
+          type: integer
+          deprecated: true
+          description: YA NO SE APLICA (2026-09-21). Siempre 0; las reservaciones están abiertas hasta que termina la noche.
         max_duration_minutes: { type: integer }
         cancellation_windows:
           type: array
@@ -9960,7 +9963,6 @@ components:
         deposit_pct: { type: number, minimum: 0, maximum: 100 }
         base_price_per_hour: { type: number, minimum: 0 }
         currency: { $ref: '#/components/schemas/Currency' }
-        min_advance_hours: { type: integer, minimum: 0 }
         max_duration_minutes: { type: integer, minimum: 30, maximum: 720 }
         cancellation_windows:
           type: array

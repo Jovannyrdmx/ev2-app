@@ -60,7 +60,13 @@ router.get('/nightclubs/:nightclubId/events',
           AND ($2::text IS NULL OR e.status = $2)
           AND ($3::date IS NULL OR e.event_date >= $3::date)
           AND ($4::date IS NULL OR e.event_date <= $4::date)
-          AND ($5::boolean IS FALSE OR e.event_date >= current_date)
+          -- "Próximas" = que no han TERMINADO. Antes era \`event_date >= current_date\`:
+          -- con la base en UTC, la noche de hoy desaparecía de la lista a las 6 de la
+          -- tarde en México, y a la una de la mañana ya era "ayer" en cualquier zona.
+          -- Ahora que se reserva con el evento en curso, eso la escondía justo cuando
+          -- está abierta.
+          AND ($5::boolean IS FALSE
+               OR COALESCE(e.closes_at, e.doors_open_at + interval '8 hours') > now())
         ORDER BY e.event_date ASC
         LIMIT $6 OFFSET $7`,
       [req.params.nightclubId, status, req.query.from || null, req.query.to || null,

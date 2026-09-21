@@ -123,6 +123,34 @@ function arrivalDeadline(event) {
   return new Date(new Date(event.doors_open_at).getTime() + minutes * 60_000);
 }
 
+/** Cuándo termina la noche: el cierre publicado, o 8 horas después de abrir. */
+function nightEnd(event) {
+  return event.closes_at
+    ? new Date(event.closes_at)
+    : new Date(new Date(event.doors_open_at).getTime() + 8 * 3_600_000);
+}
+
+/** Si la noche ya terminó. Es lo ÚNICO que cierra las reservaciones de esa noche. */
+const nightIsOver = (event, now = new Date()) => now >= nightEnd(event);
+
+/**
+ * La hora límite para llegar de UNA reservación, según cuándo se hizo.
+ *
+ * Hasta el 2026-09-21 las reservaciones cerraban dos horas antes de abrir, así que la
+ * hora límite de la noche (abrir + `arrival_deadline_minutes`) servía para todas. Ahora
+ * se puede reservar con el evento en curso, y con esa hora fija quien reserva a la una
+ * de la mañana nacía YA vencido: el siguiente repaso de "no llegó" lo marcaba `no_show`
+ * y se quedaba con su anticipo. Por eso cada quien tiene, al menos, el mismo tiempo para
+ * llegar que la noche le da a todos, contado desde que reservó — nunca más allá del
+ * cierre.
+ */
+function bookingArrivalDeadline(event, now = new Date()) {
+  const minutes = Number(event.arrival_deadline_minutes || 180);
+  const deLaNoche = arrivalDeadline(event);
+  const desdeAhora = new Date(Math.min(now.getTime() + minutes * 60_000, nightEnd(event).getTime()));
+  return desdeAhora > deLaNoche ? desdeAhora : deLaNoche;
+}
+
 function round(n) {
   return Number(Number(n).toFixed(2));
 }
@@ -155,4 +183,5 @@ function depositFor(total, event, rules) {
 
 module.exports = {
   getEventPricing, zoneFor, quote, arrivalDeadline, round, depositPctFor, depositFor,
+  nightEnd, nightIsOver, bookingArrivalDeadline,
 };
