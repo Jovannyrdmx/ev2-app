@@ -377,3 +377,45 @@ describe('Sin la llave del servidor', () => {
     }
   });
 });
+
+describe('El error dice QUÉ le pasa a la llave', () => {
+  // "Falta PIN_LOOKUP_KEY" mentía en el caso más común: la llave SÍ estaba en el .env,
+  // pero medía 16 caracteres. El gerente la veía escrita y el sistema insistía.
+  const pins = require('../src/services/pins');
+
+  it('sin llave dice que no llegó al servidor, y cómo arreglarlo', () => {
+    const m = pins.configProblem({});
+    expect(m).toMatch(/no llegó al servidor/);
+    expect(m).toMatch(/openssl rand -hex 32/);
+    expect(m).toMatch(/restart.*NO relee/);
+  });
+
+  it('una llave corta dice cuánto mide', () => {
+    expect(pins.configProblem({ PIN_LOOKUP_KEY: '7341521895331234' }))
+      .toMatch(/mide 16 caracteres y necesita 32/);
+  });
+
+  it('un comentario pegado se reconoce como tal', () => {
+    expect(pins.configProblem({ PIN_LOOKUP_KEY: 'abc   # la llave del pin' })).toMatch(/comentario/);
+  });
+
+  it('una llave buena no tiene problema', () => {
+    expect(pins.configProblem({ PIN_LOOKUP_KEY: 'a'.repeat(64) })).toBeNull();
+  });
+
+  it('el alta de un empleado con llave corta lo dice con el largo', async () => {
+    const antes = process.env.PIN_LOOKUP_KEY;
+    process.env.PIN_LOOKUP_KEY = '7341521895331234';
+    try {
+      const res = await api().post(`/api/nightclubs/${club.id}/employees`)
+        .set(auth(manager)).send({
+          email: 'nuevo.mesero@ev2.mx', first_name: 'Nuevo', last_name: 'Mesero',
+          role: 'waiter', birth_date: '1995-05-05',
+        });
+      expect(res.status).toBe(501);
+      expect(res.body.error.message).toMatch(/mide 16 caracteres/);
+    } finally {
+      process.env.PIN_LOOKUP_KEY = antes;
+    }
+  });
+});

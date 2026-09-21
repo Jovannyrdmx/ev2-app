@@ -10,6 +10,7 @@ const { redis } = require('./db/redis');
 const { EventRelay } = require('./realtime/relay');
 const paymentConfig = require('./config/payments');
 const terminalCharges = require('./services/terminal-charges');
+const pins = require('./services/pins');
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -62,6 +63,11 @@ async function start() {
     if (sweepTimer.unref) sweepTimer.unref();
     console.log(`Terminal charges: backup poll every ${Math.round(cada / 1000)}s`);
   }
+
+  // El acceso del personal. Se dice al arrancar, igual que los pagos: descubrirlo al dar
+  // de alta al primer empleado de la noche es tarde.
+  const pinProblem = pins.configProblem();
+  console.log(pinProblem ? `PIN access: NOT configured — ${pinProblem}` : 'PIN access: configured');
 
   const pay = paymentConfig.status();
   for (const p of pay.providers) {

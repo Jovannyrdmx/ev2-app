@@ -65,6 +65,33 @@ function lookupKey() {
 const isConfigured = () => Boolean(process.env.PIN_LOOKUP_KEY
   && process.env.PIN_LOOKUP_KEY.length >= 32);
 
+/**
+ * Qué le pasa exactamente a la llave, o `null` si está bien.
+ *
+ * Existe porque "Falta PIN_LOOKUP_KEY" mentía en el caso más común: la llave SÍ
+ * estaba en el `.env`, pero medía 16 caracteres (el código exige 32), o traía un
+ * comentario pegado. El gerente la veía escrita, el sistema insistía en que faltaba, y
+ * no había forma de saber cuál de los dos tenía razón. Ahora se dice cuál es el
+ * problema, con el largo, y cómo se arregla.
+ */
+function configProblem(env = process.env) {
+  const raw = env.PIN_LOOKUP_KEY;
+  const arreglo = 'Genera una con `openssl rand -hex 32`, ponla en el .env del servidor y '
+    + 'vuelve a crear el contenedor (`up -d`; `restart` NO relee el .env).';
+  if (raw === undefined || raw === '') {
+    return 'PIN_LOOKUP_KEY no llegó al servidor: no está en el .env, o el contenedor se '
+      + `creó antes de ponerla. ${arreglo}`;
+  }
+  if (/^\s*#/.test(raw) || /\s#/.test(raw)) {
+    return 'PIN_LOOKUP_KEY trae un comentario pegado (#). El comentario va en su propia '
+      + `línea. ${arreglo}`;
+  }
+  if (raw.length < 32) {
+    return `PIN_LOOKUP_KEY mide ${raw.length} caracteres y necesita 32 o más. ${arreglo}`;
+  }
+  return null;
+}
+
 /** La huella con la que se busca. Determinista, indexable, inútil sin la llave. */
 const lookupOf = (pin) => crypto.createHmac('sha256', lookupKey())
   .update(String(pin)).digest('hex');
@@ -295,6 +322,7 @@ module.exports = {
   THROTTLE,
   WINDOW_MINUTES,
   isConfigured,
+  configProblem,
   lookupOf,
   isWeakPin,
   looksLikeBirthDate,

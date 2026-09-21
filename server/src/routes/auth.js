@@ -217,8 +217,8 @@ const pinLoginSchema = z.object({
 
 router.post('/pin-login', validate({ body: pinLoginSchema }), asyncHandler(async (req, res) => {
   if (!pins.isConfigured()) {
-    throw ApiError.notImplemented('El acceso por PIN no está configurado en este servidor '
-      + '(falta PIN_LOOKUP_KEY en el .env)');
+    throw ApiError.notImplemented(
+      `El acceso por PIN no está configurado en este servidor. ${pins.configProblem()}`);
   }
 
   const club = await pool.query('SELECT id FROM nightclubs WHERE slug = $1',

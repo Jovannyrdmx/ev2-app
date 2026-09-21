@@ -108,6 +108,17 @@ describe('El .env del servidor y el contenedor dicen lo mismo', () => {
     expect(api.has('PIN_LOOKUP_KEY')).toBe(true);
   });
 
+  it('y llega también con el compose de desarrollo, que tampoco la pasaba', () => {
+    // Levantar el sistema con `deploy/docker-compose.yml` daba el mismo "falta
+    // PIN_LOOKUP_KEY" con la llave puesta: ese archivo no la pasaba al contenedor.
+    const dev = yaml.load(fs.readFileSync(path.join(RAIZ, 'deploy', 'docker-compose.yml'), 'utf8'));
+    const env = Object.keys(dev.services.api.environment || {});
+    for (const nombre of ['PIN_LOOKUP_KEY', 'MERCADOPAGO_ACCESS_TOKEN', 'MERCADOPAGO_PUBLIC_KEY',
+      'MERCADOPAGO_ENV', 'MERCADOPAGO_WEBHOOK_SECRET']) {
+      expect({ nombre, llega: env.includes(nombre) }).toEqual({ nombre, llega: true });
+    }
+  });
+
   it('las llaves de cobro llegan con el nombre EXACTO que lee el código', () => {
     for (const nombre of ['MERCADOPAGO_ACCESS_TOKEN', 'MERCADOPAGO_PUBLIC_KEY',
       'MERCADOPAGO_ENV', 'MERCADOPAGO_WEBHOOK_SECRET',

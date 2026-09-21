@@ -115,8 +115,8 @@ router.post('/nightclubs/:nightclubId/employees',
     const b = req.body;
     if (!mayGrant(req.user, b.role)) throw ApiError.forbidden(ONLY_ADMIN);
     if (!pins.isConfigured()) {
-      throw ApiError.notImplemented('Falta PIN_LOOKUP_KEY en el .env del servidor: '
-        + 'sin ella no se le puede generar un PIN a un empleado nuevo.');
+      throw ApiError.notImplemented('No se le puede generar un PIN a un empleado nuevo. '
+        + pins.configProblem());
     }
 
     // El piso entra SOLO con PIN (D46), así que su cuenta nace sin contraseña: no es
@@ -273,7 +273,7 @@ router.patch('/nightclubs/:nightclubId/employees/:userId',
       let pinOut = null;
       if (b.reset_pin) {
         if (!pins.isConfigured()) {
-          throw ApiError.notImplemented('Falta PIN_LOOKUP_KEY en el .env del servidor');
+          throw ApiError.notImplemented(`No se puede generar el PIN. ${pins.configProblem()}`);
         }
         const { rows: quien } = await client.query(
           'SELECT birth_date FROM users WHERE id = $1', [userId]);
