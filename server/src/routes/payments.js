@@ -648,8 +648,25 @@ router.post('/nightclubs/:nightclubId/payment-terminals/discover',
             AND operating_mode IS DISTINCT FROM $3::text`,
         [req.params.nightclubId, t.external_id, t.operating_mode]);
     }
+    // La terminal virtual, en modo prueba. `GET /terminals/v1/list` nunca la devuelve —
+    // no es un aparato— y una cuenta de prueba normalmente no tiene ninguna terminal
+    // física vinculada, así que la búsqueda volvía VACÍA y no había con qué ensayar.
+    // Mercado Pago documenta que se puede cobrar con ella sin aparato; se ofrece aquí.
+    const modo = paymentConfig.mercadoPagoConfig().mode;
+    const lista = found.slice();
+    if (modo === 'test' && !lista.some((t) => mercadopago.isSandboxTerminal(t.external_id))) {
+      lista.unshift({
+        external_id: mercadopago.SANDBOX_TERMINAL_ID, operating_mode: 'PDV',
+        store_id: null, pos_id: null,
+      });
+    }
     res.json({
-      terminals: found.map((t) => ({ ...t, registered: yaEstan.has(t.external_id) })),
+      mode: modo,
+      terminals: lista.map((t) => ({
+        ...t,
+        virtual: mercadopago.isSandboxTerminal(t.external_id),
+        registered: yaEstan.has(t.external_id),
+      })),
     });
   }));
 

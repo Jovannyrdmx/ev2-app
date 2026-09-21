@@ -71,13 +71,26 @@ tu `.env` y pega los valores.
    sin dar ningún error visible, y es el motivo número uno de "toco cobrar y no pasa nada".
    Viene así de fábrica.
 
-   Para ensayar sin aparato, Mercado Pago da una terminal virtual (`SBX0000001`), que
-   aparece en *Buscar en Mercado Pago* como cualquier otra. El cobro se despierta igual
-   desde la app, pero **no hay ningún botón para resolverlo**: la pantalla se queda en
-   "esperando la tarjeta", que es exactamente lo que haría una terminal real a la que
-   nadie le pasa una tarjeta.
+   **Para ensayar sin aparato** está la terminal virtual de Mercado Pago
+   (`NEWLAND_N950__SBX0000001`). No aparece en su lista de terminales —no es un aparato—,
+   así que con `MERCADOPAGO_ENV=test` el sistema la ofrece solo en *Buscar en Mercado
+   Pago*, ya con nombre puesto. Se da de alta como cualquier otra.
 
-   Para decidir el resultado hay una ruta, que solo puede llamar un gerente:
+   Con credenciales de **prueba**, la Point física del club normalmente **no aparece**: solo
+   aparece si tiene la sesión iniciada con la cuenta de prueba, y aun así Mercado Pago no
+   deja cobrar tarjetas reales con ella. Para ensayar, la virtual.
+
+   El ensayo completo:
+
+   1. En el piso o la barra, levanta un pedido y cóbralo con la terminal *Prueba*. La
+      pantalla se queda en "que pase su tarjeta", como con un aparato real.
+   2. En el panel del gerente, Pagos → **Cobros con terminal**: el cobro aparece con dos
+      botones, *Simular: pagó* y *Simular: rechazada*. Solo existen para la terminal
+      virtual y con credenciales de prueba.
+   3. Al simular, la pantalla del mesero se cierra sola con el resultado y el pedido queda
+      pagado (o no). Desde ahí mismo se puede probar *Devolver*.
+
+   Lo mismo por API, si se prefiere:
 
    ```bash
    curl -X POST https://<tu-dominio>/api/nightclubs/<club>/terminal-charges/<cobro>/simulate \
@@ -85,10 +98,6 @@ tu `.env` y pega los valores.
      -H "Content-Type: application/json" \
      -d '{"status":"processed"}'
    ```
-
-   `status` acepta `processed`, `failed`, `canceled`, `expired` y `action_required`. Al
-   mandarlo, Mercado Pago avisa por el webhook y el cobro se cierra solo en la pantalla,
-   sin recargar. Ese es el ensayo completo de punta a punta.
 
 6. **Cancelar y devolver.**
 
@@ -105,6 +114,18 @@ tu `.env` y pega los valores.
      ingreso del club.
 
 Mercado Pago es el que habilita **OXXO y SPEI**, que en México es lo que más se va a usar.
+
+7. **Para cobrar de verdad (producción)** — esto no se hace antes de la Fase 7 (CLAUDE.md,
+   regla 5):
+
+   - En *Tus integraciones → tu app → Credenciales de producción*, las dos llaves van al
+     `.env` **del VPS** (nunca a un chat ni al repositorio), con `MERCADOPAGO_ENV=live`.
+   - La Point Smart 2 tiene que estar vinculada a **esa misma cuenta**: en la terminal se
+     inicia sesión, se escanea su QR con la app de Mercado Pago y se eligen la **sucursal**
+     y la **caja** (cada caja admite una sola terminal en modo PDV). Si la cuenta todavía
+     no tiene sucursal y caja, se crean ahí mismo o en el panel de Mercado Pago.
+   - Después, *Buscar en Mercado Pago* la encuentra; al darla de alta se pasa a PDV y
+     hay que **reiniciarla**.
 
 ## Cómo saber si quedó
 

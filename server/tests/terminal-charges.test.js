@@ -1002,3 +1002,59 @@ describe('Lo que la guía de Point dice y faltaba', () => {
     expect(r).toEqual({ total: 450, count: 1 });
   });
 });
+
+// ---------------------------------------------------------------- sin terminal física
+
+describe('Una cuenta de prueba sin ninguna Point vinculada', () => {
+  const buscar = async () => api().post(`/api/nightclubs/${club.id}/payment-terminals/discover`)
+    .set(await tokenDe(manager)).send({});
+
+  it('en modo prueba ofrece la terminal virtual aunque Mercado Pago no liste nada', async () => {
+    // Era el caso real: la búsqueda volvía vacía ("no tiene ninguna terminal") y no había
+    // con qué ensayar. La virtual nunca sale en /terminals/v1/list: no es un aparato.
+    mpFake.terminals = [];
+    const res = await buscar();
+    expect(res.status).toBe(200);
+    expect(res.body.mode).toBe('test');
+    expect(res.body.terminals).toEqual([expect.objectContaining({
+      external_id: 'NEWLAND_N950__SBX0000001', virtual: true, registered: false,
+    })]);
+  });
+
+  it('no la repite si Mercado Pago sí la lista', async () => {
+    const res = await buscar();
+    expect(res.body.terminals.filter((t) => t.virtual)).toHaveLength(1);
+  });
+
+  it('con credenciales reales NO se ofrece: ahí solo cobra un aparato de verdad', async () => {
+    mpFake.terminals = [];
+    process.env.MERCADOPAGO_ENV = 'live';
+    try {
+      const res = await buscar();
+      expect(res.body.mode).toBe('live');
+      expect(res.body.terminals).toEqual([]);
+    } finally {
+      process.env.MERCADOPAGO_ENV = 'test';
+    }
+  });
+
+  it('darla de alta y cobrar con ella funciona de punta a punta, y el cobro dice que es virtual', async () => {
+    mpFake.terminals = [];
+    const alta = await api().post(`/api/nightclubs/${club.id}/payment-terminals`)
+      .set(await tokenDe(manager)).send({ external_id: 'NEWLAND_N950__SBX0000001', label: 'Prueba' });
+    expect(alta.status).toBe(201);
+    const tx = await cobroPendiente();
+    const cobro = await empezar(tx, alta.body.terminal);
+    expect(cobro.status).toBe(201);
+    expect(cobro.body.charge.terminal.virtual).toBe(true);
+
+    const sim = await api()
+      .post(`/api/nightclubs/${club.id}/terminal-charges/${cobro.body.charge.id}/simulate`)
+      .set(await tokenDe(manager)).send({ status: 'processed' });
+    expect(sim.status).toBe(202);
+    const visto = await api().get(`/api/nightclubs/${club.id}/terminal-charges/${cobro.body.charge.id}`)
+      .set(await tokenDe(manager));
+    expect(visto.body.charge.status).toBe('processed');
+    expect((await estadoDe(tx.id)).status).toBe('paid');
+  });
+});

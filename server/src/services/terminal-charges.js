@@ -80,7 +80,12 @@ function present(row) {
       ? { brand: row.payment_method_id, type: row.payment_method_type,
         installments: row.installments }
       : null,
-    terminal: { id: row.terminal_id, label: row.terminal_label },
+    terminal: {
+      id: row.terminal_id,
+      label: row.terminal_label,
+      // La de prueba de Mercado Pago: sin aparato, el resultado se simula.
+      virtual: mp.isSandboxTerminal(row.terminal_external_id),
+    },
     started_by: { id: row.started_by, name: row.started_by_name },
     expires_at: row.expires_at,
     settled_at: row.settled_at,

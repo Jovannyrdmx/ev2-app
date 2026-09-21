@@ -41,6 +41,12 @@ const token = () => process.env.MERCADOPAGO_ACCESS_TOKEN || '';
 
 /** El dispositivo virtual de pruebas de Mercado Pago. No existe físicamente. */
 const SANDBOX_SERIAL = 'SBX0000001';
+/**
+ * El id completo de la terminal virtual, tal cual aparece en la referencia de "Crear
+ * order" de Mercado Pago. NO sale en `GET /terminals/v1/list`: es un aparato que no
+ * existe, y por eso hay que ofrecerlo a mano en modo prueba.
+ */
+const SANDBOX_TERMINAL_ID = `NEWLAND_N950__${SANDBOX_SERIAL}`;
 const isSandboxTerminal = (externalId) => String(externalId || '').includes(SANDBOX_SERIAL);
 
 /**
@@ -434,6 +440,7 @@ function readOrder(order) {
 module.exports = {
   BASE_URL,
   SANDBOX_SERIAL,
+  SANDBOX_TERMINAL_ID,
   FINAL_STATUSES,
   isSandboxTerminal,
   assertUsable,

@@ -855,7 +855,12 @@
       terminals.found = data.terminals || [];
       renderFoundTerminals();
       // Vacío también es una respuesta, y la que más confunde: sin esto no aparecía nada.
+      // En modo prueba nunca llega vacío (siempre está la virtual), pero si no hay NINGUNA
+      // física se explica por qué: con credenciales de prueba la Point del club no
+      // aparece, y es lo primero que alguien espera ver.
+      const fisicas = terminals.found.filter((f) => !f.virtual);
       if (terminals.found.length === 0) avisar(error, t('term.noneFound'), 'warn');
+      else if (data.mode === 'test' && fisicas.length === 0) avisar(error, t('term.testOnlyVirtual'), 'warn');
       // Buscar pone al día el modo de las que ya están dadas de alta.
       await loadTerminals();
     } catch (err) {
@@ -876,6 +881,13 @@
       const id = document.createElement('p');
       id.className = 'text-[11px] text-white/40 break-all';
       id.textContent = found.external_id;
+      if (found.virtual) {
+        const v = document.createElement('p');
+        v.className = 'text-xs';
+        v.style.color = '#fcd34d';
+        v.textContent = t('term.virtual');
+        fila.appendChild(v);
+      }
       fila.appendChild(id);
 
       if (found.registered) {
@@ -892,6 +904,8 @@
         input.maxLength = 60;
         input.placeholder = t('term.label');
         input.setAttribute('aria-label', t('term.label'));
+        // La virtual trae nombre puesto: nadie le va a buscar uno a algo que no existe.
+        if (found.virtual) input.value = t('term.virtualName');
         const alta = document.createElement('button');
         alta.className = 'ev2-button rounded-lg px-3 py-2 text-xs shrink-0';
         alta.textContent = t('term.register');
@@ -996,6 +1010,20 @@
       nota.className = 'text-xs text-red-300';
       nota.hidden = true;
 
+      if (!c.is_final && c.terminal && c.terminal.virtual) {
+        // Sin aparato no hay tarjeta que pasar: el resultado se decide aquí. La ruta solo
+        // existe con credenciales de prueba y solo la llama el gerente.
+        const acciones = document.createElement('div');
+        acciones.className = 'flex gap-2 shrink-0';
+        for (const [status, key] of [['processed', 'tch.simPaid'], ['failed', 'tch.simFailed']]) {
+          const b = document.createElement('button');
+          b.className = `card rounded-lg px-3 py-2 text-xs ${status === 'failed' ? 'text-red-300' : ''}`;
+          b.textContent = t(key);
+          b.onclick = () => simulateCharge(c, status, b, nota);
+          acciones.appendChild(b);
+        }
+        fila.appendChild(acciones);
+      }
       if (c.refundable) {
         const devolver = document.createElement('button');
         devolver.className = 'card rounded-lg px-3 py-2 text-xs text-red-300 shrink-0';
@@ -1032,6 +1060,25 @@
         reason: motivo.trim(),
       });
       toast(t(data.outcome === 'pending' ? 'tch.pending' : 'tch.done'), 'ok');
+      await loadTerminalCharges();
+    } catch (err) {
+      listo();
+      avisar(nota, EV2Format.errorMessage(err));
+    }
+  }
+
+  async function simulateCharge(c, status, button, nota) {
+    nota.hidden = true;
+    const listo = ocupado(button, 'tch.simulating');
+    try {
+      await api.post(`/nightclubs/${clubId()}/terminal-charges/${c.id}/simulate`, { status });
+      // Mercado Pago tarda unos segundos en aplicar el resultado simulado. Consultar el
+      // cobro le pregunta directamente y asienta lo que conteste, sin esperar al webhook.
+      for (let i = 0; i < 6; i += 1) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const data = await api.get(`/nightclubs/${clubId()}/terminal-charges/${c.id}`);
+        if (data.charge && data.charge.is_final) break;
+      }
       await loadTerminalCharges();
     } catch (err) {
       listo();
