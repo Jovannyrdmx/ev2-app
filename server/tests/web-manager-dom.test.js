@@ -177,3 +177,44 @@ describe('nada sale sin traducir', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------- las terminales
+
+describe('los botones de las terminales nunca se quedan callados', () => {
+  // El 21 de septiembre de 2026 el gerente reportó dos veces "el botón no funciona". Las
+  // dos se reprodujeron en Chromium contra la API real y eran ciertas: había cuatro
+  // caminos en los que tocar no producía nada visible. Estas pruebas cuidan que no
+  // vuelvan. La reproducción completa, con los clics, está en docs/AVANCE.md.
+
+  it('cada texto de terminales que pide el controlador existe en los dos idiomas', () => {
+    const usadas = new Set();
+    const re = /'(term\.[a-zA-Z]+)'/g;
+    let m = re.exec(controlador);
+    while (m) { usadas.add(m[1]); m = re.exec(controlador); }
+    for (const k of ['term.searching', 'term.registering', 'term.needName', 'term.noneFound',
+      'term.sandboxReady', 'term.savedPending', 'term.fixing']) {
+      expect(usadas.has(k)).toBe(true);
+    }
+    for (const lang of ['es', 'en']) {
+      catalogo.setLanguage(lang);
+      const faltantes = [...usadas].filter((k) => catalogo.t(k) === k);
+      expect({ lang, faltantes }).toEqual({ lang, faltantes: [] });
+    }
+  });
+
+  it('"Buscar en Mercado Pago" ya no se apaga por falta de credenciales', () => {
+    // Apagado se veía igual y no respondía. Ahora al tocarlo explica qué falta.
+    expect(controlador).not.toMatch(/btn-term-discover'\)\.disabled = Boolean/);
+    expect(controlador).toMatch(/btn-term-discover'\)\.disabled = false/);
+  });
+
+  it('dar de alta sin nombre lo DICE, no solo pinta el borde', () => {
+    const bloque = controlador.slice(controlador.indexOf('function renderFoundTerminals'));
+    const sinNombre = bloque.slice(bloque.indexOf('if (!label)'), bloque.indexOf('if (!label)') + 200);
+    expect(sinNombre).toMatch(/term\.needName/);
+  });
+
+  it('una búsqueda vacía también contesta', () => {
+    expect(controlador).toMatch(/terminals\.found\.length === 0\) avisar\(error, t\('term\.noneFound'\)/);
+  });
+});

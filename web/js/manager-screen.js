@@ -51,7 +51,9 @@
   const secret = EV2Manager.createSecretBox();
 
   // Las terminales del club y lo que Mercado Pago dice que hay en la cuenta (D47).
-  const terminals = { mine: [], found: [], provider: null };
+  // `warnings`: por qué una terminal quedó dada de alta sin poder cobrar, por id. Vive en
+  // memoria a propósito: la verdad del modo está en el servidor, esto es solo la razón.
+  const terminals = { mine: [], found: [], provider: null, warnings: {} };
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
   const lang = () => EV2Format.getLanguage();
@@ -709,6 +711,15 @@
    * Es lo primero que hay que hacer para cobrar con tarjeta, y también el diagnóstico
    * cuando "toco cobrar y no pasa nada": el modo de operación se enseña aquí, porque una
    * terminal en STANDALONE ignora al sistema sin decir una palabra.
+   *
+   * REGLA DE ESTA SECCIÓN, aprendida por las malas: **ningún botón puede no hacer nada.**
+   * El 21 de septiembre de 2026 el gerente reportó dos veces que "el botón no funciona",
+   * y las dos era verdad desde donde él estaba parado. Se encontraron cuatro caminos
+   * silenciosos: el botón de buscar se APAGABA sin credenciales (se veía, no respondía);
+   * una búsqueda que volvía vacía no enseñaba nada; "Dar de alta" sin nombre solo ponía un
+   * borde rojo; y si Mercado Pago rechazaba el cambio a PDV, la terminal no se guardaba y
+   * el error salía en inglés al fondo de la tarjeta, fuera de la pantalla del teléfono.
+   * Cada toque ahora dice qué está haciendo mientras espera, y en qué terminó.
    */
   async function loadTerminals() {
     try {
@@ -725,23 +736,51 @@
     PDV: 'term.modePDV', STANDALONE: 'term.modeStandalone', UNDEFINED: 'term.modeUnknown',
   };
 
+  /** Un mensaje donde se ve: junto a lo que se tocó, y llevado a la pantalla. */
+  function avisar(el, message, kind) {
+    el.textContent = message;
+    el.hidden = false;
+    el.style.color = kind === 'warn' ? '#fcd34d' : '';
+    try { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch { /* navegadores viejos */ }
+  }
+
+  /** El botón dice lo que está haciendo mientras espera. Devuelve cómo regresarlo. */
+  function ocupado(button, key) {
+    const antes = button.textContent;
+    button.disabled = true;
+    button.textContent = t(key);
+    button.setAttribute('aria-busy', 'true');
+    return () => {
+      button.disabled = false;
+      button.textContent = antes;
+      button.removeAttribute('aria-busy');
+    };
+  }
+
+  const faltaConfig = () => {
+    const prov = terminals.provider;
+    return prov && !prov.configured ? prov : null;
+  };
+
   function renderTerminals() {
     const aviso = $('term-not-configured');
-    const prov = terminals.provider;
-    // Sin credenciales no hay nada que buscar ni que dar de alta, y decirlo aquí evita
-    // que el gerente toque un botón que solo sabe fallar.
-    const falta = prov && !prov.configured;
+    const falta = faltaConfig();
     aviso.hidden = !falta;
-    if (falta) aviso.textContent = t('term.notConfigured', { missing: (prov.missing || []).join(', ') });
-    $('btn-term-discover').disabled = Boolean(falta);
+    if (falta) aviso.textContent = t('term.notConfigured', { missing: (falta.missing || []).join(', ') });
+    // El botón NO se apaga sin credenciales. Apagado se veía igual y no respondía, y eso
+    // se lee como "está roto". Encendido, al tocarlo explica qué falta (ver abajo).
+    $('btn-term-discover').disabled = false;
 
     $('term-empty').hidden = terminals.mine.length > 0;
     const box = $('term-list');
     box.innerHTML = '';
     for (const term of terminals.mine) {
       const card = document.createElement('div');
-      card.className = 'flex items-center justify-between gap-3 card rounded-lg px-3 py-2';
+      card.className = 'card rounded-lg px-3 py-2 space-y-2';
       if (term.active === false) card.style.opacity = '.55';
+
+      const fila = document.createElement('div');
+      fila.className = 'flex items-center justify-between gap-3';
 
       const left = document.createElement('div');
       left.className = 'min-w-0';
@@ -751,55 +790,77 @@
       const mode = document.createElement('p');
       mode.className = 'text-[11px]';
       mode.style.color = term.operating_mode === 'PDV'
-        ? 'var(--ev2-lime)' : term.operating_mode === 'STANDALONE' ? '#fca5a5' : 'rgba(255,255,255,.4)';
+        ? 'var(--ev2-lime)' : term.operating_mode === 'STANDALONE' ? '#fca5a5' : '#fcd34d';
       mode.textContent = t(MODE_KEY[term.operating_mode] || 'term.modeUnknown');
       left.append(name, mode);
 
       const acciones = document.createElement('div');
       acciones.className = 'flex gap-2 shrink-0';
+      const nota = document.createElement('p');
+      nota.className = 'text-xs text-red-300';
+      nota.hidden = true;
+      // La razón por la que se dio de alta sin poder cobrar. Se queda puesta hasta que se
+      // arregle: si solo saliera en un aviso de dos segundos, nadie sabría qué pasó.
+      const pendiente = terminals.warnings[term.id];
+      if (pendiente && term.operating_mode !== 'PDV') avisar(nota, pendiente, 'warn');
+
       if (term.operating_mode !== 'PDV') {
         const fix = document.createElement('button');
         fix.className = 'card rounded-lg px-3 py-2 text-xs';
         fix.textContent = t('term.fixMode');
-        fix.onclick = () => patchTerminal(term.id, { set_pdv: true }, fix, 'term.restart');
+        fix.onclick = () => patchTerminal(term.id, { set_pdv: true }, fix, 'term.restart', nota, 'term.fixing');
         acciones.appendChild(fix);
       }
       const baja = document.createElement('button');
       baja.className = `card rounded-lg px-3 py-2 text-xs ${term.active === false ? '' : 'text-red-300'}`;
       baja.textContent = t(term.active === false ? 'term.reactivate' : 'term.deactivate');
-      baja.onclick = () => patchTerminal(term.id, { active: term.active === false }, baja, 'term.saved');
+      baja.onclick = () => patchTerminal(term.id, { active: term.active === false }, baja, 'term.saved', nota, 'term.saving');
       acciones.appendChild(baja);
 
-      card.append(left, acciones);
+      fila.append(left, acciones);
+      card.append(fila, nota);
       box.appendChild(card);
     }
   }
 
-  async function patchTerminal(id, body, button, okKey) {
-    button.disabled = true;
-    $('term-error').hidden = true;
+  async function patchTerminal(id, body, button, okKey, where, busyKey) {
+    const listo = ocupado(button, busyKey);
+    where.hidden = true;
     try {
       await api.patch(`/nightclubs/${clubId()}/payment-terminals/${id}`, body);
+      if (body.set_pdv) delete terminals.warnings[id];
       toast(t(okKey), 'ok');
       await loadTerminals();
     } catch (err) {
-      showError(err, $('term-error'));
-      button.disabled = false;
+      listo();
+      avisar(where, EV2Format.errorMessage(err));
     }
   }
 
   $('btn-term-discover').onclick = async () => {
     const b = $('btn-term-discover');
-    b.disabled = true;
-    $('term-error').hidden = true;
+    const error = $('term-error');
+    error.hidden = true;
+    // Sin credenciales no hay nada que preguntarle a Mercado Pago, pero el toque se
+    // contesta igual: con lo que falta y dónde se pone.
+    const falta = faltaConfig();
+    if (falta) {
+      avisar(error, t('term.notConfigured', { missing: (falta.missing || []).join(', ') }));
+      return;
+    }
+    const listo = ocupado(b, 'term.searching');
     try {
       const data = await api.post(`/nightclubs/${clubId()}/payment-terminals/discover`, {});
       terminals.found = data.terminals || [];
       renderFoundTerminals();
+      // Vacío también es una respuesta, y la que más confunde: sin esto no aparecía nada.
+      if (terminals.found.length === 0) avisar(error, t('term.noneFound'), 'warn');
+      // Buscar pone al día el modo de las que ya están dadas de alta.
+      await loadTerminals();
     } catch (err) {
-      showError(err, $('term-error'));
+      avisar(error, EV2Format.errorMessage(err));
     } finally {
-      b.disabled = false;
+      listo();
     }
   };
 
@@ -829,31 +890,50 @@
         input.className = 'field flex-1';
         input.maxLength = 60;
         input.placeholder = t('term.label');
+        input.setAttribute('aria-label', t('term.label'));
         const alta = document.createElement('button');
         alta.className = 'ev2-button rounded-lg px-3 py-2 text-xs shrink-0';
         alta.textContent = t('term.register');
+        // El resultado del alta va AQUÍ, pegado a la terminal que se tocó. Al fondo de la
+        // tarjeta quedaba fuera de la pantalla del teléfono.
+        const nota = document.createElement('p');
+        nota.className = 'text-xs text-red-300';
+        nota.hidden = true;
+        input.oninput = () => { input.classList.remove('bad'); nota.hidden = true; };
         alta.onclick = async () => {
           const label = input.value.trim();
+          nota.hidden = true;
           // Sin nombre no se da de alta: un número de serie no es un nombre que el
-          // personal pueda usar a las dos de la mañana.
-          if (!label) { input.classList.add('bad'); return; }
-          alta.disabled = true;
-          $('term-error').hidden = true;
+          // personal pueda usar a las dos de la mañana. Pero se DICE, no solo se marca.
+          if (!label) {
+            input.classList.add('bad');
+            avisar(nota, t('term.needName'));
+            input.focus();
+            return;
+          }
+          const listo = ocupado(alta, 'term.registering');
           try {
-            await api.post(`/nightclubs/${clubId()}/payment-terminals`, {
+            const data = await api.post(`/nightclubs/${clubId()}/payment-terminals`, {
               external_id: found.external_id, label, set_pdv: true,
             });
-            toast(t('term.restart'), 'ok');
+            if (data.warning) {
+              // Quedó dada de alta, pero todavía no cobra. Se guarda la razón para
+              // enseñarla en su tarjeta hasta que se arregle.
+              terminals.warnings[data.terminal.id] = data.warning;
+              toast(t('term.savedPending'), 'error');
+            } else {
+              toast(t(data.sandbox ? 'term.sandboxReady' : 'term.restart'), 'ok');
+            }
             terminals.found = [];
             $('term-found-block').hidden = true;
             await loadTerminals();
           } catch (err) {
-            showError(err, $('term-error'));
-            alta.disabled = false;
+            listo();
+            avisar(nota, EV2Format.errorMessage(err));
           }
         };
         linea.append(input, alta);
-        fila.appendChild(linea);
+        fila.append(linea, nota);
       }
       box.appendChild(fila);
     }

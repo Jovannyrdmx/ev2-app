@@ -137,6 +137,15 @@ async function reserve(client, { nightclubId, transactionId, terminalId, userId 
       + 'Cámbiala a PDV desde el panel del gerente y reiníciala.',
       { terminal_id: terminal.id, operating_mode: terminal.operating_mode });
   }
+  // Modo sin confirmar: se dio de alta pero Mercado Pago no dejó pasarla a PDV (ver
+  // `tryPdv` en routes/payments.js). Es el mismo "no pasa nada al cobrar" que el caso de
+  // arriba, solo que sin saber todavía por qué, así que tampoco se intenta.
+  if (terminal.operating_mode !== 'PDV') {
+    throw ApiError.unprocessable(
+      `La terminal "${terminal.label}" todavía no está confirmada en modo PDV, y sin eso `
+      + 'no obedece al sistema. En el panel del gerente, Pagos: tócale "Pasarla a PDV".',
+      { terminal_id: terminal.id, operating_mode: terminal.operating_mode });
+  }
 
   try {
     const { rows } = await client.query(

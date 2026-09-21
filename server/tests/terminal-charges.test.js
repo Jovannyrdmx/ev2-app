@@ -642,3 +642,83 @@ describe('Que no se cobre dos veces', () => {
     expect((await estadoDe(tx.id)).status).toBe('pending');
   });
 });
+
+// ---------------------------------------------------------------- el alta no se atora
+
+describe('Dar de alta una terminal nunca deja al gerente atorado', () => {
+  const FISICA = 'NEWLAND_N950__N950NCB801293324';
+  const altaCruda = async (body) => api().post(`/api/nightclubs/${club.id}/payment-terminals`)
+    .set(await tokenDe(manager)).send(body);
+  const noAsociada = { status: 400, body: { message: 'Terminal not found or not associated with the user', status: 400 } };
+
+  it('si Mercado Pago no deja pasarla a PDV, se guarda igual y dice por qué, en español', async () => {
+    // Antes: 502, la terminal NO se guardaba, y volver a tocar daba lo mismo para siempre.
+    mpFake.failNext = noAsociada;
+    const res = await altaCruda({ external_id: FISICA, label: 'Barra' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.terminal.operating_mode).toBeNull();
+    expect(res.body.warning).toMatch(/no está vinculada a la cuenta/);
+    // El texto original de Mercado Pago viaja también: si la traducción falla, sigue ahí.
+    expect(res.body.warning).toMatch(/not associated with the user/);
+  });
+
+  it('una terminal con el modo sin confirmar NO cobra, y dice qué tocar', async () => {
+    mpFake.failNext = noAsociada;
+    const t = (await altaCruda({ external_id: FISICA, label: 'Barra' })).body.terminal;
+    const tx = await cobroPendiente();
+    mpFake.calls = [];
+
+    const res = await empezar(tx, t);
+    expect(res.status).toBe(422);
+    expect(res.body.error.message).toMatch(/Pasarla a PDV/);
+    // Ni siquiera se le pidió la orden a Mercado Pago: se paró antes.
+    expect(mpFake.calls.filter((c) => c.path === '/v1/orders')).toHaveLength(0);
+  });
+
+  it('"Pasarla a PDV" reintenta: si vuelve a fallar lo explica, y si pasa ya cobra', async () => {
+    mpFake.failNext = noAsociada;
+    const t = (await altaCruda({ external_id: FISICA, label: 'Barra' })).body.terminal;
+    const url = `/api/nightclubs/${club.id}/payment-terminals/${t.id}`;
+
+    mpFake.failNext = noAsociada;
+    const otraVez = await api().patch(url).set(await tokenDe(manager)).send({ set_pdv: true });
+    expect(otraVez.status).toBe(422);
+    expect(otraVez.body.error.message).toMatch(/no está vinculada/);
+
+    const ahora = await api().patch(url).set(await tokenDe(manager)).send({ set_pdv: true });
+    expect(ahora.status).toBe(200);
+    expect(ahora.body.terminal.operating_mode).toBe('PDV');
+    expect((await empezar(await cobroPendiente(), t)).status).toBe(201);
+  });
+
+  it('un nombre repetido se rechaza ANTES de tocar la terminal', async () => {
+    // Si no, se cambiaba el modo de un aparato para luego contestar "ese nombre ya existe".
+    await altaTerminal('Barra');
+    mpFake.calls = [];
+    const res = await altaCruda({ external_id: FISICA, label: 'Barra' });
+    expect(res.status).toBe(409);
+    expect(mpFake.calls.filter((c) => c.path === '/terminals/v1/setup')).toHaveLength(0);
+  });
+
+  it('la terminal virtual no pide cambio de modo y se anuncia como de prueba', async () => {
+    mpFake.calls = [];
+    const res = await altaCruda({ external_id: 'NEWLAND_N950__SBX0000001', label: 'Prueba' });
+    expect(res.status).toBe(201);
+    expect(res.body.sandbox).toBe(true);
+    expect(res.body.terminal.operating_mode).toBe('PDV');
+    expect(mpFake.calls.filter((c) => c.path === '/terminals/v1/setup')).toHaveLength(0);
+  });
+
+  it('buscar pone al día el modo que dice Mercado Pago', async () => {
+    // Alguien la regresó a STANDALONE desde el aparato: ya no debe verse "lista para cobrar".
+    const t = await altaTerminal('Puerta', FISICA);
+    expect(t.operating_mode).toBe('PDV');
+    const res = await api().post(`/api/nightclubs/${club.id}/payment-terminals/discover`)
+      .set(await tokenDe(manager)).send({});
+    expect(res.status).toBe(200);
+    const { rows } = await pool.query(
+      'SELECT operating_mode FROM payment_terminals WHERE id = $1', [t.id]);
+    expect(rows[0].operating_mode).toBe('STANDALONE');
+  });
+});

@@ -3503,9 +3503,19 @@ paths:
       tags: [Pagos]
       summary: Dar de alta una terminal
       description: |
-        Con `set_pdv` (por omisión, sí) la pasa a modo PDV en Mercado Pago antes de
-        guardarla: una terminal recién sacada de la caja viene en STANDALONE y no obedece
-        a nadie. Hay que **reiniciarla** después para que el cambio surta efecto.
+        Con `set_pdv` (por omisión, sí) intenta pasarla a modo PDV en Mercado Pago: una
+        terminal recién sacada de la caja viene en STANDALONE y no obedece a nadie. Hay
+        que **reiniciarla** después para que el cambio surta efecto.
+
+        **Si Mercado Pago rechaza el cambio de modo, la terminal se guarda igual**, con
+        `operating_mode: null`, y la respuesta trae `warning` con el motivo en español
+        (y el texto original de Mercado Pago al final). Mientras el modo no esté
+        confirmado, el cobro se niega a usarla con un 422; se reintenta con
+        `PATCH … { set_pdv: true }`. Antes un rechazo aquí impedía el alta y el gerente
+        no tenía forma de avanzar.
+
+        La terminal virtual de Mercado Pago (`SBX0000001`) no tiene modo que cambiar:
+        se guarda en PDV sin llamar a nadie y la respuesta trae `sandbox: true`.
 
         El nombre es lo que el personal va a leer: "Barra", "Mesero 1", "Puerta". Ni el
         nombre ni el aparato se pueden repetir dentro de un club.
@@ -3531,8 +3541,17 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [terminal, sandbox]
                 properties:
                   terminal: { $ref: '#/components/schemas/PaymentTerminal' }
+                  sandbox:
+                    type: boolean
+                    description: Es la terminal virtual de Mercado Pago, para ensayar.
+                  warning:
+                    type: string
+                    description: |
+                      Solo cuando quedó dada de alta pero SIN poder cobrar todavía: por qué
+                      Mercado Pago no dejó pasarla a PDV.
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -9386,17 +9405,6 @@ components:
         available: { type: boolean, default: true }
         sort_order: { type: integer, default: 0 }
         initial_stock: { type: number, minimum: 0, default: 0 }
-
-    InventoryItem:
-      type: object
-      properties:
-        drink_id: { type: string, format: uuid }
-        name: { type: string }
-        category: { type: string }
-        quantity: { type: string }
-        unit: { type: string, example: unit }
-        low_stock_threshold: { type: string }
-        synced_at: { type: [string, 'null'], format: date-time }
 
     Table:
       type: object
