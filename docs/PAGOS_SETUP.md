@@ -37,10 +37,58 @@ tu `.env` y pega los valores.
 1. Crear la cuenta en **mercadopago.com.mx** con los datos fiscales.
 2. **Tus integraciones → crear aplicación → Credenciales de prueba**. Copiar:
    - `Public Key` → `MERCADOPAGO_PUBLIC_KEY`
-   - `Access Token` → `MERCADOPAGO_ACCESS_TOKEN` (las de prueba empiezan con `TEST-`).
-     **Secreto.**
-3. Configurar la notificación de pagos hacia `https://<tu-dominio>/api/webhooks/mercadopago`
-   y guardar la firma en `MERCADOPAGO_WEBHOOK_SECRET`.
+   - `Access Token` → `MERCADOPAGO_ACCESS_TOKEN`. **Secreto.**
+3. **`MERCADOPAGO_ENV=test` o `MERCADOPAGO_ENV=live`, y no se adivina.**
+
+   Esto no es una comodidad: hoy el token de prueba y el de producción **empiezan igual**
+   (`APP_USR-`). Una versión anterior de este documento decía que los de prueba empiezan
+   con `TEST-`; era cierto hace años y ya no. Quien se fíe de eso acaba cobrándole a una
+   tarjeta real creyendo que está ensayando.
+
+   Por eso el modo se **declara** en el `.env` y el servidor lo **contrasta** con el
+   `live_mode` que contesta la cuenta en cada orden: si el archivo dice prueba y la cuenta
+   contesta real, se detiene con un 503 y lo dice, antes de despertar la terminal.
+
+4. Configurar la notificación (**Webhooks**) hacia:
+
+   ```
+   https://<tu-dominio>/api/payments/mercadopago/webhook
+   ```
+
+   y guardar la **clave secreta** que da esa misma pantalla en
+   `MERCADOPAGO_WEBHOOK_SECRET`. Tiene que ser esa, copiada de ahí: una generada por
+   nuestra cuenta no valida nada.
+
+   Sin la firma correcta **el cobro sigue funcionando**, y eso es a propósito: la firma se
+   anota pero no decide. La verdad de si se cobró sale de consultar la orden
+   (`GET /v1/orders/{id}`) con nuestro propio token, porque la validación de firma de la
+   Orders API tiene un defecto abierto en los SDK del propio Mercado Pago. Lo que se pierde
+   sin ella es la marca `webhook_verified`, no el cobro.
+
+5. **La terminal Point.** Se da de alta desde la app: gerente → pestaña **Pagos** →
+   *Buscar en Mercado Pago* → *Dar de alta*. El alta la pasa a modo **PDV**, que es el
+   único en el que obedece al sistema: una terminal en **STANDALONE** ignora las órdenes
+   sin dar ningún error visible, y es el motivo número uno de "toco cobrar y no pasa nada".
+   Viene así de fábrica.
+
+   Para ensayar sin aparato, Mercado Pago da una terminal virtual (`SBX0000001`), que
+   aparece en *Buscar en Mercado Pago* como cualquier otra. El cobro se despierta igual
+   desde la app, pero **no hay ningún botón para resolverlo**: la pantalla se queda en
+   "esperando la tarjeta", que es exactamente lo que haría una terminal real a la que
+   nadie le pasa una tarjeta.
+
+   Para decidir el resultado hay una ruta, que solo puede llamar un gerente:
+
+   ```bash
+   curl -X POST https://<tu-dominio>/api/nightclubs/<club>/terminal-charges/<cobro>/simulate \
+     -H "Authorization: Bearer <token del gerente>" \
+     -H "Content-Type: application/json" \
+     -d '{"status":"processed"}'
+   ```
+
+   `status` acepta `processed`, `failed`, `canceled`, `expired` y `action_required`. Al
+   mandarlo, Mercado Pago avisa por el webhook y el cobro se cierra solo en la pantalla,
+   sin recargar. Ese es el ensayo completo de punta a punta.
 
 Mercado Pago es el que habilita **OXXO y SPEI**, que en México es lo que más se va a usar.
 
