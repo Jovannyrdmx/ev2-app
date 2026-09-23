@@ -1326,6 +1326,14 @@
       'tch.simPaid': 'Simular: pagó',
       'tch.simFailed': 'Simular: rechazada',
       'tch.simulating': 'Simulando…',
+      // La cuenta de la mesa, en papel (D53).
+      'bill.print': 'Cuenta',
+      'bill.asking': 'Sumando…',
+      'bill.sending': 'Mandando…',
+      'bill.empty': 'Esa mesa no ha consumido nada todavía.',
+      'bill.confirm': 'Mesa {code}: {total}. ¿Imprimir la cuenta?',
+      'bill.confirmDue': 'Mesa {code}: {total}, faltan {due} por pagar. ¿Imprimir la cuenta?',
+      'bill.sent': 'La cuenta se mandó a la impresora.',
       // Impresoras (D52).
       'prn.tab': 'Impresoras',
       'prn.printers': 'Impresoras',
@@ -2856,6 +2864,14 @@
       'tch.simPaid': 'Simulate: paid',
       'tch.simFailed': 'Simulate: declined',
       'tch.simulating': 'Simulating…',
+      // The table's bill, on paper (D53).
+      'bill.print': 'Bill',
+      'bill.asking': 'Adding up…',
+      'bill.sending': 'Sending…',
+      'bill.empty': 'Nothing has been ordered at that table yet.',
+      'bill.confirm': 'Table {code}: {total}. Print the bill?',
+      'bill.confirmDue': 'Table {code}: {total}, {due} still due. Print the bill?',
+      'bill.sent': 'The bill was sent to the printer.',
       // Printing (D52).
       'prn.tab': 'Printers',
       'prn.printers': 'Printers',

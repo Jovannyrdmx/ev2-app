@@ -8,6 +8,7 @@
 
 const { ApiError } = require('../middleware/errors');
 const events = require('./events');
+const tickets = require('./tickets');
 
 const METHODS = ['cash', 'card_terminal', 'zelle', 'cash_app', 'bank_transfer', 'spei'];
 // Cash is handed over in person; the rest leave a folio in a statement, which is the
@@ -98,6 +99,16 @@ async function applySideEffects(client, tx, nightclubId) {
         WHERE id = $1 AND nightclub_id = $2 AND status = 'pending'
         RETURNING id, sender_id, table_id`,
       [tx.reference_id, nightclubId]);
+    // Y con el pedido llega la comanda a la barra (D53). Va exactamente aquí, pegada
+    // al renglón que lo confirma, por la misma razón que dice el comentario de
+    // arriba: pagar es lo que manda el trago a la barra, así que el papel que la
+    // barra lee sale del mismo acto. Ponerlo en otro lado sería inventar un segundo
+    // paso que alguien tendría que acordarse de dar.
+    if (rows[0]) {
+      await tickets.printOrder(client, {
+        nightclubId, orderId: rows[0].id, userId: tx.payer_user_id || null,
+      });
+    }
     return { reservation: null, order: rows[0] || null };
   }
 
@@ -157,7 +168,27 @@ async function settle(client, {
       reviewerId, providerRef]);
 
   const { reservation, order } = await applySideEffects(client, tx, nightclubId);
-  return { tx, reservation, order };
+
+  // El recibo del dinero que acaba de entrar (D53). Va aquí y no en cada ruta porque
+  // esta función es por donde pasan los TRES caminos de cobro: el mesero cobrando en
+  // la mesa, el gerente confirmando una transferencia, y la terminal cuando la
+  // tarjeta pasa. Engancharlo en un solo lugar es lo que hace imposible que mañana se
+  // agregue un cuarto camino y se quede sin comprobante.
+  //
+  // Nunca puede tumbar el cobro: `printReceipt` encola con salvaguarda y devuelve
+  // `null` si algo falla. Un club sin impresoras cobra exactamente como antes.
+  const receipt = await tickets.printReceipt(client, {
+    nightclubId,
+    transactionId: tx.id,
+    method: payment.method,
+    // El folio del voucher. De lo que capturó quien cobró, o —cuando cobró la
+    // terminal— del folio que devolvió la pasarela, que es el mismo papel que el
+    // cliente ya tiene en la mano.
+    reference: payment.reference || providerRef || null,
+    collectedBy: reviewerId,
+  });
+
+  return { tx, reservation, order, receipt };
 }
 
 async function publishConfirmed({ nightclubId, payment, tx, reservation, order }) {

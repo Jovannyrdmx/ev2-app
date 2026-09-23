@@ -275,6 +275,9 @@ function ticket(opts = {}) {
 
     cut() { pasos.push({ t: 'cut' }); return api; },
 
+    /** Las columnas de esta impresora, para quien arme un renglón a mano. */
+    get width() { return width; },
+
     build() {
       const bytes = [CMD.init, Buffer.from([ESC, 0x74, CODEPAGES[codepage]])];
       const texto = [];

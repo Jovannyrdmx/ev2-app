@@ -405,7 +405,7 @@ router.post('/nightclubs/:nightclubId/manual-payments/:paymentId/confirm',
       await client.query('BEGIN');
       const found = await client.query(
         `SELECT id, transaction_id, method, amount::text AS amount, currency, status,
-                declared_by, on_behalf_of
+                declared_by, on_behalf_of, reference
            FROM manual_payments WHERE id = $1 AND nightclub_id = $2 FOR UPDATE`,
         [paymentId, nightclubId]);
       if (found.rowCount === 0) throw ApiError.notFound('Pago no encontrado');
@@ -526,7 +526,7 @@ router.post('/nightclubs/:nightclubId/manual-payments/register',
                                         reviewed_by, reviewed_at, client_request_id)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'confirmed',$5,now(),$11)
            RETURNING id, transaction_id, method, amount::text AS amount, currency, status,
-                     declared_by, on_behalf_of`,
+                     declared_by, on_behalf_of, reference`,
           [nightclubId, tx.id, b.option_id ?? null, b.method, req.user.id, b.on_behalf_of ?? null,
             b.amount, b.currency, b.reference ?? null, b.note ?? null, b.client_request_id ?? null]);
         created = rows[0];

@@ -995,6 +995,9 @@
           <button class="ev2-button rounded-lg px-3 py-2 text-xs font-display" data-take="1">
             ${escape(t('take.open'))}
           </button>
+          <button class="card rounded-lg px-3 py-2 text-xs" data-bill="1">
+            ${escape(t('bill.print'))}
+          </button>
           ${table.guests.map((g) => `
             <button class="card rounded-lg px-3 py-2 text-xs text-red-300" data-release="${escape(g.id)}">
               ${escape(t('floor.release'))}: ${escape(g.name || '—')}
@@ -1009,7 +1012,47 @@
       });
       const abrir = el.querySelector('[data-take]');
       if (abrir) abrir.onclick = () => openTake(mesa);
+      const cuenta = el.querySelector('[data-bill]');
+      if (cuenta) cuenta.onclick = () => printBill(el.dataset.table, cuenta);
     });
+  }
+
+  /**
+   * La cuenta de la mesa, en papel (D53).
+   *
+   * Primero se pregunta cuánto es y se enseña antes de imprimir. Son dos viajes al
+   * servidor en vez de uno, y valen la pena: imprimir la mesa equivocada significa
+   * llevarle a alguien la cuenta de otro, que es de los errores que no se arreglan
+   * con una disculpa.
+   */
+  async function printBill(tableId, button) {
+    const antes = button.textContent;
+    button.disabled = true;
+    button.textContent = t('bill.asking');
+    try {
+      const { bill } = await api.get(`/nightclubs/${clubId()}/tables/${tableId}/bill`);
+      if (!bill.lines.length) { toast(t('bill.empty'), 'info'); return; }
+      const resumen = Number(bill.due) > 0
+        ? t('bill.confirmDue', {
+          code: bill.table.code,
+          total: money(bill.total, bill.currency),
+          due: money(bill.due, bill.currency),
+        })
+        : t('bill.confirm', {
+          code: bill.table.code, total: money(bill.total, bill.currency),
+        });
+      if (!window.confirm(resumen)) return;
+
+      button.textContent = t('bill.sending');
+      await api.post(`/nightclubs/${clubId()}/tables/${tableId}/bill/print`, {});
+      toast(t('bill.sent'), 'ok');
+    } catch (err) {
+      // Aquí no se puede callar: el cliente está enfrente esperando su papel.
+      showError(err);
+    } finally {
+      button.disabled = false;
+      button.textContent = antes;
+    }
   }
 
   /**

@@ -8,6 +8,7 @@ const { validate, z, uuid, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const events = require('../services/events');
 const inventory = require('../services/inventory');
+const tickets = require('../services/tickets');
 
 const router = express.Router({ mergeParams: true });
 
@@ -347,6 +348,15 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
             [order.transaction_id]);
         }
         refundDue = order.payment_status === 'paid';
+      }
+
+      // La comanda del pedido que se confirma a mano (D53). El camino normal es el
+      // otro: un pedido se confirma al PAGARSE, y ahí la comanda sale pegada al
+      // renglón que lo confirma (`payments.applySideEffects`). Este es el de los
+      // pedidos que no tienen nada que cobrar —un trago de cortesía, una cuenta de
+      // casa—, que llegan a la barra por aquí y también necesitan su papel.
+      if (next === 'confirmed') {
+        await tickets.printOrder(client, { nightclubId, orderId, userId: req.user.id });
       }
 
       await events.publish({

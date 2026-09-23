@@ -9821,6 +9821,79 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/nightclubs/{nightclubId}/tables/{tableId}/bill:
+    get:
+      operationId: getTableBill
+      tags: [Impresión]
+      summary: La cuenta de una mesa
+      description: |
+        Todo lo que se pidió en esa mesa **desde que esa gente se sentó**, no "lo de
+        hoy": una mesa que se ocupó a las 11 y otra que se ocupó a las 3 tienen
+        cuentas distintas, y contar por noche juntaría la de los que ya se fueron con
+        la de los que acaban de llegar. Si nadie está sentado —porque el club no usa
+        el plano esa noche— se miran las últimas doce horas.
+
+        `paid` y `due` van por separado y no se restan de un total: un renglón pagado
+        y otro por pagar en la misma mesa es lo normal cuando cada quien paga lo suyo.
+
+        Se puede leer sin imprimir: el mesero enseña la pantalla cuando el cliente
+        solo quiere saber cuánto lleva.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/NightclubId'
+        - in: path
+          name: tableId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: La cuenta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bill: { $ref: '#/components/schemas/TableBill' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/tables/{tableId}/bill/print:
+    post:
+      operationId: printTableBill
+      tags: [Impresión]
+      summary: Imprimir la cuenta de una mesa
+      description: |
+        Sale en la impresora de `service` de la barra que atiende esa zona.
+
+        A diferencia de la comanda y del recibo —que se encolan solos y en silencio—
+        esta **falla con voz**: se imprime porque alguien picó un botón con el cliente
+        enfrente, y quedarse callado lo deja parado mirando la pantalla. Sin impresora
+        para esa zona contesta 400 diciéndolo.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/NightclubId'
+        - in: path
+          name: tableId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '202':
+          description: La cuenta quedó en la cola
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: { $ref: '#/components/schemas/PrintJob' }
+                  bill: { $ref: '#/components/schemas/TableBill' }
+        '400':
+          description: No hay una impresora de cuentas para esa zona
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -13076,3 +13149,41 @@ components:
         max_attempts: { type: integer, minimum: 1, maximum: 10 }
         header_text: { type: [string, 'null'] }
         footer_text: { type: [string, 'null'] }
+
+    TableBill:
+      type: object
+      description: |
+        Lo que va en la cuenta de una mesa. Los renglones vienen agrupados por bebida
+        y precio: el mismo trago pedido tres veces es un renglón de tres, no tres
+        renglones.
+      properties:
+        table:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            code: { type: string }
+            section: { type: [string, 'null'] }
+            floor: { type: [string, 'null'] }
+        since:
+          type: string
+          format: date-time
+          description: Desde cuándo cuenta, que es cuando esa gente se sentó.
+        seated:
+          type: boolean
+          description: Si había alguien sentado. En falso, `since` son las últimas 12 horas.
+        currency: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              quantity: { type: integer }
+              unit_price: { type: string }
+              amount: { type: string }
+              paid:
+                type: boolean
+                description: Si todo lo de ese renglón ya está cobrado.
+        total: { type: string }
+        paid: { type: string }
+        due: { type: string }

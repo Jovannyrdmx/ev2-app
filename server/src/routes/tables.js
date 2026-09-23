@@ -8,6 +8,7 @@ const { validate, z, uuid } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const events = require('../services/events');
 const seating = require('../services/seating');
+const tickets = require('../services/tickets');
 
 const router = express.Router({ mergeParams: true });
 
@@ -257,6 +258,49 @@ router.post('/nightclubs/:nightclubId/tables/:tableId/release',
     } finally {
       client.release();
     }
+  }));
+
+// ---------------------------------------------------------------- la cuenta (D53)
+
+/**
+ * Lo que va en la cuenta de esa mesa.
+ *
+ * Todo lo que se pidió **desde que esa gente se sentó**, no "lo de hoy": una mesa que
+ * se ocupó a las 11 y otra que se ocupó a las 3 tienen cuentas distintas, y contar
+ * por noche juntaría la de los que ya se fueron con la de los que acaban de llegar.
+ *
+ * Se puede leer sin imprimir: el mesero enseña la cuenta en la pantalla cuando el
+ * cliente solo quiere saber cuánto lleva.
+ */
+router.get('/nightclubs/:nightclubId/tables/:tableId/bill',
+  requireRole('waiter', 'bartender', 'hostess', 'manager', 'admin'),
+  validate({ params: z.object({ nightclubId: uuid, tableId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const bill = await tickets.billData(pool, {
+      nightclubId: req.params.nightclubId, tableId: req.params.tableId,
+    });
+    if (!bill) throw ApiError.notFound('Esa mesa no existe');
+    res.json({ bill });
+  }));
+
+/**
+ * Imprime la cuenta en la impresora de meseros de la barra que atiende esa zona.
+ *
+ * A diferencia de la comanda y del recibo, esta falla con voz: sale porque alguien
+ * picó un botón con el cliente enfrente, y quedarse callado lo deja parado mirando
+ * la pantalla sin saber si el papel viene o no.
+ */
+router.post('/nightclubs/:nightclubId/tables/:tableId/bill/print',
+  requireRole('waiter', 'bartender', 'hostess', 'manager', 'admin'),
+  validate({ params: z.object({ nightclubId: uuid, tableId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const out = await tickets.printBill(pool, {
+      nightclubId: req.params.nightclubId,
+      tableId: req.params.tableId,
+      userId: req.user.id,
+    });
+    if (out.error) throw ApiError.badRequest(out.error);
+    res.status(202).json({ job: out.job, bill: out.bill });
   }));
 
 // Manager: bulk layout update (coordinates, capacity, section, status).

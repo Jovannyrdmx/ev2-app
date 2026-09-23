@@ -215,6 +215,36 @@ async function enqueueTicket(runner, {
   });
 }
 
+/**
+ * Encola sin poder tumbar lo que esté pasando alrededor.
+ *
+ * Los tres papeles del servicio —comanda, cuenta y recibo— se encolan DENTRO de la
+ * transacción que asienta el pedido o el cobro, y eso es lo correcto: un recibo de un
+ * cobro que no se asentó sería un papel mintiendo. Pero trae un peligro: en Postgres
+ * **cualquier** error aborta la transacción entera, así que una impresora sin
+ * configurar reventaría el cobro. Atrapar la excepción en JavaScript no alcanza: la
+ * transacción ya quedó envenenada y el `COMMIT` fallaría igual.
+ *
+ * El `SAVEPOINT` resuelve las dos cosas a la vez: si encolar falla, se deshace solo
+ * ese pedacito y el cobro sigue su camino. Devuelve `null` y quien llama no tiene
+ * nada que decidir.
+ */
+async function enqueueSafely(client, args) {
+  const punto = `print_${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    await client.query(`SAVEPOINT ${punto}`);
+    const job = await enqueue(client, args);
+    await client.query(`RELEASE SAVEPOINT ${punto}`);
+    return job;
+  } catch (err) {
+    await client.query(`ROLLBACK TO SAVEPOINT ${punto}`).catch(() => {});
+    // No se vuelve a lanzar: que no salga un papel nunca puede impedir que se sirva un
+    // trago o se cobre una cuenta. Queda en la bitácora del servidor.
+    console.warn(`[printing] no se pudo encolar ${args.kind}: ${err.message}`);
+    return null;
+  }
+}
+
 /** El ticket de prueba de una impresora recién dada de alta. */
 async function enqueueTest(runner, { nightclubId, printer, clubName, createdBy }) {
   const { bytes, text } = escpos.testTicket({
@@ -434,6 +464,7 @@ module.exports = {
   DEFAULTS, STALE_MINUTES, REROUTE_AFTER,
   settingsOf, saveSettings,
   listPrinters, getPrinter, resolvePrinter,
-  enqueue, enqueueTicket, enqueueTest, claim, markPrinted, markFailed, reprint, listJobs,
+  enqueue, enqueueSafely, enqueueTicket, enqueueTest,
+  claim, markPrinted, markFailed, reprint, listJobs,
   newToken, hashToken, createAgent, listAgents, agentByToken, touchAgent, setAgentActive,
 };

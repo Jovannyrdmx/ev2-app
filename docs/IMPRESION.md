@@ -153,6 +153,62 @@ configuradas no debe empezar a encolar papel que nadie va a recoger.
 El recibo de cobro sale siempre: es el respaldo de que ese dinero entró, y es lo que
 hace que el corte del turno cuadre sin discutir.
 
+## Los cuatro papeles
+
+| Papel | Sale cuando | Va a | Lleva |
+|---|---|---|---|
+| **Comanda** | Se **paga** un pedido — pagar es lo que lo manda a la barra | `orders` de esa barra | Mesa en grande, cantidades en columna, **sin precios** |
+| **Cuenta** | El mesero pica "Cuenta" | `service` de esa barra | Todo lo de la mesa, lo pagado y lo que falta |
+| **Recibo** | Entra el dinero, por cualquiera de los tres caminos | `service` de esa barra | Método de pago, folio del voucher, "PAGADO" |
+| **Corte de turno** | El empleado cierra su turno | `service` de esa barra | (parte C) |
+
+### La comanda no lleva precios
+
+A propósito. El bartender no cobra: un importe en la comanda es ruido en el único
+papel que tiene que leerse de un vistazo, de lado y con las manos ocupadas. Lo que
+lleva es la mesa en grande arriba y las cantidades en su propia columna, para que el
+ojo baje por los números sin leer los nombres.
+
+Sale cuando el pedido se **paga**, no cuando se crea: pagar es lo que manda el trago a
+la barra, y la barra no prepara nada a crédito. Un pedido sin nada que cobrar —un
+trago de cortesía— lo confirma el personal a mano, y también saca su comanda.
+
+### La cuenta cuenta desde que se sentaron
+
+No desde la medianoche. Una mesa que se ocupó a las 11 y otra que se ocupó a las 3
+tienen cuentas distintas, y contar por noche juntaría la de los que ya se fueron con
+la de los que acaban de llegar. Si el club no usa el plano esa noche y nadie está
+"sentado" en el sistema, se miran las últimas 12 horas.
+
+Lo pagado y lo pendiente van por separado y **no se restan en un solo número**: un
+renglón pagado y otro por pagar en la misma mesa es lo normal cuando cada quien paga
+lo suyo, y esconder eso en una resta es como se cobra dos veces.
+
+El papel dice, abajo, que no es un comprobante de pago. Porque no lo es.
+
+### El recibo sale por los tres caminos
+
+Está enganchado dentro de `payments.settle()`, que es por donde pasa **todo** cobro:
+el mesero cobrando en la mesa, el gerente confirmando una transferencia, y la terminal
+cuando la tarjeta pasa. Enganchado ahí y no en cada ruta, es imposible que mañana se
+agregue un cuarto camino de cobro y se quede sin comprobante.
+
+Se puede apagar desde **Impresoras → Ajustes**, pero viene prendido: es el respaldo de
+que ese dinero entró, y es lo que hace que el corte del turno cuadre sin discutir.
+
+### Que no salga un papel nunca detiene el club
+
+Los tres se encolan **dentro** de la transacción que asienta el pedido o el cobro —un
+recibo de un cobro que no se asentó sería un papel mintiendo— pero envueltos en un
+`SAVEPOINT`. Si encolar falla, se deshace solo ese pedacito y el cobro sigue su camino.
+
+Sin eso, una impresora sin configurar reventaría un cobro: en Postgres cualquier error
+aborta la transacción entera, y atrapar la excepción en JavaScript no alcanza porque la
+transacción ya quedó envenenada.
+
+La única excepción es la cuenta, que **sí falla con voz**: sale porque alguien picó un
+botón con el cliente enfrente, y quedarse callado lo deja parado mirando la pantalla.
+
 ## Seguridad
 
 - El agente **no recibe conexiones**. Se conecta hacia afuera; el club no abre ningún
