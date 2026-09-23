@@ -29,6 +29,8 @@
     valetSettings: null, spots: [], occupancy: null,
     reports: [], reportFilter: null,
     nights: [], staff: [], withdrawals: [], accounts: [],
+    // Lo que espera a que el gerente cuente dinero (D51).
+    cashDrops: [], shiftCuts: [],
     // El catálogo de covers del club. Vacío significa que la puerta todavía teclea el
     // precio; en cuanto tiene uno, el servidor deja de aceptar importes sueltos.
     covers: [],
@@ -213,6 +215,7 @@
       get(`/nightclubs/${club}/drivers?include_inactive=true&limit=200`, (d) => { state.drivers = d.drivers || []; }),
       loadTerminals(),
       loadTerminalCharges(),
+      loadShiftCuts(),
       loadCovers(),
       get(`/nightclubs/${club}/taxi-settings`, (d) => { state.taxiSettings = d.settings; }),
       get(`/nightclubs/${club}/taxi-fares?include_inactive=false`, (d) => { state.fares = d.fares || []; }),
@@ -1089,6 +1092,190 @@
   $('btn-tch-reload').onclick = async () => {
     const listo = ocupado($('btn-tch-reload'), 'tch.reload');
     try { await loadTerminalCharges(); } finally { listo(); }
+  };
+
+  // ---------------------------------------------------------------- cortes de turno (D51)
+
+  /**
+   * Lo que el gerente tiene que contar: las entregas de efectivo de media noche y los
+   * cortes que esperan a que alguien cuente el dinero.
+   *
+   * Confirmar un corte cierra el turno de esa persona, así que el botón pide el monto
+   * contado y, si no cuadra, el motivo. Un faltante sin explicación es exactamente lo
+   * que este panel existe para no dejar pasar.
+   */
+  async function loadShiftCuts() {
+    try {
+      const [drops, cierres] = await Promise.all([
+        api.get(`/nightclubs/${clubId()}/cash-drops?status=declared`),
+        api.get(`/nightclubs/${clubId()}/shift-closings?status=declared`),
+      ]);
+      state.cashDrops = drops.drops || [];
+      state.shiftCuts = cierres.closings || [];
+    } catch {
+      state.cashDrops = [];
+      state.shiftCuts = [];
+    }
+    renderShiftCuts();
+  }
+
+  function renderShiftCuts() {
+    const drops = state.cashDrops || [];
+    const cortes = state.shiftCuts || [];
+    $('cuts-empty').hidden = drops.length > 0 || cortes.length > 0;
+
+    const cajaDrops = $('cuts-drops');
+    cajaDrops.innerHTML = '';
+    for (const d of drops) {
+      const card = document.createElement('div');
+      card.className = 'card rounded-lg px-3 py-2 space-y-2';
+      const fila = document.createElement('div');
+      fila.className = 'flex items-center justify-between gap-3';
+      const left = document.createElement('div');
+      left.className = 'min-w-0';
+      const monto = document.createElement('p');
+      monto.className = 'font-display';
+      monto.textContent = money(d.amount, d.currency);
+      const quien = document.createElement('p');
+      quien.className = 'text-[11px] text-white/50 truncate';
+      quien.textContent = t('cuts.dropFrom', { name: d.user_name || '', note: d.note || '' });
+      left.append(monto, quien);
+      const nota = document.createElement('p');
+      nota.className = 'text-xs text-red-300';
+      nota.hidden = true;
+
+      const acciones = document.createElement('div');
+      acciones.className = 'flex gap-2 shrink-0';
+      const recibir = document.createElement('button');
+      recibir.className = 'card rounded-lg px-3 py-2 text-xs';
+      recibir.textContent = t('cuts.receive');
+      recibir.onclick = () => receiveDrop(d, recibir, nota);
+      const rechazar = document.createElement('button');
+      rechazar.className = 'card rounded-lg px-3 py-2 text-xs text-red-300';
+      rechazar.textContent = t('cuts.reject');
+      rechazar.onclick = () => rejectDrop(d, rechazar, nota);
+      acciones.append(recibir, rechazar);
+
+      fila.append(left, acciones);
+      card.append(fila, nota);
+      cajaDrops.appendChild(card);
+    }
+
+    const caja = $('cuts-list');
+    caja.innerHTML = '';
+    for (const c of cortes) {
+      const card = document.createElement('div');
+      card.className = 'card rounded-lg px-3 py-2 space-y-2';
+
+      const fila = document.createElement('div');
+      fila.className = 'flex items-center justify-between gap-3';
+      const left = document.createElement('div');
+      left.className = 'min-w-0';
+      const quien = document.createElement('p');
+      quien.className = 'font-display truncate';
+      quien.textContent = `${c.user_name} · ${EV2Roles.describe(c.role, lang()).label}`;
+      const montos = document.createElement('p');
+      montos.className = 'text-[11px] text-white/50';
+      montos.textContent = t('cuts.amounts', {
+        expected: money(c.expected_cash, c.currency),
+        declared: money(c.declared_cash, c.currency),
+      });
+      left.append(quien, montos);
+      const nota = document.createElement('p');
+      nota.className = 'text-xs text-red-300';
+      nota.hidden = true;
+
+      const confirmar = document.createElement('button');
+      confirmar.className = 'ev2-button rounded-lg px-3 py-2 text-xs shrink-0';
+      confirmar.textContent = t('cuts.count');
+      confirmar.onclick = () => confirmCut(c, confirmar, nota);
+
+      fila.append(left, confirmar);
+      card.append(fila, nota);
+      if (c.declared_notes) {
+        const n = document.createElement('p');
+        n.className = 'text-[11px] text-white/40';
+        n.textContent = c.declared_notes;
+        card.appendChild(n);
+      }
+      caja.appendChild(card);
+    }
+  }
+
+  async function receiveDrop(drop, button, nota) {
+    nota.hidden = true;
+    const dicho = window.prompt(t('cuts.countedPrompt', { amount: money(drop.amount, drop.currency) }),
+      drop.amount);
+    if (dicho === null) return;
+    // Enter en blanco = "cuadra con lo declarado". Tomarlo como CERO daría por recibida
+    // una entrega de nada, y ese dinero le seguiría cobrándose a quien ya lo entregó.
+    const contado = String(dicho).trim() === '' ? Number(drop.amount) : Number(dicho);
+    if (!(contado >= 0)) { avisar(nota, t('cuts.errAmount')); return; }
+    const listo = ocupado(button, 'cuts.saving');
+    try {
+      await api.post(`/nightclubs/${clubId()}/cash-drops/${drop.id}/receive`, { counted_amount: contado });
+      toast(t('cuts.received'), 'ok');
+      await loadShiftCuts();
+    } catch (err) {
+      listo();
+      avisar(nota, EV2Format.errorMessage(err));
+    }
+  }
+
+  async function rejectDrop(drop, button, nota) {
+    nota.hidden = true;
+    const motivo = window.prompt(t('cuts.rejectPrompt'), '');
+    if (motivo === null) return;
+    if (motivo.trim().length < 5) { avisar(nota, t('cuts.errReason')); return; }
+    const listo = ocupado(button, 'cuts.saving');
+    try {
+      await api.post(`/nightclubs/${clubId()}/cash-drops/${drop.id}/reject`, { reason: motivo.trim() });
+      await loadShiftCuts();
+    } catch (err) {
+      listo();
+      avisar(nota, EV2Format.errorMessage(err));
+    }
+  }
+
+  async function confirmCut(corte, button, nota) {
+    nota.hidden = true;
+    const dicho = window.prompt(t('cuts.countPrompt', {
+      name: corte.user_name, expected: money(corte.expected_cash, corte.currency),
+    }), corte.declared_cash);
+    if (dicho === null) return;
+    // Igual que arriba: en blanco es "lo que declaró", no cero.
+    const contado = String(dicho).trim() === '' ? Number(corte.declared_cash) : Number(dicho);
+    if (!(contado >= 0)) { avisar(nota, t('cuts.errAmount')); return; }
+
+    const diferencia = Math.round((contado - Number(corte.expected_cash)) * 100) / 100;
+    let motivo = null;
+    if (diferencia !== 0) {
+      // Un faltante o un sobrante no se cierra sin explicación: el servidor también lo
+      // exige, pero preguntarlo aquí evita el viaje de ida y vuelta con un error.
+      motivo = window.prompt(t(diferencia < 0 ? 'cuts.missingPrompt' : 'cuts.overPrompt', {
+        amount: money(Math.abs(diferencia), corte.currency),
+      }), '');
+      if (motivo === null) return;
+      if (motivo.trim().length < 5) { avisar(nota, t('cuts.errReason')); return; }
+    }
+    if (!window.confirm(t('cuts.confirmClose', { name: corte.user_name }))) return;
+
+    const listo = ocupado(button, 'cuts.saving');
+    try {
+      await api.post(`/nightclubs/${clubId()}/shift-closings/${corte.id}/confirm`, {
+        counted_cash: contado, ...(motivo ? { reason: motivo.trim() } : {}),
+      });
+      toast(t('cuts.closed'), 'ok');
+      await loadShiftCuts();
+    } catch (err) {
+      listo();
+      avisar(nota, EV2Format.errorMessage(err));
+    }
+  }
+
+  $('btn-cuts-reload').onclick = async () => {
+    const listo = ocupado($('btn-cuts-reload'), 'cuts.reload');
+    try { await loadShiftCuts(); } finally { listo(); }
   };
 
   // ---------------------------------------------------------------- pagos

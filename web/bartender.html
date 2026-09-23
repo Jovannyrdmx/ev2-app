@@ -204,6 +204,8 @@
     </nav>
 
     <main class="flex-1 overflow-y-auto p-3 space-y-3">
+      <!-- El corte del turno (D51): el bartender cobra igual que el mesero. -->
+      <button id="btn-cut" class="card w-full rounded-lg py-2 text-sm" data-i18n="cut.title">Mi corte del turno</button>
       <p id="lane-empty" class="text-center text-white/40 text-sm py-16"></p>
       <div id="lane-list" class="space-y-3"></div>
     </main>
@@ -289,6 +291,7 @@
 <script src="js/bar-queue.js"></script>
 <script src="js/receiving.js"></script>
 <script src="js/terminal-charge.js"></script>
+<script src="js/shift-cut.js"></script>
 <script src="js/bartender-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

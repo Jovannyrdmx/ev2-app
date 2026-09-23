@@ -424,6 +424,23 @@
           <p id="tch-error" class="text-sm text-red-300" hidden></p>
         </div>
 
+        <!--
+          Los cortes de turno (D51). Aquí el gerente cuenta el dinero que le entrega
+          cada mesero y cada bartender: las entregas parciales de media noche y el
+          corte final. Confirmar un corte cierra el turno de esa persona.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="cuts.title">Cortes de turno</p>
+            <button id="btn-cuts-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="cuts.reload">Actualizar</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="cuts.why">Cuenta el dinero antes de confirmar: al confirmar, el turno de esa persona queda cerrado.</p>
+          <p id="cuts-empty" class="text-sm text-white/40" data-i18n="cuts.none" hidden>Nadie tiene entregas ni cortes pendientes.</p>
+          <div id="cuts-drops" class="space-y-2"></div>
+          <div id="cuts-list" class="space-y-2"></div>
+          <p id="cuts-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
         <div class="card rounded-xl p-4 space-y-2">
           <div class="flex justify-between items-baseline">
             <span class="text-sm text-white/60" data-i18n="pay.owed">Se debe</span>

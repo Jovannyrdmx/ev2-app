@@ -371,6 +371,12 @@
         <div class="card rounded-xl p-4 space-y-3">
           <p id="shift-state" class="text-sm">—</p>
           <button id="btn-shift" class="ev2-button w-full rounded-lg py-3 font-display">—</button>
+          <!--
+            El corte del turno (D51). Va junto al botón del turno a propósito: son el
+            mismo momento de la noche, y el turno ya no se cierra sin pasar por aquí.
+          -->
+          <button id="btn-cut" class="card w-full rounded-lg py-3 text-sm" data-i18n="cut.title">Mi corte del turno</button>
+          <p id="cut-hint" class="text-[11px] text-white/40" data-i18n="cut.hint">Lo que cobraste y lo que te toca entregar. Puedes entregar efectivo antes de cerrar.</p>
         </div>
         <div class="card rounded-xl p-4 space-y-2">
           <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="floor.myTips">Mis propinas de hoy</p>
@@ -458,6 +464,7 @@
 <script src="js/drink-art.js"></script>
 <script src="js/order-taking.js"></script>
 <script src="js/terminal-charge.js"></script>
+<script src="js/shift-cut.js"></script>
 <script src="js/staff-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

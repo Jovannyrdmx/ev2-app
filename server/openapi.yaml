@@ -4762,6 +4762,13 @@ paths:
                 properties:
                   shift: { $ref: '#/components/schemas/Shift' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: |
+            Cobró dinero en ese turno y no tiene corte confirmado (D51). El turno lo
+            cierra el gerente al contar el dinero.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /api/nightclubs/{nightclubId}/staff/{userId}/shifts/end:
     post:
@@ -9007,6 +9014,304 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/Unprocessable' }
 
+  # ------------------------------------------------------------------ cortes de turno (D51)
+
+  /api/nightclubs/{nightclubId}/shifts/me/cut:
+    get:
+      operationId: getMyShiftCut
+      tags: [Cortes de turno]
+      summary: Lo que traigo encima ahora mismo
+      description: |
+        Lo que esta persona cobró en su turno abierto —por método de pago—, lo que ya
+        entregó y lo que le falta entregar. **Ningún número de aquí lo teclea quien
+        cobra**: salen de los pagos, los cobros con terminal y los covers que esa
+        persona registró.
+
+        Sin turno abierto contesta 200 con `shift: null`: la pantalla necesita poder
+        distinguir "no tienes turno" de un error.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: El estado del corte
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShiftCut' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/shifts/me/cash-drops:
+    post:
+      operationId: declareCashDrop
+      tags: [Cortes de turno]
+      summary: Entregar efectivo a media noche
+      description: |
+        Un mesero con doce mil pesos en la bolsa es un problema de seguridad, no de
+        contabilidad. La entrega **no descuenta nada** hasta que un gerente la cuenta:
+        hasta entonces ese dinero sigue siendo responsabilidad de quien lo trae.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+                note: { type: string, maxLength: 200 }
+      responses:
+        '201':
+          description: Entrega declarada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drop: { $ref: '#/components/schemas/CashDrop' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: No hay turno abierto
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/cash-drops:
+    get:
+      operationId: listCashDrops
+      tags: [Cortes de turno]
+      summary: Entregas de efectivo del club
+      description: 'Requiere rol `manager`. Por omisión, primero las que esperan a que alguien las cuente.'
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: status
+          in: query
+          schema: { type: string, enum: [declared, received, rejected] }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Las entregas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drops:
+                    type: array
+                    items: { $ref: '#/components/schemas/CashDrop' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/cash-drops/{dropId}/receive:
+    post:
+      operationId: receiveCashDrop
+      tags: [Cortes de turno]
+      summary: Contar y recibir una entrega
+      description: |
+        Requiere rol `manager`. `counted_amount` es lo que el gerente **contó**; si se
+        omite, se toma lo declarado. Lo contado es lo que descuenta de lo que esa
+        persona debe, no lo declarado.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: dropId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                counted_amount: { type: number, minimum: 0, maximum: 1000000 }
+                note: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: Entrega recibida
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drop: { $ref: '#/components/schemas/CashDrop' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Esa entrega no existe o ya estaba contada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/cash-drops/{dropId}/reject:
+    post:
+      operationId: rejectCashDrop
+      tags: [Cortes de turno]
+      summary: Rechazar una entrega
+      description: 'Requiere rol `manager`. El motivo es obligatorio y queda con su nombre.'
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: dropId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 5, maxLength: 200 }
+      responses:
+        '200':
+          description: Entrega rechazada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drop: { $ref: '#/components/schemas/CashDrop' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/shifts/me/closing:
+    post:
+      operationId: declareShiftClosing
+      tags: [Cortes de turno]
+      summary: Declarar mi corte
+      description: |
+        El empleado dice cuánto efectivo entrega. **No cierra el turno**: el turno se
+        cierra cuando el gerente cuenta el dinero y confirma, porque hasta que alguien
+        lo cuenta ese dinero sigue siendo de quien lo trae.
+
+        Lo cobrado queda congelado en el corte al declararlo: lo que cobre después es
+        otro turno.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [declared_cash]
+              properties:
+                declared_cash: { type: number, minimum: 0, maximum: 1000000 }
+                notes: { type: string, maxLength: 280 }
+      responses:
+        '201':
+          description: Corte declarado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  closing: { $ref: '#/components/schemas/ShiftClosing' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: No hay turno que cortar, o ya se declaró
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/shift-closings:
+    get:
+      operationId: listShiftClosings
+      tags: [Cortes de turno]
+      summary: Los cortes del club
+      description: 'Requiere rol `manager`. Primero los que esperan a que alguien cuente el dinero.'
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - name: status
+          in: query
+          schema: { type: string, enum: [declared, confirmed] }
+        - { name: hours, in: query, schema: { type: integer, minimum: 1, maximum: 2160, default: 24 } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses:
+        '200':
+          description: Los cortes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  closings:
+                    type: array
+                    items: { $ref: '#/components/schemas/ShiftClosing' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/shift-closings/{closingId}:
+    get:
+      operationId: getShiftClosing
+      tags: [Cortes de turno]
+      summary: Un corte, con sus entregas
+      description: 'El suyo lo ve cualquiera del personal; el de otra persona, solo un `manager`.'
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: closingId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: El corte
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  closing: { $ref: '#/components/schemas/ShiftClosing' }
+                  drops:
+                    type: array
+                    items: { $ref: '#/components/schemas/CashDrop' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/shift-closings/{closingId}/confirm:
+    post:
+      operationId: confirmShiftClosing
+      tags: [Cortes de turno]
+      summary: Contar el dinero y cerrar el turno
+      description: |
+        Requiere rol `manager`, y nunca puede ser la misma persona que cobró.
+
+        La diferencia se calcula contra lo que **le tocaba entregar**, no contra lo que
+        declaró: si declara de menos y entrega de menos, el corte lo ve igual. Una
+        diferencia distinta de cero exige motivo.
+
+        No se confirma con entregas parciales sin contar, y al confirmarlo el turno de
+        esa persona queda cerrado.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: closingId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [counted_cash]
+              properties:
+                counted_cash: { type: number, minimum: 0, maximum: 1000000 }
+                reason: { type: string, maxLength: 280 }
+      responses:
+        '200':
+          description: Corte confirmado y turno cerrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  closing: { $ref: '#/components/schemas/ShiftClosing' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: Falta el motivo de la diferencia, o hay entregas sin contar
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+
 components:
   securitySchemes:
     bearerAuth:
@@ -9369,6 +9674,91 @@ components:
                 refunds:
                   type: array
                   items: { $ref: '#/components/schemas/TerminalRefund' }
+
+    ShiftCut:
+      type: object
+      description: Lo que una persona cobró en su turno y lo que le toca entregar.
+      properties:
+        shift:
+          type: [object, 'null']
+          properties:
+            id: { type: string, format: uuid }
+            user_id: { type: string, format: uuid }
+            section: { type: [string, 'null'] }
+            started_at: { type: string, format: date-time }
+            ended_at: { type: [string, 'null'], format: date-time }
+        totals:
+          type: object
+          properties:
+            currency: { $ref: '#/components/schemas/Currency' }
+            by_method:
+              type: array
+              items:
+                type: object
+                properties:
+                  method: { type: string, example: cash }
+                  amount: { type: string, example: '3000.00' }
+                  count: { type: integer }
+            cash_collected: { type: string, example: '3000.00' }
+            total_collected: { type: string, example: '7500.00' }
+            payments_count: { type: integer }
+            door_people: { type: integer }
+            tips:
+              type: object
+              description: 'De la persona, no del club: se enseña y no se entrega.'
+              properties:
+                amount: { type: string }
+                count: { type: integer }
+        drops:
+          type: array
+          items: { $ref: '#/components/schemas/CashDrop' }
+        drops_received: { type: string, description: Lo entregado Y contado., example: '1000.00' }
+        drops_pending: { type: integer }
+        cash_to_hand: { type: string, description: Lo que tiene que entregar ahora., example: '2000.00' }
+        closing:
+          type: [object, 'null']
+          description: El corte de ese turno, si ya se declaró.
+
+    CashDrop:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        amount: { type: string, description: Lo declarado por quien entrega. }
+        counted_amount: { type: [string, 'null'], description: Lo que el gerente contó. }
+        currency: { $ref: '#/components/schemas/Currency' }
+        note: { type: [string, 'null'] }
+        status: { type: string, enum: [declared, received, rejected] }
+        rejection_reason: { type: [string, 'null'] }
+        user_id: { type: string, format: uuid }
+        user_name: { type: string }
+        received_by: { type: [string, 'null'] }
+        received_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+
+    ShiftClosing:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        shift_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        user_name: { type: string }
+        role: { type: string, example: waiter }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        currency: { $ref: '#/components/schemas/Currency' }
+        totals: { type: object, description: 'La foto de lo cobrado, congelada al declarar.' }
+        cash_collected: { type: string }
+        drops_total: { type: string }
+        expected_cash: { type: string, description: Lo que le tocaba entregar. }
+        declared_cash: { type: string, description: Lo que dijo entregar. }
+        declared_notes: { type: [string, 'null'] }
+        declared_at: { type: string, format: date-time }
+        counted_cash: { type: [string, 'null'], description: Lo que el gerente contó. }
+        difference: { type: [string, 'null'], description: 'Contado menos esperado: negativo es faltante.' }
+        difference_reason: { type: [string, 'null'] }
+        status: { type: string, enum: [declared, confirmed] }
+        confirmed_by_name: { type: [string, 'null'] }
+        confirmed_at: { type: [string, 'null'], format: date-time }
 
     User:
       type: object

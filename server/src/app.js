@@ -29,6 +29,7 @@ const eventRoutes = require('./routes/events');
 const flirtRoutes = require('./routes/flirts');
 const employeeRoutes = require('./routes/employees');
 const tipRoutes = require('./routes/tips');
+const shiftRoutes = require('./routes/shifts');
 const taxiRoutes = require('./routes/taxi');
 const valetRoutes = require('./routes/valet');
 const posRoutes = require('./routes/pos');
@@ -199,6 +200,7 @@ function createApp() {
   app.use('/api', flirtRoutes);
   app.use('/api', employeeRoutes);
   app.use('/api', tipRoutes);
+  app.use('/api', shiftRoutes);
   app.use('/api', taxiRoutes);
   app.use('/api', valetRoutes);
   app.use('/api', posRoutes);

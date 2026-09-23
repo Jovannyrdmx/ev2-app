@@ -4,7 +4,7 @@
  * Conecta el DOM con `EV2` (API y socket), `EV2Staff` (charolas, ocupación, propinas)
  * y `EV2Roles`. Las decisiones viven en `staff-floor.js` y están probadas ahí.
  */
-/* global EV2TerminalCharge, EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan,
+/* global EV2TerminalCharge, EV2ShiftCut, EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan,
           EV2Client, EV2DrinkArt, EV2OrderTaking */
 (function () {
   'use strict';
@@ -1427,6 +1427,26 @@
       </div>`).join('');
   }
 
+
+  // ---------------------------------------------------------------- el corte del turno (D51)
+
+  let cutSheet = null;
+  function corte() {
+    if (!cutSheet) {
+      cutSheet = EV2ShiftCut.createSheet({
+        api,
+        clubId,
+        t,
+        money: (a) => EV2Format.money(a, state.currency),
+        errorMessage: (err) => EV2Format.errorMessage(err),
+        toast,
+      });
+    }
+    return cutSheet;
+  }
+
+  $('btn-cut').onclick = () => corte().open();
+
   $('btn-shift').onclick = async () => {
     const onShift = Boolean(state.employee && state.employee.on_shift);
     if (onShift && !window.confirm(t('floor.confirmEndShift'))) return;
@@ -1436,7 +1456,12 @@
       state.employee = d.employee;
       renderMe();
       toast(t(onShift ? 'floor.shiftEnd' : 'floor.shiftStart'), 'ok');
-    } catch (err) { showError(err); }
+    } catch (err) {
+      // El servidor no deja cerrar el turno con dinero del club sin corte. En vez de
+      // enseñar el error y dejar a la persona buscando dónde, se le abre el corte.
+      showError(err);
+      if (err && err.status === 422) corte().open();
+    }
   };
 
   // ---------------------------------------------------------------- tiempo real

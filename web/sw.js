@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v15';
+const VERSION = 'ev2-v16';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -50,6 +50,9 @@ const SHELL = [
   // El cuadro de la terminal (D47): si no esta guardado, el cobro con tarjeta se
   // queda sin pantalla justo cuando la senal falla, que es cuando mas se nota.
   'js/terminal-charge.js',
+  // El corte del turno (D51): quien cobra lo abre al final de la noche, con el club
+  // lleno y la senal peor que nunca. Sin el guardado, no puede ni ver cuanto entrega.
+  'js/shift-cut.js',
   // El nombre del logo lleva la extension doble ('...svg.png') porque el archivo que
   // se puso es un PNG. Apuntar a 'ev2-logo.svg' -- que no existe -- dejaba la app sin
   // icono grande al agregarla a la pantalla de inicio, y el service worker fallaba al

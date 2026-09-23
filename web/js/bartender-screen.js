@@ -5,7 +5,7 @@
  * abrir esto). Las decisiones —qué carril, qué botón, qué hace un evento— viven en
  * `bar-queue.js` y están probadas ahí.
  */
-/* global EV2TerminalCharge, EV2, EV2Format, EV2Bar, EV2Client, EV2OrderTaking, EV2Receiving, EV2Roles, EV2PasswordGate */
+/* global EV2TerminalCharge, EV2ShiftCut, EV2, EV2Format, EV2Bar, EV2Client, EV2OrderTaking, EV2Receiving, EV2Roles, EV2PasswordGate */
 (function () {
   'use strict';
 
@@ -216,6 +216,26 @@
   /**
    * El cuadro de la espera de la terminal. Se arma la primera vez que hace falta.
    */
+
+  // ---------------------------------------------------------------- el corte del turno (D51)
+
+  let cutSheet = null;
+  function corte() {
+    if (!cutSheet) {
+      cutSheet = EV2ShiftCut.createSheet({
+        api,
+        clubId,
+        t,
+        money: (a) => EV2Format.money(a, 'MXN'),
+        errorMessage: (err) => EV2Format.errorMessage(err),
+        toast,
+      });
+    }
+    return cutSheet;
+  }
+
+  $('btn-cut').onclick = () => corte().open();
+
   let terminalSheet = null;
   function sheet() {
     if (!terminalSheet) {

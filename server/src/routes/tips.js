@@ -19,6 +19,7 @@ const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, currency, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const events = require('../services/events');
+const shiftCuts = require('../services/shift-closings');
 const { createOrder } = require('../services/orders');
 
 const router = express.Router({ mergeParams: true });
@@ -148,9 +149,35 @@ router.post('/nightclubs/:nightclubId/staff/shifts/end',
   requireRole(...STAFF_ROLES),
   validate({ params: z.object({ nightclubId: uuid }) }),
   asyncHandler(async (req, res) => {
+    const abierto = await pool.query(
+      `SELECT id, user_id, section, started_at, ended_at FROM staff_shifts
+        WHERE user_id = $1 AND nightclub_id = $2 AND ended_at IS NULL`,
+      [req.user.id, req.params.nightclubId]);
+    if (abierto.rowCount === 0) throw ApiError.conflict('No tienes un turno abierto');
+
+    // Quien cobró dinero no cierra su turno sin corte (D51). Irse con el efectivo del
+    // club en la bolsa y el turno cerrado es exactamente lo que el corte existe para
+    // impedir; el turno lo cierra el gerente al contar el dinero.
+    const resumen = await shiftCuts.shiftSummary(pool, {
+      nightclubId: req.params.nightclubId, shift: abierto.rows[0],
+    });
+    if (Number(resumen.cash_to_hand) > 0 || Number(resumen.totals.total_collected) > 0) {
+      if (!resumen.closing) {
+        throw ApiError.unprocessable(
+          `Cobraste ${resumen.totals.total_collected} en este turno: haz tu corte antes de `
+          + 'cerrarlo. Al confirmarlo el gerente, el turno se cierra solo.',
+          { cash_to_hand: resumen.cash_to_hand, total_collected: resumen.totals.total_collected });
+      }
+      if (resumen.closing.status !== 'confirmed') {
+        throw ApiError.unprocessable(
+          'Tu corte está declarado y falta que el gerente cuente el dinero. '
+          + 'Al confirmarlo, el turno se cierra solo.');
+      }
+    }
+
     const { rows } = await pool.query(
-      `UPDATE staff_shifts SET ended_at = now() WHERE user_id = $1 AND ended_at IS NULL
-       RETURNING id, section, started_at, ended_at`, [req.user.id]);
+      `UPDATE staff_shifts SET ended_at = now() WHERE id = $1 AND ended_at IS NULL
+       RETURNING id, section, started_at, ended_at`, [abierto.rows[0].id]);
     if (rows.length === 0) throw ApiError.conflict('No tienes un turno abierto');
     res.json({ shift: rows[0] });
   }));
