@@ -1,0 +1,14 @@
+{
+  "name": "ev2-print-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Puente entre el servidor de EV2 y las impresoras térmicas de la barra.",
+  "main": "print-agent.js",
+  "bin": { "ev2-print-agent": "print-agent.js" },
+  "scripts": {
+    "start": "node print-agent.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {},
+  "license": "UNLICENSED"
+}

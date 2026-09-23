@@ -57,6 +57,11 @@
   // memoria a propósito: la verdad del modo está en el servidor, esto es solo la razón.
   const terminals = { mine: [], found: [], provider: null, warnings: {}, charges: [] };
 
+  // Las impresoras del club, las PCs que imprimen por él y lo último que se mandó a
+  // papel (D52). `staleMinutes` lo dice el servidor: es el mismo umbral con el que
+  // decide que una PC se murió con un trabajo en la mano.
+  const printing = { printers: [], agents: [], jobs: [], settings: null, staleMinutes: 2 };
+
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
   const lang = () => EV2Format.getLanguage();
   const money = (amount, currency) => EV2Format.money(amount, currency || state.currency);
@@ -216,6 +221,7 @@
       loadTerminals(),
       loadTerminalCharges(),
       loadShiftCuts(),
+      loadPrinting(),
       loadCovers(),
       get(`/nightclubs/${club}/taxi-settings`, (d) => { state.taxiSettings = d.settings; }),
       get(`/nightclubs/${club}/taxi-fares?include_inactive=false`, (d) => { state.fares = d.fares || []; }),
@@ -273,7 +279,8 @@
 
   // ---------------------------------------------------------------- pintar
 
-  const TABS = ['summary', 'nights', 'staff', 'payouts', 'reports', 'drivers', 'taxi', 'parking', 'inventory'];
+  const TABS = ['summary', 'nights', 'staff', 'payouts', 'reports', 'drivers', 'taxi',
+    'parking', 'inventory', 'printing'];
 
   function renderAll() {
     for (const tab of TABS) $(`tab-${tab}`).hidden = tab !== state.tab;
@@ -290,6 +297,7 @@
     renderTaxi();
     renderParking();
     renderInventory();
+    renderPrinting();
     renderSecret();
   }
 
@@ -1276,6 +1284,331 @@
   $('btn-cuts-reload').onclick = async () => {
     const listo = ocupado($('btn-cuts-reload'), 'cuts.reload');
     try { await loadShiftCuts(); } finally { listo(); }
+  };
+
+  // ---------------------------------------------------------------- impresoras (D52)
+
+  /**
+   * Lo que el gerente necesita ver cuando algo no salió en papel, junto.
+   *
+   * Son cuatro preguntas y se contestan en la misma pantalla a propósito: qué
+   * impresoras hay, qué PCs están vivas, qué tickets se quedaron sin salir y si la
+   * comanda por pedido está prendida. Separadas, encontrar por qué no imprimió la
+   * barra de arriba es un recorrido por tres pestañas.
+   */
+  async function loadPrinting() {
+    const club = clubId();
+    const pedir = async (ruta, aplicar) => {
+      try { aplicar(await api.get(ruta)); } catch { /* cada tarjeta se cuida sola */ }
+    };
+    await Promise.all([
+      pedir(`/nightclubs/${club}/printers?include_inactive=true`, (d) => {
+        printing.printers = d.printers || [];
+      }),
+      pedir(`/nightclubs/${club}/print-agents`, (d) => {
+        printing.agents = d.agents || [];
+        printing.staleMinutes = d.stale_minutes || 2;
+      }),
+      pedir(`/nightclubs/${club}/print-jobs?limit=20`, (d) => { printing.jobs = d.jobs || []; }),
+      pedir(`/nightclubs/${club}/print-settings`, (d) => { printing.settings = d.settings; }),
+    ]);
+    renderPrinting();
+  }
+
+  /** Hace cuánto se asomó esa PC, dicho como lo diría una persona. */
+  function agentState(agent) {
+    if (!agent.active) return { key: 'prn.agentOff', color: '#fca5a5' };
+    if (!agent.last_seen_at) return { key: 'prn.agentNever', color: '#fcd34d' };
+    const minutos = (Date.now() - new Date(agent.last_seen_at).getTime()) / 60000;
+    // El agente pregunta cada tres segundos: si lleva más de dos minutos callado, esa
+    // PC está apagada, y eso es lo que hay que ver de un vistazo.
+    return minutos > printing.staleMinutes
+      ? { key: 'prn.agentDown', color: '#fca5a5', minutes: Math.round(minutos) }
+      : { key: 'prn.agentUp', color: 'var(--ev2-lime)' };
+  }
+
+  const JOB_COLOR = {
+    printed: 'var(--ev2-lime)', failed: '#fca5a5', taken: '#fcd34d', pending: '#fcd34d',
+  };
+
+  function renderPrinting() {
+    renderPrintersList();
+    renderPrintAgents();
+    renderPrintJobs();
+    renderPrintSettings();
+
+    // Las barras llegan en el mismo lote que todo lo demás, así que esta pestaña se
+    // puede abrir antes de que estén. Mientras no estén, el formulario se apaga y lo
+    // dice: dejarlo abierto con la lista vacía hacía que picarle "Dar de alta"
+    // contestara "escoge en qué barra está" señalando un menú sin opciones.
+    const select = $('prn-location');
+    const barras = (state.locations || []).filter((l) => l.kind === 'bar');
+    const listas = barras.length > 0;
+    if (!listas) {
+      select.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = t(state.invLoaded ? 'prn.noBars' : 'prn.loadingBars');
+      select.appendChild(opt);
+    } else if (select.options.length !== barras.length || !select.options[0].value) {
+      select.innerHTML = '';
+      for (const b of barras) {
+        const opt = document.createElement('option');
+        opt.value = b.id;
+        opt.textContent = b.name;
+        select.appendChild(opt);
+      }
+    }
+    select.disabled = !listas;
+    $('btn-prn-add').disabled = !listas;
+  }
+
+  function renderPrintersList() {
+    const lista = printing.printers || [];
+    $('prn-empty').hidden = lista.length > 0;
+    const caja = $('prn-list');
+    caja.innerHTML = '';
+    for (const p of lista) {
+      const card = document.createElement('div');
+      card.className = 'card rounded-lg px-3 py-2 space-y-2';
+      if (!p.active) card.style.opacity = '.5';
+
+      const fila = document.createElement('div');
+      fila.className = 'flex items-center justify-between gap-3';
+      const left = document.createElement('div');
+      left.className = 'min-w-0';
+      const nombre = document.createElement('p');
+      nombre.className = 'font-display truncate';
+      nombre.textContent = p.name;
+      const donde = document.createElement('p');
+      donde.className = 'text-[11px] text-white/50 truncate';
+      donde.textContent = `${p.location_name || ''} · ${t(p.purpose === 'orders' ? 'prn.pOrders' : 'prn.pService')}`;
+      const como = document.createElement('p');
+      como.className = 'text-[11px] text-white/40 truncate';
+      como.textContent = p.connection === 'windows'
+        ? `${t('prn.cWindows')} · ${p.windows_name}`
+        : `${p.host}:${p.port} · ${p.paper_width} mm · ${p.codepage}`;
+      left.append(nombre, donde, como);
+
+      const nota = document.createElement('p');
+      nota.className = 'text-xs text-red-300';
+      nota.hidden = true;
+
+      const acciones = document.createElement('div');
+      acciones.className = 'flex gap-2 shrink-0';
+      const probar = document.createElement('button');
+      probar.className = 'card rounded-lg px-3 py-2 text-xs';
+      probar.textContent = t('prn.test');
+      probar.disabled = !p.active;
+      probar.onclick = () => testPrinter(p, probar, nota);
+      const apagar = document.createElement('button');
+      apagar.className = 'card rounded-lg px-3 py-2 text-xs';
+      apagar.textContent = t(p.active ? 'prn.disable' : 'prn.enable');
+      apagar.onclick = () => togglePrinter(p, apagar, nota);
+      acciones.append(probar, apagar);
+
+      fila.append(left, acciones);
+      card.append(fila, nota);
+      caja.appendChild(card);
+    }
+  }
+
+  function renderPrintAgents() {
+    const lista = printing.agents || [];
+    $('prn-agents-empty').hidden = lista.length > 0;
+    const caja = $('prn-agents');
+    caja.innerHTML = '';
+    for (const a of lista) {
+      const estado = agentState(a);
+      const card = document.createElement('div');
+      card.className = 'card rounded-lg px-3 py-2 flex items-center justify-between gap-3';
+      const left = document.createElement('div');
+      left.className = 'min-w-0';
+      const nombre = document.createElement('p');
+      nombre.className = 'font-display truncate';
+      nombre.textContent = a.name;
+      const linea = document.createElement('p');
+      linea.className = 'text-[11px] truncate';
+      linea.style.color = estado.color;
+      linea.textContent = estado.minutes !== undefined
+        ? t(estado.key, { minutes: estado.minutes })
+        : t(estado.key);
+      left.append(nombre, linea);
+
+      const apagar = document.createElement('button');
+      apagar.className = 'card rounded-lg px-3 py-2 text-xs shrink-0';
+      apagar.textContent = t(a.active ? 'prn.disable' : 'prn.enable');
+      apagar.onclick = async () => {
+        const listo = ocupado(apagar, 'prn.saving');
+        try {
+          await api.patch(`/nightclubs/${clubId()}/print-agents/${a.id}`, { active: !a.active });
+          await loadPrinting();
+        } catch (err) { listo(); showError(err); }
+      };
+
+      card.append(left, apagar);
+      caja.appendChild(card);
+    }
+  }
+
+  function renderPrintJobs() {
+    const lista = printing.jobs || [];
+    $('prn-jobs-empty').hidden = lista.length > 0;
+    const caja = $('prn-jobs');
+    caja.innerHTML = '';
+    for (const j of lista) {
+      const card = document.createElement('div');
+      card.className = 'card rounded-lg px-3 py-2 flex items-center justify-between gap-3';
+      const left = document.createElement('div');
+      left.className = 'min-w-0';
+      const que = document.createElement('p');
+      que.className = 'text-sm truncate';
+      que.textContent = `${t(`prn.k.${j.kind}`)} · ${j.printer_name || ''}`;
+      const como = document.createElement('p');
+      como.className = 'text-[11px] truncate';
+      como.style.color = JOB_COLOR[j.status] || 'rgba(255,255,255,.5)';
+      // El motivo del fallo va completo: "no se pudo conectar (EHOSTUNREACH)" es lo
+      // que distingue una impresora apagada de una con la IP mal escrita.
+      como.textContent = j.status === 'failed'
+        ? t('prn.jobFailed', { error: j.last_error || '' })
+        : t(`prn.s.${j.status}`);
+      left.append(que, como);
+
+      const otra = document.createElement('button');
+      otra.className = 'card rounded-lg px-3 py-2 text-xs shrink-0';
+      otra.textContent = t('prn.reprint');
+      otra.onclick = async () => {
+        const listo = ocupado(otra, 'prn.sending');
+        try {
+          await api.post(`/nightclubs/${clubId()}/print-jobs/${j.id}/reprint`, {});
+          toast(t('prn.queued'), 'ok');
+          await loadPrinting();
+        } catch (err) { listo(); showError(err); }
+      };
+
+      card.append(left, otra);
+      caja.appendChild(card);
+    }
+  }
+
+  function renderPrintSettings() {
+    const s = printing.settings;
+    const check = $('prn-order-tickets');
+    check.checked = Boolean(s && s.print_order_tickets);
+    // Solo el administrador lo cambia. Se deshabilita en vez de esconderse: el
+    // gerente tiene que poder VER si está prendido cuando la barra reclama.
+    const esAdmin = Boolean(api.session && api.session.user && api.session.user.role === 'admin');
+    check.disabled = !esAdmin;
+  }
+
+  async function testPrinter(printer, button, nota) {
+    nota.hidden = true;
+    const listo = ocupado(button, 'prn.sending');
+    try {
+      await api.post(`/nightclubs/${clubId()}/printers/${printer.id}/test`, {});
+      toast(t('prn.queued'), 'ok');
+      await loadPrinting();
+    } catch (err) {
+      listo();
+      avisar(nota, EV2Format.errorMessage(err));
+    }
+  }
+
+  async function togglePrinter(printer, button, nota) {
+    nota.hidden = true;
+    const listo = ocupado(button, 'prn.saving');
+    try {
+      await api.patch(`/nightclubs/${clubId()}/printers/${printer.id}`,
+        { active: !printer.active });
+      await loadPrinting();
+    } catch (err) {
+      listo();
+      avisar(nota, EV2Format.errorMessage(err));
+    }
+  }
+
+  $('prn-connection').onchange = () => {
+    const red = $('prn-connection').value === 'network';
+    $('prn-network-fields').hidden = !red;
+    $('prn-windows-fields').hidden = red;
+  };
+
+  $('btn-prn-add').onclick = async () => {
+    const nota = $('prn-add-error');
+    nota.hidden = true;
+    const red = $('prn-connection').value === 'network';
+    const cuerpo = {
+      location_id: $('prn-location').value,
+      name: $('prn-name').value.trim(),
+      purpose: $('prn-purpose').value,
+      connection: $('prn-connection').value,
+      paper_width: Number($('prn-width').value),
+      codepage: $('prn-codepage').value,
+      has_cutter: $('prn-cutter').checked,
+      ...(red
+        ? { host: $('prn-host').value.trim(), port: Number($('prn-port').value) }
+        : { windows_name: $('prn-winname').value.trim() }),
+    };
+    if (!cuerpo.location_id) { avisar(nota, t('prn.errBar')); return; }
+    if (!cuerpo.name) { avisar(nota, t('prn.errName')); return; }
+    if (red && !cuerpo.host) { avisar(nota, t('prn.errHost')); return; }
+    if (!red && !cuerpo.windows_name) { avisar(nota, t('prn.errWinName')); return; }
+
+    const listo = ocupado($('btn-prn-add'), 'prn.saving');
+    try {
+      await api.post(`/nightclubs/${clubId()}/printers`, cuerpo);
+      $('prn-name').value = '';
+      $('prn-host').value = '';
+      $('prn-winname').value = '';
+      toast(t('prn.added'), 'ok');
+      await loadPrinting();
+      listo();
+    } catch (err) {
+      listo();
+      avisar(nota, EV2Format.errorMessage(err));
+    }
+  };
+
+  $('btn-agent-add').onclick = async () => {
+    const nombre = window.prompt(t('prn.agentName'), '');
+    if (nombre === null) return;
+    if (!nombre.trim()) { toast(t('prn.errName'), 'error'); return; }
+    const listo = ocupado($('btn-agent-add'), 'prn.saving');
+    try {
+      const { agent } = await api.post(`/nightclubs/${clubId()}/print-agents`,
+        { name: nombre.trim() });
+      // El token se enseña UNA vez: si se cierra esta ventana sin copiarlo, se crea
+      // otro agente. Por eso va en un alerta que hay que cerrar a mano y no en un
+      // mensajito que se va solo a los tres segundos.
+      window.alert(t('prn.agentToken', { name: agent.name, token: agent.token }));
+      await loadPrinting();
+    } catch (err) { showError(err); } finally { listo(); }
+  };
+
+  $('btn-prn-reload').onclick = async () => {
+    const listo = ocupado($('btn-prn-reload'), 'prn.reload');
+    try { await loadPrinting(); } finally { listo(); }
+  };
+  $('btn-jobs-reload').onclick = async () => {
+    const listo = ocupado($('btn-jobs-reload'), 'prn.reload');
+    try { await loadPrinting(); } finally { listo(); }
+  };
+
+  $('prn-order-tickets').onchange = async () => {
+    const nota = $('prn-settings-error');
+    nota.hidden = true;
+    const quiere = $('prn-order-tickets').checked;
+    try {
+      const { settings } = await api.patch(`/nightclubs/${clubId()}/print-settings`,
+        { print_order_tickets: quiere });
+      printing.settings = settings;
+      toast(t(quiere ? 'prn.ordersOn' : 'prn.ordersOff'), 'ok');
+    } catch (err) {
+      // Se regresa el interruptor a donde estaba: dejarlo palomeado cuando el
+      // servidor lo rechazó haría creer a la barra que va a imprimir.
+      $('prn-order-tickets').checked = !quiere;
+      avisar(nota, EV2Format.errorMessage(err));
+    }
   };
 
   // ---------------------------------------------------------------- pagos

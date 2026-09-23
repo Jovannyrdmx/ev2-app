@@ -26,3 +26,7 @@ Claude outputs/
 
 # Carpetas de los editores (Visual Studio, VS Code de escritorio)
 .vs/
+
+# El token de cada PC de barra es una llave, no configuracion (D52).
+agent/config.json
+agent/*.log

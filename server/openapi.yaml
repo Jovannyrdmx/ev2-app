@@ -148,6 +148,12 @@ tags:
   - name: Pagos
     description: Métodos de pago guardados por el usuario.
 
+  - name: Impresión
+    description: |
+      Impresoras térmicas del club, las PCs que imprimen por el servidor y la cola de
+      papel. El servidor está fuera de la red del club y no alcanza ninguna impresora:
+      arma los bytes y un agente local se los lleva.
+
 security:
   - bearerAuth: []
 
@@ -9312,6 +9318,509 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
 
 
+  # ------------------------------------------------------------------ impresión (D52)
+
+  /api/nightclubs/{nightclubId}/printers:
+    get:
+      operationId: listPrinters
+      tags: [Impresión]
+      summary: Las impresoras del club
+      description: |
+        Cada impresora cuelga de una barra (`supply_locations` con `kind=bar`) y tiene
+        un propósito: `orders` es la PC del bartender y `service` la de meseros. La
+        lista la puede leer también quien cobra, para saber a dónde va a salir su papel.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/NightclubId'
+        - in: query
+          name: include_inactive
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Las impresoras
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  printers:
+                    type: array
+                    items: { $ref: '#/components/schemas/Printer' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createPrinter
+      tags: [Impresión]
+      summary: Dar de alta una impresora
+      description: |
+        Requiere rol `manager` o `admin`.
+
+        `columns` se calcula solo si no se manda: 48 a 80 mm y 32 a 58 mm, que es lo
+        que cabe en fuente A. `codepage` decide cómo salen los acentos y la ñ, y el
+        valor correcto **no se sabe sin imprimir**: por eso existe el ticket de prueba.
+
+        Una barra no puede tener dos impresoras activas con el mismo propósito. Si
+        tuviera dos, "la impresora de comandas de la barra baja" dejaría de ser una
+        respuesta.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PrinterInput' }
+      responses:
+        '201':
+          description: Impresora dada de alta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  printer: { $ref: '#/components/schemas/Printer' }
+        '400':
+          description: Falta la IP, falta el nombre de Windows, o el lugar no es una barra
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/printers/{printerId}:
+    patch:
+      operationId: updatePrinter
+      tags: [Impresión]
+      summary: Cambiar o apagar una impresora
+      description: |
+        Requiere rol `manager` o `admin`. Lo que no se manda no se pisa.
+        `fallback_id` es a dónde se desvía el papel cuando esta no contesta:
+        normalmente la otra impresora de la misma barra.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/NightclubId'
+        - in: path
+          name: printerId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/PrinterInput'
+                - type: object
+                  properties:
+                    active: { type: boolean }
+      responses:
+        '200':
+          description: Impresora actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  printer: { $ref: '#/components/schemas/Printer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/printers/{printerId}/test:
+    post:
+      operationId: testPrinter
+      tags: [Impresión]
+      summary: Imprimir un ticket de prueba
+      description: |
+        Requiere rol `manager` o `admin`. Es la única verificación que sirve para una
+        impresora térmica: trae acentos, ñ, una regla de ancho completo y el corte, que
+        son exactamente las tres cosas que salen mal cuando la configuración está mal.
+
+        Contesta 202 porque el papel **todavía no salió**: el trabajo queda en la cola
+        y lo recoge el agente de la barra.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/NightclubId'
+        - in: path
+          name: printerId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '202':
+          description: El ticket quedó en la cola
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: { $ref: '#/components/schemas/PrintJob' }
+        '400':
+          description: Esa impresora está apagada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/print-agents:
+    get:
+      operationId: listPrintAgents
+      tags: [Impresión]
+      summary: Las PCs que imprimen
+      description: |
+        Requiere rol `manager` o `admin`. `last_seen_at` es lo único que distingue "no
+        hay trabajos" de "esa PC lleva tres horas apagada". `stale_minutes` es el mismo
+        umbral con el que el servidor devuelve a la cola el trabajo de una PC que murió
+        con el papel en la mano.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Los agentes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agents:
+                    type: array
+                    items: { $ref: '#/components/schemas/PrintAgent' }
+                  stale_minutes: { type: integer }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createPrintAgent
+      tags: [Impresión]
+      summary: Dar de alta una PC que imprima
+      description: |
+        Requiere rol `manager` o `admin`.
+
+        **El `token` se devuelve una sola vez en la vida del agente.** La base guarda
+        solo su huella (SHA-256), así que no hay forma de volver a verlo: quien lo
+        pierda da de alta otra PC y apaga esta.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 60, example: PC barra baja }
+      responses:
+        '201':
+          description: Agente creado, con su token por única vez
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent:
+                    allOf:
+                      - $ref: '#/components/schemas/PrintAgent'
+                      - type: object
+                        properties:
+                          token:
+                            type: string
+                            description: Solo en esta respuesta. No se puede recuperar.
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/print-agents/{agentId}:
+    patch:
+      operationId: setPrintAgentActive
+      tags: [Impresión]
+      summary: Prender o apagar una PC
+      description: |
+        Requiere rol `manager` o `admin`. Un agente apagado deja de poder tomar
+        trabajos de inmediato: es lo que se usa cuando se pierde un token.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/NightclubId'
+        - in: path
+          name: agentId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [active]
+              properties:
+                active: { type: boolean }
+      responses:
+        '200':
+          description: Agente actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent: { $ref: '#/components/schemas/PrintAgent' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/print-jobs:
+    get:
+      operationId: listPrintJobs
+      tags: [Impresión]
+      summary: Lo último que se mandó a papel
+      description: |
+        Requiere rol `manager` o `admin`. Lo que falló va primero: un ticket que no
+        salió y nadie sabe es peor que uno que no salió y se ve en rojo.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/NightclubId'
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, taken, printed, failed] }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: La cola
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items: { $ref: '#/components/schemas/PrintJob' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/print-jobs/{jobId}/reprint:
+    post:
+      operationId: reprintJob
+      tags: [Impresión]
+      summary: Volver a sacar un ticket
+      description: |
+        Requiere rol `manager` o `admin`. Sale **exactamente el mismo papel**, con los
+        bytes que se guardaron: una reimpresión no vuelve a calcular nada, aunque los
+        precios o el pedido hayan cambiado desde entonces.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/NightclubId'
+        - in: path
+          name: jobId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '202':
+          description: La copia quedó en la cola
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: { $ref: '#/components/schemas/PrintJob' }
+        '400':
+          description: Esa impresora ya no está activa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/print-settings:
+    get:
+      operationId: getPrintSettings
+      tags: [Impresión]
+      summary: Los ajustes de impresión
+      description: |
+        Requiere rol `manager` o `admin`. Contesta valores aunque el club nunca haya
+        guardado esta pantalla.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Los ajustes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settings: { $ref: '#/components/schemas/PrintSettings' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    patch:
+      operationId: updatePrintSettings
+      tags: [Impresión]
+      summary: Prender la comanda por pedido
+      description: |
+        **Requiere rol `admin`**, no basta con `manager`.
+
+        `print_order_tickets` arranca apagado a propósito: un club sin impresoras
+        configuradas no debe empezar a encolar papel que nadie va a recoger. Lo que no
+        se manda no se pisa.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                print_order_tickets: { type: boolean }
+                print_receipts: { type: boolean }
+                max_attempts: { type: integer, minimum: 1, maximum: 10 }
+                header_text: { type: [string, 'null'], maxLength: 120 }
+                footer_text: { type: [string, 'null'], maxLength: 160 }
+      responses:
+        '200':
+          description: Ajustes guardados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settings: { $ref: '#/components/schemas/PrintSettings' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/print-agent/jobs:
+    get:
+      operationId: claimPrintJobs
+      tags: [Impresión]
+      summary: (Agente) Pedir trabajo
+      description: |
+        La usa **el agente de impresión**, no una persona: se identifica con el
+        encabezado `X-Print-Agent-Token` y no lleva sesión.
+
+        Contesta de inmediato aunque esté vacío; el agente vuelve a preguntar en unos
+        segundos. Los bytes viajan en `payload` codificados en base64, porque JSON no
+        transporta un byte `0x1B` sin romperse.
+
+        Dos PCs pueden preguntar a la vez sin que salga el mismo ticket dos veces: el
+        servidor entrega cada trabajo a una sola.
+      security: []
+      parameters:
+        - in: header
+          name: X-Print-Agent-Token
+          required: true
+          schema: { type: string }
+        - in: header
+          name: X-Print-Agent-Version
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 20, default: 5 }
+      responses:
+        '200':
+          description: Los trabajos tomados por este agente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      name: { type: string }
+                  jobs:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/PrintJob'
+                        - type: object
+                          properties:
+                            payload:
+                              type: string
+                              format: byte
+                              description: Los bytes ESC/POS, en base64.
+                            printer: { $ref: '#/components/schemas/Printer' }
+        '401':
+          description: Token de agente inválido o agente apagado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/print-agent/jobs/{jobId}/done:
+    post:
+      operationId: reportPrintJobDone
+      tags: [Impresión]
+      summary: (Agente) El papel salió
+      security: []
+      parameters:
+        - in: header
+          name: X-Print-Agent-Token
+          required: true
+          schema: { type: string }
+        - in: path
+          name: jobId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Anotado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: { $ref: '#/components/schemas/PrintJob' }
+        '401':
+          description: Token de agente inválido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/print-agent/jobs/{jobId}/failed:
+    post:
+      operationId: reportPrintJobFailed
+      tags: [Impresión]
+      summary: (Agente) El papel no salió
+      description: |
+        Aquí el servidor decide qué hacer, en este orden: **reintentar** (sin papel o
+        atascada duran minutos), **desviar** a la impresora de respaldo de esa barra
+        después de dos intentos —un desvío es un trabajo NUEVO, con `rerouted_from`
+        apuntando a la que falló—, o **rendirse** y dejarlo en `failed` con el motivo.
+
+        Un papel que ya viene desviado no se vuelve a desviar: rebotaría entre las dos
+        impresoras de la barra mientras el cliente espera su cuenta.
+      security: []
+      parameters:
+        - in: header
+          name: X-Print-Agent-Token
+          required: true
+          schema: { type: string }
+        - in: path
+          name: jobId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [error]
+              properties:
+                error: { type: string, maxLength: 500, example: la impresora se quedó sin papel }
+      responses:
+        '200':
+          description: Anotado. `job` es el trabajo que sigue vivo, que con un desvío es otro.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: { $ref: '#/components/schemas/PrintJob' }
+                  rerouted:
+                    type: boolean
+                    description: El papel se mandó a la impresora de respaldo de esa barra.
+        '401':
+          description: Token de agente inválido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -12451,3 +12960,119 @@ components:
         passes_total: { type: integer }
         passes_used: { type: integer }
         passes_active: { type: integer }
+
+    PrinterInput:
+      type: object
+      required: [location_id, name, purpose]
+      properties:
+        location_id:
+          type: string
+          format: uuid
+          description: La barra donde está. Tiene que ser un `supply_location` con `kind=bar`.
+        name: { type: string, maxLength: 60 }
+        purpose:
+          type: string
+          enum: [orders, service]
+          description: '`orders` es la PC del bartender; `service` la de meseros.'
+        connection: { type: string, enum: [network, windows], default: network }
+        host:
+          type: [string, 'null']
+          description: Obligatorio con `connection=network`.
+        port: { type: integer, minimum: 1, maximum: 65535, default: 9100 }
+        windows_name:
+          type: [string, 'null']
+          description: Obligatorio con `connection=windows`. Es el nombre con el que se compartió.
+        paper_width: { type: integer, enum: [58, 80], default: 80 }
+        columns:
+          type: integer
+          minimum: 24
+          maximum: 64
+          description: Si no se manda, 48 a 80 mm y 32 a 58 mm.
+        codepage: { type: string, enum: [CP437, CP850, CP858, CP860, CP1252], default: CP850 }
+        has_cutter: { type: boolean, default: true }
+        fallback_id:
+          type: [string, 'null']
+          format: uuid
+          description: A dónde se desvía el papel si esta no contesta.
+
+    Printer:
+      type: object
+      description: |
+        Una impresora térmica del club. El servidor nunca se conecta a ella: solo sabe
+        cómo hablarle para que el agente de la barra le pase los bytes.
+      properties:
+        id: { type: string, format: uuid }
+        nightclub_id: { type: string, format: uuid }
+        location_id: { type: string, format: uuid }
+        location_name: { type: [string, 'null'] }
+        name: { type: string }
+        purpose: { type: string, enum: [orders, service] }
+        connection: { type: string, enum: [network, windows] }
+        host: { type: [string, 'null'] }
+        port: { type: integer }
+        windows_name: { type: [string, 'null'] }
+        paper_width: { type: integer }
+        columns: { type: integer }
+        codepage: { type: string }
+        has_cutter: { type: boolean }
+        fallback_id: { type: [string, 'null'], format: uuid }
+        active: { type: boolean }
+
+    PrintAgent:
+      type: object
+      description: |
+        Una PC del club que imprime por el servidor. `token` solo aparece en la
+        respuesta que la crea: la base guarda únicamente su huella.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        token_hint:
+          type: string
+          description: Los últimos caracteres del token, para distinguir una PC de otra.
+        last_seen_at: { type: [string, 'null'], format: date-time }
+        agent_version: { type: [string, 'null'] }
+        active: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    PrintJob:
+      type: object
+      description: |
+        Un papel en la cola. `payload` (los bytes ESC/POS) no se devuelve nunca salvo
+        al agente que toma el trabajo; `preview` es el mismo ticket en texto plano,
+        para verlo en pantalla y para diagnosticar sin descifrar bytes.
+
+        Ni el contenido ni la impresora de un trabajo se pueden editar, y un trabajo
+        impreso no se borra: ese ticket está en la mano de alguien.
+      properties:
+        id: { type: string, format: uuid }
+        nightclub_id: { type: string, format: uuid }
+        printer_id: { type: string, format: uuid }
+        printer_name: { type: [string, 'null'] }
+        kind: { type: string, enum: [order, bill, receipt, shift_cut, test] }
+        ref_id: { type: [string, 'null'], format: uuid }
+        copies: { type: integer }
+        status: { type: string, enum: [pending, taken, printed, failed] }
+        attempts: { type: integer }
+        last_error: { type: [string, 'null'] }
+        preview: { type: string }
+        taken_by: { type: [string, 'null'], format: uuid }
+        taken_at: { type: [string, 'null'], format: date-time }
+        printed_at: { type: [string, 'null'], format: date-time }
+        rerouted_from:
+          type: [string, 'null']
+          format: uuid
+          description: La impresora que falló, cuando este trabajo es un desvío.
+        created_at: { type: string, format: date-time }
+
+    PrintSettings:
+      type: object
+      properties:
+        print_order_tickets:
+          type: boolean
+          description: Si cada pedido saca su comanda en la barra. Arranca apagado.
+        print_receipts:
+          type: boolean
+          description: Si cada cobro saca su recibo. Arranca prendido.
+        max_attempts: { type: integer, minimum: 1, maximum: 10 }
+        header_text: { type: [string, 'null'] }
+        footer_text: { type: [string, 'null'] }

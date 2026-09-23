@@ -177,6 +177,7 @@
       <button data-tab="taxi" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabTaxi">Taxi</button>
       <button data-tab="inventory" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="inv.tab">Inventario</button>
       <button data-tab="parking" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabParking">Cajones</button>
+      <button data-tab="printing" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="prn.tab">Impresoras</button>
     </nav>
 
     <main class="flex-1 overflow-y-auto p-4 space-y-4">
@@ -640,6 +641,123 @@
 
         <p id="spots-empty" class="text-sm text-white/40 text-center py-6" data-i18n="manager.noSpots" hidden>Todavía no hay cajones dados de alta.</p>
         <div id="spots-list" class="flex flex-wrap gap-2"></div>
+      </div>
+
+      <!--
+        Impresoras (D52). Tiene pestaña propia y no un rincón de "Pagos" porque son
+        cuatro cosas que se consultan juntas cuando algo no sale en papel: qué
+        impresoras hay, qué PCs están vivas, qué tickets se quedaron sin salir, y si
+        la comanda por pedido está prendida.
+      -->
+      <div id="tab-printing" class="space-y-4" hidden>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.printers">Impresoras</p>
+            <button id="btn-prn-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.reload">Actualizar</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="prn.why">Cada barra tiene dos: la de la PC del bartender saca las comandas, la de la PC de meseros saca cuentas y recibos.</p>
+          <p id="prn-empty" class="text-sm text-white/40" data-i18n="prn.none" hidden>Todavía no hay impresoras dadas de alta.</p>
+          <div id="prn-list" class="space-y-2"></div>
+          <p id="prn-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
+        <details class="card rounded-xl p-4">
+          <summary class="text-sm cursor-pointer" data-i18n="prn.addTitle">Dar de alta una impresora</summary>
+          <div class="space-y-3 pt-3">
+            <div>
+              <label class="label" for="prn-location" data-i18n="prn.location">Barra</label>
+              <select id="prn-location" class="field"></select>
+            </div>
+            <div>
+              <label class="label" for="prn-purpose" data-i18n="prn.purpose">Para qué es</label>
+              <select id="prn-purpose" class="field">
+                <option value="orders" data-i18n="prn.pOrders">Comandas (PC del bartender)</option>
+                <option value="service" data-i18n="prn.pService">Cuentas y recibos (PC de meseros)</option>
+              </select>
+            </div>
+            <div>
+              <label class="label" for="prn-name" data-i18n="prn.name">Nombre</label>
+              <input id="prn-name" class="field" maxlength="60" placeholder="Barra baja · bartender">
+            </div>
+            <div>
+              <label class="label" for="prn-connection" data-i18n="prn.connection">Cómo está conectada</label>
+              <select id="prn-connection" class="field">
+                <option value="network" data-i18n="prn.cNetwork">En la red, con su IP</option>
+                <option value="windows" data-i18n="prn.cWindows">Por USB a una PC (Windows)</option>
+              </select>
+            </div>
+            <div id="prn-network-fields" class="grid grid-cols-3 gap-2">
+              <div class="col-span-2">
+                <label class="label" for="prn-host" data-i18n="prn.host">Dirección IP</label>
+                <input id="prn-host" class="field" maxlength="120" placeholder="192.168.1.50" inputmode="decimal">
+              </div>
+              <div>
+                <label class="label" for="prn-port" data-i18n="prn.port">Puerto</label>
+                <input id="prn-port" class="field" type="number" min="1" max="65535" value="9100">
+              </div>
+            </div>
+            <div id="prn-windows-fields" hidden>
+              <label class="label" for="prn-winname" data-i18n="prn.winName">Nombre compartido en Windows</label>
+              <input id="prn-winname" class="field" maxlength="120" placeholder="XP80">
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="label" for="prn-width" data-i18n="prn.width">Ancho del papel</label>
+                <select id="prn-width" class="field">
+                  <option value="80">80 mm</option>
+                  <option value="58">58 mm</option>
+                </select>
+              </div>
+              <div>
+                <label class="label" for="prn-codepage" data-i18n="prn.codepage">Acentos</label>
+                <select id="prn-codepage" class="field">
+                  <option value="CP850">CP850</option>
+                  <option value="CP1252">CP1252</option>
+                  <option value="CP858">CP858</option>
+                  <option value="CP860">CP860</option>
+                  <option value="CP437">CP437</option>
+                </select>
+              </div>
+            </div>
+            <p class="text-[11px] text-white/40" data-i18n="prn.codepageHint">Si la prueba sale con la ñ y los acentos rotos, cambia esta opción y vuelve a probar. No hay forma de saberlo sin imprimir.</p>
+            <label class="flex items-center gap-3 text-sm tap">
+              <input id="prn-cutter" type="checkbox" class="w-5 h-5 accent-emerald-400" checked>
+              <span data-i18n="prn.cutter">Corta el papel sola</span>
+            </label>
+            <p id="prn-add-error" class="text-sm text-red-300" hidden></p>
+            <button id="btn-prn-add" class="ev2-button w-full rounded-lg py-2" data-i18n="prn.add">Dar de alta</button>
+          </div>
+        </details>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.agents">PCs que imprimen</p>
+            <button id="btn-agent-add" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.agentAdd">Nueva PC</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="prn.agentsWhy">El servidor no alcanza las impresoras del club: un programa en una PC de barra las alcanza por él. Con dos, si apagan una la otra sigue sacando todo el papel.</p>
+          <p id="prn-agents-empty" class="text-sm text-white/40" data-i18n="prn.agentsNone" hidden>Ninguna PC está dada de alta todavía. Sin esto no sale ningún papel.</p>
+          <div id="prn-agents" class="space-y-2"></div>
+        </div>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.queue">Últimos tickets</p>
+            <button id="btn-jobs-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.reload">Actualizar</button>
+          </div>
+          <p id="prn-jobs-empty" class="text-sm text-white/40" data-i18n="prn.queueNone" hidden>No se ha mandado imprimir nada todavía.</p>
+          <div id="prn-jobs" class="space-y-2"></div>
+        </div>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.settings">Ajustes</p>
+          <label class="flex items-center gap-3 text-sm tap">
+            <input id="prn-order-tickets" type="checkbox" class="w-5 h-5 accent-emerald-400">
+            <span data-i18n="prn.orderTickets">Imprimir comanda en la barra con cada pedido</span>
+          </label>
+          <p class="text-[11px] text-white/40" data-i18n="prn.orderTicketsWhy">Solo el administrador puede cambiarlo. El recibo de cobro sale siempre.</p>
+          <p id="prn-settings-error" class="text-sm text-red-300" hidden></p>
+        </div>
       </div>
     </main>
   </section>
