@@ -447,6 +447,177 @@ async function printReceipt(client, {
   });
 }
 
+// ---------------------------------------------------------------- el corte de turno
+
+/**
+ * Lo que va en el ticket del corte (D54).
+ *
+ * Todo sale del renglón del corte, que quedó congelado al cerrarlo: los totales por
+ * método de pago, lo esperado, lo declarado y lo contado. Reimprimir dos días después
+ * saca exactamente el mismo papel aunque el empleado haya cobrado mil pesos más desde
+ * entonces, porque no se vuelve a calcular nada.
+ */
+async function cutData(runner, { nightclubId, closingId }) {
+  const { rows } = await runner.query(
+    `SELECT c.id::text AS id, c.shift_id::text AS shift_id, c.role, c.currency,
+            c.started_at, c.ended_at, c.totals,
+            c.cash_collected::text  AS cash_collected,
+            c.drops_total::text     AS drops_total,
+            c.expected_cash::text   AS expected_cash,
+            c.declared_cash::text   AS declared_cash,
+            c.counted_cash::text    AS counted_cash,
+            c.difference::text      AS difference,
+            c.difference_reason, c.declared_notes, c.confirmed_at, c.authorized_role,
+            u.display_name AS user_name,
+            a.display_name AS authorized_by,
+            s.section
+       FROM shift_closings c
+       JOIN users u ON u.id = c.user_id
+       LEFT JOIN users a ON a.id = c.authorized_by
+       LEFT JOIN staff_shifts s ON s.id = c.shift_id
+      WHERE c.id = $1 AND c.nightclub_id = $2`,
+    [closingId, nightclubId]);
+  const corte = rows[0];
+  if (!corte) return null;
+
+  const { rows: retiros } = await runner.query(
+    `SELECT d.amount::text AS amount, d.reason, d.created_at, d.authorized_role,
+            a.display_name AS authorized_by
+       FROM shift_cash_drops d
+       LEFT JOIN users a ON a.id = d.authorized_by
+      WHERE d.shift_id = $1 AND d.status = 'received'
+      ORDER BY d.created_at`,
+    [corte.shift_id]);
+
+  return { ...corte, withdrawals: retiros };
+}
+
+const ROLE_LABEL = {
+  waiter: 'Mesero', bartender: 'Bartender', hostess: 'Anfitriona',
+  manager: 'Gerente', admin: 'Administrador',
+};
+
+function renderCut(t, data, { club, settings }) {
+  header(t, club, settings);
+  t.center().bold().tall('CORTE DE TURNO').normal().boldOff().left();
+  t.row(`Folio ${folio(data.id)}`, localTime(data.confirmed_at, club.timezone));
+  t.rule();
+
+  t.line(`${data.user_name} · ${ROLE_LABEL[data.role] || data.role}`);
+  if (data.section) t.line(`Zona: ${data.section}`);
+  t.row('Entró', localTime(data.started_at, club.timezone));
+  t.row('Salió', localTime(data.ended_at || data.confirmed_at, club.timezone));
+
+  // ---- lo cobrado, por método de pago
+  t.blank().rule();
+  t.bold().line('COBRADO').boldOff();
+  const totales = data.totals || {};
+  for (const l of totales.by_method || []) {
+    const veces = l.count ? ` (${l.count})` : '';
+    t.row(`${METHOD_LABEL[l.method] || l.method}${veces}`, money(l.amount, data.currency));
+  }
+  if (!(totales.by_method || []).length) t.line('No cobró nada en este turno.');
+  t.bold();
+  t.row('Total cobrado', money(totales.total_collected || 0, data.currency));
+  t.boldOff();
+
+  // La propina va aparte y NO se entrega: no es del club.
+  const propinas = totales.tips || {};
+  if (Number(propinas.amount) > 0) {
+    t.row(`Propinas (${propinas.count || 0}) — no se entregan`,
+      money(propinas.amount, data.currency));
+  }
+
+  // ---- los retiros parciales, con su motivo y quién los autorizó
+  if (data.withdrawals.length) {
+    t.blank().rule();
+    t.bold().line('RETIROS PARCIALES').boldOff();
+    for (const r of data.withdrawals) {
+      t.row(localTime(r.created_at, club.timezone).slice(-5), money(r.amount, data.currency));
+      // Sangrados con `raw`: el motivo y el nombre cuelgan del importe de arriba, y
+      // `line` juntaría los espacios que forman esa sangría.
+      for (const l of escpos.wrap(r.reason || 'sin motivo', t.width - 2)) t.raw(`  ${l}`);
+      if (r.authorized_by) t.raw(`  Autorizo: ${r.authorized_by}`.replace('Autorizo', 'Autorizó'));
+    }
+    t.bold();
+    t.row('Total retirado', money(data.drops_total, data.currency));
+    t.boldOff();
+  }
+
+  // ---- el efectivo: lo que tocaba, lo que dijo y lo que se contó
+  t.blank().rule();
+  t.bold().line('EFECTIVO').boldOff();
+  t.row('Efectivo cobrado', money(data.cash_collected, data.currency));
+  if (Number(data.drops_total) > 0) {
+    t.row('Menos retiros', `-${money(data.drops_total, data.currency)}`);
+  }
+  t.bold();
+  t.row('Debía entregar', money(data.expected_cash, data.currency));
+  t.boldOff();
+  t.row('Declaró', money(data.declared_cash, data.currency));
+  t.row('Contado', money(data.counted_cash, data.currency));
+
+  const dif = Number(data.difference);
+  t.rule();
+  t.bold().tall();
+  // A doble tamaño caben la mitad de las columnas, así que el renglón se arma con esa
+  // medida y no con el ancho del papel: si no, el importe se iría al renglón de abajo.
+  t.raw(escpos.twoColumns(dif === 0 ? 'CUADRA' : (dif < 0 ? 'FALTA' : 'SOBRA'),
+    money(Math.abs(dif), data.currency), Math.floor(t.width / 2)));
+  t.normal().boldOff();
+  if (dif !== 0 && data.difference_reason) {
+    t.line(`Motivo: ${data.difference_reason}`);
+  }
+  if (data.declared_notes) t.line(`Nota: ${data.declared_notes}`);
+
+  // ---- las firmas, que es para lo que se imprime en papel
+  t.blank();
+  t.line(`Autorizó: ${data.authorized_by || '—'}`
+    + `${data.authorized_role ? ` (${ROLE_LABEL[data.authorized_role] || data.authorized_role})` : ''}`);
+  t.blank(2);
+  t.line('_______________________');
+  t.line(`${data.user_name}`);
+  t.blank(2);
+  t.line('_______________________');
+  t.line(`${data.authorized_by || 'Gerencia'}`);
+
+  footer(t, settings);
+  t.blank(2).cut();
+}
+
+/**
+ * El ticket del corte, después de cerrarlo.
+ *
+ * Se llama FUERA de la transacción que cierra el turno, y a propósito: el corte ya
+ * está hecho y es definitivo, así que si la impresora falla lo que hay que resolver
+ * es la impresora, no deshacer el cierre. Por eso tampoco usa `enqueueSafely`: aquí
+ * quien llama sí quiere saber si el papel salió, y el corte no corre peligro.
+ */
+async function printShiftCut(runner, { nightclubId, closingId, userId = null }) {
+  const data = await cutData(runner, { nightclubId, closingId });
+  if (!data) return null;
+
+  const printer = await printing.resolvePrinter(runner, {
+    nightclubId, purpose: 'service', section: data.section,
+  });
+  if (!printer) return null;
+
+  const club = await clubOf(runner, nightclubId);
+  const settings = await printing.settingsOf(runner, nightclubId);
+  const job = await printing.enqueue(runner, {
+    nightclubId,
+    printer,
+    kind: 'shift_cut',
+    refId: closingId,
+    createdBy: userId,
+    ...build(printer, (t) => renderCut(t, data, { club, settings })),
+  });
+  await runner.query(
+    'UPDATE shift_closings SET ticket_job_id = $2 WHERE id = $1 AND ticket_job_id IS NULL',
+    [closingId, job.id]);
+  return job;
+}
+
 // ---------------------------------------------------------------- armar
 
 /**
@@ -473,5 +644,6 @@ module.exports = {
   orderData, renderOrder, printOrder,
   billWindow, billData, renderBill, printBill,
   receiptData, renderReceipt, printReceipt,
+  cutData, renderCut, printShiftCut, ROLE_LABEL,
   build,
 };

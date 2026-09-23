@@ -9048,13 +9048,25 @@ paths:
 
   /api/nightclubs/{nightclubId}/shifts/me/cash-drops:
     post:
-      operationId: declareCashDrop
+      operationId: withdrawShiftCash
       tags: [Cortes de turno]
-      summary: Entregar efectivo a media noche
+      summary: Retiro parcial de efectivo, autorizado en el acto
       description: |
         Un mesero con doce mil pesos en la bolsa es un problema de seguridad, no de
-        contabilidad. La entrega **no descuenta nada** hasta que un gerente la cuenta:
-        hasta entonces ese dinero sigue siendo responsabilidad de quien lo trae.
+        contabilidad. Retirar a media noche tiene que ser posible sin cerrar el turno.
+
+        Tres cosas y ninguna opcional: **cuánto**, **por qué**, y el **código de un
+        gerente o un admin** tecleado ahí mismo. El código es su PIN de seis dígitos y
+        **no abre sesión**: autoriza este retiro y nada más, y el aparato sigue siendo
+        del empleado cuando el gerente quita el dedo.
+
+        Como quien autoriza está presente, el dinero queda recibido y contado en el
+        acto. Dejarlo "pendiente de contar" no tendría sentido: quien lo contaría
+        acaba de firmar que lo tiene en la mano.
+
+        Un código equivocado contesta 403 con **un solo mensaje**, sea cual sea el
+        motivo: distinguir "ese PIN no es de nadie" de "ese PIN es de un mesero"
+        permitiría mapear los PIN del club de a uno por intento.
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/NightclubId' }]
       requestBody:
@@ -9063,22 +9075,48 @@ paths:
           application/json:
             schema:
               type: object
-              required: [amount]
+              required: [amount, reason, manager_pin]
               properties:
                 amount: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
-                note: { type: string, maxLength: 200 }
+                reason:
+                  type: string
+                  minLength: 3
+                  maxLength: 200
+                  example: Traía mucho efectivo encima
+                manager_pin:
+                  type: string
+                  pattern: '^\d{6}$'
+                  description: El PIN de un gerente o admin del club, tecleado por él.
       responses:
         '201':
-          description: Entrega declarada
+          description: Retiro hecho
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  drop: { $ref: '#/components/schemas/CashDrop' }
+                  withdrawal:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      amount: { type: string }
+                      remaining:
+                        type: string
+                        description: Lo que le queda por entregar después del retiro.
+                      authorized_by: { type: string }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: Código de autorización inválido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '409':
-          description: No hay turno abierto
+          description: No hay turno abierto, o ese turno ya tiene su corte
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: Retira más efectivo del que trae
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -9087,19 +9125,26 @@ paths:
     get:
       operationId: listCashDrops
       tags: [Cortes de turno]
-      summary: Entregas de efectivo del club
-      description: 'Requiere rol `manager`. Por omisión, primero las que esperan a que alguien las cuente.'
+      summary: Los retiros de efectivo de la noche
+      description: |
+        Requiere rol `manager` o `admin`. Es lo que se revisa para saber por dónde
+        salió el dinero, con el motivo y el nombre de quien lo autorizó. Ya no hay
+        nada que "recibir" aquí: un retiro nace autorizado y contado.
       security: [{ bearerAuth: [] }]
       parameters:
-        - { $ref: '#/components/parameters/NightclubId' }
-        - name: status
-          in: query
+        - $ref: '#/components/parameters/NightclubId'
+        - in: query
+          name: status
           schema: { type: string, enum: [declared, received, rejected] }
-        - { $ref: '#/components/parameters/Limit' }
-        - { $ref: '#/components/parameters/Offset' }
+        - in: query
+          name: hours
+          schema: { type: integer, minimum: 1, maximum: 2160, default: 24 }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
       responses:
         '200':
-          description: Las entregas
+          description: Los retiros
           content:
             application/json:
               schema:
@@ -9110,86 +9155,28 @@ paths:
                     items: { $ref: '#/components/schemas/CashDrop' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
-  /api/nightclubs/{nightclubId}/cash-drops/{dropId}/receive:
-    post:
-      operationId: receiveCashDrop
-      tags: [Cortes de turno]
-      summary: Contar y recibir una entrega
-      description: |
-        Requiere rol `manager`. `counted_amount` es lo que el gerente **contó**; si se
-        omite, se toma lo declarado. Lo contado es lo que descuenta de lo que esa
-        persona debe, no lo declarado.
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { $ref: '#/components/parameters/NightclubId' }
-        - { name: dropId, in: path, required: true, schema: { type: string, format: uuid } }
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                counted_amount: { type: number, minimum: 0, maximum: 1000000 }
-                note: { type: string, maxLength: 200 }
-      responses:
-        '200':
-          description: Entrega recibida
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  drop: { $ref: '#/components/schemas/CashDrop' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409':
-          description: Esa entrega no existe o ya estaba contada
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-
-  /api/nightclubs/{nightclubId}/cash-drops/{dropId}/reject:
-    post:
-      operationId: rejectCashDrop
-      tags: [Cortes de turno]
-      summary: Rechazar una entrega
-      description: 'Requiere rol `manager`. El motivo es obligatorio y queda con su nombre.'
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { $ref: '#/components/parameters/NightclubId' }
-        - { name: dropId, in: path, required: true, schema: { type: string, format: uuid } }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [reason]
-              properties:
-                reason: { type: string, minLength: 5, maxLength: 200 }
-      responses:
-        '200':
-          description: Entrega rechazada
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  drop: { $ref: '#/components/schemas/CashDrop' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
-
   /api/nightclubs/{nightclubId}/shifts/me/closing:
     post:
-      operationId: declareShiftClosing
+      operationId: closeShiftCut
       tags: [Cortes de turno]
-      summary: Declarar mi corte
+      summary: Cerrar el corte del turno, en un acto
       description: |
-        El empleado dice cuánto efectivo entrega. **No cierra el turno**: el turno se
-        cierra cuando el gerente cuenta el dinero y confirma, porque hasta que alguien
-        lo cuenta ese dinero sigue siendo de quien lo trae.
+        El empleado declara lo que entrega, el gerente cuenta delante de él y teclea
+        su código, y el turno queda cerrado. Antes eran dos pasos; ahora es uno,
+        porque en la barra es uno: el gerente ya está parado ahí con el dinero.
 
-        Lo cobrado queda congelado en el corte al declararlo: lo que cobre después es
-        otro turno.
+        **Lo cobrado no lo teclea nadie**: sale de lo que esa persona de verdad cobró.
+        Lo único que se teclea es `declared_cash` (lo que entrega) y `counted_cash`
+        (lo que el gerente contó).
+
+        **La diferencia se mide contra lo que le TOCABA entregar**, no contra lo que
+        declaró. Medir contra lo declarado sería el agujero obvio: declarar de menos y
+        entregar de menos cuadraría perfecto. Una diferencia distinta de cero exige
+        `difference_reason`.
+
+        El ticket se imprime **después** de cerrar y fuera de la transacción: el corte
+        ya es definitivo, así que si la impresora falla lo que hay que resolver es la
+        impresora. Por eso `ticket` puede venir en `null` con el corte hecho.
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/NightclubId' }]
       requestBody:
@@ -9198,22 +9185,48 @@ paths:
           application/json:
             schema:
               type: object
-              required: [declared_cash]
+              required: [declared_cash, counted_cash, manager_pin]
               properties:
                 declared_cash: { type: number, minimum: 0, maximum: 1000000 }
+                counted_cash:
+                  type: number
+                  minimum: 0
+                  maximum: 1000000
+                  description: Lo que el gerente contó de verdad.
+                difference_reason:
+                  type: string
+                  maxLength: 280
+                  description: Obligatorio si lo contado no cuadra con lo que debía entregar.
                 notes: { type: string, maxLength: 280 }
+                manager_pin: { type: string, pattern: '^\d{6}$' }
       responses:
         '201':
-          description: Corte declarado
+          description: Corte cerrado y turno cerrado
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   closing: { $ref: '#/components/schemas/ShiftClosing' }
+                  ticket:
+                    type: [object, 'null']
+                    description: El trabajo de impresión del ticket, o null si no salió.
+                    properties:
+                      job_id: { type: string, format: uuid }
+                      status: { type: string }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: Código de autorización inválido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         '409':
-          description: No hay turno que cortar, o ya se declaró
+          description: No hay turno que cortar, o ese turno ya tiene su corte
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: Falta el motivo de la diferencia, o hay retiros sin contar
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -9271,52 +9284,38 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /api/nightclubs/{nightclubId}/shift-closings/{closingId}/confirm:
+  /api/nightclubs/{nightclubId}/shift-closings/{closingId}/ticket:
     post:
-      operationId: confirmShiftClosing
+      operationId: reprintShiftCutTicket
       tags: [Cortes de turno]
-      summary: Contar el dinero y cerrar el turno
+      summary: Reimprimir el ticket de un corte
       description: |
-        Requiere rol `manager`, y nunca puede ser la misma persona que cobró.
-
-        La diferencia se calcula contra lo que **le tocaba entregar**, no contra lo que
-        declaró: si declara de menos y entrega de menos, el corte lo ve igual. Una
-        diferencia distinta de cero exige motivo.
-
-        No se confirma con entregas parciales sin contar, y al confirmarlo el turno de
-        esa persona queda cerrado.
+        Requiere rol `manager` o `admin`. Saca **exactamente el mismo papel**: el
+        ticket se arma con el renglón del corte, que quedó congelado al cerrarlo. Dos
+        días después, con esa persona habiendo cobrado mil pesos más, el papel dice lo
+        mismo que dijo esa noche.
       security: [{ bearerAuth: [] }]
       parameters:
-        - { $ref: '#/components/parameters/NightclubId' }
-        - { name: closingId, in: path, required: true, schema: { type: string, format: uuid } }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [counted_cash]
-              properties:
-                counted_cash: { type: number, minimum: 0, maximum: 1000000 }
-                reason: { type: string, maxLength: 280 }
+        - $ref: '#/components/parameters/NightclubId'
+        - in: path
+          name: closingId
+          required: true
+          schema: { type: string, format: uuid }
       responses:
-        '200':
-          description: Corte confirmado y turno cerrado
+        '202':
+          description: El ticket quedó en la cola
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  closing: { $ref: '#/components/schemas/ShiftClosing' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422':
-          description: Falta el motivo de la diferencia, o hay entregas sin contar
+                  job: { $ref: '#/components/schemas/PrintJob' }
+        '400':
+          description: No hay impresora para la zona de ese turno, o el corte no existe
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
-
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   # ------------------------------------------------------------------ impresión (D52)
 
@@ -10303,6 +10302,10 @@ components:
 
     CashDrop:
       type: object
+      x-note: |
+        Desde D54 un retiro nace autorizado y contado: `reason` dice por qué salió ese
+        dinero y `authorized_by_name` quién lo autorizó con su código. Los renglones
+        anteriores a esa decisión no los traen, y se quedan como fueron.
       properties:
         id: { type: string, format: uuid }
         amount: { type: string, description: Lo declarado por quien entrega. }
@@ -10316,6 +10319,12 @@ components:
         received_by: { type: [string, 'null'] }
         received_at: { type: [string, 'null'], format: date-time }
         created_at: { type: string, format: date-time }
+        reason:
+          type: [string, 'null']
+          description: Por qué salió ese dinero de la bolsa. Obligatorio en los retiros nuevos.
+        authorized_by_name: { type: [string, 'null'] }
+        authorized_role: { type: [string, 'null'], enum: [manager, admin, null] }
+        authorized_at: { type: [string, 'null'], format: date-time }
 
     ShiftClosing:
       type: object
@@ -10338,9 +10347,23 @@ components:
         counted_cash: { type: [string, 'null'], description: Lo que el gerente contó. }
         difference: { type: [string, 'null'], description: 'Contado menos esperado: negativo es faltante.' }
         difference_reason: { type: [string, 'null'] }
-        status: { type: string, enum: [declared, confirmed] }
+        status:
+          type: string
+          enum: [declared, confirmed]
+          description: |
+            Desde D54 un corte nace `confirmed`: se declara, se cuenta y se cierra en
+            un acto. `declared` solo existe en cortes anteriores a esa decisión.
         confirmed_by_name: { type: [string, 'null'] }
         confirmed_at: { type: [string, 'null'], format: date-time }
+        authorized_by_name:
+          type: [string, 'null']
+          description: El gerente o admin que lo autorizó con su código.
+        authorized_role: { type: [string, 'null'], enum: [manager, admin, null] }
+        authorized_at: { type: [string, 'null'], format: date-time }
+        ticket_job_id:
+          type: [string, 'null']
+          format: uuid
+          description: El papel en que salió, para reimprimirlo exactamente igual.
 
     User:
       type: object

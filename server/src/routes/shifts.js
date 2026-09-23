@@ -23,6 +23,8 @@ const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const cuts = require('../services/shift-closings');
+const managerAuth = require('../services/manager-auth');
+const tickets = require('../services/tickets');
 const events = require('../services/events');
 
 const router = express.Router({ mergeParams: true });
@@ -66,171 +68,199 @@ router.get('/nightclubs/:nightclubId/shifts/me/cut',
 
 // ---------------------------------------------------------------- entregas parciales
 
+/**
+ * Un retiro parcial de efectivo, autorizado en el acto (D54).
+ *
+ * Tres cosas y ninguna opcional: cuánto, por qué, y el código de un gerente o un
+ * admin tecleado ahí mismo. El código NO abre sesión: autoriza este retiro y nada
+ * más, y el aparato sigue siendo del empleado cuando el gerente quita el dedo.
+ *
+ * Como quien autoriza está presente, el dinero queda recibido y contado en el acto.
+ * Dejarlo "pendiente de contar" no tendría sentido: quien lo contaría acaba de
+ * firmar que lo tiene en la mano.
+ */
 router.post('/nightclubs/:nightclubId/shifts/me/cash-drops',
   requireRole(...STAFF_ROLES),
   validate({
     params: z.object({ nightclubId: uuid }),
     body: z.object({
       amount: z.number().positive().max(1_000_000),
-      note: z.string().trim().max(200).optional(),
+      reason: z.string().trim().min(3).max(200),
+      manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos'),
     }),
   }),
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
     const shift = await shiftToCut(pool, { nightclubId, userId: req.user.id });
     if (!shift || shift.ended_at) {
-      throw ApiError.conflict('No tienes un turno abierto: la entrega va dentro del turno');
+      throw ApiError.conflict('No tienes un turno abierto: el retiro va dentro del turno');
     }
-    const { rows } = await pool.query(
-      `INSERT INTO shift_cash_drops (nightclub_id, shift_id, user_id, amount, currency, note)
-       VALUES ($1,$2,$3,$4,'MXN',$5::text)
-       RETURNING id, amount::text AS amount, currency, note, status, created_at`,
-      [nightclubId, shift.id, req.user.id, req.body.amount, req.body.note || null]);
 
-    // El gerente tiene que enterarse AHORA: hay alguien esperando con dinero en la mano.
-    await events.publish({
-      nightclubId,
-      type: 'cash_drop_declared',
-      audience: { roles: ['manager'] },
-      payload: {
-        drop_id: rows[0].id, user_id: req.user.id, amount: rows[0].amount,
-        user_name: req.user.display_name || null,
-      },
+    // El código se verifica ANTES de tocar nada. Si está mal, no se escribió ni un
+    // renglón, y el mensaje no dice por qué está mal.
+    const autoriza = await managerAuth.authorize(pool, {
+      nightclubId, pin: req.body.manager_pin, selfId: req.user.id, ip: req.ip,
     });
-    res.status(201).json({ drop: rows[0] });
-  }));
 
-/** Las entregas que esperan a que alguien las cuente. */
-router.get('/nightclubs/:nightclubId/cash-drops',
-  requireRole('manager'),
-  validate({
-    params: z.object({ nightclubId: uuid }),
-    query: pagination.extend({
-      status: z.enum(['declared', 'received', 'rejected']).optional(),
-    }),
-  }),
-  asyncHandler(async (req, res) => {
-    const { rows } = await pool.query(
-      `SELECT d.id, d.amount::text AS amount, d.counted_amount::text AS counted_amount,
-              d.currency, d.note, d.status, d.rejection_reason, d.created_at, d.received_at,
-              d.user_id, u.display_name AS user_name, u.role,
-              r.display_name AS received_by_name
-         FROM shift_cash_drops d
-         JOIN users u ON u.id = d.user_id
-         LEFT JOIN users r ON r.id = d.received_by
-        WHERE d.nightclub_id = $1 AND ($2::text IS NULL OR d.status = $2::text)
-        ORDER BY d.status = 'declared' DESC, d.created_at DESC
-        LIMIT $3 OFFSET $4`,
-      [req.params.nightclubId, req.query.status || null, req.query.limit, req.query.offset]);
-    res.json({ drops: rows });
-  }));
-
-router.post('/nightclubs/:nightclubId/cash-drops/:dropId/receive',
-  requireRole('manager'),
-  validate({
-    params: z.object({ nightclubId: uuid, dropId: uuid }),
-    body: z.object({
-      // Lo que el gerente CONTÓ. Por omisión, lo declarado: en la mayoría de las
-      // entregas coincide, y obligar a teclearlo otra vez invita a teclearlo mal.
-      counted_amount: z.number().min(0).max(1_000_000).optional(),
-      note: z.string().trim().max(200).optional(),
-    }).default({}),
-  }),
-  asyncHandler(async (req, res) => {
-    const { nightclubId, dropId } = req.params;
-    const { rows } = await pool.query(
-      `UPDATE shift_cash_drops
-          SET status = 'received',
-              counted_amount = COALESCE($3::numeric, amount),
-              received_by = $4, received_at = now(), updated_at = now()
-        WHERE id = $1 AND nightclub_id = $2 AND status = 'declared'
-        RETURNING id, user_id, amount::text AS amount, counted_amount::text AS counted_amount,
-                  currency, status`,
-      [dropId, nightclubId, req.body.counted_amount ?? null, req.user.id]);
-    if (rows.length === 0) {
-      throw ApiError.conflict('Esa entrega no existe o ya estaba contada');
-    }
-    const drop = rows[0];
-    await events.publish({
-      nightclubId,
-      type: 'cash_drop_received',
-      audience: { roles: ['manager'], userIds: [drop.user_id] },
-      payload: { drop_id: drop.id, counted_amount: drop.counted_amount },
-    });
-    res.json({ drop });
-  }));
-
-router.post('/nightclubs/:nightclubId/cash-drops/:dropId/reject',
-  requireRole('manager'),
-  validate({
-    params: z.object({ nightclubId: uuid, dropId: uuid }),
-    body: z.object({ reason: z.string().trim().min(5).max(200) }),
-  }),
-  asyncHandler(async (req, res) => {
-    const { rows } = await pool.query(
-      `UPDATE shift_cash_drops
-          SET status = 'rejected', rejection_reason = $3::text,
-              received_by = $4, received_at = now(), updated_at = now()
-        WHERE id = $1 AND nightclub_id = $2 AND status = 'declared'
-        RETURNING id, user_id, status, rejection_reason`,
-      [req.params.dropId, req.params.nightclubId, req.body.reason, req.user.id]);
-    if (rows.length === 0) throw ApiError.conflict('Esa entrega no existe o ya estaba resuelta');
-    await events.publish({
-      nightclubId: req.params.nightclubId,
-      type: 'cash_drop_rejected',
-      audience: { roles: ['manager'], userIds: [rows[0].user_id] },
-      payload: { drop_id: rows[0].id, reason: rows[0].rejection_reason },
-    });
-    res.json({ drop: rows[0] });
-  }));
-
-// ---------------------------------------------------------------- el corte
-
-router.post('/nightclubs/:nightclubId/shifts/me/closing',
-  requireRole(...STAFF_ROLES),
-  validate({
-    params: z.object({ nightclubId: uuid }),
-    body: z.object({
-      declared_cash: z.number().min(0).max(1_000_000),
-      notes: z.string().trim().max(280).optional(),
-    }),
-  }),
-  asyncHandler(async (req, res) => {
-    const { nightclubId } = req.params;
     const client = await pool.connect();
+    let hecho;
     try {
       await client.query('BEGIN');
-      const shift = await shiftToCut(client, { nightclubId, userId: req.user.id });
-      if (!shift) throw ApiError.conflict('No tienes un turno que cortar');
-      const hecho = await cuts.declare(client, {
+      hecho = await cuts.withdraw(client, {
         nightclubId,
         shift,
-        role: req.user.role,
-        declaredCash: req.body.declared_cash,
-        notes: req.body.notes,
+        amount: req.body.amount,
+        reason: req.body.reason,
+        authorizer: autoriza,
       });
       await client.query('COMMIT');
-      await events.publish({
-        nightclubId,
-        type: 'shift_closing_declared',
-        audience: { roles: ['manager'] },
-        payload: {
-          closing_id: hecho.id, user_id: req.user.id,
-          declared_cash: Number(req.body.declared_cash).toFixed(2),
-          expected_cash: hecho.expected_cash,
-        },
-      });
-      const detalle = await pool.query(
-        `SELECT id, status, declared_cash::text AS declared_cash,
-                expected_cash::text AS expected_cash, declared_at
-           FROM shift_closings WHERE id = $1`, [hecho.id]);
-      res.status(201).json({ closing: detalle.rows[0] });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       throw err;
     } finally {
       client.release();
     }
+
+    await events.publish({
+      nightclubId,
+      type: 'cash_withdrawn',
+      audience: { roles: ['manager', 'admin'], userIds: [req.user.id] },
+      payload: {
+        drop_id: hecho.id,
+        user_id: req.user.id,
+        user_name: req.user.display_name || null,
+        amount: hecho.amount,
+        reason: req.body.reason,
+        authorized_by: autoriza.name,
+      },
+    });
+    res.status(201).json({ withdrawal: hecho });
+  }));
+
+/**
+ * Los retiros de efectivo de la noche, con su motivo y quién los autorizó.
+ *
+ * Es lo que el gerente revisa cuando quiere saber por dónde salió el dinero antes de
+ * los cortes. Ya no hay nada que "recibir" aquí: desde D54 un retiro nace autorizado
+ * y contado, porque quien lo autoriza está presente.
+ */
+router.get('/nightclubs/:nightclubId/cash-drops',
+  requireRole('manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: pagination.extend({
+      status: z.enum(['declared', 'received', 'rejected']).optional(),
+      hours: z.coerce.number().int().min(1).max(24 * 90).default(24),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `SELECT d.id, d.amount::text AS amount, d.counted_amount::text AS counted_amount,
+              d.currency, d.note, d.status, d.rejection_reason, d.created_at, d.received_at,
+              d.reason, d.authorized_at, d.authorized_role,
+              d.user_id, u.display_name AS user_name, u.role,
+              r.display_name AS received_by_name,
+              a.display_name AS authorized_by_name
+         FROM shift_cash_drops d
+         JOIN users u ON u.id = d.user_id
+         LEFT JOIN users r ON r.id = d.received_by
+         LEFT JOIN users a ON a.id = d.authorized_by
+        WHERE d.nightclub_id = $1 AND ($2::text IS NULL OR d.status = $2::text)
+          AND d.created_at > now() - make_interval(hours => $3)
+        ORDER BY d.created_at DESC
+        LIMIT $4 OFFSET $5`,
+      [req.params.nightclubId, req.query.status || null, req.query.hours,
+        req.query.limit, req.query.offset]);
+    res.json({ drops: rows });
+  }));
+
+// ---------------------------------------------------------------- el corte
+
+/**
+ * El corte del turno, en un solo acto (D54).
+ *
+ * El empleado declara lo que entrega, el gerente cuenta delante de él y teclea su
+ * código, y el turno queda cerrado. Antes eran dos pasos y el dueño pidió que fuera
+ * uno, porque en la barra es uno: el gerente ya está parado ahí con el dinero.
+ *
+ * El ticket se imprime DESPUÉS de cerrar, fuera de la transacción: el corte ya es
+ * definitivo, y si la impresora falla lo que hay que resolver es la impresora, no
+ * deshacer el cierre. Por eso la respuesta dice aparte si el papel salió.
+ */
+router.post('/nightclubs/:nightclubId/shifts/me/closing',
+  requireRole(...STAFF_ROLES),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      declared_cash: z.number().min(0).max(1_000_000),
+      counted_cash: z.number().min(0).max(1_000_000),
+      difference_reason: z.string().trim().max(280).optional(),
+      notes: z.string().trim().max(280).optional(),
+      manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos'),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const shift = await shiftToCut(pool, { nightclubId, userId: req.user.id });
+    if (!shift) throw ApiError.conflict('No tienes un turno que cortar');
+
+    const autoriza = await managerAuth.authorize(pool, {
+      nightclubId, pin: req.body.manager_pin, selfId: req.user.id, ip: req.ip,
+    });
+
+    const client = await pool.connect();
+    let hecho;
+    try {
+      await client.query('BEGIN');
+      hecho = await cuts.close(client, {
+        nightclubId,
+        shift,
+        role: req.user.role,
+        declaredCash: req.body.declared_cash,
+        countedCash: req.body.counted_cash,
+        reason: req.body.difference_reason,
+        notes: req.body.notes,
+        authorizer: autoriza,
+      });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    await events.publish({
+      nightclubId,
+      type: 'shift_closed',
+      audience: { roles: ['manager', 'admin'], userIds: [req.user.id] },
+      payload: {
+        closing_id: hecho.id,
+        user_id: req.user.id,
+        user_name: req.user.display_name || null,
+        expected_cash: hecho.expected_cash,
+        counted_cash: hecho.counted_cash,
+        difference: hecho.difference,
+        authorized_by: autoriza.name,
+      },
+    });
+
+    // El papel. Si no sale, el corte sigue hecho y la respuesta lo dice: el gerente
+    // reimprime desde su panel cuando la impresora vuelva.
+    let ticket = null;
+    try {
+      ticket = await tickets.printShiftCut(pool, {
+        nightclubId, closingId: hecho.id, userId: req.user.id,
+      });
+    } catch (err) {
+      req.log?.warn?.({ err }, 'no se pudo imprimir el corte');
+    }
+
+    const { rows } = await pool.query(`${CLOSING_SELECT} WHERE c.id = $1`, [hecho.id]);
+    res.status(201).json({
+      closing: rows[0],
+      ticket: ticket ? { job_id: ticket.id, status: ticket.status } : null,
+    });
   }));
 
 const CLOSING_SELECT = `
@@ -240,10 +270,13 @@ const CLOSING_SELECT = `
          c.declared_cash::text AS declared_cash, c.declared_notes, c.declared_at,
          c.counted_cash::text AS counted_cash, c.difference::text AS difference,
          c.difference_reason, c.status, c.confirmed_at,
-         u.display_name AS user_name, m.display_name AS confirmed_by_name
+         c.authorized_at, c.authorized_role, c.ticket_job_id,
+         u.display_name AS user_name, m.display_name AS confirmed_by_name,
+         a.display_name AS authorized_by_name
     FROM shift_closings c
     JOIN users u ON u.id = c.user_id
-    LEFT JOIN users m ON m.id = c.confirmed_by`;
+    LEFT JOIN users m ON m.id = c.confirmed_by
+    LEFT JOIN users a ON a.id = c.authorized_by`;
 
 router.get('/nightclubs/:nightclubId/shift-closings',
   requireRole('manager'),
@@ -282,43 +315,27 @@ router.get('/nightclubs/:nightclubId/shift-closings/:closingId',
     res.json({ closing: corte, drops: await cuts.dropsOf(pool, corte.shift_id) });
   }));
 
-router.post('/nightclubs/:nightclubId/shift-closings/:closingId/confirm',
-  requireRole('manager'),
-  validate({
-    params: z.object({ nightclubId: uuid, closingId: uuid }),
-    body: z.object({
-      counted_cash: z.number().min(0).max(1_000_000),
-      reason: z.string().trim().max(280).optional(),
-    }),
-  }),
+/**
+ * Reimprimir el ticket de un corte.
+ *
+ * Saca EXACTAMENTE el mismo papel: el ticket se arma de nuevo con el renglón del
+ * corte, que quedó congelado al cerrarlo. Dos días después, con esa persona habiendo
+ * cobrado mil pesos más, el papel dice lo mismo que dijo esa noche.
+ */
+router.post('/nightclubs/:nightclubId/shift-closings/:closingId/ticket',
+  requireRole('manager', 'admin'),
+  validate({ params: z.object({ nightclubId: uuid, closingId: uuid }) }),
   asyncHandler(async (req, res) => {
-    const { nightclubId, closingId } = req.params;
-    const client = await pool.connect();
-    let hecho;
-    try {
-      await client.query('BEGIN');
-      hecho = await cuts.confirm(client, {
-        nightclubId,
-        closingId,
-        countedCash: req.body.counted_cash,
-        reason: req.body.reason,
-        managerId: req.user.id,
-      });
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw err;
-    } finally {
-      client.release();
-    }
-    await events.publish({
-      nightclubId,
-      type: 'shift_closing_confirmed',
-      audience: { roles: ['manager'], userIds: [hecho.userId] },
-      payload: { closing_id: closingId, difference: hecho.difference },
+    const job = await tickets.printShiftCut(pool, {
+      nightclubId: req.params.nightclubId,
+      closingId: req.params.closingId,
+      userId: req.user.id,
     });
-    const { rows } = await pool.query(`${CLOSING_SELECT} WHERE c.id = $1`, [closingId]);
-    res.json({ closing: rows[0] });
+    if (!job) {
+      throw ApiError.badRequest(
+        'No hay una impresora de cuentas para la zona de ese turno, o el corte no existe');
+    }
+    res.status(202).json({ job });
   }));
 
 module.exports = router;

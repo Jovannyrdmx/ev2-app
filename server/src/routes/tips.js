@@ -155,9 +155,11 @@ router.post('/nightclubs/:nightclubId/staff/shifts/end',
       [req.user.id, req.params.nightclubId]);
     if (abierto.rowCount === 0) throw ApiError.conflict('No tienes un turno abierto');
 
-    // Quien cobró dinero no cierra su turno sin corte (D51). Irse con el efectivo del
-    // club en la bolsa y el turno cerrado es exactamente lo que el corte existe para
-    // impedir; el turno lo cierra el gerente al contar el dinero.
+    // Quien cobró dinero no cierra su turno sin corte (D51, D54). Irse con el efectivo
+    // del club en la bolsa y el turno cerrado es exactamente lo que el corte existe
+    // para impedir. Desde D54 el corte se hace en un acto —el gerente cuenta y teclea
+    // su código ahí mismo— y al cerrarlo el turno queda cerrado solo, así que quien
+    // llega aquí con dinero cobrado es alguien que todavía no lo ha hecho.
     const resumen = await shiftCuts.shiftSummary(pool, {
       nightclubId: req.params.nightclubId, shift: abierto.rows[0],
     });
@@ -165,13 +167,8 @@ router.post('/nightclubs/:nightclubId/staff/shifts/end',
       if (!resumen.closing) {
         throw ApiError.unprocessable(
           `Cobraste ${resumen.totals.total_collected} en este turno: haz tu corte antes de `
-          + 'cerrarlo. Al confirmarlo el gerente, el turno se cierra solo.',
+          + 'cerrarlo. Al cerrarlo, el turno se cierra solo.',
           { cash_to_hand: resumen.cash_to_hand, total_collected: resumen.totals.total_collected });
-      }
-      if (resumen.closing.status !== 'confirmed') {
-        throw ApiError.unprocessable(
-          'Tu corte está declarado y falta que el gerente cuente el dinero. '
-          + 'Al confirmarlo, el turno se cierra solo.');
       }
     }
 

@@ -145,9 +145,12 @@ async function dropsOf(runner, shiftId) {
   const { rows } = await runner.query(
     `SELECT d.id, d.amount::text AS amount, d.counted_amount::text AS counted_amount,
             d.currency, d.note, d.status, d.rejection_reason, d.created_at, d.received_at,
-            u.display_name AS received_by_name
+            d.reason, d.authorized_at, d.authorized_role,
+            u.display_name AS received_by_name,
+            a.display_name AS authorized_by_name
        FROM shift_cash_drops d
        LEFT JOIN users u ON u.id = d.received_by
+       LEFT JOIN users a ON a.id = d.authorized_by
       WHERE d.shift_id = $1
       ORDER BY d.created_at`,
     [shiftId]);
@@ -162,6 +165,12 @@ async function dropsOf(runner, shiftId) {
     created_at: r.created_at,
     received_at: r.received_at,
     received_by: r.received_by_name || null,
+    // Por qué salió ese dinero y quién lo autorizó (D54). Van juntos a propósito:
+    // un motivo sin nombre detrás es una frase que cualquiera pudo escribir.
+    reason: r.reason,
+    authorized_by: r.authorized_by_name || null,
+    authorized_role: r.authorized_role,
+    authorized_at: r.authorized_at,
   }));
 }
 
@@ -206,81 +215,124 @@ async function shiftSummary(runner, { nightclubId, shift }) {
 }
 
 /**
- * Declara el corte: el empleado dice cuánto efectivo entrega.
+ * Un retiro parcial de efectivo, autorizado en el acto (D54).
  *
- * NO cierra el turno. El turno se cierra cuando el gerente cuenta el dinero y
- * confirma: mientras nadie lo haya contado, ese dinero sigue siendo de quien lo trae,
- * y un turno cerrado diría lo contrario.
+ * El gerente está ahí tecleando su código, así que recibe el dinero en ese mismo
+ * momento: el retiro nace `received`, con lo contado igual a lo entregado y con su
+ * nombre. No tiene sentido dejarlo "pendiente de contar" cuando quien lo contaría
+ * acaba de firmar que lo tiene en la mano.
+ *
+ * `authorizer` ya viene verificado por `manager-auth`: aquí no se ve ningún PIN.
  */
-async function declare(client, { nightclubId, shift, role, declaredCash, notes }) {
+async function withdraw(client, {
+  nightclubId, shift, amount, reason, authorizer, currency = 'MXN',
+}) {
   const resumen = await shiftSummary(client, { nightclubId, shift });
-  if (resumen.closing) {
-    throw ApiError.conflict(resumen.closing.status === 'confirmed'
-      ? 'El corte de ese turno ya está confirmado'
-      : 'Ya declaraste tu corte: falta que el gerente lo cuente');
+  if (resumen.closing) throw ApiError.conflict('Ese turno ya tiene su corte hecho');
+
+  const monto = round2(Number(amount));
+  const disponible = Number(resumen.cash_to_hand);
+  if (!Number.isFinite(monto) || monto <= 0) {
+    throw ApiError.unprocessable('El monto del retiro tiene que ser mayor que cero');
   }
-  const esperado = Number(resumen.cash_to_hand);
+  // Retirar de más no es un descuido: o el número está mal tecleado, o ese dinero no
+  // es del club. Las dos cosas se paran antes de que alguien suelte los billetes.
+  if (monto > disponible) {
+    throw ApiError.unprocessable(
+      `Solo trae ${money(disponible)} en efectivo del club; no se pueden retirar ${money(monto)}.`,
+      { available: money(disponible) });
+  }
+
   const { rows } = await client.query(
-    `INSERT INTO shift_closings (nightclub_id, shift_id, user_id, role, started_at, ended_at,
-                                 currency, totals, cash_collected, drops_total, expected_cash,
-                                 declared_cash, declared_notes)
-     VALUES ($1,$2,$3,$4::text,$5,COALESCE($6, now()),$7::text,$8::jsonb,$9,$10,$11,$12,$13)
+    `INSERT INTO shift_cash_drops
+       (nightclub_id, shift_id, user_id, amount, currency, reason, status,
+        counted_amount, received_by, received_at,
+        authorized_by, authorized_at, authorized_role)
+     VALUES ($1,$2,$3,$4,$5::text,$6::text,'received',$4,$7, now(), $7, now(), $8::text)
      RETURNING id`,
-    [nightclubId, shift.id, shift.user_id, role, shift.started_at, shift.ended_at,
-      resumen.totals.currency, JSON.stringify(resumen.totals), resumen.totals.cash_collected,
-      resumen.drops_received, esperado.toFixed(2), Number(declaredCash).toFixed(2),
-      notes || null]);
-  return { id: rows[0].id, expected_cash: money(esperado) };
+    [nightclubId, shift.id, shift.user_id, monto.toFixed(2), currency,
+      String(reason).trim(), authorizer.id, authorizer.role]);
+
+  return {
+    id: rows[0].id,
+    amount: money(monto),
+    remaining: money(round2(disponible - monto)),
+    authorized_by: authorizer.name,
+  };
 }
 
 /**
- * El gerente cuenta el dinero y cierra el turno.
+ * El corte del turno, en un solo acto (D54).
  *
- * La diferencia se calcula contra lo ESPERADO, no contra lo declarado: si el empleado
- * declara de menos y entrega de menos, el corte tiene que verlo igual.
+ * El empleado declara lo que entrega, el gerente cuenta delante de él y teclea su
+ * código, y ahí queda cerrado. Antes eran dos pasos —declarar y, después, que el
+ * gerente confirmara en su panel—; el dueño pidió que fuera uno, porque en la barra
+ * es uno: el gerente ya está parado ahí con el dinero en la mano.
+ *
+ * Lo que NO cambió, porque es el punto entero de la función:
+ *
+ *   * Lo cobrado no lo teclea nadie: sale de lo que esa persona de verdad cobró.
+ *   * La diferencia se mide contra lo que le TOCABA entregar, no contra lo que
+ *     declaró. Medir contra lo declarado sería el agujero obvio: declarar de menos y
+ *     entregar de menos cuadraría perfecto.
+ *   * Quien entrega no autoriza. Lo impide `manager-auth`, y también la base.
  */
-async function confirm(client, { nightclubId, closingId, countedCash, reason, managerId }) {
-  const { rows } = await client.query(
-    `SELECT c.id, c.shift_id, c.user_id, c.expected_cash::text AS expected_cash, c.status,
-            c.currency
-       FROM shift_closings c
-      WHERE c.id = $1 AND c.nightclub_id = $2 FOR UPDATE`,
-    [closingId, nightclubId]);
-  if (rows.length === 0) throw ApiError.notFound('Ese corte no existe');
-  const corte = rows[0];
-  if (corte.status === 'confirmed') throw ApiError.conflict('Ese corte ya está confirmado');
-
-  const pendientes = pendingDrops(await dropsOf(client, corte.shift_id));
+async function close(client, {
+  nightclubId, shift, role, declaredCash, countedCash, reason, notes, authorizer,
+}) {
+  const resumen = await shiftSummary(client, { nightclubId, shift });
+  if (resumen.closing) {
+    throw ApiError.conflict('El corte de ese turno ya está hecho');
+  }
+  const pendientes = pendingDrops(resumen.drops);
   if (pendientes.length > 0) {
     throw ApiError.unprocessable(
-      `Hay ${pendientes.length} entrega(s) de efectivo sin contar en ese turno. `
-      + 'Recíbelas o recházalas antes de cerrar el corte.',
+      `Hay ${pendientes.length} retiro(s) de efectivo sin contar en ese turno.`,
       { pending_drops: pendientes.map((d) => d.id) });
   }
 
-  const diferencia = round2(Number(countedCash) - Number(corte.expected_cash));
-  if (diferencia !== 0 && !reason) {
+  const esperado = Number(resumen.cash_to_hand);
+  const contado = round2(Number(countedCash));
+  const diferencia = round2(contado - esperado);
+  if (diferencia !== 0 && (!reason || String(reason).trim().length < 5)) {
     throw ApiError.unprocessable(
-      `${diferencia < 0 ? 'Falta' : 'Sobra'} dinero (${Math.abs(diferencia).toFixed(2)}). `
-      + 'Escribe el motivo: un faltante sin explicación es lo que este corte existe para evitar.');
+      `${diferencia < 0 ? 'Falta' : 'Sobra'} dinero (${money(Math.abs(diferencia))}). `
+      + 'Escribe el motivo: un faltante sin explicación es lo que este corte existe para evitar.',
+      { difference: money(diferencia), expected: money(esperado) });
   }
 
-  await client.query(
-    `UPDATE shift_closings
-        SET counted_cash = $2, difference = $3, difference_reason = $4::text,
-            status = 'confirmed', confirmed_by = $5, confirmed_at = now(), updated_at = now()
-      WHERE id = $1`,
-    [corte.id, Number(countedCash).toFixed(2), diferencia.toFixed(2), reason || null, managerId]);
+  const { rows } = await client.query(
+    `INSERT INTO shift_closings (nightclub_id, shift_id, user_id, role, started_at, ended_at,
+                                 currency, totals, cash_collected, drops_total, expected_cash,
+                                 declared_cash, declared_notes,
+                                 counted_cash, difference, difference_reason,
+                                 status, confirmed_by, confirmed_at,
+                                 authorized_by, authorized_at, authorized_role)
+     VALUES ($1,$2,$3,$4::text,$5,COALESCE($6, now()),$7::text,$8::jsonb,$9,$10,$11,$12,$13,
+             $14,$15,$16::text,'confirmed',$17, now(), $17, now(), $18::text)
+     RETURNING id`,
+    [nightclubId, shift.id, shift.user_id, role, shift.started_at, shift.ended_at,
+      resumen.totals.currency, JSON.stringify(resumen.totals), resumen.totals.cash_collected,
+      resumen.drops_received, esperado.toFixed(2), round2(Number(declaredCash)).toFixed(2),
+      notes || null,
+      contado.toFixed(2), diferencia.toFixed(2), reason ? String(reason).trim() : null,
+      authorizer.id, authorizer.role]);
 
-  // El corte es el último paso del turno: al confirmarlo, el turno queda cerrado.
+  // El corte es el último paso del turno: al cerrarlo, el turno queda cerrado.
   await client.query(
-    'UPDATE staff_shifts SET ended_at = COALESCE(ended_at, now()) WHERE id = $1',
-    [corte.shift_id]);
+    'UPDATE staff_shifts SET ended_at = COALESCE(ended_at, now()) WHERE id = $1', [shift.id]);
 
-  return { difference: money(diferencia), userId: corte.user_id, shiftId: corte.shift_id };
+  return {
+    id: rows[0].id,
+    expected_cash: money(esperado),
+    counted_cash: money(contado),
+    difference: money(diferencia),
+    authorized_by: authorizer.name,
+  };
 }
 
 module.exports = {
   CASH_METHODS, COLLECTING_ROLES,
-  collected, dropsOf, receivedTotal, pendingDrops, shiftSummary, declare, confirm, money, round2,
+  collected, dropsOf, receivedTotal, pendingDrops, shiftSummary,
+  withdraw, close, money, round2,
 };

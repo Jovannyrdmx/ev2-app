@@ -160,7 +160,7 @@ hace que el corte del turno cuadre sin discutir.
 | **Comanda** | Se **paga** un pedido — pagar es lo que lo manda a la barra | `orders` de esa barra | Mesa en grande, cantidades en columna, **sin precios** |
 | **Cuenta** | El mesero pica "Cuenta" | `service` de esa barra | Todo lo de la mesa, lo pagado y lo que falta |
 | **Recibo** | Entra el dinero, por cualquiera de los tres caminos | `service` de esa barra | Método de pago, folio del voucher, "PAGADO" |
-| **Corte de turno** | El empleado cierra su turno | `service` de esa barra | (parte C) |
+| **Corte de turno** | El empleado cierra su turno, con un gerente autorizando | `service` de esa barra | Cobros por método, propinas aparte, retiros con su motivo, esperado/declarado/contado y las dos firmas |
 
 ### La comanda no lleva precios
 
@@ -195,6 +195,17 @@ agregue un cuarto camino de cobro y se quede sin comprobante.
 
 Se puede apagar desde **Impresoras → Ajustes**, pero viene prendido: es el respaldo de
 que ese dinero entró, y es lo que hace que el corte del turno cuadre sin discutir.
+
+### El ticket del corte es el único que puede no salir sin avisar bajito
+
+Los otros tres se encolan dentro de la transacción que los origina. El del corte no:
+se imprime **después** de cerrar, fuera de la transacción, porque el corte ya es
+definitivo —el dinero se contó, las dos personas lo vieron— y si la impresora falla lo
+que hay que resolver es la impresora, no deshacer el cierre.
+
+Por eso la respuesta del cierre trae `ticket: null` cuando el papel no salió, y el
+gerente lo reimprime desde su panel cuando la impresora vuelva. Sale **exactamente el
+mismo papel**: se arma con el renglón del corte, que quedó congelado al cerrarlo.
 
 ### Que no salga un papel nunca detiene el club
 

@@ -42,30 +42,50 @@
   const isCash = (method) => String(method) === 'cash';
 
   /**
-   * Por qué no se puede entregar ese efectivo. Devuelve la clave del motivo o null.
+   * Por qué no se puede hacer ese retiro. Devuelve la clave del motivo o null.
    *
-   * Entregar de más no es un descuido: o el número está mal tecleado, o ese dinero no
+   * Retirar de más no es un descuido: o el número está mal tecleado, o ese dinero no
    * es del club. Las dos cosas se paran antes de que alguien suelte los billetes.
    */
-  function dropBlocker(amount, cut) {
+  function dropBlocker(amount, cut, { reason = '', pin = '' } = {}) {
     const n = Number(amount);
     if (!Number.isFinite(n) || n <= 0) return 'cut.errAmount';
     if (!cut || !cut.shift) return 'cut.errNoShift';
     if (cut.shift.ended_at) return 'cut.errShiftClosed';
     if (n > Number(cut.cash_to_hand)) return 'cut.errTooMuch';
+    // El motivo y el código no son formalidades: son la función entera. Un retiro sin
+    // ellos es exactamente el hueco que esto vino a tapar.
+    if (String(reason).trim().length < 3) return 'cut.errReason';
+    if (!/^\d{6}$/.test(String(pin))) return 'cut.errPin';
     return null;
   }
 
-  /** Por qué no se puede declarar el corte todavía. */
-  function closeBlocker(amount, cut) {
-    const n = Number(amount);
+  /**
+   * Por qué no se puede cerrar el corte todavía.
+   *
+   * `counted` es lo que el gerente contó, y la diferencia se mide contra lo que la
+   * persona DEBÍA entregar —no contra lo que declaró—, igual que en el servidor.
+   */
+  function closeBlocker(declared, cut, { counted = null, reason = '', pin = '' } = {}) {
+    const n = Number(declared);
     if (!Number.isFinite(n) || n < 0) return 'cut.errAmount';
     if (!cut || !cut.shift) return 'cut.errNoShift';
     if (cut.closing) return 'cut.errAlready';
+    const contado = counted === null || counted === '' ? n : Number(counted);
+    if (!Number.isFinite(contado) || contado < 0) return 'cut.errCounted';
+    if (!/^\d{6}$/.test(String(pin))) return 'cut.errPin';
+    const diferencia = Math.round((contado - Number(cut.cash_to_hand)) * 100) / 100;
+    if (diferencia !== 0 && String(reason).trim().length < 5) return 'cut.errDiffReason';
     return null;
   }
 
-  /** Lo que el corte enseña, en el orden en que se lee. */
+  /** Cuánto se desvía lo contado de lo que esa persona debía entregar. */
+  function difference(counted, cut) {
+    if (!cut) return 0;
+    return Math.round((Number(counted) - Number(cut.cash_to_hand)) * 100) / 100;
+  }
+
+    /** Lo que el corte enseña, en el orden en que se lee. */
   function lines(cut, t) {
     if (!cut || !cut.totals) return [];
     const out = cut.totals.by_method.map((l) => ({
@@ -87,8 +107,9 @@
   /** El estado del corte, dicho en una línea. */
   function statusKey(cut) {
     if (!cut || !cut.shift) return 'cut.noShift';
-    if (!cut.closing) return 'cut.open';
-    return cut.closing.status === 'confirmed' ? 'cut.confirmed' : 'cut.waitingManager';
+    // Desde D54 no existe el estado intermedio: el corte se hace en un acto, con el
+    // gerente presente, o no se ha hecho.
+    return cut.closing ? 'cut.confirmed' : 'cut.open';
   }
 
   // ---------------------------------------------------------------- el cuadro
@@ -130,6 +151,18 @@
         <div class="grid grid-cols-2 gap-2 pt-1">
           <input id="cut-amount" type="number" min="0" step="50" inputmode="decimal"
                  class="px-3 py-3 rounded-xl bg-white/5 border border-white/10 outline-none text-center col-span-2">
+          <input id="cut-counted" type="number" min="0" step="50" inputmode="decimal"
+                 class="px-3 py-3 rounded-xl bg-white/5 border border-white/10 outline-none text-center col-span-2">
+          <input id="cut-reason" type="text" maxlength="200"
+                 class="px-3 py-3 rounded-xl bg-white/5 border border-white/10 outline-none col-span-2">
+          <!--
+            El código del gerente, enmascarado: lo teclea él enfrente del empleado.
+            Se borra en cuanto se usa, salga bien o mal, porque el aparato sigue
+            siendo del mesero cuando el gerente quita el dedo.
+          -->
+          <input id="cut-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"
+                 class="px-3 py-3 rounded-xl bg-white/5 border border-white/10 outline-none text-center col-span-2 tracking-[0.5em]">
+          <p id="cut-pin-hint" class="text-[11px] text-white/40 col-span-2">—</p>
           <button id="cut-drop" class="card rounded-xl py-3 text-sm">—</button>
           <button id="cut-declare" class="ev2-button rounded-xl py-3 font-display text-sm">—</button>
         </div>
@@ -154,6 +187,10 @@
       $('cut-drop').textContent = t('cut.drop');
       $('cut-declare').textContent = t('cut.declare');
       $('cut-amount').placeholder = t('cut.amount');
+      $('cut-counted').placeholder = t('cut.counted');
+      $('cut-reason').placeholder = t('cut.reason');
+      $('cut-pin').placeholder = t('cut.pin');
+      $('cut-pin-hint').textContent = t('cut.pinHint');
 
       const box = $('cut-lines');
       box.innerHTML = '';
@@ -187,6 +224,9 @@
       const puede = Boolean(cut && cut.shift && !cut.closing);
       $('cut-drop').disabled = !puede || Boolean(cut.shift.ended_at);
       $('cut-declare').disabled = !puede;
+      for (const id of ['cut-amount', 'cut-counted', 'cut-reason', 'cut-pin']) {
+        $(id).disabled = !puede;
+      }
     }
 
     async function refrescar() {
@@ -203,9 +243,19 @@
       if (estado.busy) return;
       $('cut-error').hidden = true;
       const monto = Number($('cut-amount').value);
+      const motivo = $('cut-reason').value;
+      const pin = $('cut-pin').value;
+      const contado = $('cut-counted').value;
+
       const bloqueo = tipo === 'drop'
-        ? dropBlocker(monto, estado.cut) : closeBlocker(monto, estado.cut);
-      if (bloqueo) { avisar(t(bloqueo)); return; }
+        ? dropBlocker(monto, estado.cut, { reason: motivo, pin })
+        : closeBlocker(monto, estado.cut, { counted: contado, reason: motivo, pin });
+      if (bloqueo) {
+        avisar(t(bloqueo, bloqueo === 'cut.errDiffReason'
+          ? { amount: dinero(Math.abs(difference(contado === '' ? monto : contado, estado.cut))) }
+          : undefined));
+        return;
+      }
       if (tipo === 'declare'
         && !window.confirm(t('cut.confirmDeclare', { amount: dinero(monto) }))) return;
 
@@ -216,16 +266,35 @@
       boton.disabled = true;
       try {
         if (tipo === 'drop') {
-          await api.post(`/nightclubs/${clubId()}/shifts/me/cash-drops`, { amount: monto });
+          const hecho = await api.post(`/nightclubs/${clubId()}/shifts/me/cash-drops`, {
+            amount: monto, reason: motivo.trim(), manager_pin: pin,
+          });
+          if (deps.toast) {
+            deps.toast(t('cut.dropSent', {
+              name: (hecho.withdrawal && hecho.withdrawal.authorized_by) || '',
+            }), 'ok');
+          }
         } else {
-          await api.post(`/nightclubs/${clubId()}/shifts/me/closing`, { declared_cash: monto });
+          const hecho = await api.post(`/nightclubs/${clubId()}/shifts/me/closing`, {
+            declared_cash: monto,
+            counted_cash: contado === '' ? monto : Number(contado),
+            ...(motivo.trim() ? { difference_reason: motivo.trim() } : {}),
+            manager_pin: pin,
+          });
+          if (deps.toast) {
+            deps.toast(t(hecho.ticket ? 'cut.declared' : 'cut.declaredNoTicket'), 'ok');
+          }
         }
         $('cut-amount').value = '';
+        $('cut-counted').value = '';
+        $('cut-reason').value = '';
         await refrescar();
-        if (deps.toast) deps.toast(t(tipo === 'drop' ? 'cut.dropSent' : 'cut.declared'), 'ok');
       } catch (err) {
         avisar(deps.errorMessage ? deps.errorMessage(err) : String(err.message || err));
       } finally {
+        // El código se borra SIEMPRE, salga bien o mal: si se quedara escrito, el
+        // empleado podría autorizar el siguiente retiro él solo.
+        $('cut-pin').value = '';
         estado.busy = false;
         boton.textContent = antes;
         boton.disabled = false;
@@ -254,6 +323,6 @@
 
   return {
     METHOD_KEY, methodKey, isCash, money, lines, statusKey,
-    dropBlocker, closeBlocker, createSheet,
+    dropBlocker, closeBlocker, difference, createSheet,
   };
 }));

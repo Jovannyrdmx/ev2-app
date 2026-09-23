@@ -11,6 +11,7 @@
 
 const { randomUUID } = require('crypto');
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
+const pins = require('../src/services/pins');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
 
@@ -52,16 +53,30 @@ const cobrar = async (user, amount, method = 'cash') => api()
     ...(method === 'cash' ? {} : { reference: `VCH${Math.random().toString().slice(2, 8)}` }),
   });
 
-const entregar = (user, amount, note) => api()
-  .post(url('/shifts/me/cash-drops')).set(auth(user)).send({ amount, ...(note ? { note } : {}) });
-const recibir = (dropId, body = {}) => api()
-  .post(url(`/cash-drops/${dropId}/receive`)).set(auth(manager)).send(body);
-const declarar = (user, declared, notes) => api()
+/**
+ * El código con el que un gerente autoriza. Es su PIN de acceso, el mismo que ya
+ * existe: el dueño no quiso una segunda credencial que administrar.
+ */
+async function codigoDe(user) {
+  const pin = await pins.issuePin(pool, { userId: user.id });
+  // Un PIN recién emitido viene marcado para cambiarse, y mientras no se cambie el
+  // servidor le bloquea a esa persona TODAS las rutas (D46). Aquí se limpia porque
+  // lo que se está probando es la autorización, no el alta del PIN — pero conviene
+  // saberlo: un gerente con PIN recién dado no puede entrar a su panel hasta que lo
+  // cambie, aunque su código sí sirva para autorizar un retiro.
+  await pool.query('UPDATE users SET must_change_pin = false WHERE id = $1', [user.id]);
+  return pin;
+}
+
+/** Un retiro parcial: monto, motivo y el código de quien lo autoriza. */
+const retirar = (user, amount, reason, pin) => api()
+  .post(url('/shifts/me/cash-drops')).set(auth(user))
+  .send({ amount, reason, manager_pin: pin });
+
+/** El corte completo, en un acto: lo declarado, lo contado y el código. */
+const cortar = (user, declared, counted, pin, extra = {}) => api()
   .post(url('/shifts/me/closing')).set(auth(user))
-  .send({ declared_cash: declared, ...(notes ? { notes } : {}) });
-const confirmar = (closingId, counted, reason) => api()
-  .post(url(`/shift-closings/${closingId}/confirm`)).set(auth(manager))
-  .send({ counted_cash: counted, ...(reason ? { reason } : {}) });
+  .send({ declared_cash: declared, counted_cash: counted, manager_pin: pin, ...extra });
 
 const turnoAbierto = async (userId) => (await pool.query(
   'SELECT ended_at FROM staff_shifts WHERE user_id = $1', [userId])).rows[0];
@@ -119,232 +134,369 @@ describe('Lo que traigo encima', () => {
   });
 });
 
-describe('Entregar efectivo a media noche', () => {
-  it('el mesero entrega, el gerente cuenta, y deja de deberlo', async () => {
+
+// ============================================================================
+// Retiros parciales y corte, desde D54: siempre con un gerente presente.
+// ============================================================================
+
+describe('El retiro parcial de efectivo', () => {
+  let pin;
+  beforeEach(async () => { pin = await codigoDe(manager); });
+
+  it('pide monto, motivo y código, y con los tres sale', async () => {
     await abrirTurno(waiter);
     await cobrar(waiter, 5000);
-    const drop = await entregar(waiter, 3000, 'Va con el de seguridad');
-    expect(drop.status).toBe(201);
+    const res = await retirar(waiter, 3000, 'Traía mucho efectivo encima', pin);
 
-    // Declarada todavía no es entregada: hasta que alguien la cuenta, el dinero es suyo.
-    expect((await miCorte(waiter)).body.cash_to_hand).toBe('5000.00');
-
-    expect((await recibir(drop.body.drop.id)).status).toBe(200);
-    const despues = await miCorte(waiter);
-    expect(despues.body.drops_received).toBe('3000.00');
-    expect(despues.body.cash_to_hand).toBe('2000.00');
+    expect(res.status).toBe(201);
+    expect(res.body.withdrawal).toMatchObject({ amount: '3000.00', remaining: '2000.00' });
+    expect(res.body.withdrawal.authorized_by).toBe('Gerente');
   });
 
-  it('el gerente puede contar MENOS de lo declarado, y eso es lo que vale', async () => {
+  it('queda recibido y contado en el acto: quien autoriza está ahí', async () => {
     await abrirTurno(waiter);
     await cobrar(waiter, 5000);
-    const drop = await entregar(waiter, 3000);
-    await recibir(drop.body.drop.id, { counted_amount: 2800 });
-
-    const res = await miCorte(waiter);
-    expect(res.body.drops_received).toBe('2800.00');
-    expect(res.body.cash_to_hand).toBe('2200.00');
+    const res = await retirar(waiter, 3000, 'A la caja fuerte', pin);
+    const { rows } = await pool.query(
+      `SELECT status, counted_amount::text AS counted, reason, authorized_role,
+              received_by = authorized_by AS mismo
+         FROM shift_cash_drops WHERE id = $1`, [res.body.withdrawal.id]);
+    // Dejarlo "pendiente de contar" no tendría sentido: quien lo contaría acaba de
+    // firmar que lo tiene en la mano.
+    expect(rows[0]).toMatchObject({
+      status: 'received', counted: '3000.00', reason: 'A la caja fuerte',
+      authorized_role: 'manager', mismo: true,
+    });
   });
 
-  it('una entrega rechazada no descuenta nada, y dice por qué', async () => {
+  it('descuenta de lo que falta entregar', async () => {
     await abrirTurno(waiter);
-    await cobrar(waiter, 1000);
-    const drop = await entregar(waiter, 800);
-    const res = await api().post(url(`/cash-drops/${drop.body.drop.id}/reject`))
-      .set(auth(manager)).send({ reason: 'Los billetes no coinciden con lo declarado' });
-    expect(res.status).toBe(200);
-    expect((await miCorte(waiter)).body.cash_to_hand).toBe('1000.00');
+    await cobrar(waiter, 5000);
+    await retirar(waiter, 3000, 'A la caja fuerte', pin);
+    expect((await miCorte(waiter)).body.cash_to_hand).toBe('2000.00');
   });
 
-  it('la misma entrega no se cuenta dos veces', async () => {
+  it('sin motivo no hay retiro', async () => {
     await abrirTurno(waiter);
-    await cobrar(waiter, 1000);
-    const drop = await entregar(waiter, 500);
-    expect((await recibir(drop.body.drop.id)).status).toBe(200);
-    expect((await recibir(drop.body.drop.id)).status).toBe(409);
-    expect((await miCorte(waiter)).body.drops_received).toBe('500.00');
+    await cobrar(waiter, 5000);
+    const res = await api().post(url('/shifts/me/cash-drops')).set(auth(waiter))
+      .send({ amount: 1000, manager_pin: pin });
+    expect(res.status).toBe(400);
   });
 
-  it('solo el gerente recibe, y solo dentro de un turno se entrega', async () => {
+  it('un motivo de dos letras tampoco es un motivo', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 5000);
+    expect((await retirar(waiter, 1000, 'ok', pin)).status).toBe(400);
+  });
+
+  it('sin código no hay retiro, y un código equivocado no dice por qué', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 5000);
+    const sinCodigo = await api().post(url('/shifts/me/cash-drops')).set(auth(waiter))
+      .send({ amount: 1000, reason: 'Traía mucho' });
+    expect(sinCodigo.status).toBe(400);
+
+    const malo = await retirar(waiter, 1000, 'Traía mucho', '999111');
+    expect(malo.status).toBe(403);
+    // "Ese PIN no es de nadie" y "ese PIN es de un mesero" son la misma respuesta:
+    // distinguirlas permitiría mapear los PIN del club de a uno por intento.
+    expect(malo.body.error.message).toBe('Código de autorización inválido');
+  });
+
+  it('el PIN de un mesero no autoriza nada', async () => {
+    const pinMesero = await codigoDe(bartender);
+    await abrirTurno(waiter);
+    await cobrar(waiter, 5000);
+    const res = await retirar(waiter, 1000, 'Traía mucho', pinMesero);
+    expect(res.status).toBe(403);
+    expect(res.body.error.message).toBe('Código de autorización inválido');
+  });
+
+  it('nadie se autoriza a sí mismo, y la base tampoco lo deja', async () => {
+    // Hoy ninguna ruta llega a este caso —un gerente no abre turno, así que no tiene
+    // corte propio— pero la garantía no puede depender de eso: mañana alguien agrega
+    // otra forma de cerrar un turno y este renglón sigue siendo el que manda.
     await abrirTurno(waiter);
     await cobrar(waiter, 1000);
-    const drop = await entregar(waiter, 500);
-    expect((await api().post(url(`/cash-drops/${drop.body.drop.id}/receive`))
-      .set(auth(bartender)).send({})).status).toBe(403);
-    expect((await entregar(bartender, 100)).status).toBe(409);
+    const turno = await pool.query(
+      'SELECT id FROM staff_shifts WHERE user_id = $1', [waiter.id]);
+    await expect(pool.query(
+      `INSERT INTO shift_cash_drops
+         (nightclub_id, shift_id, user_id, amount, currency, reason, status,
+          counted_amount, received_by, received_at, authorized_by, authorized_at, authorized_role)
+       VALUES ($1,$2,$3,500,'MXN','me lo autorizo yo','received',500,$3,now(),$3,now(),'manager')`,
+      [club.id, turno.rows[0].id, waiter.id]))
+      .rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('autorizado a medias no existe: o están los tres datos o no hay autorización', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 1000);
+    const turno = await pool.query(
+      'SELECT id FROM staff_shifts WHERE user_id = $1', [waiter.id]);
+    await expect(pool.query(
+      `INSERT INTO shift_cash_drops
+         (nightclub_id, shift_id, user_id, amount, currency, reason, authorized_by)
+       VALUES ($1,$2,$3,500,'MXN','sin fecha ni rol',$4)`,
+      [club.id, turno.rows[0].id, waiter.id, manager.id]))
+      .rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('no se retira más de lo que se trae', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 1000);
+    const res = await retirar(waiter, 4000, 'Me equivoqué de tecla', pin);
+    expect(res.status).toBe(422);
+    expect(res.body.error.message).toMatch(/Solo trae/);
+  });
+
+  it('el gerente ve los retiros con su motivo y quién los autorizó', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 5000);
+    await retirar(waiter, 3000, 'A la caja fuerte', pin);
+    const lista = await api().get(url('/cash-drops')).set(auth(manager));
+    expect(lista.body.drops[0]).toMatchObject({
+      amount: '3000.00', reason: 'A la caja fuerte', authorized_by_name: 'Gerente',
+    });
+  });
+
+  it('un retiro escrito no se edita ni se borra', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 5000);
+    const res = await retirar(waiter, 3000, 'A la caja fuerte', pin);
+    const id = res.body.withdrawal.id;
+    await expect(pool.query('DELETE FROM shift_cash_drops WHERE id = $1', [id]))
+      .rejects.toMatchObject({ code: '23001' });
+    await expect(pool.query(
+      `UPDATE shift_cash_drops SET reason = 'otra cosa' WHERE id = $1`, [id]))
+      .rejects.toMatchObject({ code: '23001' });
   });
 });
 
-describe('El corte', () => {
-  it('el empleado declara, el gerente cuenta, y el turno se cierra solo', async () => {
+describe('El corte, en un solo acto', () => {
+  let pin;
+  beforeEach(async () => { pin = await codigoDe(manager); });
+
+  it('se declara, se cuenta y se cierra de una vez', async () => {
     await abrirTurno(waiter);
-    await cobrar(waiter, 450);
-    await cobrar(waiter, 550);
+    await cobrar(waiter, 2000);
+    const res = await cortar(waiter, 2000, 2000, pin);
 
-    const declarado = await declarar(waiter, 1000, 'Todo en billetes de 500');
-    expect(declarado.status).toBe(201);
-    expect(declarado.body.closing).toMatchObject({
-      status: 'declared', declared_cash: '1000.00', expected_cash: '1000.00',
-    });
-    // Declarar NO cierra el turno: el dinero sigue siendo suyo hasta que lo cuenten.
-    expect((await turnoAbierto(waiter.id)).ended_at).toBeNull();
-
-    const res = await confirmar(declarado.body.closing.id, 1000);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     expect(res.body.closing).toMatchObject({
-      status: 'confirmed', counted_cash: '1000.00', difference: '0.00',
-      confirmed_by_name: 'Gerente',
+      status: 'confirmed', expected_cash: '2000.00', declared_cash: '2000.00',
+      counted_cash: '2000.00', difference: '0.00',
     });
+    expect(res.body.closing.authorized_by_name).toBe('Gerente');
+    // Cerrar el corte cierra el turno: es el último paso.
     expect((await turnoAbierto(waiter.id)).ended_at).not.toBeNull();
   });
 
-  it('un faltante SIN motivo no se puede cerrar', async () => {
-    await abrirTurno(bartender);
-    await cobrar(bartender, 2000);
-    const declarado = await declarar(bartender, 1800);
-
-    const sinMotivo = await confirmar(declarado.body.closing.id, 1800);
-    expect(sinMotivo.status).toBe(422);
-    expect(sinMotivo.body.error.message).toMatch(/Falta dinero \(200/);
-
-    const conMotivo = await confirmar(declarado.body.closing.id, 1800, 'Le fio a la mesa 4, lo paga mañana');
-    expect(conMotivo.status).toBe(200);
-    expect(conMotivo.body.closing.difference).toBe('-200.00');
-    expect(conMotivo.body.closing.difference_reason).toMatch(/mesa 4/);
+  it('la diferencia se mide contra lo que TOCABA, no contra lo declarado', async () => {
+    // Es el agujero obvio: declarar de menos y entregar de menos cuadraría perfecto.
+    await abrirTurno(waiter);
+    await cobrar(waiter, 2000);
+    const res = await cortar(waiter, 1800, 1800, pin,
+      { difference_reason: 'Se me perdieron doscientos pesos' });
+    expect(res.body.closing.difference).toBe('-200.00');
   });
 
-  it('un sobrante también pide motivo: sobra dinero de alguien', async () => {
+  it('una diferencia sin motivo no se acepta', async () => {
     await abrirTurno(waiter);
-    await cobrar(waiter, 1000);
-    const declarado = await declarar(waiter, 1200);
-    expect((await confirmar(declarado.body.closing.id, 1200)).status).toBe(422);
-    const ok = await confirmar(declarado.body.closing.id, 1200, 'Propina en efectivo que entró a la caja');
-    expect(ok.body.closing.difference).toBe('200.00');
-  });
-
-  it('la diferencia se mide contra lo COBRADO, no contra lo que el empleado declaró', async () => {
-    // Si se midiera contra lo declarado, declarar de menos y entregar de menos
-    // cuadraría perfecto, que es la forma más fácil de robar de un corte.
-    await abrirTurno(waiter);
-    await cobrar(waiter, 3000);
-    const declarado = await declarar(waiter, 2500);
-    expect(declarado.body.closing.expected_cash).toBe('3000.00');
-    const res = await confirmar(declarado.body.closing.id, 2500, 'Dice que se le perdió un billete');
-    expect(res.body.closing.difference).toBe('-500.00');
-  });
-
-  it('lo ya entregado durante el turno no se le vuelve a pedir', async () => {
-    await abrirTurno(waiter);
-    await cobrar(waiter, 5000);
-    const drop = await entregar(waiter, 4000);
-    await recibir(drop.body.drop.id);
-
-    const declarado = await declarar(waiter, 1000);
-    expect(declarado.body.closing.expected_cash).toBe('1000.00');
-    const res = await confirmar(declarado.body.closing.id, 1000);
-    expect(res.body.closing).toMatchObject({ difference: '0.00', drops_total: '4000.00' });
-  });
-
-  it('no se cierra un corte con entregas sin contar', async () => {
-    await abrirTurno(waiter);
-    await cobrar(waiter, 5000);
-    await entregar(waiter, 2000);
-    const declarado = await declarar(waiter, 3000);
-    const res = await confirmar(declarado.body.closing.id, 3000);
+    await cobrar(waiter, 2000);
+    const res = await cortar(waiter, 2000, 1900, pin);
     expect(res.status).toBe(422);
-    expect(res.body.error.message).toMatch(/sin contar/);
-  });
-
-  it('nadie confirma su propio corte, ni el de otro sin ser gerente', async () => {
-    await abrirTurno(waiter);
-    await cobrar(waiter, 500);
-    const declarado = await declarar(waiter, 500);
-    expect((await api().post(url(`/shift-closings/${declarado.body.closing.id}/confirm`))
-      .set(auth(waiter)).send({ counted_cash: 500 })).status).toBe(403);
-    expect((await api().post(url(`/shift-closings/${declarado.body.closing.id}/confirm`))
-      .set(auth(bartender)).send({ counted_cash: 500 })).status).toBe(403);
-  });
-
-  it('un corte no se declara ni se confirma dos veces', async () => {
-    await abrirTurno(waiter);
-    await cobrar(waiter, 500);
-    const declarado = await declarar(waiter, 500);
-    expect((await declarar(waiter, 500)).status).toBe(409);
-    expect((await confirmar(declarado.body.closing.id, 500)).status).toBe(200);
-    expect((await confirmar(declarado.body.closing.id, 500)).status).toBe(409);
-  });
-
-  it('lo cobrado queda CONGELADO al declarar: lo de después es otro turno', async () => {
-    await abrirTurno(waiter);
-    await cobrar(waiter, 1000);
-    const declarado = await declarar(waiter, 1000);
-    await cobrar(waiter, 700); // sigue cobrando mientras espera al gerente
-    const res = await confirmar(declarado.body.closing.id, 1000);
-    expect(res.body.closing.cash_collected).toBe('1000.00');
-    expect(res.body.closing.difference).toBe('0.00');
-  });
-
-  it('el gerente ve los cortes que esperan, con nombre y diferencia', async () => {
-    await abrirTurno(waiter);
-    await cobrar(waiter, 800);
-    await declarar(waiter, 800);
-
-    const lista = await api().get(url('/shift-closings?status=declared')).set(auth(manager));
-    expect(lista.status).toBe(200);
-    expect(lista.body.closings[0]).toMatchObject({
-      user_name: 'Luis', role: 'waiter', expected_cash: '800.00', status: 'declared',
-    });
-    expect((await api().get(url('/shift-closings')).set(auth(waiter))).status).toBe(403);
-  });
-
-  it('cada quien ve su corte; el de otro, no', async () => {
-    await abrirTurno(waiter);
-    await cobrar(waiter, 300);
-    const declarado = await declarar(waiter, 300);
-    const id = declarado.body.closing.id;
-    expect((await api().get(url(`/shift-closings/${id}`)).set(auth(waiter))).status).toBe(200);
-    expect((await api().get(url(`/shift-closings/${id}`)).set(auth(bartender))).status).toBe(403);
-    expect((await api().get(url(`/shift-closings/${id}`)).set(auth(manager))).status).toBe(200);
-  });
-});
-
-describe('Cerrar el turno', () => {
-  it('quien cobró no cierra su turno sin corte', async () => {
-    await abrirTurno(waiter);
-    await cobrar(waiter, 600);
-    const res = await api().post(url('/staff/shifts/end')).set(auth(waiter)).send({});
-    expect(res.status).toBe(422);
-    expect(res.body.error.message).toMatch(/haz tu corte/);
+    expect(res.body.error.message).toMatch(/Falta dinero/);
+    // Y el turno sigue abierto: no se cerró nada a medias.
     expect((await turnoAbierto(waiter.id)).ended_at).toBeNull();
   });
 
-  it('con el corte declarado pero sin contar, tampoco', async () => {
+  it('un motivo de tres letras no es un motivo', async () => {
     await abrirTurno(waiter);
-    await cobrar(waiter, 600);
-    await declarar(waiter, 600);
-    const res = await api().post(url('/staff/shifts/end')).set(auth(waiter)).send({});
-    expect(res.status).toBe(422);
-    expect(res.body.error.message).toMatch(/falta que el gerente/);
+    await cobrar(waiter, 2000);
+    expect((await cortar(waiter, 2000, 1900, pin, { difference_reason: 'ups' })).status).toBe(422);
   });
 
-  it('quien no cobró nada cierra su turno como siempre', async () => {
+  it('sin código no se cierra nada', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 2000);
+    const res = await api().post(url('/shifts/me/closing')).set(auth(waiter))
+      .send({ declared_cash: 2000, counted_cash: 2000 });
+    expect(res.status).toBe(400);
+    expect((await turnoAbierto(waiter.id)).ended_at).toBeNull();
+  });
+
+  it('con un código equivocado no se escribe ni un renglón', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 2000);
+    expect((await cortar(waiter, 2000, 2000, '111999')).status).toBe(403);
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM shift_closings');
+    expect(rows[0].n).toBe(0);
+  });
+
+  it('el corte descuenta los retiros de la noche', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 5000);
+    await retirar(waiter, 3000, 'A la caja fuerte', pin);
+    const res = await cortar(waiter, 2000, 2000, pin);
+    expect(res.body.closing).toMatchObject({
+      cash_collected: '5000.00', drops_total: '3000.00', expected_cash: '2000.00',
+      difference: '0.00',
+    });
+  });
+
+  it('no se corta dos veces el mismo turno', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 1000);
+    await cortar(waiter, 1000, 1000, pin);
+    expect((await cortar(waiter, 1000, 1000, pin)).status).toBe(409);
+  });
+
+  it('un corte cerrado no se reescribe', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 1000);
+    const res = await cortar(waiter, 1000, 1000, pin);
+    await expect(pool.query(
+      `UPDATE shift_closings SET counted_cash = 999 WHERE id = $1`, [res.body.closing.id]))
+      .rejects.toMatchObject({ code: '23001' });
+  });
+
+  it('quien no cobró nada puede cerrar su turno sin corte', async () => {
     await abrirTurno(bartender);
     const res = await api().post(url('/staff/shifts/end')).set(auth(bartender)).send({});
     expect(res.status).toBe(200);
-    expect((await turnoAbierto(bartender.id)).ended_at).not.toBeNull();
   });
 
-  it('el turno cerrado por el gerente deja el corte pendiente, y se puede hacer después', async () => {
-    // El gerente cierra turnos olvidados. Eso NO borra el dinero que esa persona cobró.
+  it('quien cobró NO puede cerrar su turno sin corte', async () => {
     await abrirTurno(waiter);
-    await cobrar(waiter, 900);
-    expect((await api().post(url(`/staff/${waiter.id}/shifts/end`)).set(auth(manager)).send({}))
-      .status).toBe(200);
+    await cobrar(waiter, 800);
+    const res = await api().post(url('/staff/shifts/end')).set(auth(waiter)).send({});
+    expect(res.status).toBe(422);
+    expect(res.body.error.message).toMatch(/haz tu corte/i);
+  });
+});
 
-    const pendiente = await miCorte(waiter);
-    expect(pendiente.body.shift).not.toBeNull();
-    expect(pendiente.body.cash_to_hand).toBe('900.00');
-    const declarado = await declarar(waiter, 900);
-    expect((await confirmar(declarado.body.closing.id, 900)).status).toBe(200);
+describe('El ticket del corte', () => {
+  let pin;
+  beforeEach(async () => {
+    pin = await codigoDe(manager);
+    await api().post(url('/printers')).set(auth(manager)).send({
+      location_id: club.bar_id,
+      name: 'Barra baja · meseros',
+      purpose: 'service',
+      connection: 'network',
+      host: '192.168.1.50',
+    });
+  });
+
+  const ticketDe = async (closingId) => {
+    const { rows } = await pool.query(
+      `SELECT preview FROM print_jobs WHERE ref_id = $1 AND kind = 'shift_cut'`, [closingId]);
+    return rows[0] ? rows[0].preview : null;
+  };
+
+  it('sale al cerrar, con el desglose por método de pago', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 3000);
+    await cobrar(waiter, 4500, 'card_terminal');
+    const res = await cortar(waiter, 3000, 3000, pin);
+
+    expect(res.body.ticket).not.toBeNull();
+    const papel = await ticketDe(res.body.closing.id);
+    expect(papel).toContain('CORTE DE TURNO');
+    expect(papel).toContain('Luis');
+    expect(papel).toContain('Efectivo');
+    expect(papel).toContain('$3,000.00');
+    expect(papel).toContain('Tarjeta (terminal)');
+    expect(papel).toContain('$4,500.00');
+    expect(papel).toContain('Total cobrado');
+    expect(papel).toContain('$7,500.00');
+  });
+
+  it('desglosa cada retiro parcial con su motivo y quién lo autorizó', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 9000);
+    await retirar(waiter, 5000, 'A la caja fuerte del gerente', pin);
+    await retirar(waiter, 2000, 'Se pagó al proveedor del hielo', pin);
+    const res = await cortar(waiter, 2000, 2000, pin);
+
+    const papel = await ticketDe(res.body.closing.id);
+    expect(papel).toContain('RETIROS PARCIALES');
+    expect(papel).toContain('A la caja fuerte del gerente');
+    expect(papel).toContain('Se pagó al proveedor del hielo');
+    expect(papel).toContain('Autorizó: Gerente');
+    expect(papel).toContain('Total retirado');
+    expect(papel).toContain('$7,000.00');
+  });
+
+  it('la propina aparece aparte y dice que no se entrega', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 1000);
+    await api().post(url('/tips')).set(auth(guest))
+      .send({ client_request_id: randomUUID(), to_user_id: waiter.id, amount: 250 });
+    const res = await cortar(waiter, 1000, 1000, pin);
+
+    const papel = await ticketDe(res.body.closing.id);
+    expect(papel).toMatch(/Propinas.*no se entregan/);
+    expect(papel).toContain('$250.00');
+  });
+
+  it('cuando falta dinero, el papel lo dice con su motivo', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 2000);
+    const res = await cortar(waiter, 2000, 1850, pin,
+      { difference_reason: 'Faltó un billete de 150, no apareció al recontar' });
+
+    const papel = await ticketDe(res.body.closing.id);
+    expect(papel).toContain('FALTA');
+    expect(papel).toContain('$150.00');
+    expect(papel).toContain('Faltó un billete');
+  });
+
+  it('cuando cuadra, lo dice también: el silencio no es una respuesta', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 2000);
+    const res = await cortar(waiter, 2000, 2000, pin);
+    expect(await ticketDe(res.body.closing.id)).toContain('CUADRA');
+  });
+
+  it('trae las dos firmas: la de quien entrega y la de quien autoriza', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 500);
+    const res = await cortar(waiter, 500, 500, pin);
+    const papel = await ticketDe(res.body.closing.id);
+    expect(papel).toContain('_______________________');
+    expect(papel).toContain('Autorizó: Gerente');
+  });
+
+  it('se reimprime igual: el papel no se vuelve a calcular', async () => {
+    await abrirTurno(waiter);
+    await cobrar(waiter, 1000);
+    const res = await cortar(waiter, 1000, 1000, pin);
+
+    // Esa persona sigue cobrando después de su corte, en otro turno.
+    await abrirTurno(waiter);
+    await cobrar(waiter, 4000);
+
+    const otra = await api().post(url(`/shift-closings/${res.body.closing.id}/ticket`))
+      .set(auth(manager));
+    expect(otra.status).toBe(202);
+    const { rows } = await pool.query(
+      `SELECT payload FROM print_jobs WHERE ref_id = $1 AND kind = 'shift_cut'
+        ORDER BY created_at`, [res.body.closing.id]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].payload.equals(rows[1].payload)).toBe(true);
+  });
+
+  it('sin impresora el corte se cierra igual, y lo dice', async () => {
+    await pool.query('UPDATE printers SET active = false WHERE nightclub_id = $1', [club.id]);
+    await abrirTurno(waiter);
+    await cobrar(waiter, 1000);
+    const res = await cortar(waiter, 1000, 1000, pin);
+    // El dinero ya se contó: que no salga el papel no puede deshacer eso.
+    expect(res.status).toBe(201);
+    expect(res.body.closing.status).toBe('confirmed');
+    expect(res.body.ticket).toBeNull();
   });
 });

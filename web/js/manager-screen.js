@@ -1105,20 +1105,21 @@
   // ---------------------------------------------------------------- cortes de turno (D51)
 
   /**
-   * Lo que el gerente tiene que contar: las entregas de efectivo de media noche y los
-   * cortes que esperan a que alguien cuente el dinero.
+   * Los retiros de efectivo de la noche y los cortes ya cerrados (D54).
    *
-   * Confirmar un corte cierra el turno de esa persona, así que el botón pide el monto
-   * contado y, si no cuadra, el motivo. Un faltante sin explicación es exactamente lo
-   * que este panel existe para no dejar pasar.
+   * Este panel dejó de tener botones que decidan nada: desde D54 un retiro se
+   * autoriza en el acto —el gerente teclea su código en el aparato del empleado— y el
+   * corte se cierra en ese mismo momento. Lo que queda aquí es lo que el gerente sí
+   * necesita: **ver por dónde salió el dinero**, con el motivo y el nombre de quien
+   * lo autorizó, y poder reimprimir un ticket que no salió.
    */
   async function loadShiftCuts() {
     try {
-      const [drops, cierres] = await Promise.all([
-        api.get(`/nightclubs/${clubId()}/cash-drops?status=declared`),
-        api.get(`/nightclubs/${clubId()}/shift-closings?status=declared`),
+      const [retiros, cierres] = await Promise.all([
+        api.get(`/nightclubs/${clubId()}/cash-drops?hours=24&limit=50`),
+        api.get(`/nightclubs/${clubId()}/shift-closings?hours=24&limit=50`),
       ]);
-      state.cashDrops = drops.drops || [];
+      state.cashDrops = retiros.drops || [];
       state.shiftCuts = cierres.closings || [];
     } catch {
       state.cashDrops = [];
@@ -1128,45 +1129,39 @@
   }
 
   function renderShiftCuts() {
-    const drops = state.cashDrops || [];
+    const retiros = state.cashDrops || [];
     const cortes = state.shiftCuts || [];
-    $('cuts-empty').hidden = drops.length > 0 || cortes.length > 0;
+    $('cuts-empty').hidden = retiros.length > 0 || cortes.length > 0;
 
-    const cajaDrops = $('cuts-drops');
-    cajaDrops.innerHTML = '';
-    for (const d of drops) {
+    const cajaRetiros = $('cuts-drops');
+    cajaRetiros.innerHTML = '';
+    for (const d of retiros) {
       const card = document.createElement('div');
-      card.className = 'card rounded-lg px-3 py-2 space-y-2';
+      card.className = 'card rounded-lg px-3 py-2 space-y-1';
       const fila = document.createElement('div');
       fila.className = 'flex items-center justify-between gap-3';
-      const left = document.createElement('div');
-      left.className = 'min-w-0';
-      const monto = document.createElement('p');
-      monto.className = 'font-display';
-      monto.textContent = money(d.amount, d.currency);
       const quien = document.createElement('p');
-      quien.className = 'text-[11px] text-white/50 truncate';
-      quien.textContent = t('cuts.dropFrom', { name: d.user_name || '', note: d.note || '' });
-      left.append(monto, quien);
-      const nota = document.createElement('p');
-      nota.className = 'text-xs text-red-300';
-      nota.hidden = true;
+      quien.className = 'text-sm truncate';
+      quien.textContent = d.user_name || '—';
+      const monto = document.createElement('p');
+      monto.className = 'font-display shrink-0';
+      monto.textContent = money(d.amount, d.currency);
+      fila.append(quien, monto);
 
-      const acciones = document.createElement('div');
-      acciones.className = 'flex gap-2 shrink-0';
-      const recibir = document.createElement('button');
-      recibir.className = 'card rounded-lg px-3 py-2 text-xs';
-      recibir.textContent = t('cuts.receive');
-      recibir.onclick = () => receiveDrop(d, recibir, nota);
-      const rechazar = document.createElement('button');
-      rechazar.className = 'card rounded-lg px-3 py-2 text-xs text-red-300';
-      rechazar.textContent = t('cuts.reject');
-      rechazar.onclick = () => rejectDrop(d, rechazar, nota);
-      acciones.append(recibir, rechazar);
+      // El motivo es el renglón que hace útil este panel: un retiro sin él es el
+      // hueco que esta función vino a tapar.
+      const motivo = document.createElement('p');
+      motivo.className = 'text-[11px] text-white/60';
+      motivo.textContent = d.reason || t('cuts.noReason');
+      const autoriza = document.createElement('p');
+      autoriza.className = 'text-[11px] text-white/40';
+      autoriza.textContent = d.authorized_by_name
+        ? t('cuts.authorizedBy', { name: d.authorized_by_name })
+        : t('cuts.notAuthorized');
+      if (!d.authorized_by_name) autoriza.style.color = '#fcd34d';
 
-      fila.append(left, acciones);
-      card.append(fila, nota);
-      cajaDrops.appendChild(card);
+      card.append(fila, motivo, autoriza);
+      cajaRetiros.appendChild(card);
     }
 
     const caja = $('cuts-list');
@@ -1186,98 +1181,59 @@
       montos.className = 'text-[11px] text-white/50';
       montos.textContent = t('cuts.amounts', {
         expected: money(c.expected_cash, c.currency),
-        declared: money(c.declared_cash, c.currency),
+        declared: money(c.counted_cash ?? c.declared_cash, c.currency),
       });
       left.append(quien, montos);
+
+      // La diferencia, en el color que le toca. Cero también se dice: el silencio
+      // no distingue "cuadró" de "nadie lo revisó".
+      const dif = Number(c.difference || 0);
+      const marca = document.createElement('p');
+      marca.className = 'font-display shrink-0 text-sm';
+      marca.style.color = dif === 0 ? 'var(--ev2-lime)' : '#fca5a5';
+      marca.textContent = dif === 0
+        ? t('cuts.balanced')
+        : t(dif < 0 ? 'cuts.short' : 'cuts.over', { amount: money(Math.abs(dif), c.currency) });
+      fila.append(left, marca);
+      card.appendChild(fila);
+
+      if (dif !== 0 && c.difference_reason) {
+        const motivo = document.createElement('p');
+        motivo.className = 'text-[11px] text-white/60';
+        motivo.textContent = c.difference_reason;
+        card.appendChild(motivo);
+      }
+      const autoriza = document.createElement('p');
+      autoriza.className = 'text-[11px] text-white/40';
+      autoriza.textContent = c.authorized_by_name
+        ? t('cuts.authorizedBy', { name: c.authorized_by_name })
+        : t('cuts.notAuthorized');
+      card.appendChild(autoriza);
+
       const nota = document.createElement('p');
       nota.className = 'text-xs text-red-300';
       nota.hidden = true;
+      const papel = document.createElement('button');
+      papel.className = 'card rounded-lg px-3 py-2 text-xs';
+      papel.textContent = t('cuts.reprint');
+      papel.onclick = () => reprintCut(c, papel, nota);
+      card.append(papel, nota);
 
-      const confirmar = document.createElement('button');
-      confirmar.className = 'ev2-button rounded-lg px-3 py-2 text-xs shrink-0';
-      confirmar.textContent = t('cuts.count');
-      confirmar.onclick = () => confirmCut(c, confirmar, nota);
-
-      fila.append(left, confirmar);
-      card.append(fila, nota);
-      if (c.declared_notes) {
-        const n = document.createElement('p');
-        n.className = 'text-[11px] text-white/40';
-        n.textContent = c.declared_notes;
-        card.appendChild(n);
-      }
       caja.appendChild(card);
     }
   }
 
-  async function receiveDrop(drop, button, nota) {
+  /** Vuelve a sacar el ticket de un corte. Sale exactamente el mismo papel. */
+  async function reprintCut(corte, button, nota) {
     nota.hidden = true;
-    const dicho = window.prompt(t('cuts.countedPrompt', { amount: money(drop.amount, drop.currency) }),
-      drop.amount);
-    if (dicho === null) return;
-    // Enter en blanco = "cuadra con lo declarado". Tomarlo como CERO daría por recibida
-    // una entrega de nada, y ese dinero le seguiría cobrándose a quien ya lo entregó.
-    const contado = String(dicho).trim() === '' ? Number(drop.amount) : Number(dicho);
-    if (!(contado >= 0)) { avisar(nota, t('cuts.errAmount')); return; }
     const listo = ocupado(button, 'cuts.saving');
     try {
-      await api.post(`/nightclubs/${clubId()}/cash-drops/${drop.id}/receive`, { counted_amount: contado });
-      toast(t('cuts.received'), 'ok');
-      await loadShiftCuts();
+      await api.post(`/nightclubs/${clubId()}/shift-closings/${corte.id}/ticket`, {});
+      toast(t('cuts.reprinted'), 'ok');
     } catch (err) {
-      listo();
       avisar(nota, EV2Format.errorMessage(err));
-    }
-  }
-
-  async function rejectDrop(drop, button, nota) {
-    nota.hidden = true;
-    const motivo = window.prompt(t('cuts.rejectPrompt'), '');
-    if (motivo === null) return;
-    if (motivo.trim().length < 5) { avisar(nota, t('cuts.errReason')); return; }
-    const listo = ocupado(button, 'cuts.saving');
-    try {
-      await api.post(`/nightclubs/${clubId()}/cash-drops/${drop.id}/reject`, { reason: motivo.trim() });
-      await loadShiftCuts();
-    } catch (err) {
+    } finally {
       listo();
-      avisar(nota, EV2Format.errorMessage(err));
-    }
-  }
-
-  async function confirmCut(corte, button, nota) {
-    nota.hidden = true;
-    const dicho = window.prompt(t('cuts.countPrompt', {
-      name: corte.user_name, expected: money(corte.expected_cash, corte.currency),
-    }), corte.declared_cash);
-    if (dicho === null) return;
-    // Igual que arriba: en blanco es "lo que declaró", no cero.
-    const contado = String(dicho).trim() === '' ? Number(corte.declared_cash) : Number(dicho);
-    if (!(contado >= 0)) { avisar(nota, t('cuts.errAmount')); return; }
-
-    const diferencia = Math.round((contado - Number(corte.expected_cash)) * 100) / 100;
-    let motivo = null;
-    if (diferencia !== 0) {
-      // Un faltante o un sobrante no se cierra sin explicación: el servidor también lo
-      // exige, pero preguntarlo aquí evita el viaje de ida y vuelta con un error.
-      motivo = window.prompt(t(diferencia < 0 ? 'cuts.missingPrompt' : 'cuts.overPrompt', {
-        amount: money(Math.abs(diferencia), corte.currency),
-      }), '');
-      if (motivo === null) return;
-      if (motivo.trim().length < 5) { avisar(nota, t('cuts.errReason')); return; }
-    }
-    if (!window.confirm(t('cuts.confirmClose', { name: corte.user_name }))) return;
-
-    const listo = ocupado(button, 'cuts.saving');
-    try {
-      await api.post(`/nightclubs/${clubId()}/shift-closings/${corte.id}/confirm`, {
-        counted_cash: contado, ...(motivo ? { reason: motivo.trim() } : {}),
-      });
-      toast(t('cuts.closed'), 'ok');
-      await loadShiftCuts();
-    } catch (err) {
-      listo();
-      avisar(nota, EV2Format.errorMessage(err));
     }
   }
 
