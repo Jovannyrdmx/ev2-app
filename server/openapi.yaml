@@ -9893,6 +9893,105 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/nightclubs/{nightclubId}/print-agents/scan:
+    post:
+      operationId: scanForPrinters
+      tags: [Impresión]
+      summary: Buscar las impresoras que haya en la red del club
+      description: |
+        Requiere rol `manager` o `admin`.
+
+        El servidor no ve la red del club, así que **el que busca es el agente**. Esto
+        solo deja el encargo apuntado; cada PC lo recoge en su siguiente sondeo —ya
+        pregunta cada pocos segundos— barre su propia subred privada probando el
+        puerto 9100, lee las impresoras instaladas en ese Windows, y reporta.
+
+        Se le encarga a **todas** las PCs activas, no a una: con dos agentes lo
+        interesante no es "hay una impresora en el .50", es **cuál PC la alcanza**,
+        que es lo que decide a quién ponerle de respaldo a quién.
+
+        Contesta 202 y no la lista: el barrido tarda unos segundos. El resultado
+        aparece en `GET /print-agents`, en `scan_result` de cada agente.
+
+        **El agente solo barre rangos privados** (10/8, 172.16/12, 192.168/16,
+        169.254/16) y solo /24. Ni el servidor ni el archivo de configuración pueden
+        ampliarlo: un agente que aceptara barrer cualquier rango sería un escáner de
+        puertos con permiso de fábrica dentro del club.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '202':
+          description: El encargo quedó apuntado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asked: { type: integer, description: A cuántas PCs se les encargó. }
+                  online:
+                    type: integer
+                    description: Cuántas de ellas están conectadas ahora. Cero no es un error.
+                  agents:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        name: { type: string }
+        '400':
+          description: No hay ninguna PC activa dada de alta
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/print-agent/scan:
+    post:
+      operationId: reportPrinterScan
+      tags: [Impresión]
+      summary: (Agente) Esto es lo que veo en mi red
+      description: |
+        Lo manda el agente después de barrer. Puede traer `error` en vez de `found`:
+        una búsqueda que falla en silencio deja al gerente esperando una lista que no
+        va a llegar.
+
+        Lo recibido se recorta antes de guardarse —64 hallazgos, textos cortos—
+        porque viene de un programa que corre en el club, no de una fuente de verdad.
+        Se recorta y no se rechaza: un barrido bueno de una red grande es justo
+        cuando más sirve.
+      security: []
+      parameters:
+        - in: header
+          name: X-Print-Agent-Token
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                found:
+                  type: array
+                  items: { $ref: '#/components/schemas/PrinterFound' }
+                error: { type: [string, 'null'], maxLength: 400 }
+      responses:
+        '200':
+          description: Anotado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  saved: { type: boolean }
+                  scan_at: { type: [string, 'null'], format: date-time }
+        '401':
+          description: Token de agente inválido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -13129,6 +13228,13 @@ components:
         agent_version: { type: [string, 'null'] }
         active: { type: boolean }
         created_at: { type: string, format: date-time }
+        scan_requested_at: { type: [string, 'null'], format: date-time }
+        scan_at: { type: [string, 'null'], format: date-time }
+        scan_result:
+          type: [array, 'null']
+          description: Lo último que esta PC vio en su red.
+          items: { $ref: '#/components/schemas/PrinterFound' }
+        scan_error: { type: [string, 'null'] }
 
     PrintJob:
       type: object
@@ -13210,3 +13316,22 @@ components:
         total: { type: string }
         paid: { type: string }
         due: { type: string }
+
+    PrinterFound:
+      type: object
+      description: |
+        Una impresora que una PC vio. `network` es una que contestó en el puerto 9100
+        de la red local —con su modelo, si se identificó al preguntárselo con `GS I`—
+        y `windows` una instalada en esa PC. Una `windows` sin `share` no se puede
+        usar todavía: hay que compartirla en Windows primero.
+      properties:
+        kind: { type: string, enum: [network, windows] }
+        host:
+          type: [string, 'null']
+          description: La dirección IP, o el puerto de Windows en las locales.
+        port: { type: [integer, 'null'] }
+        name: { type: [string, 'null'] }
+        share: { type: [string, 'null'] }
+        model:
+          type: [string, 'null']
+          description: Lo que la impresora contestó de sí misma. Muchas no contestan.

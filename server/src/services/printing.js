@@ -425,10 +425,74 @@ async function createAgent(runner, { nightclubId, name, createdBy }) {
 
 async function listAgents(runner, { nightclubId }) {
   const { rows } = await runner.query(
-    `SELECT id::text AS id, name, token_hint, last_seen_at, agent_version, active, created_at
+    `SELECT id::text AS id, name, token_hint, last_seen_at, agent_version, active, created_at,
+            scan_requested_at, scan_at, scan_result, scan_error
        FROM print_agents WHERE nightclub_id = $1 ORDER BY name`,
     [nightclubId]);
   return rows;
+}
+
+// ---------------------------------------------------------------- buscar impresoras
+
+/** Cuánto vale una petición de búsqueda antes de darla por abandonada. */
+const SCAN_TTL_MINUTES = 5;
+
+/**
+ * Pide a todas las PCs vivas del club que busquen impresoras (D55).
+ *
+ * A todas, no a una: con dos agentes lo interesante no es solo "hay una impresora en
+ * el .50", es **cuál PC la alcanza**, que es lo que decide a quién ponerle de
+ * respaldo a quién. Cada una contesta lo que ve desde donde está.
+ *
+ * Marcar la petición y esperar a que el agente la recoja en su siguiente vuelta es
+ * todo el mecanismo: ya pregunta cada pocos segundos, y un segundo canal para
+ * avisarle sería una conexión más que se cae con cada parpadeo del internet del club.
+ */
+async function requestScan(runner, { nightclubId }) {
+  const { rows } = await runner.query(
+    `UPDATE print_agents
+        SET scan_requested_at = now(), scan_error = NULL
+      WHERE nightclub_id = $1 AND active
+      RETURNING id::text AS id, name, last_seen_at`,
+    [nightclubId]);
+  return rows;
+}
+
+/** ¿Este agente tiene una búsqueda pendiente que todavía le interese a alguien? */
+async function pendingScan(runner, agentId) {
+  const { rows } = await runner.query(
+    `SELECT scan_requested_at FROM print_agents
+      WHERE id = $1 AND scan_requested_at IS NOT NULL
+        AND (scan_at IS NULL OR scan_at < scan_requested_at)
+        AND scan_requested_at > now() - ($2::int * interval '1 minute')`,
+    [agentId, SCAN_TTL_MINUTES]);
+  return rows.length > 0;
+}
+
+/**
+ * Guarda lo que esa PC encontró.
+ *
+ * Los hallazgos vienen de un programa que corre en el club, así que se recortan aquí:
+ * un agente comprometido no debe poder llenar la base con una lista de cien mil
+ * renglones ni meter texto de cualquier largo en la pantalla del gerente.
+ */
+async function saveScan(runner, { agentId, found = [], error = null }) {
+  const limpio = (Array.isArray(found) ? found : []).slice(0, 64).map((f) => ({
+    kind: f.kind === 'windows' ? 'windows' : 'network',
+    host: f.host ? String(f.host).slice(0, 120) : null,
+    port: Number.isFinite(Number(f.port)) ? Number(f.port) : null,
+    name: f.name ? String(f.name).slice(0, 120) : null,
+    share: f.share ? String(f.share).slice(0, 120) : null,
+    model: f.model ? String(f.model).slice(0, 80) : null,
+  }));
+  const { rows } = await runner.query(
+    `UPDATE print_agents
+        SET scan_at = now(), scan_result = $2::jsonb, scan_error = $3::text
+      WHERE id = $1
+      RETURNING id::text AS id, scan_at`,
+    [agentId, error ? null : JSON.stringify(limpio),
+      error ? String(error).slice(0, 400) : null]);
+  return rows[0] || null;
 }
 
 /** Quién es el que está preguntando por trabajo. */
@@ -467,4 +531,5 @@ module.exports = {
   enqueue, enqueueSafely, enqueueTicket, enqueueTest,
   claim, markPrinted, markFailed, reprint, listJobs,
   newToken, hashToken, createAgent, listAgents, agentByToken, touchAgent, setAgentActive,
+  SCAN_TTL_MINUTES, requestScan, pendingScan, saveScan,
 };

@@ -426,3 +426,113 @@ describe('El interruptor de la comanda por pedido', () => {
     });
   });
 });
+
+describe('Buscar impresoras en vez de teclear su IP (D55)', () => {
+  const scanDe = async (agentId) => {
+    const { rows } = await pool.query(
+      `SELECT scan_requested_at, scan_at, scan_result, scan_error
+         FROM print_agents WHERE id = $1`, [agentId]);
+    return rows[0];
+  };
+
+  it('el gerente pide la búsqueda y se le encarga a TODAS las PCs', async () => {
+    // Con dos agentes lo interesante no es "hay una impresora en el .50": es cuál PC
+    // la alcanza, que es lo que decide a quién ponerle de respaldo a quién.
+    const a = await nuevoAgente('PC barra baja');
+    const b = await nuevoAgente('PC barra alta');
+    const res = await api().post(url('/print-agents/scan')).set(auth(manager));
+
+    expect(res.status).toBe(202);
+    expect(res.body.asked).toBe(2);
+    expect((await scanDe(a.id)).scan_requested_at).not.toBeNull();
+    expect((await scanDe(b.id)).scan_requested_at).not.toBeNull();
+  });
+
+  it('sin ninguna PC dada de alta lo dice, en vez de encolar algo que nadie hará', async () => {
+    const res = await api().post(url('/print-agents/scan')).set(auth(manager));
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/PC/);
+  });
+
+  it('una PC apagada no recibe el encargo', async () => {
+    const a = await nuevoAgente('PC apagada');
+    await api().patch(url(`/print-agents/${a.id}`)).set(auth(manager)).send({ active: false });
+    const res = await api().post(url('/print-agents/scan')).set(auth(manager));
+    expect(res.status).toBe(400);
+  });
+
+  it('el agente ve el encargo en el mismo sondeo que ya hace', async () => {
+    const a = await nuevoAgente();
+    expect((await comoAgente(a.token, 'get', '/api/print-agent/jobs')).body.scan).toBe(false);
+    await api().post(url('/print-agents/scan')).set(auth(manager));
+    // Un segundo canal sería una conexión más que se cae con cada parpadeo del
+    // internet del club, para algo que se pide una vez al mes.
+    expect((await comoAgente(a.token, 'get', '/api/print-agent/jobs')).body.scan).toBe(true);
+  });
+
+  it('reporta lo que encontró y deja de pedírsele', async () => {
+    const a = await nuevoAgente();
+    await api().post(url('/print-agents/scan')).set(auth(manager));
+    const res = await comoAgente(a.token, 'post', '/api/print-agent/scan').send({
+      found: [
+        { kind: 'network', host: '192.168.1.50', port: 9100, model: 'XP-C260M' },
+        { kind: 'windows', name: 'XP-80C', share: 'XP80' },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const guardado = await scanDe(a.id);
+    expect(guardado.scan_result).toHaveLength(2);
+    expect(guardado.scan_result[0]).toMatchObject({ host: '192.168.1.50', model: 'XP-C260M' });
+    expect((await comoAgente(a.token, 'get', '/api/print-agent/jobs')).body.scan).toBe(false);
+  });
+
+  it('una búsqueda que falla lo dice, en vez de dejar al gerente esperando', async () => {
+    const a = await nuevoAgente();
+    await api().post(url('/print-agents/scan')).set(auth(manager));
+    await comoAgente(a.token, 'post', '/api/print-agent/scan')
+      .send({ error: 'no hay ninguna red privada en esta PC' });
+    const guardado = await scanDe(a.id);
+    expect(guardado.scan_error).toMatch(/red privada/);
+    expect(guardado.scan_result).toBeNull();
+  });
+
+  it('un encargo viejo se da por abandonado', async () => {
+    const a = await nuevoAgente();
+    await api().post(url('/print-agents/scan')).set(auth(manager));
+    await pool.query(
+      `UPDATE print_agents SET scan_requested_at = now() - interval '30 minutes' WHERE id = $1`,
+      [a.id]);
+    // Una PC que estuvo apagada media hora no debe ponerse a barrer la red al
+    // prender, por algo que el gerente pidió cuando estaba en otra cosa.
+    expect((await comoAgente(a.token, 'get', '/api/print-agent/jobs')).body.scan).toBe(false);
+  });
+
+  it('lo que manda el agente se recorta: es un programa del club, no una fuente de verdad', async () => {
+    const a = await nuevoAgente();
+    await api().post(url('/print-agents/scan')).set(auth(manager));
+    const muchas = Array.from({ length: 200 }, (_, i) => ({
+      kind: 'network', host: `192.168.1.${i}`, port: 9100, model: 'x'.repeat(200),
+    }));
+    await comoAgente(a.token, 'post', '/api/print-agent/scan').send({ found: muchas });
+    const guardado = await scanDe(a.id);
+    // Ni una lista interminable ni texto de cualquier largo en la pantalla del gerente.
+    expect(guardado.scan_result.length).toBeLessThanOrEqual(64);
+    expect(guardado.scan_result[0].model.length).toBeLessThanOrEqual(80);
+  });
+
+  it('el gerente ve el resultado junto a la PC que lo encontró', async () => {
+    const a = await nuevoAgente('PC barra baja');
+    await api().post(url('/print-agents/scan')).set(auth(manager));
+    await comoAgente(a.token, 'post', '/api/print-agent/scan')
+      .send({ found: [{ kind: 'network', host: '192.168.1.50', port: 9100 }] });
+
+    const lista = await api().get(url('/print-agents')).set(auth(manager));
+    expect(lista.body.agents[0]).toMatchObject({ name: 'PC barra baja' });
+    expect(lista.body.agents[0].scan_result[0].host).toBe('192.168.1.50');
+  });
+
+  it('un mesero no manda a buscar impresoras', async () => {
+    await nuevoAgente();
+    expect((await api().post(url('/print-agents/scan')).set(auth(waiter))).status).toBe(403);
+  });
+});

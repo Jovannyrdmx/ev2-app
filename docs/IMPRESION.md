@@ -116,8 +116,27 @@ tres cosas que salen mal. Si el papel sale bien, esa impresora ya sirve.
 
 ### 1. Dar de alta las impresoras
 
-Panel del gerente → pestaña **Impresoras** → *Dar de alta una impresora*. Por cada
-una: la barra, el propósito, la IP, el ancho del papel.
+**Primero instala el agente (paso 3 y 4) y luego vuelve aquí**: con una PC conectada,
+el panel las encuentra solo.
+
+Panel del gerente → pestaña **Impresoras** → **Buscar impresoras**. Cada PC barre su
+propia red probando el puerto 9100, le pregunta el modelo a la que conteste, y lista
+también las impresoras instaladas en ese Windows. Tarda unos segundos. Después,
+"Usar esta" deja la dirección puesta y solo falta decir en qué barra está y para qué
+es — que es justo lo que una máquina no puede adivinar.
+
+Una IP tecleada a mano no se descubre mal escrita al guardarla: se descubre cuando el
+ticket no sale, a las dos de la mañana, con la barra llena.
+
+Si prefieres a mano, o la impresora está en otra VLAN que la PC: *Dar de alta una
+impresora*, con la barra, el propósito, la IP y el ancho del papel. Para otra VLAN,
+`scanSubnets` en el `config.json` del agente también sirve.
+
+> **El barrido solo toca rangos privados** (10.x, 172.16-31.x, 192.168.x, 169.254.x) y
+> solo redes /24. Ni el servidor ni el `config.json` pueden ampliarlo: un agente que
+> aceptara barrer cualquier rango sería un escáner de puertos con permiso de fábrica
+> dentro del club. Y la consulta del modelo (`GS I`) es eso, una pregunta: **no
+> imprime nada**.
 
 ### 2. Encender el respaldo
 

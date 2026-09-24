@@ -63,12 +63,18 @@ agentRouter.use(authenticateAgent);
 agentRouter.get('/jobs',
   validate({ query: z.object({ limit: z.coerce.number().int().min(1).max(20).default(5) }) }),
   asyncHandler(async (req, res) => {
-    const jobs = await printing.claim(pool, {
-      nightclubId: req.agent.nightclub_id,
-      agentId: req.agent.id,
-      limit: req.query.limit,
-    });
-    res.json({ agent: { id: req.agent.id, name: req.agent.name }, jobs });
+    const [jobs, scan] = await Promise.all([
+      printing.claim(pool, {
+        nightclubId: req.agent.nightclub_id,
+        agentId: req.agent.id,
+        limit: req.query.limit,
+      }),
+      // La petición de búsqueda viaja en el mismo sondeo que ya hace el agente. Un
+      // segundo canal sería una conexión más que se cae con cada parpadeo del
+      // internet del club, para algo que se pide una vez al mes.
+      printing.pendingScan(pool, req.agent.id),
+    ]);
+    res.json({ agent: { id: req.agent.id, name: req.agent.name }, jobs, scan });
   }));
 
 agentRouter.post('/jobs/:jobId/done',
@@ -109,6 +115,40 @@ agentRouter.post('/jobs/:jobId/failed',
       });
     }
     res.json({ job, rerouted: Boolean(rerouted) });
+  }));
+
+/**
+ * "Esto es lo que veo en mi red."
+ *
+ * Lo manda el agente después de barrer. Puede traer `error` en vez de `found`: una
+ * búsqueda que falla en silencio deja al gerente esperando una lista que no va a
+ * llegar, y eso es peor que un mensaje feo.
+ */
+agentRouter.post('/scan',
+  validate({
+    body: z.object({
+      // Los topes de aquí son solo para que un cuerpo absurdo no llegue a la base;
+      // el recorte de verdad lo hace `saveScan`. Rechazar el reporte entero por venir
+      // largo perdería un barrido bueno de una red grande, que es justo cuando más
+      // sirve: 64 hallazgos es lo que se enseña, no lo máximo que se acepta oír.
+      found: z.array(z.object({
+        kind: z.enum(['network', 'windows']),
+        host: z.string().trim().max(240).nullish(),
+        port: z.coerce.number().int().min(1).max(65535).nullish(),
+        name: z.string().trim().max(240).nullish(),
+        share: z.string().trim().max(240).nullish(),
+        model: z.string().trim().max(240).nullish(),
+      })).max(512).optional(),
+      error: z.string().trim().max(400).nullish(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const hecho = await printing.saveScan(pool, {
+      agentId: req.agent.id,
+      found: req.body.found || [],
+      error: req.body.error || null,
+    });
+    res.json({ saved: Boolean(hecho), scan_at: hecho ? hecho.scan_at : null });
   }));
 
 // ============================================================================
@@ -294,6 +334,35 @@ router.post('/nightclubs/:nightclubId/print-agents',
       if (err.code === '23505') throw ApiError.conflict('Ya hay un agente con ese nombre');
       throw err;
     }
+  }));
+
+/**
+ * "Busca las impresoras que haya."
+ *
+ * Contesta 202 y no la lista: el que busca es el agente, en el club, y tarda unos
+ * segundos. La pantalla vuelve a preguntar por los agentes hasta que aparezca el
+ * resultado de cada uno.
+ *
+ * Sin ninguna PC viva no se encola una búsqueda que nadie va a hacer: se dice.
+ */
+router.post('/nightclubs/:nightclubId/print-agents/scan',
+  requireRole(...MANAGE),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const agentes = await printing.requestScan(pool, {
+      nightclubId: req.params.nightclubId,
+    });
+    if (agentes.length === 0) {
+      throw ApiError.badRequest(
+        'No hay ninguna PC dada de alta que pueda buscar. Da de alta una primero.');
+    }
+    const vivas = agentes.filter((a) => a.last_seen_at
+      && Date.now() - new Date(a.last_seen_at).getTime() < printing.STALE_MINUTES * 60000);
+    res.status(202).json({
+      asked: agentes.length,
+      online: vivas.length,
+      agents: agentes.map((a) => ({ id: a.id, name: a.name })),
+    });
   }));
 
 router.patch('/nightclubs/:nightclubId/print-agents/:agentId',

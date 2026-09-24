@@ -125,8 +125,26 @@ gerente, y desde ahí se reimprime.
 | `printTimeoutMs` | `15000` | Cuánto espera a una impresora antes de darla por muerta |
 | `checkPaper` | `true` | Preguntarle a la impresora si tiene papel antes de imprimir |
 | `paperCheckMs` | `500` | Cuánto espera esa respuesta antes de seguir de todos modos |
+| `scanTimeoutMs` | `400` | Cuánto espera a cada dirección al buscar impresoras |
+| `scanConcurrency` | `32` | Cuántas direcciones prueba a la vez |
+| `scanSubnets` | `[]` | Subredes /24 extra, como `["192.168.20"]`, cuando las impresoras están en otra VLAN que la PC |
 
 `EV2_API_URL` y `EV2_AGENT_TOKEN` como variables de entorno ganan sobre el archivo.
+
+## Buscar impresoras
+
+Desde el panel del gerente, **Impresoras → Buscar impresoras**, el agente barre su
+propia subred probando el puerto 9100 y le pregunta el modelo a cada una que conteste
+—con `GS I`, que es una consulta y **no imprime nada**—. También lista las impresoras
+instaladas en ese Windows, que es lo que resuelve las de USB.
+
+Tarda unos segundos: son 254 direcciones, de 32 en 32.
+
+**Solo barre rangos privados** (10.x, 172.16-31.x, 192.168.x, 169.254.x) y solo redes
+/24. `scanSubnets` sirve para agregar otra VLAN privada; lo que no sea privado se
+ignora aunque se escriba ahí. Un agente que aceptara barrer cualquier rango sería un
+escáner de puertos con permiso de fábrica dentro del club, y eso no lo arregla
+confiar en el servidor.
 
 ## Una limitación honesta
 

@@ -60,7 +60,12 @@
   // Las impresoras del club, las PCs que imprimen por él y lo último que se mandó a
   // papel (D52). `staleMinutes` lo dice el servidor: es el mismo umbral con el que
   // decide que una PC se murió con un trabajo en la mano.
-  const printing = { printers: [], agents: [], jobs: [], settings: null, staleMinutes: 2 };
+  const printing = {
+    printers: [], agents: [], jobs: [], settings: null, staleMinutes: 2,
+    // La búsqueda de impresoras (D55). `scanUntil` es hasta cuándo se sigue
+    // preguntando por el resultado: el que busca es el agente, en el club, y tarda.
+    scanUntil: 0,
+  };
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
   const lang = () => EV2Format.getLanguage();
@@ -1288,6 +1293,7 @@
   };
 
   function renderPrinting() {
+    renderFoundPrinters();
     renderPrintersList();
     renderPrintAgents();
     renderPrintJobs();
@@ -1367,6 +1373,156 @@
       card.append(fila, nota);
       caja.appendChild(card);
     }
+  }
+
+  /**
+   * Lo que cada PC vio en su red (D55).
+   *
+   * Agrupado por PC y no en una lista sola a propósito: con dos agentes, saber que
+   * hay una impresora en el .50 vale menos que saber **cuál PC la alcanza**, que es
+   * lo que decide a quién ponerle de respaldo a quién.
+   *
+   * Lo que ya está dado de alta se marca en vez de esconderse: si alguien busca y no
+   * ve su impresora, la pregunta siguiente es "¿entonces cuál es la que ya tengo?".
+   */
+  function renderFoundPrinters() {
+    const agentes = printing.agents || [];
+    const caja = $('prn-found');
+    const conResultado = agentes.filter((a) => a.scan_at || a.scan_error);
+    const buscando = Date.now() < printing.scanUntil;
+
+    const estado = $('prn-scan-status');
+    estado.hidden = !buscando && conResultado.length === 0;
+    if (buscando) {
+      estado.textContent = t('prn.scanning');
+      estado.style.color = '#fcd34d';
+    } else if (conResultado.length) {
+      estado.textContent = t('prn.scanDone', { count: conResultado.length });
+      estado.style.color = 'rgba(255,255,255,.4)';
+    }
+
+    caja.innerHTML = '';
+    const yaDadas = new Set((printing.printers || [])
+      .map((p) => `${p.connection}|${p.host || p.windows_name}`));
+
+    for (const a of conResultado) {
+      const bloque = document.createElement('div');
+      bloque.className = 'space-y-1';
+      const titulo = document.createElement('p');
+      titulo.className = 'text-[11px] text-white/50';
+      titulo.textContent = a.name;
+      bloque.appendChild(titulo);
+
+      if (a.scan_error) {
+        const err = document.createElement('p');
+        err.className = 'text-xs text-red-300';
+        err.textContent = a.scan_error;
+        bloque.appendChild(err);
+        caja.appendChild(bloque);
+        continue;
+      }
+
+      const hallazgos = a.scan_result || [];
+      if (!hallazgos.length) {
+        const vacio = document.createElement('p');
+        vacio.className = 'text-xs text-white/40';
+        vacio.textContent = t('prn.scanNone');
+        bloque.appendChild(vacio);
+        caja.appendChild(bloque);
+        continue;
+      }
+
+      for (const h of hallazgos) {
+        const fila = document.createElement('div');
+        fila.className = 'card rounded-lg px-3 py-2 flex items-center justify-between gap-3';
+        const left = document.createElement('div');
+        left.className = 'min-w-0';
+        const que = document.createElement('p');
+        que.className = 'text-sm truncate';
+        que.textContent = h.kind === 'windows'
+          ? `${h.name || '—'}${h.share ? ` (${h.share})` : ''}`
+          : `${h.host}:${h.port}`;
+        const como = document.createElement('p');
+        como.className = 'text-[11px] text-white/40 truncate';
+        como.textContent = h.kind === 'windows'
+          ? (h.share ? t('prn.cWindows') : t('prn.notShared'))
+          : (h.model || t('prn.cNetwork'));
+        if (h.kind === 'windows' && !h.share) como.style.color = '#fcd34d';
+        left.append(que, como);
+
+        const ya = yaDadas.has(`${h.kind === 'windows' ? 'windows' : 'network'}|${h.kind === 'windows' ? h.share : h.host}`);
+        const accion = document.createElement('button');
+        accion.className = 'card rounded-lg px-3 py-2 text-xs shrink-0';
+        accion.textContent = ya ? t('prn.already') : t('prn.useThis');
+        accion.disabled = ya || (h.kind === 'windows' && !h.share);
+        accion.onclick = () => fillFromScan(h);
+
+        fila.append(left, accion);
+        bloque.appendChild(fila);
+      }
+      caja.appendChild(bloque);
+    }
+  }
+
+  /**
+   * Pone el hallazgo en el formulario de alta y lo abre.
+   *
+   * No la da de alta sola: falta decir en qué barra está y para qué es, que es
+   * justamente lo que una máquina no puede adivinar.
+   */
+  function fillFromScan(hallazgo) {
+    const caja = $('prn-add-box');
+    caja.open = true;
+    if (hallazgo.kind === 'windows') {
+      $('prn-connection').value = 'windows';
+      $('prn-winname').value = hallazgo.share || '';
+      $('prn-name').value = hallazgo.name || '';
+    } else {
+      $('prn-connection').value = 'network';
+      $('prn-host').value = hallazgo.host || '';
+      $('prn-port').value = String(hallazgo.port || 9100);
+      $('prn-name').value = hallazgo.model || `Impresora ${hallazgo.host}`;
+    }
+    $('prn-connection').onchange();
+    caja.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    $('prn-location').focus();
+  }
+
+  $('btn-prn-scan').onclick = async () => {
+    const nota = $('prn-scan-error');
+    nota.hidden = true;
+    const listo = ocupado($('btn-prn-scan'), 'prn.scanning');
+    try {
+      const res = await api.post(`/nightclubs/${clubId()}/print-agents/scan`, {});
+      if (res.online === 0) {
+        avisar(nota, t('prn.scanNoAgents'), 'warn');
+      }
+      // Se sigue preguntando un rato: el barrido tarda unos segundos y el resultado
+      // llega cuando el agente lo manda, no cuando esta llamada contesta.
+      printing.scanUntil = Date.now() + 30000;
+      renderFoundPrinters();
+      await waitForScan();
+    } catch (err) {
+      avisar(nota, EV2Format.errorMessage(err));
+    } finally {
+      listo();
+    }
+  };
+
+  /** Vuelve a preguntar por los agentes hasta que contesten, o hasta rendirse. */
+  async function waitForScan() {
+    while (Date.now() < printing.scanUntil) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => { setTimeout(r, 2000); });
+      // eslint-disable-next-line no-await-in-loop
+      await loadPrinting();
+      const listos = (printing.agents || []).filter((a) => a.scan_at
+        && a.scan_requested_at && new Date(a.scan_at) >= new Date(a.scan_requested_at));
+      const pedidos = (printing.agents || []).filter((a) => a.active && a.scan_requested_at);
+      if (pedidos.length && listos.length >= pedidos.length) break;
+    }
+    printing.scanUntil = 0;
+    renderFoundPrinters();
   }
 
   function renderPrintAgents() {

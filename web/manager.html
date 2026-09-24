@@ -662,7 +662,22 @@
           <p id="prn-error" class="text-sm text-red-300" hidden></p>
         </div>
 
-        <details class="card rounded-xl p-4">
+        <!--
+          Buscar antes que teclear. Una IP mal escrita no se descubre al guardarla: se
+          descubre cuando el ticket no sale, a las dos de la mañana.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.found">Impresoras encontradas</p>
+            <button id="btn-prn-scan" class="ev2-button rounded-lg px-3 py-2 text-xs" data-i18n="prn.scan">Buscar impresoras</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="prn.scanWhy">Cada PC busca en su propia red y dice lo que ve. Así también sabes cuál PC alcanza a cuál impresora.</p>
+          <p id="prn-scan-status" class="text-[11px]" hidden></p>
+          <div id="prn-found" class="space-y-2"></div>
+          <p id="prn-scan-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
+        <details id="prn-add-box" class="card rounded-xl p-4">
           <summary class="text-sm cursor-pointer" data-i18n="prn.addTitle">Dar de alta una impresora</summary>
           <div class="space-y-3 pt-3">
             <div>
