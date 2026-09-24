@@ -9484,47 +9484,111 @@ paths:
                   agents:
                     type: array
                     items: { $ref: '#/components/schemas/PrintAgent' }
+                  invites:
+                    type: array
+                    description: Los códigos de alta que siguen vivos. Sin el código, solo su pista.
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        code_hint: { type: string }
+                        expires_at: { type: string, format: date-time }
+                        attempts: { type: integer }
                   stale_minutes: { type: integer }
         '403': { $ref: '#/components/responses/Forbidden' }
     post:
-      operationId: createPrintAgent
+      operationId: invitePrintAgent
       tags: [Impresión]
-      summary: Dar de alta una PC que imprima
+      summary: Emitir un código para dar de alta una PC
       description: |
         Requiere rol `manager` o `admin`.
 
-        **El `token` se devuelve una sola vez en la vida del agente.** La base guarda
-        solo su huella (SHA-256), así que no hay forma de volver a verlo: quien lo
-        pierda da de alta otra PC y apaga esta.
+        Devuelve un código de ocho caracteres, tipo `K7M4-2QX9`, que se enseña en la
+        pantalla y se teclea en la PC de la barra. **No hay token que copiar**: la PC
+        lo canjea, recibe su token por la red y se escribe su propia configuración.
+
+        El alfabeto es Crockford base32 —sin `I`, `L`, `O` ni `U`— porque alguien lo
+        lee de una pantalla y lo teclea en otra máquina, y confundir un 1 con una I es
+        lo que convierte "teclea esto" en "no funciona".
+
+        `code` sale de aquí **una sola vez**: la base guarda su huella (SHA-256).
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '201':
+          description: El código, por única vez
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invite:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      code:
+                        type: string
+                        example: K7M4-2QX9
+                        description: Solo en esta respuesta. No se puede recuperar.
+                      code_hint: { type: string, description: 'Los últimos cuatro, para distinguir dos códigos vivos.' }
+                      expires_at: { type: string, format: date-time }
+                      ttl_minutes: { type: integer, example: 10 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/print-agent/pair:
+    post:
+      operationId: pairPrintAgent
+      tags: [Impresión]
+      summary: (Agente) Canjear el código y darse de alta
+      description: |
+        Sin sesión y sin token: es lo que viene a pedir. La PC manda el código que
+        alguien tecleó y su propio nombre de máquina, y recibe el token con el que
+        trabajará desde entonces.
+
+        Queda dada de alta **con una búsqueda de impresoras ya pedida**: es la
+        diferencia entre "ya quedó" y "ahora ve y pícale buscar".
+
+        Un código corto es adivinable por una máquina, así que el rechazo no dice
+        nada que ayude: no existe, ya se usó y venció son **la misma respuesta**. Cada
+        fallo suma un intento a todos los códigos vivos de ese club, y a los ocho se
+        queman. La ruta lleva además su propio límite por minuto.
+
+        Dos PCs con el mismo nombre de Windows no chocan: se desempata sola, porque
+        quien está parado en la barra no puede resolver un choque de nombres.
+      security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name]
+              required: [code]
               properties:
-                name: { type: string, maxLength: 60, example: PC barra baja }
+                code: { type: string, example: K7M4-2QX9, description: 'Se acepta en minúsculas y sin guión.' }
+                hostname: { type: string, maxLength: 80, example: DESKTOP-BARRA1 }
+                version: { type: string, maxLength: 20 }
       responses:
         '201':
-          description: Agente creado, con su token por única vez
+          description: La PC quedó dada de alta, con su token por única vez
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   agent:
-                    allOf:
-                      - $ref: '#/components/schemas/PrintAgent'
-                      - type: object
-                        properties:
-                          token:
-                            type: string
-                            description: Solo en esta respuesta. No se puede recuperar.
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      name: { type: string }
+                  token:
+                    type: string
+                    description: Solo en esta respuesta. Lo guarda el propio agente.
+        '403':
+          description: Código inválido o vencido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /api/nightclubs/{nightclubId}/print-agents/{agentId}:
     patch:
@@ -13235,6 +13299,10 @@ components:
           description: Lo último que esta PC vio en su red.
           items: { $ref: '#/components/schemas/PrinterFound' }
         scan_error: { type: [string, 'null'] }
+        hostname:
+          type: [string, 'null']
+          description: El nombre con el que esa PC se presentó al emparejarse.
+        paired_at: { type: [string, 'null'], format: date-time }
 
     PrintJob:
       type: object

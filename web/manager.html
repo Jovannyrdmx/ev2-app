@@ -752,6 +752,20 @@
           </div>
           <p class="text-[11px] text-white/40" data-i18n="prn.agentsWhy">El servidor no alcanza las impresoras del club: un programa en una PC de barra las alcanza por él. Con dos, si apagan una la otra sigue sacando todo el papel.</p>
           <p id="prn-agents-empty" class="text-sm text-white/40" data-i18n="prn.agentsNone" hidden>Ninguna PC está dada de alta todavía. Sin esto no sale ningún papel.</p>
+
+          <!--
+            El código de emparejamiento (D56). Se enseña en grande porque alguien lo
+            va a leer de esta pantalla y teclearlo en otra máquina, y ese es
+            exactamente el momento en que se confunde un 0 con una O.
+          -->
+          <div id="prn-pair" class="rounded-xl p-4 text-center space-y-2"
+               style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12)" hidden>
+            <p class="text-xs text-white/50" data-i18n="prn.pairStep1">En esa PC, abre el agente y teclea este código:</p>
+            <p id="prn-pair-code" class="font-display text-3xl tracking-[0.2em]" style="color:var(--ev2-gold)">—</p>
+            <p id="prn-pair-ttl" class="text-[11px] text-white/40">—</p>
+            <p id="prn-pair-wait" class="text-xs" style="color:var(--ev2-lime)" hidden></p>
+          </div>
+
           <div id="prn-agents" class="space-y-2"></div>
         </div>
 

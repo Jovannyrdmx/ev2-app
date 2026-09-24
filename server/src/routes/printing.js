@@ -45,6 +45,56 @@ const authenticateAgent = asyncHandler(async (req, res, next) => {
   next();
 });
 
+/**
+ * Canjear un código de emparejamiento (D56).
+ *
+ * Va ANTES de `authenticateAgent` a propósito: quien llama aquí todavía no tiene
+ * token —es lo que viene a pedir— y pasar por la autenticación de agente le daría un
+ * 401 en vez de dejarlo emparejarse.
+ *
+ * El token sale de aquí una sola vez en la vida de esa PC, y esta vez no lo copia
+ * nadie: lo guarda el propio agente en su archivo.
+ */
+agentRouter.post('/pair',
+  validate({
+    body: z.object({
+      code: z.string().trim().min(4).max(20),
+      hostname: z.string().trim().max(80).optional(),
+      version: z.string().trim().max(20).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const client = await pool.connect();
+    let hecho;
+    try {
+      await client.query('BEGIN');
+      hecho = await printing.redeemInvite(client, {
+        code: req.body.code,
+        hostname: req.body.hostname,
+        version: req.body.version,
+        ip: req.ip,
+      });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      // Un código equivocado le cuesta a todos los códigos vivos: pasados unos
+      // cuantos fallos se queman solos, y adivinar deja de ser posible antes de que
+      // valga la pena empezar.
+      if (err.status === 403) await printing.countFailedPairing(pool).catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    await events.publish({
+      nightclubId: hecho.nightclubId,
+      type: 'print_agent_paired',
+      audience: { roles: ['manager', 'admin'] },
+      payload: { agent_id: hecho.agent.id, name: hecho.agent.name },
+    });
+    res.status(201).json({ agent: hecho.agent, token: hecho.token });
+  }));
+
 // Va montado en `/api/print-agent`, no en `/api`, y esto no es un detalle de estilo:
 // un `use()` sin ruta sobre un router montado en `/api` corre en TODAS las peticiones
 // que llegan a `/api`, incluidas las que no casan con ninguna ruta. El efecto era que
@@ -312,39 +362,31 @@ router.get('/nightclubs/:nightclubId/print-agents',
   requireRole(...MANAGE),
   validate({ params: z.object({ nightclubId: uuid }) }),
   asyncHandler(async (req, res) => {
-    const agents = await printing.listAgents(pool, { nightclubId: req.params.nightclubId });
-    res.json({ agents, stale_minutes: printing.STALE_MINUTES });
-  }));
-
-router.post('/nightclubs/:nightclubId/print-agents',
-  requireRole(...MANAGE),
-  validate({
-    params: z.object({ nightclubId: uuid }),
-    body: z.object({ name: z.string().trim().min(1).max(60) }),
-  }),
-  asyncHandler(async (req, res) => {
-    try {
-      const agent = await printing.createAgent(pool, {
-        nightclubId: req.params.nightclubId, name: req.body.name, createdBy: req.user.id,
-      });
-      // `token` sale de aquí una sola vez en la vida del agente. Quien lo pierda,
-      // crea otro agente: no hay forma de volver a verlo, y así tiene que ser.
-      res.status(201).json({ agent });
-    } catch (err) {
-      if (err.code === '23505') throw ApiError.conflict('Ya hay un agente con ese nombre');
-      throw err;
-    }
+    const [agents, invites] = await Promise.all([
+      printing.listAgents(pool, { nightclubId: req.params.nightclubId }),
+      printing.openInvites(pool, { nightclubId: req.params.nightclubId }),
+    ]);
+    res.json({ agents, invites, stale_minutes: printing.STALE_MINUTES });
   }));
 
 /**
- * "Busca las impresoras que haya."
+ * Emitir un código para dar de alta una PC (D56).
  *
- * Contesta 202 y no la lista: el que busca es el agente, en el club, y tarda unos
- * segundos. La pantalla vuelve a preguntar por los agentes hasta que aparezca el
- * resultado de cada uno.
- *
- * Sin ninguna PC viva no se encola una búsqueda que nadie va a hacer: se dice.
+ * El código se enseña en la pantalla del gerente y se teclea en la PC de la barra.
+ * No hay token que copiar: la PC se configura sola al canjearlo, se pone el nombre
+ * de la máquina, y empieza a buscar impresoras sin que nadie se lo pida.
  */
+router.post('/nightclubs/:nightclubId/print-agents/invite',
+  requireRole(...MANAGE),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const invite = await printing.createInvite(pool, {
+      nightclubId: req.params.nightclubId, createdBy: req.user.id,
+    });
+    // `code` sale de aquí una sola vez: la base guarda su huella, no el código.
+    res.status(201).json({ invite });
+  }));
+
 router.post('/nightclubs/:nightclubId/print-agents/scan',
   requireRole(...MANAGE),
   validate({ params: z.object({ nightclubId: uuid }) }),

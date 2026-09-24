@@ -116,10 +116,11 @@ tres cosas que salen mal. Si el papel sale bien, esa impresora ya sirve.
 
 ### 1. Dar de alta las impresoras
 
-**Primero instala el agente (paso 3 y 4) y luego vuelve aquí**: con una PC conectada,
-el panel las encuentra solo.
+**Primero empareja la PC (paso 3 y 4) y luego vuelve aquí.** De hecho, si acabas de
+emparejarla, las impresoras **ya están en la lista**: una PC recién dada de alta busca
+sola, sin que nadie se lo pida.
 
-Panel del gerente → pestaña **Impresoras** → **Buscar impresoras**. Cada PC barre su
+Para volver a buscar: pestaña **Impresoras** → **Buscar impresoras**. Cada PC barre su
 propia red probando el puerto 9100, le pregunta el modelo a la que conteste, y lista
 también las impresoras instaladas en ese Windows. Tarda unos segundos. Después,
 "Usar esta" deja la dirección puesta y solo falta decir en qué barra está y para qué
@@ -149,14 +150,15 @@ Sin esto, una impresora atascada detiene su papel hasta que alguien la atienda.
 están en la red, cualquier agente las alcanza todas, y con dos, si apagan una PC la
 otra sigue sacando todo el papel del club.
 
-El panel enseña un **token que se ve una sola vez**. La base guarda solo su huella
-(SHA-256), así que no se puede recuperar: quien lo pierda da de alta otra PC y apaga
-la anterior.
+Sale un **código de ocho caracteres** que vive diez minutos y sirve una sola vez. No
+hay token que copiar: el token largo nunca pasa por las manos de nadie.
 
 ### 4. Instalar el agente
 
-Sigue `agent/README.md`. Resumido: Node.js 18+, copiar la carpeta, poner el token en
-`config.json`, y dejarlo arrancando con Windows.
+Node.js 18+, copiar la carpeta `agent/`, y correr `node print-agent.js`. Pregunta la
+dirección del servidor y el código, **se escribe su propio `config.json`**, se pone el
+nombre de la máquina y empieza a buscar impresoras solo. Detalle completo en
+`agent/README.md`.
 
 ### 5. Probar
 

@@ -185,6 +185,17 @@ function createApp() {
     legacyHeaders: false,
   }));
 
+  // El canje del código de emparejamiento (D56). Es público —quien llama todavía no
+  // tiene token, es lo que viene a pedir— y el código es corto, así que aquí sí va
+  // apretado. El freno de verdad está en la base: un código muere a los ocho intentos
+  // fallidos del club. Esto es el de antes, para que ni siquiera lleguen a contarse.
+  app.use('/api/print-agent/pair', rateLimit({
+    windowMs: 60 * 1000,
+    limit: Number(process.env.PAIRING_RATE_LIMIT_PER_MIN || 10),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  }));
+
   app.use('/api/auth', authRoutes);
   app.use('/api', nightclubRoutes);
   app.use('/api', drinkRoutes);

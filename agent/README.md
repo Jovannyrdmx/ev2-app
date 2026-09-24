@@ -22,6 +22,8 @@ solo, así que **nunca sale el mismo ticket dos veces**.
 
 ## Instalación
 
+Tres pasos. No hay ningún token que copiar.
+
 ### 1. Node.js
 
 Instala Node.js 18 o más nuevo desde <https://nodejs.org> (la opción "LTS"). El
@@ -31,40 +33,35 @@ agente no usa ninguna librería externa: con Node basta.
 
 Copia esta carpeta `agent/` a la PC, por ejemplo en `C:\EV2\agent`.
 
-### 3. Crear el agente en el panel
+### 3. Emparejarla
 
-En el panel del gerente → **Pagos → Impresoras → Agentes → Nuevo agente**. Ponle el
-nombre de la PC ("PC barra baja"). El panel te enseña un **token** que empieza con
-`ev2ag_`.
+En el panel del gerente: **Impresoras → Nueva PC**. Sale un código de ocho
+caracteres, tipo `K7M4-2QX9`, que vive diez minutos.
 
-> Ese token se enseña **una sola vez**. Si se pierde, no se puede recuperar: se crea
-> otro agente y se apaga el anterior. Es a propósito: la base guarda solo su huella.
-
-### 4. config.json
-
-Copia `config.example.json` a `config.json` y pon tu dominio y tu token:
-
-```json
-{
-  "apiUrl": "https://tu-dominio.com",
-  "token": "ev2ag_..."
-}
-```
-
-El `config.json` tiene la llave de esa PC: no lo subas a git ni lo mandes por chat.
-
-### 5. Probar
+En la PC de la barra:
 
 ```
 cd C:\EV2\agent
 node print-agent.js
 ```
 
-Debe decir `conectado como "PC barra baja"`. Con eso, desde el panel del gerente
-pícale **Imprimir prueba** a una impresora: el papel tiene que salir con acentos, con
-la ñ y cortado.
+Pregunta dos cosas —la dirección del servidor y el código— y con eso queda. El
+programa **se escribe su propio `config.json`**, se pone el nombre de la máquina, y
+empieza a buscar impresoras solo. Cuando el gerente vuelva a mirar el panel, ya están
+ahí.
 
-### 6. Dejarlo arrancando solo
+> El código es de un solo uso y muere a los diez minutos. Si se venció, pide otro:
+> son dos clics.
+
+Para una instalación desatendida, el código puede ir por variable de entorno:
+
+```
+set EV2_API_URL=https://tu-dominio.com
+set EV2_PAIR_CODE=K7M4-2QX9
+node print-agent.js
+```
+
+### 4. Dejarlo arrancando solo
 
 La forma más simple, sin instalar nada más: un acceso directo en la carpeta de
 inicio.
@@ -84,6 +81,8 @@ nadie inicie sesión**, usa el Programador de tareas: tarea nueva → "Ejecutar 
 el usuario inició sesión como si no" → desencadenador "Al iniciar el equipo" →
 acción: `node.exe` con argumento `C:\EV2\agent\print-agent.js` y "Iniciar en"
 `C:\EV2\agent`.
+
+El `config.json` tiene la llave de esa PC: no lo subas a git ni lo mandes por chat.
 
 ## Impresoras por USB (Windows)
 

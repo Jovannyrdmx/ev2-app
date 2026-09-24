@@ -412,6 +412,151 @@ function newToken() {
  */
 const hashToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 
+// ---------------------------------------------------------------- emparejar una PC
+
+/**
+ * El alfabeto del código de emparejamiento.
+ *
+ * Crockford base32: sin `I`, `L`, `O` ni `U`. No es un capricho — el código lo lee
+ * alguien de una pantalla y lo teclea en otra máquina, y confundir un 1 con una I o
+ * un 0 con una O es el error que convierte "teclea esto" en "no funciona".
+ */
+const CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const CODE_LENGTH = 8;
+/** Cuánto vive un código. Diez minutos es el tiempo de ir a la otra barra. */
+const INVITE_TTL_MINUTES = 10;
+/** A los cuántos intentos fallidos se queman los códigos vivos del club. */
+const INVITE_MAX_ATTEMPTS = 8;
+
+/** Ocho caracteres al azar, en grupos de cuatro para leerlos sin perderse. */
+function newInviteCode() {
+  const bytes = crypto.randomBytes(CODE_LENGTH);
+  let code = '';
+  for (let i = 0; i < CODE_LENGTH; i += 1) code += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  return code;
+}
+
+/** Como se escribe para leerlo: `K7M4-2QX9`. */
+const prettyCode = (code) => `${code.slice(0, 4)}-${code.slice(4)}`;
+
+/**
+ * El código, en la única forma en que se compara.
+ *
+ * Quien lo teclea va a poner minúsculas, guiones y espacios, y va a tener razón: lo
+ * que se le enseñó tiene un guión en medio. Normalizar aquí es lo que hace que
+ * `k7m4-2qx9` y `K7M42QX9` sean el mismo código.
+ */
+const normalizeCode = (code) => String(code || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+
+const hashCode = (code) => crypto.createHash('sha256').update(normalizeCode(code)).digest('hex');
+
+/** Emite un código para dar de alta una PC. Se enseña una vez, en la pantalla. */
+async function createInvite(runner, { nightclubId, createdBy }) {
+  const code = newInviteCode();
+  const { rows } = await runner.query(
+    `INSERT INTO print_agent_invites
+       (nightclub_id, code_hash, code_hint, expires_at, created_by)
+     VALUES ($1,$2,$3, now() + ($4::int * interval '1 minute'), $5)
+     RETURNING id::text AS id, code_hint, expires_at, created_at`,
+    [nightclubId, hashCode(code), code.slice(-4), INVITE_TTL_MINUTES, createdBy || null]);
+  return { ...rows[0], code: prettyCode(code), ttl_minutes: INVITE_TTL_MINUTES };
+}
+
+/**
+ * Canjea un código y crea la PC.
+ *
+ * Devuelve el token de esa PC **una sola vez**, igual que antes: lo que cambió es
+ * quién lo escribe. Antes lo copiaba una persona; ahora lo guarda el propio agente en
+ * su archivo, y nunca pasa por el portapapeles de nadie.
+ *
+ * Un código equivocado suma un intento a TODOS los códigos vivos del club, y pasados
+ * unos cuantos se queman. Contarlo por club y no por código es lo que impide probar
+ * ocho veces contra uno, ocho contra otro, y así hasta acertar.
+ */
+async function redeemInvite(client, { code, hostname, version = null, ip = null }) {
+  const { rows } = await client.query(
+    `SELECT id, nightclub_id::text AS nightclub_id, expires_at, used_at, attempts
+       FROM print_agent_invites
+      WHERE code_hash = $1 FOR UPDATE`,
+    [hashCode(code)]);
+  const invite = rows[0];
+
+  if (!invite) {
+    // No se sabe de qué club era, así que no hay a quién sumarle el intento. Ese es
+    // justo el caso que el índice único de arriba hace barato: buscar es una lectura.
+    throw ApiError.forbidden('Código inválido o vencido');
+  }
+
+  const vencido = new Date(invite.expires_at).getTime() < Date.now();
+  if (invite.used_at || vencido || invite.attempts >= INVITE_MAX_ATTEMPTS) {
+    throw ApiError.forbidden('Código inválido o vencido');
+  }
+
+  const nombre = String(hostname || '').trim().slice(0, 60) || `PC ${invite.id.slice(0, 4)}`;
+  const token = newToken();
+
+  // El nombre viene de la PC, así que dos PCs con el mismo nombre de Windows chocarían
+  // contra el índice único. Se desempata en vez de fallar: quien está parado en la
+  // barra no puede resolver un choque de nombres.
+  let agente = null;
+  for (let i = 0; i < 5 && !agente; i += 1) {
+    const intento = i === 0 ? nombre : `${nombre} (${i + 1})`;
+    // Cada intento va en su propio SAVEPOINT: en Postgres un INSERT que choca aborta
+    // la transacción entera, y atrapar la excepción en JavaScript no la revive. Sin
+    // esto, el segundo nombre repetido no reintentaba: tiraba el canje completo.
+    const punto = `pair_${i}`;
+    try {
+      await client.query(`SAVEPOINT ${punto}`);
+      const { rows: creado } = await client.query(
+        `INSERT INTO print_agents
+           (nightclub_id, name, token_hash, token_hint, hostname, agent_version,
+            paired_at, paired_by, scan_requested_at)
+         VALUES ($1,$2::text,$3,$4,$5::text,$6::text, now(),
+                 (SELECT created_by FROM print_agent_invites WHERE id = $7), now())
+         RETURNING id::text AS id, name`,
+        [invite.nightclub_id, intento, hashToken(token), token.slice(-6),
+          nombre, version, invite.id]);
+      await client.query(`RELEASE SAVEPOINT ${punto}`);
+      agente = creado[0];
+    } catch (err) {
+      await client.query(`ROLLBACK TO SAVEPOINT ${punto}`).catch(() => {});
+      if (err.code !== '23505') throw err;
+    }
+  }
+  if (!agente) throw ApiError.conflict('No se pudo dar de alta esta PC');
+
+  await client.query(
+    `UPDATE print_agent_invites
+        SET used_at = now(), used_agent_id = $2, used_ip = $3::text
+      WHERE id = $1`,
+    [invite.id, agente.id, ip]);
+
+  // `scan_requested_at` va puesto desde el INSERT: una PC que se acaba de emparejar
+  // busca impresoras sola. Es la diferencia entre "ya quedó" y "ahora ve y pícale
+  // buscar", que es un paso que nadie debería tener que dar.
+  return { agent: agente, token, nightclubId: invite.nightclub_id };
+}
+
+/** Un código equivocado le cuesta a todos los códigos vivos del club. */
+async function countFailedPairing(runner, { nightclubId = null } = {}) {
+  await runner.query(
+    `UPDATE print_agent_invites SET attempts = attempts + 1
+      WHERE used_at IS NULL AND expires_at > now()
+        AND ($1::uuid IS NULL OR nightclub_id = $1::uuid)`,
+    [nightclubId]);
+}
+
+/** Los códigos que siguen vivos, para la pantalla del gerente. */
+async function openInvites(runner, { nightclubId }) {
+  const { rows } = await runner.query(
+    `SELECT id::text AS id, code_hint, expires_at, attempts, created_at
+       FROM print_agent_invites
+      WHERE nightclub_id = $1 AND used_at IS NULL AND expires_at > now()
+      ORDER BY created_at DESC`,
+    [nightclubId]);
+  return rows;
+}
+
 async function createAgent(runner, { nightclubId, name, createdBy }) {
   const token = newToken();
   const { rows } = await runner.query(
@@ -532,4 +677,7 @@ module.exports = {
   claim, markPrinted, markFailed, reprint, listJobs,
   newToken, hashToken, createAgent, listAgents, agentByToken, touchAgent, setAgentActive,
   SCAN_TTL_MINUTES, requestScan, pendingScan, saveScan,
+  CODE_ALPHABET, CODE_LENGTH, INVITE_TTL_MINUTES, INVITE_MAX_ATTEMPTS,
+  newInviteCode, prettyCode, normalizeCode, hashCode,
+  createInvite, redeemInvite, countFailedPairing, openInvites,
 };

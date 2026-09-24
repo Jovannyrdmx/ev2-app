@@ -12,6 +12,7 @@ process.env.AUTH_RATE_LIMIT_PER_MIN = '100000';
 process.env.PIN_LOOKUP_KEY = process.env.PIN_LOOKUP_KEY
   || 'test-pin-lookup-key-0123456789-0123456789-abcdef';
 process.env.PIN_RATE_LIMIT_PER_MIN = '100000';
+process.env.PAIRING_RATE_LIMIT_PER_MIN = '100000';
 // Mercado Pago: las pruebas sustituyen `fetch`, asi que estas no llaman a nadie. Se
 // declaran igual porque el servicio se niega a cobrar sin ellas -- que es justo lo que
 // debe hacer en un servidor real.

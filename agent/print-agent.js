@@ -41,6 +41,7 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
+const readline = require('readline');
 const { execFile } = require('child_process');
 
 const VERSION = '1.0.0';
@@ -66,9 +67,9 @@ const DEFAULTS = {
   checkPaper: true,
   paperCheckMs: 500,
   /** Cuánto se espera a cada dirección al buscar impresoras en la red. */
-  scanTimeoutMs: 400,
+  scanTimeoutMs: 300,
   /** Cuántas direcciones se prueban a la vez. */
-  scanConcurrency: 32,
+  scanConcurrency: 64,
   /**
    * Subredes /24 extra para buscar, como `["192.168.20"]`.
    *
@@ -97,10 +98,19 @@ function loadConfig() {
     ...(process.env.EV2_API_URL ? { apiUrl: process.env.EV2_API_URL } : {}),
     ...(process.env.EV2_AGENT_TOKEN ? { token: process.env.EV2_AGENT_TOKEN } : {}),
   };
-  if (!cfg.apiUrl) fatal('Falta "apiUrl" en config.json (ej. https://tu-dominio.com)');
-  if (!cfg.token) fatal('Falta "token" en config.json: es el que te dio el panel al crear el agente');
-  cfg.apiUrl = String(cfg.apiUrl).replace(/\/+$/, '');
+  if (cfg.apiUrl) cfg.apiUrl = String(cfg.apiUrl).replace(/\/+$/, '');
   return cfg;
+}
+
+/** Guarda la configuración que el agente se armó solo al emparejarse. */
+function saveConfig(cfg) {
+  const archivo = path.join(__dirname, 'config.json');
+  const guardar = { apiUrl: cfg.apiUrl, token: cfg.token };
+  for (const k of Object.keys(DEFAULTS)) {
+    if (k !== 'apiUrl' && k !== 'token' && cfg[k] !== DEFAULTS[k]) guardar[k] = cfg[k];
+  }
+  fs.writeFileSync(archivo, `${JSON.stringify(guardar, null, 2)}\n`, { mode: 0o600 });
+  return archivo;
 }
 
 function fatal(msg) {
@@ -227,6 +237,66 @@ function printToWindows(printer, payload) {
 const printOne = (printer, payload, cfg) => (printer.connection === 'windows'
   ? printToWindows(printer, payload)
   : printToNetwork(printer, payload, cfg));
+
+// ---------------------------------------------------------------- emparejarse
+
+/** Una pregunta en la consola. Sin dependencias: `readline` viene con Node. */
+function ask(pregunta) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => rl.question(pregunta, (r) => { rl.close(); resolve(r.trim()); }));
+}
+
+/**
+ * Se da de alta con el código que el gerente tiene en la pantalla (D56).
+ *
+ * Antes había que copiar un token de 48 caracteres desde el panel hasta esta máquina
+ * —por WhatsApp, por un papel— y pegarlo a mano en el archivo. Ahora se teclean ocho
+ * caracteres que caducan en diez minutos, y **el token largo nunca pasa por las manos
+ * de nadie**: llega por la red y lo escribe este programa.
+ *
+ * La PC se presenta con su propio nombre de máquina, así que tampoco hay que
+ * inventarle uno.
+ */
+async function pair(cfg) {
+  // Sin consola de por medio, para una instalación en serie o desatendida. Es el
+  // mismo canje: lo único que cambia es de dónde salen las dos respuestas.
+  const desdeEntorno = process.env.EV2_PAIR_CODE;
+  if (!desdeEntorno) {
+    console.log('');
+    console.log('  Esta PC todavía no está dada de alta.');
+    console.log('  En el panel del gerente: Impresoras → Nueva PC. Ahí sale el código.');
+    console.log('');
+  }
+
+  const apiUrl = cfg.apiUrl
+    || (desdeEntorno ? '' : await ask('  Dirección del servidor (ej. https://tu-dominio.com): '));
+  if (!apiUrl) fatal('Sin la dirección del servidor no se puede continuar.');
+  const code = desdeEntorno
+    || await ask('  Código que aparece en la pantalla (ej. K7M4-2QX9): ');
+  if (!code) fatal('Sin el código no se puede dar de alta esta PC.');
+
+  const limpio = String(apiUrl).replace(/\/+$/, '');
+  const res = await fetch(`${limpio}/api/print-agent/pair`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, hostname: os.hostname(), version: VERSION }),
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok) {
+    const cuerpo = await res.json().catch(() => ({}));
+    const motivo = (cuerpo.error && cuerpo.error.message) || `HTTP ${res.status}`;
+    fatal(`No se pudo dar de alta esta PC: ${motivo}`);
+  }
+  const { agent, token } = await res.json();
+
+  const completo = { ...cfg, apiUrl: limpio, token };
+  const archivo = saveConfig(completo);
+  console.log('');
+  log('INFO', `esta PC quedó dada de alta como "${agent.name}"`);
+  log('INFO', `configuración guardada en ${archivo} — ya no hace falta volver a hacer esto`);
+  console.log('');
+  return completo;
+}
 
 // ---------------------------------------------------------------- buscar impresoras
 
@@ -446,7 +516,10 @@ async function tick(cfg, estado) {
 }
 
 async function main() {
-  const cfg = loadConfig();
+  let cfg = loadConfig();
+  // Sin token, lo primero es darse de alta. Un agente sin configurar ya no es un
+  // error que hay que ir a resolver a un archivo: es la primera pantalla.
+  if (!cfg.token) cfg = await pair(cfg);
   log('INFO', `EV2 print agent ${VERSION} — servidor ${cfg.apiUrl}`);
   const estado = { conectado: false, parando: false };
 
@@ -474,4 +547,5 @@ if (require.main === module) {
 module.exports = {
   VERSION, DEFAULTS, loadConfig, printToNetwork, printToWindows, handleJob, tick,
   isPrivateIPv4, ownSubnets, probePrinter, windowsPrinters, inBatches, scan,
+  saveConfig, pair,
 };

@@ -65,6 +65,9 @@
     // La búsqueda de impresoras (D55). `scanUntil` es hasta cuándo se sigue
     // preguntando por el resultado: el que busca es el agente, en el club, y tarda.
     scanUntil: 0,
+    // El código de emparejamiento que está en pantalla ahora (D56), y hasta cuándo
+    // se espera a que alguien lo teclee en la otra PC.
+    invite: null, pairUntil: 0,
   };
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
@@ -1293,6 +1296,7 @@
   };
 
   function renderPrinting() {
+    renderPairing();
     renderFoundPrinters();
     renderPrintersList();
     renderPrintAgents();
@@ -1681,21 +1685,73 @@
     }
   };
 
+  /**
+   * Dar de alta una PC, sin token que copiar (D56).
+   *
+   * Se pide un código, se enseña en grande, y se espera a que la otra máquina lo
+   * teclee. Copiar un token de 48 caracteres desde aquí hasta la barra —por WhatsApp,
+   * por un papel— era donde se rompía la instalación.
+   */
   $('btn-agent-add').onclick = async () => {
-    const nombre = window.prompt(t('prn.agentName'), '');
-    if (nombre === null) return;
-    if (!nombre.trim()) { toast(t('prn.errName'), 'error'); return; }
     const listo = ocupado($('btn-agent-add'), 'prn.saving');
     try {
-      const { agent } = await api.post(`/nightclubs/${clubId()}/print-agents`,
-        { name: nombre.trim() });
-      // El token se enseña UNA vez: si se cierra esta ventana sin copiarlo, se crea
-      // otro agente. Por eso va en un alerta que hay que cerrar a mano y no en un
-      // mensajito que se va solo a los tres segundos.
-      window.alert(t('prn.agentToken', { name: agent.name, token: agent.token }));
-      await loadPrinting();
-    } catch (err) { showError(err); } finally { listo(); }
+      const { invite } = await api.post(`/nightclubs/${clubId()}/print-agents/invite`, {});
+      printing.invite = invite;
+      printing.pairUntil = new Date(invite.expires_at).getTime();
+      renderPairing();
+      await waitForPairing(invite);
+    } catch (err) {
+      showError(err);
+    } finally {
+      listo();
+    }
   };
+
+  function renderPairing() {
+    const caja = $('prn-pair');
+    const invite = printing.invite;
+    const vivo = Boolean(invite) && Date.now() < printing.pairUntil;
+    caja.hidden = !vivo;
+    if (!vivo) { printing.invite = null; return; }
+
+    $('prn-pair-code').textContent = invite.code;
+    const minutos = Math.max(0, Math.ceil((printing.pairUntil - Date.now()) / 60000));
+    $('prn-pair-ttl').textContent = t('prn.pairTtl', { minutes: minutos });
+    $('prn-pair-wait').hidden = false;
+    $('prn-pair-wait').textContent = t('prn.pairWaiting');
+  }
+
+  /**
+   * Espera a que la PC se empareje y avisa cuando llegó.
+   *
+   * Se sigue preguntando hasta que el código caduque: quien lo teclea está en la otra
+   * barra, y el tiempo que tarda en caminar hasta allá es parte del proceso.
+   */
+  async function waitForPairing(invite) {
+    const antes = new Set((printing.agents || []).map((a) => a.id));
+    while (Date.now() < printing.pairUntil) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => { setTimeout(r, 3000); });
+      // eslint-disable-next-line no-await-in-loop
+      await loadPrinting();
+      const nueva = (printing.agents || []).find((a) => !antes.has(a.id));
+      if (nueva) {
+        printing.invite = null;
+        printing.pairUntil = 0;
+        toast(t('prn.paired', { name: nueva.name }), 'ok');
+        // La PC recién emparejada ya está buscando impresoras sola: se espera su
+        // resultado para que el gerente lo encuentre puesto y no tenga que pedirlo.
+        printing.scanUntil = Date.now() + 40000;
+        renderPrinting();
+        await waitForScan();
+        return;
+      }
+      // Sigue vivo el mismo código: se repinta para que el contador baje.
+      if (printing.invite && printing.invite.id === invite.id) renderPairing();
+    }
+    printing.invite = null;
+    renderPairing();
+  }
 
   $('btn-prn-reload').onclick = async () => {
     const listo = ocupado($('btn-prn-reload'), 'prn.reload');

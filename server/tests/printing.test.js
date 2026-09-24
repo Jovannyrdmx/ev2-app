@@ -44,11 +44,24 @@ const altaImpresora = (user, body) => api().post(url('/printers')).set(auth(user
   ...body,
 });
 
-/** Crea un agente y devuelve su token en claro, que solo se ve esta vez. */
+/**
+ * Da de alta una PC como se hace de verdad desde D56: el gerente pide un código y la
+ * PC lo canja. El helper recorre el camino real y no un atajo, porque si ese camino
+ * se rompe se rompe la instalación del club entero.
+ */
 async function nuevoAgente(name = 'PC barra baja') {
-  const res = await api().post(url('/print-agents')).set(auth(manager)).send({ name });
-  return res.body.agent;
+  const { body } = await api().post(url('/print-agents/invite')).set(auth(manager));
+  const res = await api().post('/api/print-agent/pair')
+    .send({ code: body.invite.code, hostname: name, version: '1.0.0' });
+  return { ...res.body.agent, token: res.body.token };
 }
+
+/** Un código de emparejamiento recién emitido. */
+const nuevoCodigo = async () => (await api().post(url('/print-agents/invite'))
+  .set(auth(manager))).body.invite;
+
+const emparejar = (code, hostname = 'PC prueba') => api().post('/api/print-agent/pair')
+  .send({ code, hostname });
 
 const comoAgente = (token, method, path) => api()[method](path).set('X-Print-Agent-Token', token);
 
@@ -463,7 +476,11 @@ describe('Buscar impresoras en vez de teclear su IP (D55)', () => {
 
   it('el agente ve el encargo en el mismo sondeo que ya hace', async () => {
     const a = await nuevoAgente();
+    // La primera búsqueda ya venía pedida al emparejarse (D56): se consume y desde
+    // ahí el encargo solo aparece cuando alguien lo pide.
+    await comoAgente(a.token, 'post', '/api/print-agent/scan').send({ found: [] });
     expect((await comoAgente(a.token, 'get', '/api/print-agent/jobs')).body.scan).toBe(false);
+
     await api().post(url('/print-agents/scan')).set(auth(manager));
     // Un segundo canal sería una conexión más que se cae con cada parpadeo del
     // internet del club, para algo que se pide una vez al mes.
@@ -534,5 +551,127 @@ describe('Buscar impresoras en vez de teclear su IP (D55)', () => {
   it('un mesero no manda a buscar impresoras', async () => {
     await nuevoAgente();
     expect((await api().post(url('/print-agents/scan')).set(auth(waiter))).status).toBe(403);
+  });
+});
+
+describe('Dar de alta una PC sin copiar un token (D56)', () => {
+  it('el gerente pide un código corto, legible y de un solo uso', async () => {
+    const invite = await nuevoCodigo();
+    // Ocho caracteres en dos grupos: alguien lo lee de una pantalla y lo teclea en
+    // otra máquina, y ahí es donde se confunde un 0 con una O.
+    expect(invite.code).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
+    expect(invite.code).not.toMatch(/[ILOU]/);
+    expect(invite.ttl_minutes).toBe(10);
+  });
+
+  it('la base guarda la huella, no el código', async () => {
+    const invite = await nuevoCodigo();
+    const { rows } = await pool.query(
+      'SELECT code_hash, code_hint FROM print_agent_invites WHERE id = $1', [invite.id]);
+    expect(rows[0].code_hash).not.toContain(invite.code.replace('-', ''));
+    expect(rows[0].code_hash).toBe(printing.hashCode(invite.code));
+    expect(invite.code.endsWith(rows[0].code_hint)).toBe(true);
+  });
+
+  it('la PC lo canjea, se nombra sola y recibe su token', async () => {
+    const invite = await nuevoCodigo();
+    const res = await emparejar(invite.code, 'DESKTOP-BARRA1');
+
+    expect(res.status).toBe(201);
+    // El token largo nunca pasa por las manos de nadie: llega por la red y lo escribe
+    // el propio agente en su archivo.
+    expect(res.body.token).toMatch(/^ev2ag_[0-9a-f]{48}$/);
+    expect(res.body.agent.name).toBe('DESKTOP-BARRA1');
+
+    // Y sirve de inmediato.
+    const sondeo = await comoAgente(res.body.token, 'get', '/api/print-agent/jobs');
+    expect(sondeo.status).toBe(200);
+  });
+
+  it('se acepta tecleado como sea: minúsculas, con guión o sin él', async () => {
+    const invite = await nuevoCodigo();
+    const res = await emparejar(invite.code.toLowerCase().replace('-', ' '));
+    // Lo que se enseña lleva un guión, así que quien lo teclea va a ponerlo — o no.
+    // Las dos formas son el mismo código.
+    expect(res.status).toBe(201);
+  });
+
+  it('recién emparejada empieza a buscar impresoras sola', async () => {
+    // Es la diferencia entre "ya quedó" y "ahora ve y pícale buscar".
+    const invite = await nuevoCodigo();
+    const res = await emparejar(invite.code);
+    const sondeo = await comoAgente(res.body.token, 'get', '/api/print-agent/jobs');
+    expect(sondeo.body.scan).toBe(true);
+  });
+
+  it('un código sirve UNA vez', async () => {
+    const invite = await nuevoCodigo();
+    expect((await emparejar(invite.code, 'PC uno')).status).toBe(201);
+    const segunda = await emparejar(invite.code, 'PC dos');
+    expect(segunda.status).toBe(403);
+    expect(segunda.body.error.message).toBe('Código inválido o vencido');
+  });
+
+  it('un código vencido no sirve', async () => {
+    const invite = await nuevoCodigo();
+    await pool.query(
+      `UPDATE print_agent_invites SET expires_at = now() - interval '1 minute' WHERE id = $1`,
+      [invite.id]);
+    expect((await emparejar(invite.code)).status).toBe(403);
+  });
+
+  it('un código inventado no dice nada que ayude a adivinar', async () => {
+    const res = await emparejar('AAAA-BBBB');
+    expect(res.status).toBe(403);
+    // "No existe", "ya se usó" y "venció" son la misma respuesta a propósito.
+    expect(res.body.error.message).toBe('Código inválido o vencido');
+  });
+
+  it('a fuerza de intentos, los códigos vivos se queman', async () => {
+    const invite = await nuevoCodigo();
+    for (let i = 0; i < printing.INVITE_MAX_ATTEMPTS; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await emparejar('ZZZZ-ZZZZ');
+    }
+    // Ocho caracteres son adivinables para una máquina; lo que lo impide no es el
+    // largo, es que el código muera antes de que probar valga la pena.
+    expect((await emparejar(invite.code)).status).toBe(403);
+  });
+
+  it('dos PCs con el mismo nombre de Windows no se pisan', async () => {
+    const a = await emparejar((await nuevoCodigo()).code, 'DESKTOP-PC');
+    const b = await emparejar((await nuevoCodigo()).code, 'DESKTOP-PC');
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    // Quien está parado en la barra no puede resolver un choque de nombres.
+    expect(b.body.agent.name).not.toBe(a.body.agent.name);
+  });
+
+  it('queda constancia de cómo entró esa PC, y no se puede reescribir', async () => {
+    const invite = await nuevoCodigo();
+    await emparejar(invite.code, 'DESKTOP-BARRA1');
+    const { rows } = await pool.query(
+      `SELECT used_at, used_agent_id, used_ip FROM print_agent_invites WHERE id = $1`,
+      [invite.id]);
+    expect(rows[0].used_at).not.toBeNull();
+    expect(rows[0].used_agent_id).not.toBeNull();
+
+    await expect(pool.query(
+      `UPDATE print_agent_invites SET used_agent_id = NULL WHERE id = $1`, [invite.id]))
+      .rejects.toMatchObject({ code: '23001' });
+    await expect(pool.query('DELETE FROM print_agent_invites WHERE id = $1', [invite.id]))
+      .rejects.toMatchObject({ code: '23001' });
+  });
+
+  it('el gerente ve los códigos vivos, pero nunca el código otra vez', async () => {
+    const invite = await nuevoCodigo();
+    const lista = await api().get(url('/print-agents')).set(auth(manager));
+    expect(lista.body.invites).toHaveLength(1);
+    expect(lista.body.invites[0].code).toBeUndefined();
+    expect(lista.body.invites[0].code_hint).toBe(invite.code.slice(-4));
+  });
+
+  it('un mesero no emite códigos', async () => {
+    expect((await api().post(url('/print-agents/invite')).set(auth(waiter))).status).toBe(403);
   });
 });
