@@ -113,9 +113,42 @@ function saveConfig(cfg) {
   return archivo;
 }
 
+/**
+ * Un error del que no se vuelve.
+ *
+ * Existe como clase para poder distinguirlo del resto: en el ciclo principal, un
+ * fallo de red es normal y se sigue; esto no.
+ */
+class FatalError extends Error {}
+
+/**
+ * Se rinde, y se rinde bien.
+ *
+ * **Lanza en vez de llamar a `process.exit()`, y eso no es estilo.** Salir en el mismo
+ * instante en que hay una petición HTTP a medio cerrar aborta Node en Windows con
+ * «Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\\win\\async.c». Lo
+ * vimos en una PC de barra: el mensaje útil salía y, justo encima, un choque de
+ * programa a nivel C. Quien está parado ahí a las once de la noche ya no sabe cuál de
+ * las dos líneas leer, y la que importaba era la primera.
+ *
+ * Lanzar además corta la ejecución donde se llama, que es exactamente lo que daban por
+ * hecho los `if (!algo) fatal(...)` de este archivo.
+ */
 function fatal(msg) {
-  log('ERROR', msg);
-  process.exit(1);
+  throw new FatalError(msg);
+}
+
+/**
+ * Terminar sin romper nada.
+ *
+ * Se marca el código de salida y se deja que el proceso termine solo en cuanto se
+ * cierre lo que quede abierto. El temporizador es la red de seguridad para un socket
+ * con `keep-alive` que se quede colgado, y va sin `ref` para no ser él quien mantenga
+ * vivo el programa.
+ */
+function salir(codigo) {
+  process.exitCode = codigo;
+  setTimeout(() => process.exit(codigo), 1500).unref();
 }
 
 // ---------------------------------------------------------------- bitácora
@@ -533,19 +566,31 @@ async function main() {
 
   while (!estado.parando) {
     // eslint-disable-next-line no-await-in-loop
-    await tick(cfg, estado).catch((err) => log('ERROR', err.message));
+    await tick(cfg, estado).catch((err) => {
+      // La impresora apagada, el internet del club parpadeando, el servidor
+      // reiniciándose: eso se anota y se sigue, que para eso está el ciclo. Lo que no
+      // se arregla insistiendo —un token que el servidor no reconoce— sube y termina
+      // el programa, en vez de llenar la bitácora del servidor toda la noche.
+      if (err instanceof FatalError) throw err;
+      log('ERROR', err.message);
+    });
     // eslint-disable-next-line no-await-in-loop
     await new Promise((r) => { setTimeout(r, cfg.pollSeconds * 1000); });
   }
-  process.exit(0);
+  salir(0);
 }
 
 if (require.main === module) {
-  main().catch((err) => fatal(err.stack || err.message));
+  main().catch((err) => {
+    // Un error previsto se dice en una línea; uno que no lo era enseña la pila, porque
+    // entonces hace falta para arreglarlo.
+    log('ERROR', err instanceof FatalError ? err.message : (err.stack || err.message));
+    salir(1);
+  });
 }
 
 module.exports = {
-  VERSION, DEFAULTS, loadConfig, printToNetwork, printToWindows, handleJob, tick,
-  isPrivateIPv4, ownSubnets, probePrinter, windowsPrinters, inBatches, scan,
+  VERSION, DEFAULTS, FatalError, loadConfig, printToNetwork, printToWindows, handleJob,
+  tick, isPrivateIPv4, ownSubnets, probePrinter, windowsPrinters, inBatches, scan,
   saveConfig, pair,
 };

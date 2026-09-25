@@ -129,6 +129,33 @@ PC**.
 | Apagan la PC a medio trabajo | El servidor devuelve ese trabajo a la cola a los dos minutos |
 | El token es inválido | Se detiene y lo dice, en vez de insistir toda la noche |
 
+### «El servidor rechazó el token»
+
+```
+[ERROR] El servidor rechazó el token. Revisa "token" en config.json,
+        o crea otro agente desde el panel del gerente.
+```
+
+El agente termina ahí a propósito: un token que el servidor no reconoce no se arregla
+insistiendo, y seguir sondeando toda la noche solo llena la bitácora del servidor de
+intentos fallidos. Pasa cuando esa PC se apagó desde el panel, cuando se dio de alta
+contra otro servidor, o cuando el servidor se repuso desde un respaldo anterior al
+alta.
+
+Se resuelve dando de alta la PC otra vez, que son dos minutos:
+
+```
+del C:\EV2\agent\config.json
+node print-agent.js
+```
+
+Pide un código nuevo en el panel y tecléalo. La PC vieja queda en la lista como
+apagada; se puede quitar desde ahí.
+
+> Si además de ese mensaje ves un `Assertion failed ... UV_HANDLE_CLOSING`, tienes una
+> versión del agente anterior a esta. El mensaje de arriba sigue siendo el bueno: ese
+> segundo renglón era un defecto nuestro al terminar, ya corregido, y no dice nada de
+> tu instalación.
 
 Nada de eso se pierde en silencio: lo que no salió se ve en rojo en el panel del
 gerente, y desde ahí se reimprime.
