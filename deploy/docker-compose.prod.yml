@@ -82,8 +82,10 @@ services:
 
   api:
     build:
-      context: ../server
-      dockerfile: ../deploy/Dockerfile.api
+      # La raíz del repositorio, no `server/`: la imagen también lleva `agent/`, que es
+      # lo que baja una PC de barra para instalarse (D57). Ver deploy/Dockerfile.api.
+      context: ..
+      dockerfile: deploy/Dockerfile.api
     container_name: ev2-api
     command: ["sh", "-c", "node src/db/migrate.js && node src/index.js"]
     environment:
@@ -143,6 +145,7 @@ services:
       TAXI_VERIFY_RATE_LIMIT_PER_MIN: ${TAXI_VERIFY_RATE_LIMIT_PER_MIN:-}
       MERCADOPAGO_WEBHOOK_RATE_LIMIT_PER_MIN: ${MERCADOPAGO_WEBHOOK_RATE_LIMIT_PER_MIN:-}
       PAIRING_RATE_LIMIT_PER_MIN: ${PAIRING_RATE_LIMIT_PER_MIN:-}
+      AGENT_DOWNLOAD_RATE_LIMIT_PER_MIN: ${AGENT_DOWNLOAD_RATE_LIMIT_PER_MIN:-}
       DB_POOL_MAX: ${DB_POOL_MAX:-}
       SERVE_API_DOCS: ${SERVE_API_DOCS:-}
       # ---------------------------------------------------------------- lectura de tickets

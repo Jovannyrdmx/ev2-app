@@ -155,10 +155,23 @@ hay token que copiar: el token largo nunca pasa por las manos de nadie.
 
 ### 4. Instalar el agente
 
-Node.js 18+, copiar la carpeta `agent/`, y correr `node print-agent.js`. Pregunta la
-dirección del servidor y el código, **se escribe su propio `config.json`**, se pone el
-nombre de la máquina y empieza a buscar impresoras solo. Detalle completo en
-`agent/README.md`.
+Debajo del código hay un desplegable, **"Esa PC todavía no tiene el agente"**, con la
+línea ya escrita y un botón para copiarla. En la PC de la barra: clic derecho en
+Inicio → Windows PowerShell, y pegar:
+
+```
+irm https://tu-dominio.com/api/print-agent/install.ps1 | iex
+```
+
+Eso baja el agente a `C:\EV2\agent`, deja hecho el `.bat` de arranque, y lo corre.
+Solo pide el código. **Se escribe su propio `config.json`**, se pone el nombre de la
+máquina y empieza a buscar impresoras solo. Si falta Node.js, lo dice y manda a
+nodejs.org.
+
+Esto existe porque al club se entra por la dirección web, no con una USB: pedirle a
+quien está dando de alta la cuarta PC que consiga la carpeta `agent/` era pedirle que
+saliera a buscar una memoria. Copiar la carpeta a mano sigue funcionando igual; el
+detalle completo está en `agent/README.md`.
 
 ### 5. Probar
 
@@ -254,6 +267,17 @@ botón con el cliente enfrente, y quedarse callado lo deja parado mirando la pan
 - Los trabajos impresos son inmutables y no se borran: ese ticket está en la mano de
   alguien, y cambiar aquí lo que dice sería inventar una historia distinta de la que
   anda circulando por el club.
+- El instalador (`/api/print-agent/install.ps1`) y los archivos del agente son
+  **públicos**, y es una decisión: una PC que todavía no está dada de alta no tiene
+  con qué identificarse, y pedir sesión obligaría al gerente a dejar la suya abierta
+  en la PC de la barra. El código del agente no es un secreto; lo que da de alta a esa
+  PC es el código de emparejamiento, que vive diez minutos y sirve una vez.
+- Esa línea **ejecuta código remoto**, así que el instalador solo se genera sobre
+  **https**, y el dominio que lleva adentro sale de `ALLOWED_ORIGINS`, no del `Host`
+  de la petición: si mandara el `Host`, bastaría pedirlo con el dominio de otro para
+  que la PC de la barra bajara y ejecutara lo que ese otro sirva.
+- Lo que se sirve es una **lista blanca de dos archivos**, no la carpeta. En una PC ya
+  instalada esa carpeta también tiene `config.json`, con el token de esa PC.
 
 ## Una limitación honesta
 

@@ -196,6 +196,19 @@ function createApp() {
     legacyHeaders: false,
   }));
 
+  // Bajar el agente desde el navegador de la barra (D57). Es público —una PC que aún
+  // no está dada de alta no tiene con qué identificarse— y son archivos de texto que
+  // salen de disco, así que el límite es holgado: dar de alta una PC son tres
+  // descargas, y el par de veces al año que se instalan cuatro seguidas no debe
+  // toparse con un 429. Apretarlo no protegería nada que importe: lo que se sirve
+  // aquí no es secreto, y el gasto real de una descarga es leer 21 KB.
+  app.use(['/api/print-agent/install.ps1', '/api/print-agent/files'], rateLimit({
+    windowMs: 60 * 1000,
+    limit: Number(process.env.AGENT_DOWNLOAD_RATE_LIMIT_PER_MIN || 30),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  }));
+
   app.use('/api/auth', authRoutes);
   app.use('/api', nightclubRoutes);
   app.use('/api', drinkRoutes);

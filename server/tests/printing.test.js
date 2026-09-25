@@ -675,3 +675,119 @@ describe('Dar de alta una PC sin copiar un token (D56)', () => {
     expect((await api().post(url('/print-agents/invite')).set(auth(waiter))).status).toBe(403);
   });
 });
+
+/**
+ * D57 — instalar el agente desde el navegador.
+ *
+ * El caso real: el gerente entra al panel desde una PC de barra recién puesta, donde
+ * no hay ninguna carpeta `agent/` porque nadie la copió por USB. Si esto falla, esa
+ * PC no imprime y no hay manera de arreglarlo sin una memoria y un viaje.
+ *
+ * Lo que se prueba aquí es lo único que se rompe en silencio: que lo que sirve la API
+ * sea **el archivo del repositorio**, byte a byte. El día que alguien mueva `agent/`
+ * o cambie el contexto de build, esto falla aquí y no en la barra a las once de la
+ * noche.
+ */
+describe('Instalar el agente desde el navegador (D57)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const AGENT_DIR = path.resolve(__dirname, '../../agent');
+
+  let origenes;
+  beforeEach(() => { origenes = process.env.ALLOWED_ORIGINS; });
+  afterEach(() => { process.env.ALLOWED_ORIGINS = origenes; });
+
+  it('sirve el agente tal cual está en el repositorio, byte a byte', async () => {
+    for (const archivo of ['print-agent.js', 'package.json']) {
+      const res = await api().get(`/api/print-agent/files/${archivo}`).buffer().parse((r, cb) => {
+        const trozos = [];
+        r.on('data', (d) => trozos.push(d));
+        r.on('end', () => cb(null, Buffer.concat(trozos)));
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.equals(fs.readFileSync(path.join(AGENT_DIR, archivo)))).toBe(true);
+    }
+  });
+
+  it('no sirve nada que no sea del agente, ni el config con el token', async () => {
+    // `config.json` vive en esa misma carpeta en una PC de barra y lleva su llave.
+    expect((await api().get('/api/print-agent/files/config.json')).status).toBe(404);
+    expect((await api().get('/api/print-agent/files/README.md')).status).toBe(404);
+    expect((await api().get('/api/print-agent/files/..%2F..%2Fserver%2F.env')).status).toBe(404);
+  });
+
+  it('bajar el agente no pide sesión, pero tampoco la reemplaza', async () => {
+    // Sin token: la descarga sí, tomar trabajos no. Que uno sea público no ablanda
+    // al otro, que es lo que este proyecto no puede permitirse confundir.
+    expect((await api().get('/api/print-agent/files/print-agent.js')).status).toBe(200);
+    expect((await api().get('/api/print-agent/jobs')).status).toBe(401);
+  });
+
+  it('el instalador trae el dominio del club, no un ejemplo', async () => {
+    process.env.ALLOWED_ORIGINS = 'https://ev2-clandestinoz.mx';
+    const res = await api().get('/api/print-agent/install.ps1');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/plain/);
+    expect(res.text).toContain("$ApiUrl  = 'https://ev2-clandestinoz.mx'");
+    // Y baja los archivos de ese mismo lugar, no de otro.
+    expect(res.text).toContain('$ApiUrl/api/print-agent/files/$archivo');
+    expect(res.text).toContain("@('print-agent.js', 'package.json')");
+  });
+
+  it('un Host inventado no se cuela dentro del instalador', async () => {
+    // Quien pide puede escribir el `Host` que quiera. Si eso mandara, bastaría con
+    // pedir el instalador con el dominio de otro para que la PC de la barra bajara y
+    // ejecutara lo que ese otro sirva. Manda ALLOWED_ORIGINS.
+    process.env.ALLOWED_ORIGINS = 'https://ev2-clandestinoz.mx';
+    const res = await api().get('/api/print-agent/install.ps1').set('Host', 'servidor-ajeno.mx');
+    expect(res.status).toBe(200);
+    expect(res.text).not.toContain('servidor-ajeno.mx');
+    expect(res.text).toContain("$ApiUrl  = 'https://ev2-clandestinoz.mx'");
+  });
+
+  it('sobre http no se genera instalador', async () => {
+    process.env.ALLOWED_ORIGINS = 'http://ev2-clandestinoz.mx';
+    const res = await api().get('/api/print-agent/install.ps1');
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('insecure_install_url');
+  });
+
+  it('la imagen de la API se construye de forma que el agente venga adentro', () => {
+    // Esto no es pedantería de despliegue: con el contexto anterior (`../server`) la
+    // carpeta `agent/` quedaba FUERA del contexto de build, así que estas rutas
+    // pasaban todas las pruebas aquí y contestaban 404 en el VPS. Si alguien vuelve a
+    // apretar el contexto, se entera aquí.
+    const raiz = path.resolve(__dirname, '../..');
+    const dockerfile = fs.readFileSync(path.join(raiz, 'deploy/Dockerfile.api'), 'utf8');
+    expect(dockerfile).toMatch(/^COPY agent \.\/agent$/m);
+    expect(dockerfile).toMatch(/^COPY server\/src \.\/src$/m);
+
+    for (const archivo of ['deploy/docker-compose.prod.yml', 'deploy/docker-compose.yml']) {
+      const compose = fs.readFileSync(path.join(raiz, archivo), 'utf8');
+      const api2 = compose.slice(compose.indexOf('\n  api:'));
+      const build = api2.slice(0, api2.indexOf('container_name'));
+      expect(build).toMatch(/context: \.\.$/m);
+      expect(build).toMatch(/dockerfile: deploy\/Dockerfile\.api$/m);
+    }
+
+    // Y que el proxy de enfrente deje pasar la descarga. Sin el `^~`, la regla por
+    // extensión de nginx le gana a la de prefijo y se queda con cualquier `/api/…`
+    // que acabe en `.js` buscándola entre los archivos estáticos: 404 justo para
+    // `files/print-agent.js`, con el resto de la API contestando perfecto.
+    const nginx = fs.readFileSync(path.join(raiz, 'deploy/nginx-web.conf'), 'utf8');
+    expect(nginx).toMatch(/location \^~ \/api\/ \{/);
+
+    // Y que el contexto no se lleve por delante el código de la propia API.
+    const ignorar = fs.readFileSync(path.join(raiz, '.dockerignore'), 'utf8')
+      .split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    expect(ignorar).not.toContain('server');
+    expect(ignorar).toContain('agent/config.json');
+  });
+
+  it('el instalador se niega él solo si alguien le cambia la dirección', async () => {
+    // El servidor no genera nada que no sea https, pero el archivo se puede guardar y
+    // pasar de mano. La comprobación viaja dentro del script.
+    const res = await api().get('/api/print-agent/install.ps1');
+    expect(res.text).toContain("-notmatch '^https://'");
+  });
+});

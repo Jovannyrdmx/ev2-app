@@ -1,7 +1,15 @@
 # EV2 API (Express + WebSocket notifications)
+#
+# El contexto de build es la RAIZ del repositorio, no `server/`, y por eso cada COPY
+# lleva el prefijo `server/`. El motivo es `agent/`: desde D57 una PC de barra se
+# instala bajando el agente de la propia API, asi que esos archivos tienen que estar
+# dentro de esta imagen. Con el contexto anterior (`../server`) la carpeta `agent/`
+# quedaba FUERA del contexto y ningun COPY podia alcanzarla -- la ruta habria
+# contestado 404 en el VPS pasando todas las pruebas en local, que es justo la clase
+# de fallo que este proyecto no quiere.
 FROM node:20-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev
 
 FROM node:20-alpine
@@ -23,17 +31,25 @@ RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-spa
 RUN mkdir -p /app/var/receipts && chown -R node:node /app/var
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY package.json ./
-COPY src ./src
-COPY migrations ./migrations
+COPY server/package.json ./
+COPY server/src ./src
+COPY server/migrations ./migrations
 # `npm run seed` / `seed:floor` corren dentro de este contenedor (docker compose exec).
-COPY seeds ./seeds
+COPY server/seeds ./seeds
 # `npm run bootstrap` crea el club y el PRIMER gerente en un servidor nuevo. Sin esto
 # dentro de la imagen, un despliegue de produccion no tiene forma de que nadie entre:
 # el seed se niega a correr con NODE_ENV=production y /auth/register solo crea invitados.
-COPY scripts ./scripts
+COPY server/scripts ./scripts
 # The API contract is served at /api/docs and /api/openapi.yaml.
-COPY openapi.yaml ./
+COPY server/openapi.yaml ./
+# El agente de impresion (D57). La API lo sirve en /api/print-agent/files/... para que
+# una PC de barra se instale desde el navegador, sin copiar carpetas por USB. Son dos
+# archivos de texto sin dependencias: no pesan ni arrastran nada.
+#
+# La ruta relativa importa: `src/routes/printing.js` busca la carpeta tres niveles
+# arriba, que aqui es `/app/agent` y en el repositorio es `agent/`. La misma ruta
+# funciona en los dos lados a proposito, para que lo que se prueba sea lo que se sirve.
+COPY agent ./agent
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \

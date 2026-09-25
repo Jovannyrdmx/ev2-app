@@ -764,6 +764,25 @@
             <p id="prn-pair-code" class="font-display text-3xl tracking-[0.2em]" style="color:var(--ev2-gold)">—</p>
             <p id="prn-pair-ttl" class="text-[11px] text-white/40">—</p>
             <p id="prn-pair-wait" class="text-xs" style="color:var(--ev2-lime)" hidden></p>
+
+            <!--
+              Y si esa PC todavía no tiene el agente (D57). Va aquí adentro y cerrado:
+              la mayoría de las veces la PC ya lo tiene y esto solo estorbaría, pero
+              la vez que no, quien está parado en la barra necesita encontrarlo sin
+              buscar una carpeta en una USB.
+            -->
+            <details id="prn-install" class="text-left rounded-lg" style="background:rgba(0,0,0,.25)">
+              <summary class="cursor-pointer px-3 py-2 text-xs text-white/60 tap" data-i18n="prn.installOpen">Esa PC todavía no tiene el agente</summary>
+              <div class="px-3 pb-3 space-y-2">
+                <p class="text-[11px] text-white/50" data-i18n="prn.installHow">En esa PC: clic derecho en Inicio → Windows PowerShell. Pega esta línea y dale Enter.</p>
+                <code id="prn-install-cmd" class="block text-[11px] break-all rounded p-2" style="background:rgba(0,0,0,.45);color:var(--ev2-lime)">—</code>
+                <div class="flex gap-2">
+                  <button id="btn-prn-copy" class="card rounded-lg px-3 py-2 text-xs flex-1" data-i18n="prn.installCopy">Copiar la línea</button>
+                  <a id="prn-install-dl" class="card rounded-lg px-3 py-2 text-xs flex-1 text-center tap" href="#" download="instalar-agente-ev2.ps1" data-i18n="prn.installDownload">Bajar el archivo</a>
+                </div>
+                <p class="text-[11px] text-white/40" data-i18n="prn.installNode">Hace falta Node.js en esa PC. Si no lo tiene, la línea te lo dice y te manda a nodejs.org.</p>
+              </div>
+            </details>
           </div>
 
           <div id="prn-agents" class="space-y-2"></div>

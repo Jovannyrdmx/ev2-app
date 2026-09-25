@@ -9590,6 +9590,79 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
 
+  /api/print-agent/install.ps1:
+    get:
+      operationId: getPrintAgentInstaller
+      tags: [Impresión]
+      summary: (Público) El instalador del agente, con el dominio del club adentro
+      description: |
+        Para dar de alta una PC de barra que **no tiene la carpeta del agente**, que es
+        el caso normal: al club se entra por la dirección web, no con una USB.
+
+        En esa PC se pega una línea en PowerShell:
+
+        ```
+        irm https://tu-dominio.com/api/print-agent/install.ps1 | iex
+        ```
+
+        El script baja `print-agent.js` y `package.json` a `C:\EV2\agent`, deja hecho
+        el `.bat` de arranque y corre el agente, que entonces pide el código de
+        emparejamiento. Si falta Node.js lo dice y manda a nodejs.org, en vez de
+        fallar con un error raro.
+
+        **Solo se genera sobre https.** Esa línea ejecuta código remoto: sobre http,
+        cualquiera dentro de la red del club podría contestar por el servidor y
+        mandarle a la barra el script que quisiera. El dominio que se hornea sale de
+        `ALLOWED_ORIGINS`, no del `Host` de la petición, por la misma razón.
+
+        Es público a propósito: una PC que todavía no está dada de alta no tiene con
+        qué identificarse, y pedir sesión obligaría al gerente a dejar la suya abierta
+        en la PC de la barra. Lo que da de alta a esa PC no es este archivo, es el
+        código de emparejamiento.
+      security: []
+      responses:
+        '200':
+          description: El script de PowerShell
+          content:
+            text/plain:
+              schema: { type: string }
+        '400':
+          description: El servidor no se ve por https, así que no se genera
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/print-agent/files/{file}:
+    get:
+      operationId: getPrintAgentFile
+      tags: [Impresión]
+      summary: (Público) Un archivo del agente
+      description: |
+        Los dos archivos que necesita una PC de barra, y ningún otro: es una lista
+        blanca, no una carpeta servida. La diferencia importa porque en una PC ya
+        instalada esa misma carpeta tiene `config.json`, que lleva el token de esa PC.
+      security: []
+      parameters:
+        - name: file
+          in: path
+          required: true
+          schema: { type: string, enum: [print-agent.js, package.json] }
+      responses:
+        '200':
+          description: El archivo, idéntico al del repositorio
+          content:
+            text/javascript:
+              schema: { type: string }
+            application/json:
+              schema: { type: string }
+        '404':
+          description: Ese archivo no forma parte del agente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
   /api/nightclubs/{nightclubId}/print-agents/{agentId}:
     patch:
       operationId: setPrintAgentActive

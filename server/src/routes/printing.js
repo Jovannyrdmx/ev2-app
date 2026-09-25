@@ -17,6 +17,8 @@
  */
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const { pool } = require('../db/pool');
 const { ApiError, asyncHandler } = require('../middleware/errors');
@@ -94,6 +96,184 @@ agentRouter.post('/pair',
     });
     res.status(201).json({ agent: hecho.agent, token: hecho.token });
   }));
+
+// ---------------------------------------------------------- bajar el agente (D57)
+
+/**
+ * La carpeta del agente, vista desde aquí.
+ *
+ * `src/routes/printing.js` → tres niveles arriba. En el repositorio eso es `agent/`;
+ * dentro de la imagen de la API es `/app/agent`, porque `deploy/Dockerfile.api`
+ * construye desde la raíz y hace `COPY agent ./agent`. La ruta es la misma en los dos
+ * lados a propósito: si no lo fuera, esto pasaría las pruebas aquí y contestaría 404
+ * en el club.
+ */
+const AGENT_DIR = path.resolve(__dirname, '../../../agent');
+
+/**
+ * Lo que se sirve, y nada más.
+ *
+ * Es una lista blanca, no una carpeta estática, y la diferencia importa: `agent/`
+ * también llega a tener `config.json`, que lleva el token de esa PC. Servir la
+ * carpeta entera y confiar en que nadie ponga un archivo delicado ahí es cómo se
+ * publica una llave sin querer. Aquí lo que no está escrito no existe.
+ */
+const AGENT_FILES = new Map([
+  ['print-agent.js', 'text/javascript; charset=utf-8'],
+  ['package.json', 'application/json; charset=utf-8'],
+]);
+
+const LOCALHOST = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+
+/**
+ * ¿De dónde se baja el agente?
+ *
+ * Se usa el origen con el que llegó la petición, pero **solo si está en
+ * `ALLOWED_ORIGINS`**. El `Host` lo escribe quien llama, y hornear un dominio ajeno
+ * dentro de un script que alguien va a ejecutar en la PC de la barra es exactamente
+ * la forma de convertir esta comodidad en un agujero. `ALLOWED_ORIGINS` ya es
+ * obligatorio en producción y ya dice cuál es el dominio del club: esa es la fuente
+ * honesta, y es la que gana cuando el `Host` no coincide.
+ */
+function agentBaseUrl(req) {
+  const permitidos = (process.env.ALLOWED_ORIGINS || '')
+    .split(',').map((o) => o.trim().replace(/\/+$/, '')).filter(Boolean);
+  const propio = `${req.protocol}://${req.get('host') || ''}`;
+  if (permitidos.includes(propio)) return propio;
+  return permitidos.find((o) => /^https:\/\//i.test(o)) || permitidos[0] || propio;
+}
+
+/**
+ * El instalador de PowerShell, con el dominio de este club ya adentro.
+ *
+ * Se escribe **sin acentos ni eñes a propósito**. No es descuido: la consola de
+ * Windows PowerShell 5.1 sigue en una página de códigos de los ochenta, y un mensaje
+ * con acentos sale con basura justo cuando alguien está parado en la barra tratando
+ * de entender por qué no arranca. Los archivos que baja sí llevan acentos; lo que se
+ * imprime en esa consola, no.
+ */
+function installScript(base) {
+  return `#Requires -Version 5.1
+# Instalador del agente de impresion de EV2.
+#
+# Generado por el servidor del club: la direccion de abajo es la suya, no un ejemplo.
+# Este archivo no lleva ningun secreto. Lo que da de alta a esta PC es el codigo de
+# emparejamiento que sale en el panel del gerente, y ese se teclea aqui, en vivo.
+& {
+  $ErrorActionPreference = 'Stop'
+  $ApiUrl  = '${base}'
+  $Destino = 'C:\\EV2\\agent'
+
+  # Solo por https, salvo en una prueba local. Una PC de barra que acepte bajar y
+  # ejecutar codigo por http confia en cualquiera que este en la red del club.
+  if ($ApiUrl -notmatch '^https://' -and $ApiUrl -notmatch '^http://(localhost|127\\.0\\.0\\.1)(:\\d+)?$') {
+    Write-Host "  Esta instalacion apunta a $ApiUrl, que no es https." -ForegroundColor Red
+    Write-Host "  No se continua. Pide la linea correcta en el panel del gerente."
+    return
+  }
+
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+  Write-Host ""
+  Write-Host "  EV2 - agente de impresion" -ForegroundColor Cyan
+  Write-Host "  Servidor: $ApiUrl"
+  Write-Host ""
+
+  $node = Get-Command node -ErrorAction SilentlyContinue
+  if (-not $node) {
+    Write-Host "  Falta Node.js en esta PC." -ForegroundColor Yellow
+    Write-Host "  Instalalo desde https://nodejs.org (el boton que dice LTS),"
+    Write-Host "  cierra esta ventana y vuelve a pegar la misma linea."
+    return
+  }
+  $version = (& node -v) -replace '^v', ''
+  if ([int](($version -split '\\.')[0]) -lt 18) {
+    Write-Host "  Node.js $version es muy viejo: hace falta 18 o mas nuevo." -ForegroundColor Yellow
+    Write-Host "  Actualizalo desde https://nodejs.org y vuelve a pegar la misma linea."
+    return
+  }
+
+  New-Item -ItemType Directory -Force -Path $Destino | Out-Null
+  foreach ($archivo in @('print-agent.js', 'package.json')) {
+    Write-Host "  Bajando $archivo ..."
+    Invoke-WebRequest -Uri "$ApiUrl/api/print-agent/files/$archivo" \`
+      -OutFile (Join-Path $Destino $archivo) -UseBasicParsing
+  }
+
+  # Para que arranque solo la proxima vez. El acceso directo en la carpeta de inicio
+  # lo pone una persona; esto solo deja el .bat listo (ver agent/README.md).
+  $bat = Join-Path $Destino 'iniciar-agente.bat'
+  Set-Content -Path $bat -Encoding ASCII -Value @"
+@echo off
+cd /d $Destino
+node print-agent.js >> agente.log 2>&1
+"@
+
+  Write-Host ""
+  Write-Host "  Instalado en $Destino" -ForegroundColor Green
+  Write-Host "  Ahora te va a pedir el codigo de ocho caracteres que sale en el panel"
+  Write-Host "  del gerente, en Impresoras -> Nueva PC."
+  Write-Host ""
+
+  # El agente si habla con acentos, y la consola de Windows viene en una pagina de
+  # codigos donde "codigo" sale como "c¾digo". Esto la pasa a UTF-8 antes de cederle
+  # la ventana, para que lo primero que vea quien instala se entienda.
+  try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+
+  $env:EV2_API_URL = $ApiUrl
+  Set-Location $Destino
+  & node print-agent.js
+}
+`;
+}
+
+/**
+ * Los archivos del agente. Públicos, y eso es una decisión, no un descuido.
+ *
+ * El código del agente no es un secreto: es un programa que sondea una API y manda
+ * bytes a una impresora. El secreto es el código de emparejamiento, que vive diez
+ * minutos, sirve una vez y se quema a los ocho fallos del club. Pedir sesión para
+ * bajar estos dos archivos obligaría al gerente a dejar la suya abierta en la PC de
+ * la barra, que es peor de verdad que servir un .js que cualquiera puede leer.
+ */
+agentRouter.get('/files/:file', asyncHandler(async (req, res) => {
+  const tipo = AGENT_FILES.get(req.params.file);
+  if (!tipo) throw ApiError.notFound('Ese archivo no forma parte del agente');
+  let contenido;
+  try {
+    contenido = await fs.promises.readFile(path.join(AGENT_DIR, req.params.file));
+  } catch {
+    // Esto solo pasa si la imagen se construyó sin `agent/`. Decirlo con todas sus
+    // letras ahorra la tarde entera que costaría verlo como un 404 cualquiera.
+    throw new ApiError(500, 'agent_files_missing',
+      'La carpeta del agente no viene dentro de esta imagen. '
+      + 'Reconstruye la API desde la raíz del repositorio (deploy/Dockerfile.api).');
+  }
+  res.type(tipo)
+    .set('Cache-Control', 'no-store')
+    .set('Content-Disposition', `attachment; filename="${req.params.file}"`)
+    .send(contenido);
+}));
+
+/**
+ * El instalador de una línea.
+ *
+ * `irm https://dominio/api/print-agent/install.ps1 | iex` baja este texto y lo
+ * ejecuta. Eso es ejecutar código remoto, y por eso la ruta se niega a generar nada
+ * que no vaya por https: sobre http, cualquiera dentro de la red del club podría
+ * responder por el servidor y mandar a la barra el script que quisiera.
+ */
+agentRouter.get('/install.ps1', asyncHandler(async (req, res) => {
+  const base = agentBaseUrl(req);
+  if (!/^https:\/\//i.test(base) && !LOCALHOST.test(base)) {
+    throw new ApiError(400, 'insecure_install_url',
+      `El instalador solo se genera sobre https, y este servidor se ve como ${base}. `
+      + 'Revisa ALLOWED_ORIGINS y el certificado antes de dar de alta una PC.');
+  }
+  res.type('text/plain; charset=utf-8')
+    .set('Cache-Control', 'no-store')
+    .send(installScript(base));
+}));
 
 // Va montado en `/api/print-agent`, no en `/api`, y esto no es un detalle de estilo:
 // un `use()` sin ruta sobre un router montado en `/api` corre en TODAS las peticiones

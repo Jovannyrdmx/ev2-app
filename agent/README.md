@@ -22,33 +22,51 @@ solo, así que **nunca sale el mismo ticket dos veces**.
 
 ## Instalación
 
-Tres pasos. No hay ningún token que copiar.
+Dos pasos, y ninguno es copiar una carpeta por USB. No hay ningún token que copiar.
 
 ### 1. Node.js
 
 Instala Node.js 18 o más nuevo desde <https://nodejs.org> (la opción "LTS"). El
-agente no usa ninguna librería externa: con Node basta.
+agente no usa ninguna librería externa: con Node basta. Si se te olvida, el
+instalador del paso 2 te lo dice y te manda ahí; no falla con un error raro.
 
-### 2. Copiar la carpeta
-
-Copia esta carpeta `agent/` a la PC, por ejemplo en `C:\EV2\agent`.
-
-### 3. Emparejarla
+### 2. Pegar una línea
 
 En el panel del gerente: **Impresoras → Nueva PC**. Sale un código de ocho
-caracteres, tipo `K7M4-2QX9`, que vive diez minutos.
+caracteres, tipo `K7M4-2QX9`, que vive diez minutos, y debajo un desplegable que dice
+**"Esa PC todavía no tiene el agente"** con la línea ya escrita y un botón para
+copiarla.
 
-En la PC de la barra:
+En la PC de la barra: clic derecho en Inicio → **Windows PowerShell**, y pega:
+
+```
+irm https://tu-dominio.com/api/print-agent/install.ps1 | iex
+```
+
+Eso baja el agente a `C:\EV2\agent`, deja hecho el `.bat` de arranque y lo corre. Solo
+te pregunta el código. El programa **se escribe su propio `config.json`**, se pone el
+nombre de la máquina, y empieza a buscar impresoras solo. Cuando el gerente vuelva a
+mirar el panel, ya están ahí.
+
+> Esa línea baja código y lo ejecuta, así que el servidor **solo la genera sobre
+> https**: si el club se ve por http, la ruta contesta un error en vez de un script.
+> Sobre http, cualquiera dentro de la red del club podría contestar por el servidor y
+> mandarle a la barra lo que quisiera. Si prefieres verla antes de correrla, ábrela en
+> el navegador: es texto plano y son cuarenta renglones.
+
+Junto a la línea hay también un **enlace para bajar el archivo**, por si en esa PC es
+más cómodo guardarlo y hacerle clic derecho → "Ejecutar con PowerShell".
+
+### A mano, si prefieres
+
+Sigue funcionando copiar la carpeta `agent/` a la PC y correr:
 
 ```
 cd C:\EV2\agent
 node print-agent.js
 ```
 
-Pregunta dos cosas —la dirección del servidor y el código— y con eso queda. El
-programa **se escribe su propio `config.json`**, se pone el nombre de la máquina, y
-empieza a buscar impresoras solo. Cuando el gerente vuelva a mirar el panel, ya están
-ahí.
+Pregunta dos cosas —la dirección del servidor y el código— y con eso queda.
 
 > El código es de un solo uso y muere a los diez minutos. Si se venció, pide otro:
 > son dos clics.
@@ -61,12 +79,13 @@ set EV2_PAIR_CODE=K7M4-2QX9
 node print-agent.js
 ```
 
-### 4. Dejarlo arrancando solo
+### 3. Dejarlo arrancando solo
 
 La forma más simple, sin instalar nada más: un acceso directo en la carpeta de
 inicio.
 
-1. Crea `iniciar-agente.bat` en `C:\EV2\agent`:
+1. `iniciar-agente.bat` ya está en `C:\EV2\agent` si usaste el instalador. Si copiaste
+   la carpeta a mano, créalo:
 
    ```bat
    @echo off
@@ -109,6 +128,7 @@ PC**.
 | Se cae el internet del club | Sigue intentando; cuando vuelve, imprime lo que se acumuló |
 | Apagan la PC a medio trabajo | El servidor devuelve ese trabajo a la cola a los dos minutos |
 | El token es inválido | Se detiene y lo dice, en vez de insistir toda la noche |
+
 
 Nada de eso se pierde en silencio: lo que no salió se ve en rojo en el panel del
 gerente, y desde ahí se reimprime.

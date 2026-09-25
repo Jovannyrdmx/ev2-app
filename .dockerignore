@@ -1,9 +1,19 @@
+# Qué NO se manda al daemon de Docker al construir.
+#
+# Ojo con `server`: ya NO se ignora, y es a propósito. Desde D57 la imagen de la API
+# se construye desde la raíz del repositorio para poder meter también `agent/` (los
+# archivos que descarga una PC de barra). Si `server` volviera a esta lista, el build
+# de la API se quedaría sin su propio código y fallaría en el primer COPY.
 .git
 node_modules
 **/node_modules
 docs
 mobile
-server
+# Los secretos, en cualquier carpeta. `\.env` a secas solo casa con la raíz, y desde
+# que `server/` viaja en el contexto eso dejaría `server/.env` dentro.
 .env
 .env.*
+**/.env
+**/.env.*
+agent/config.json
 *.md

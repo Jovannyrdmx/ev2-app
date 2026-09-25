@@ -38,8 +38,10 @@ services:
 
   api:
     build:
-      context: ../server
-      dockerfile: ../deploy/Dockerfile.api
+      # Igual que en producción: la raíz del repositorio, porque la imagen lleva
+      # también `agent/` (D57). Ver deploy/Dockerfile.api.
+      context: ..
+      dockerfile: deploy/Dockerfile.api
     container_name: ev2-api
     # Apply pending migrations, then start the API.
     command: ["sh", "-c", "node src/db/migrate.js && node src/index.js"]

@@ -1719,7 +1719,37 @@
     $('prn-pair-ttl').textContent = t('prn.pairTtl', { minutes: minutos });
     $('prn-pair-wait').hidden = false;
     $('prn-pair-wait').textContent = t('prn.pairWaiting');
+
+    // La línea que se pega en la otra PC (D57). Sale de `location.origin`, no de una
+    // constante: el panel ya se está viendo desde el dominio bueno, así que es la
+    // única fuente que no se puede quedar vieja cuando el club cambie de dominio.
+    $('prn-install-cmd').textContent = installLine();
+    $('prn-install-dl').href = `${location.origin}/api/print-agent/install.ps1`;
   }
+
+  /** `irm https://dominio/api/print-agent/install.ps1 | iex` */
+  function installLine() {
+    return `irm ${location.origin}/api/print-agent/install.ps1 | iex`;
+  }
+
+  $('btn-prn-copy').onclick = async () => {
+    const linea = installLine();
+    try {
+      // `navigator.clipboard` no existe fuera de https (salvo en localhost), y el
+      // panel se abre en la tableta de la barra. Si no está, se selecciona la línea
+      // para que copiarla sea un gesto y no una transcripción a mano.
+      if (!navigator.clipboard) throw new Error('sin portapapeles');
+      await navigator.clipboard.writeText(linea);
+      toast(t('prn.installCopied'), 'ok');
+    } catch (err) {
+      const rango = document.createRange();
+      rango.selectNodeContents($('prn-install-cmd'));
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(rango);
+      toast(t('prn.installCopyFail'), 'warn');
+    }
+  };
 
   /**
    * Espera a que la PC se empareje y avisa cuando llegó.
