@@ -202,12 +202,30 @@ hace que el corte del turno cuadre sin discutir.
 | **Recibo** | Entra el dinero, por cualquiera de los tres caminos | `service` de esa barra | Método de pago, folio del voucher, "PAGADO" |
 | **Corte de turno** | El empleado cierra su turno, con un gerente autorizando | `service` de esa barra | Cobros por método, propinas aparte, retiros con su motivo, esperado/declarado/contado y las dos firmas |
 
-### La comanda no lleva precios
+### La comanda lleva precios, y dice si ya se pagó
 
-A propósito. El bartender no cobra: un importe en la comanda es ruido en el único
-papel que tiene que leerse de un vistazo, de lado y con las manos ocupadas. Lo que
-lleva es la mesa en grande arriba y las cantidades en su propia columna, para que el
-ojo baje por los números sin leer los nombres.
+Hasta D59 no los llevaba, y el argumento era bueno: el bartender no cobra, y un importe
+es ruido en el único papel que tiene que leerse de un vistazo, de lado y con las manos
+ocupadas.
+
+Lo que cambió no es el argumento, es el recorrido del papel. En este club la comanda
+**no se queda en la barra**: el bartender la lee, sirve, y la pone en la charola para
+que el mesero la lleve a la mesa con los tragos. Un papel que viaja a la mesa necesita
+decir cuánto — y sobre todo necesita decir **si ya está pagado**, porque un total a
+secas es cómo el siguiente mesero que lo vea intenta cobrarlo otra vez.
+
+Lo que se conservó de D53 es lo que hacía buena a la comanda: la mesa en grande arriba
+y las cantidades en su propia columna, para que el ojo baje por los números sin leer
+los nombres. El importe va a la derecha del renglón, y si el nombre del trago no cabe
+se parte con sangría bajo el nombre, nunca bajo el número.
+
+El renglón de estado dice **PAGADO**, **CORTESÍA** cuando no hay nada que cobrar, o
+**POR COBRAR** / **REEMBOLSADO** según el estado real del cobro. Sale del libro, no de
+suponerlo.
+
+**El total son los tragos, no lo que se cobró.** La propina y el servicio viven en el
+cobro y salen en el recibo. Una cifra en la comanda que no cuadre con lo cobrado sería
+peor que no poner ninguna.
 
 Sale cuando el pedido se **paga**, no cuando se crea: pagar es lo que manda el trago a
 la barra, y la barra no prepara nada a crédito. Un pedido sin nada que cobrar —un

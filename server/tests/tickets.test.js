@@ -168,7 +168,7 @@ describe('La comanda de la barra', () => {
     expect(comanda.preview).toContain('Agua de la casa');
   });
 
-  it('lleva la mesa y las cantidades, y NO lleva precios', async () => {
+  it('lleva la mesa, las cantidades y el importe de cada renglón (D59)', async () => {
     const pedido = await pedir({
       items: [{ drink_id: beer.id, quantity: 2 }, { drink_id: shot.id, quantity: 1 }],
     });
@@ -177,12 +177,70 @@ describe('La comanda de la barra', () => {
 
     expect(comanda.preview).toContain('MESA T-7');
     expect(comanda.preview).toContain('TERRAZA');
-    expect(comanda.preview).toContain('2   Cerveza Coronita');
-    expect(comanda.preview).toContain('1   Tequila añejo');
-    // El bartender no cobra: un importe en la comanda es ruido en el único papel que
-    // tiene que leerse de un vistazo, de lado y con las manos ocupadas.
-    expect(comanda.preview).not.toContain('60.00');
-    expect(comanda.preview).not.toContain('$');
+    // La columna de cantidades se mantiene: es lo que hace que el bartender lea el
+    // papel de lado y con las manos ocupadas.
+    expect(comanda.preview).toMatch(/^2 {3}Cerveza Coronita\s+\$120\.00$/m);
+    expect(comanda.preview).toMatch(/^1 {3}Tequila añejo\s+\$180\.00$/m);
+    // Y el total, que es lo que ese papel necesita ahora que viaja a la mesa.
+    expect(comanda.preview).toMatch(/^TOTAL\s+\$300\.00$/m);
+  });
+
+  it('dice si ya está pagado, porque acaba en la mesa del cliente (D59)', async () => {
+    // Un total sin decir que ya se pagó es cómo el siguiente mesero que vea el papel
+    // intenta cobrarlo otra vez.
+    const pedido = await pedir();
+    await cobrar(pedido.body.order.id);
+    const [comanda] = await jobs('order');
+    expect(comanda.preview).toContain('PAGADO');
+    expect(comanda.preview).not.toContain('POR COBRAR');
+  });
+
+  it('un trago de cortesía dice CORTESÍA, no "pagado" ni un total a secas', async () => {
+    const gratis = await f.createDrink(club.id, { name: 'Agua de la casa', price: 0, stock: 10 });
+    const pedido = await pedir({ items: [{ drink_id: gratis.id, quantity: 1 }] });
+    await confirmar(pedido.body.order.id);
+    const [comanda] = await jobs('order');
+    expect(comanda.preview).toContain('CORTESÍA');
+    expect(comanda.preview).not.toContain('PAGADO');
+  });
+
+  it('un pedido con importe no se manda a la barra sin pagar, y la barra no lo ve como cortesía', async () => {
+    // Doble comprobación, y las dos importan:
+    //
+    // 1. La barra no sirve a crédito: confirmar un pedido con cobro pendiente se
+    //    rechaza, así que ese papel no llega a la barra. Es la regla de D53.
+    // 2. Por eso mismo `not_required` hoy SOLO puede significar que el pedido no vale
+    //    nada: la transacción se crea si y solo si `subtotal > 0`. Se comprueba aquí
+    //    para que, si algún día aparecen las cuentas de casa, esta prueba falle y
+    //    alguien mire la etiqueta del papel antes de que la vea un cliente.
+    const pedido = await pedir();
+    const rechazo = await confirmar(pedido.body.order.id);
+    expect(rechazo.status).toBe(409);
+    expect(await jobs('order')).toHaveLength(0);
+
+    // La etiqueta correcta para ese caso existe y dice la verdad, aunque hoy la API no
+    // pueda producirlo: cortesía y "sin cobro" no son lo mismo cuando hay dinero.
+    expect(tickets.orderPaymentLabel({ payment_status: 'not_required', subtotal: '120.00' }))
+      .toBe('SIN COBRO');
+    expect(tickets.orderPaymentLabel({ payment_status: 'not_required', subtotal: '0.00' }))
+      .toBe('CORTESÍA');
+    expect(tickets.orderPaymentLabel({ payment_status: 'pending', subtotal: '120.00' }))
+      .toBe('POR COBRAR');
+    expect(tickets.orderPaymentLabel({ payment_status: 'refunded', subtotal: '120.00' }))
+      .toBe('REEMBOLSADO');
+  });
+
+  it('el total son los tragos, no lo que se cobró con propina', async () => {
+    // La propina vive en el cobro y sale en el recibo. Un total en la comanda que no
+    // cuadre con lo cobrado sería peor que no poner ninguno, así que este papel dice
+    // exactamente lo que valen los tragos y nada más.
+    const pedido = await pedir();
+    const cargo = await chargeOf(pedido.body.order.id);
+    await cobrar(pedido.body.order.id, { tip_amount: 50 });
+    const [comanda] = await jobs('order');
+    expect(comanda.preview).toMatch(/^TOTAL\s+\$120\.00$/m);
+    expect(Number(cargo.amount)).toBe(120);
+    expect(comanda.preview).not.toContain('170.00');
   });
 
   it('dice quién tomó el pedido y la nota del cliente', async () => {

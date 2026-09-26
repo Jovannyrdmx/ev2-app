@@ -111,6 +111,12 @@ async function orderData(runner, { nightclubId, orderId }) {
             wu.display_name AS taken_by_name,
             su.display_name AS sender_name,
             ru.display_name AS recipient_name,
+            o.subtotal::text AS subtotal, o.currency,
+            -- 'not_required' no es un estado del libro: es la respuesta honesta para un
+            -- pedido que no cuesta nada y por tanto no tiene cobro que esperar. Mismo
+            -- COALESCE que usa services/orders.js, para que la comanda y la pantalla
+            -- nunca cuenten historias distintas del mismo pedido.
+            COALESCE(tx.status, 'not_required') AS payment_status,
             COALESCE(items.items, '[]'::json) AS items
        FROM drink_orders o
        LEFT JOIN tables t ON t.id = o.table_id
@@ -118,9 +124,16 @@ async function orderData(runner, { nightclubId, orderId }) {
        LEFT JOIN users wu ON wu.id = o.taken_by
        LEFT JOIN users su ON su.id = o.sender_id
        LEFT JOIN users ru ON ru.id = o.recipient_id
+       LEFT JOIN transactions tx
+              ON tx.reference_type = 'drink_order' AND tx.reference_id = o.id
        LEFT JOIN LATERAL (
          SELECT json_agg(json_build_object(
-                  'name', d.name, 'quantity', oi.quantity, 'notes', oi.notes
+                  'name', d.name, 'quantity', oi.quantity, 'notes', oi.notes,
+                  -- ::text para que el dinero llegue como cadena de dos decimales,
+                  -- igual que en todo el resto del sistema: NUMERIC leído como número
+                  -- de JavaScript es cómo se pierde un centavo sin que nadie lo vea.
+                  'unit_price', oi.unit_price::text,
+                  'amount', (oi.unit_price * oi.quantity)::text
                 ) ORDER BY d.name) AS items
            FROM drink_order_items oi JOIN drinks d ON d.id = oi.drink_id
           WHERE oi.order_id = o.id) items ON true
@@ -139,12 +152,48 @@ const QTY_COLUMN = 4;
  * columna de cantidades tiene que poder leerse de arriba abajo sin que un "Michelada
  * preparada con clamato" meta un 2 a media línea.
  */
-function itemLines(quantity, name, width) {
+/**
+ * En qué quedó el cobro de este pedido, en una palabra (D59).
+ *
+ * `not_required` no distingue por sí solo dos cosas que en la mesa son muy distintas:
+ * un trago de cortesía —que no cuesta nada— y una cuenta de casa, que sí tiene importe
+ * y simplemente no se cobró aquí. El subtotal es lo que las separa, y decirlo mal en un
+ * papel que el cliente tiene en la mano es peor que no decir nada.
+ */
+function orderPaymentLabel(data) {
+  const cobrado = Number(data.subtotal || 0);
+  switch (data.payment_status) {
+    case 'paid': return 'PAGADO';
+    case 'refunded': return 'REEMBOLSADO';
+    case 'cancelled': return 'COBRO CANCELADO';
+    case 'failed': return 'COBRO RECHAZADO';
+    case 'not_required': return cobrado > 0 ? 'SIN COBRO' : 'CORTESÍA';
+    // `pending` y `pending_manual`: el pedido llegó a la barra y el cobro no ha
+    // cerrado. Se dicen igual porque para quien lee el papel son lo mismo.
+    default: return 'POR COBRAR';
+  }
+}
+
+function itemLines(item, width, currency = 'MXN') {
   const sangria = ' '.repeat(QTY_COLUMN);
-  const partes = escpos.wrap(name, Math.max(8, width - QTY_COLUMN));
-  return partes.map((parte, i) => (i === 0
-    ? `${String(quantity).padEnd(QTY_COLUMN - 1)} ${parte}`
-    : `${sangria}${parte}`));
+  // El importe va a la derecha, en la PRIMERA línea (D59). Se mide primero porque es
+  // lo que decide cuánto espacio le queda al nombre: al contrario, un "Michelada
+  // preparada con clamato" empujaría el precio fuera del papel sin avisar.
+  const precio = item.amount === null || item.amount === undefined
+    ? '' : money(item.amount, currency);
+  const hueco = precio ? precio.length + 1 : 0;
+  const anchoNombre = Math.max(8, width - QTY_COLUMN - hueco);
+  const partes = escpos.wrap(item.name, anchoNombre);
+
+  return partes.map((parte, i) => {
+    if (i > 0) return `${sangria}${parte}`;
+    const izquierda = `${String(item.quantity).padEnd(QTY_COLUMN - 1)} ${parte}`;
+    if (!precio) return izquierda;
+    // Si el nombre llenó su columna, el relleno sale en 1 y el precio queda pegado:
+    // preferible a partirlo o a empujar el renglón, que sí rompería la columna.
+    const relleno = Math.max(1, width - izquierda.length - precio.length);
+    return `${izquierda}${' '.repeat(relleno)}${precio}`;
+  });
 }
 
 function renderOrder(t, data, { club, settings }) {
@@ -166,10 +215,11 @@ function renderOrder(t, data, { club, settings }) {
 
   t.blank();
   for (const it of data.items) {
-    // La cantidad en su propia columna y el trago después: el ojo baja por los
-    // números sin leer los nombres. Se arma a mano en vez de con `line()` porque ese
-    // normaliza los espacios —para eso está— y aquí el espacio ES la columna.
-    for (const l of itemLines(it.quantity, it.name, t.width)) {
+    // La cantidad en su propia columna, el trago después y el importe a la derecha:
+    // el ojo baja por los números sin leer los nombres. Se arma a mano en vez de con
+    // `line()` porque ese normaliza los espacios —para eso está— y aquí el espacio ES
+    // la columna.
+    for (const l of itemLines(it, t.width, data.currency)) {
       // `raw` y no `line`: `line` acomoda el texto y de paso junta los espacios, que
       // es justo lo que aquí no se quiere.
       t.bold().tall();
@@ -179,8 +229,23 @@ function renderOrder(t, data, { club, settings }) {
     // La nota va sangrada bajo el nombre, por `raw` y por lo mismo: es una columna.
     if (it.notes) for (const n of escpos.wrap(it.notes, t.width - QTY_COLUMN - 2)) t.raw(`${' '.repeat(QTY_COLUMN + 2)}${n}`);
   }
+  // El total y en qué quedó el cobro (D59).
+  //
+  // Este papel acaba en la mesa del cliente, junto con los tragos. Por eso lleva
+  // importe, y por eso lleva estado: un total sin decir que ya está pagado es cómo el
+  // siguiente mesero que lo vea intenta cobrarlo otra vez.
+  //
+  // El total son LOS TRAGOS, no lo que se cobró: la propina y el servicio viven en el
+  // cobro y salen en el recibo. Poner aquí una cifra que no cuadre con lo cobrado
+  // sería peor que no poner ninguna.
+  t.blank().rule();
+  t.bold();
+  t.row('TOTAL', money(data.subtotal, data.currency));
+  t.boldOff();
+  t.right().bold().line(orderPaymentLabel(data)).boldOff().left();
+
   if (data.message) {
-    t.blank().rule();
+    t.rule();
     t.line(`NOTA: ${data.message}`);
   }
 
@@ -641,7 +706,7 @@ function build(printer, render) {
 module.exports = {
   FALLBACK_HOURS, ORDER_STATES_ON_BILL, METHOD_LABEL, CONCEPT,
   money, localTime, folio,
-  orderData, renderOrder, printOrder,
+  orderData, renderOrder, printOrder, orderPaymentLabel, itemLines,
   billWindow, billData, renderBill, printBill,
   receiptData, renderReceipt, printReceipt,
   cutData, renderCut, printShiftCut, ROLE_LABEL,

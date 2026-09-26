@@ -155,3 +155,61 @@ describe('El ticket de prueba', () => {
     expect(prueba().bytes.toString('hex').endsWith('1d564200')).toBe(true);
   });
 });
+
+/**
+ * El renglón de la comanda con su importe (D59).
+ *
+ * El precio a la derecha es lo que hace que ese papel sirva en la mesa, y es también
+ * lo que puede empujar el nombre del trago fuera del papel sin que nadie se entere
+ * hasta que alguien mire una comanda cortada a media palabra. Aquí se aprieta a
+ * propósito: papel angosto, nombres largos, importes de cuatro cifras.
+ */
+describe('El renglón de la comanda con importe', () => {
+  const { itemLines } = require('../src/services/tickets');
+
+  const renglon = (over = {}) => ({
+    quantity: 2, name: 'Margarita', amount: '260.00', ...over,
+  });
+
+  it('pone la cantidad en su columna y el importe a la derecha', () => {
+    const [l] = itemLines(renglon(), 42);
+    expect(l).toMatch(/^2 {3}Margarita\s+\$260\.00$/);
+    expect(l.length).toBeLessThanOrEqual(42);
+  });
+
+  it('nunca se pasa del papel, ni en 58 mm con un nombre imposible', () => {
+    const nombres = [
+      'Michelada preparada con clamato y camarón',
+      'Buchanan\'s 12 botella',
+      'Agua',
+      'X'.repeat(80),
+    ];
+    for (const width of [32, 42, 48]) {
+      for (const name of nombres) {
+        for (const amount of ['0.00', '260.00', '2400.00', '999999.00']) {
+          const lineas = itemLines(renglon({ name, amount }), width);
+          for (const l of lineas) {
+            expect(l.length).toBeLessThanOrEqual(width);
+          }
+          // Y el importe sale COMPLETO en el primer renglón: un precio partido en dos
+          // es peor que no imprimirlo.
+          expect(lineas[0]).toContain(amount.replace(/\B(?=(\d{3})+(?!\d))/g, ',').replace(/^/, '$'));
+        }
+      }
+    }
+  });
+
+  it('la columna de cantidades se lee de arriba abajo aunque el nombre se parta', () => {
+    // Es la razón de ser de esta columna: el ojo del bartender baja por los números.
+    const lineas = itemLines(renglon({ name: 'Michelada preparada con clamato', quantity: 12 }), 32);
+    expect(lineas.length).toBeGreaterThan(1);
+    expect(lineas[0]).toMatch(/^12 /);
+    // Las continuaciones NUNCA meten un número en la columna.
+    for (const l of lineas.slice(1)) expect(l).toMatch(/^ {4}\S/);
+  });
+
+  it('sin importe se comporta como antes, sin dejar un hueco raro', () => {
+    const [l] = itemLines(renglon({ amount: null }), 42);
+    expect(l).toBe('2   Margarita');
+  });
+});
