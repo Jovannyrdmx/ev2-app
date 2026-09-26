@@ -1611,10 +1611,11 @@
     const s = printing.settings;
     const check = $('prn-order-tickets');
     check.checked = Boolean(s && s.print_order_tickets);
-    // Solo el administrador lo cambia. Se deshabilita en vez de esconderse: el
-    // gerente tiene que poder VER si está prendido cuando la barra reclama.
-    const esAdmin = Boolean(api.session && api.session.user && api.session.user.role === 'admin');
-    check.disabled = !esAdmin;
+    // Lo cambian gerente y admin (D58). Para cualquier otro rol que llegue a esta
+    // pantalla se deshabilita en vez de esconderse: hay que poder VER si está
+    // prendido cuando la barra reclama, aunque no se pueda tocar.
+    const rol = (api.session && api.session.user && api.session.user.role) || null;
+    check.disabled = !['manager', 'admin'].includes(rol);
   }
 
   async function testPrinter(printer, button, nota) {

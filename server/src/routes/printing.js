@@ -642,8 +642,19 @@ router.get('/nightclubs/:nightclubId/print-settings',
     res.json({ settings: await printing.settingsOf(pool, req.params.nightclubId) });
   }));
 
+/**
+ * Cambiar los ajustes de impresión (D58: también el gerente, no solo el admin).
+ *
+ * El interruptor de la comanda por pedido afecta a toda la barra, y hasta aquí solo lo
+ * movía el administrador. Pero quien está en el club a las dos de la mañana cuando una
+ * impresora se atasca o la barra se satura es el **gerente**, y pedirle que localice
+ * al dueño para apagar un interruptor es pedirle que no lo apague.
+ *
+ * No es aflojar el control, es repartirlo: cada cambio guarda `updated_by` y
+ * `updated_at`, así que sigue habiendo constancia de quién lo movió y cuándo.
+ */
 router.patch('/nightclubs/:nightclubId/print-settings',
-  requireRole('admin'),
+  requireRole(...MANAGE),
   validate({
     params: z.object({ nightclubId: uuid }),
     body: z.object({

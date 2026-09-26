@@ -180,9 +180,15 @@ códigos y vuelve a probar. **No avances hasta que las cuatro saquen su papel bi
 
 ### 6. Prender la comanda por pedido
 
-**Impresoras → Ajustes → "Imprimir comanda en la barra con cada pedido"**. Solo el
-administrador puede cambiarlo, y arranca apagado a propósito: un club sin impresoras
-configuradas no debe empezar a encolar papel que nadie va a recoger.
+**Impresoras → Ajustes → "Imprimir comanda en la barra con cada pedido"**. Lo cambian
+el **gerente y el administrador**, y arranca apagado a propósito: un club sin
+impresoras configuradas no debe empezar a encolar papel que nadie va a recoger.
+
+Que también lo mueva el gerente es deliberado (D58): quien está en el club a las dos
+de la mañana cuando una impresora se atasca o la barra se satura es él, y pedirle que
+localice al dueño para apagar un interruptor es pedirle que no lo apague. No es
+aflojar el control: cada cambio guarda **quién** lo hizo y **cuándo**, así que si una
+noche no salió una sola comanda, ahí está la respuesta.
 
 El recibo de cobro sale siempre: es el respaldo de que ese dinero entró, y es lo que
 hace que el corte del turno cuadre sin discutir.

@@ -420,13 +420,37 @@ describe('El interruptor de la comanda por pedido', () => {
     expect(res.body.settings).toMatchObject({ print_order_tickets: false, print_receipts: true });
   });
 
-  it('lo prende el admin, y no el gerente', async () => {
-    expect((await api().patch(url('/print-settings')).set(auth(manager))
-      .send({ print_order_tickets: true })).status).toBe(403);
-    const res = await api().patch(url('/print-settings')).set(auth(admin))
+  it('lo prende el gerente, no solo el admin (D58)', async () => {
+    // Quien está en el club a las dos de la mañana cuando una impresora se atasca es
+    // el gerente. Pedirle que localice al dueño para apagar un interruptor es pedirle
+    // que no lo apague.
+    const suyo = await api().patch(url('/print-settings')).set(auth(manager))
       .send({ print_order_tickets: true });
-    expect(res.status).toBe(200);
-    expect(res.body.settings.print_order_tickets).toBe(true);
+    expect(suyo.status).toBe(200);
+    expect(suyo.body.settings.print_order_tickets).toBe(true);
+
+    const delAdmin = await api().patch(url('/print-settings')).set(auth(admin))
+      .send({ print_order_tickets: false });
+    expect(delAdmin.status).toBe(200);
+    expect(delAdmin.body.settings.print_order_tickets).toBe(false);
+  });
+
+  it('y un mesero no lo toca', async () => {
+    // Repartir el permiso no es abrirlo: sigue siendo de quien manda en la noche.
+    expect((await api().patch(url('/print-settings')).set(auth(waiter))
+      .send({ print_order_tickets: true })).status).toBe(403);
+  });
+
+  it('queda constancia de quién lo movió', async () => {
+    // Es lo que hace que ampliar el permiso no sea aflojar el control. Si una noche
+    // no salió una sola comanda, esto dice quién lo apagó y a qué hora.
+    await api().patch(url('/print-settings')).set(auth(manager))
+      .send({ print_order_tickets: true });
+    const { rows } = await pool.query(
+      `SELECT updated_by::text AS updated_by, updated_at
+         FROM nightclub_print_settings WHERE nightclub_id = $1`, [club.id]);
+    expect(rows[0].updated_by).toBe(manager.id);
+    expect(rows[0].updated_at).not.toBeNull();
   });
 
   it('lo que no se manda no se pisa', async () => {

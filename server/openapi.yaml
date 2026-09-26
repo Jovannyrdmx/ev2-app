@@ -9787,7 +9787,11 @@ paths:
       tags: [Impresión]
       summary: Prender la comanda por pedido
       description: |
-        **Requiere rol `admin`**, no basta con `manager`.
+        Requiere rol `manager` o `admin` (D58). Antes era solo `admin`, y se amplió
+        porque quien está en el club cuando una impresora se atasca es el gerente:
+        pedirle que localice al dueño para apagar un interruptor es pedirle que no lo
+        apague. Cada cambio guarda `updated_by` y `updated_at`, así que sigue habiendo
+        constancia de quién lo movió.
 
         `print_order_tickets` arranca apagado a propósito: un club sin impresoras
         configuradas no debe empezar a encolar papel que nadie va a recoger. Lo que no
