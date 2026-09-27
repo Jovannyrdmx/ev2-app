@@ -236,39 +236,202 @@ function printToNetwork(printer, payload, cfg) {
 }
 
 /**
- * Manda los bytes a una impresora conectada por USB a esta PC, a través del spooler.
+ * El programa que mete los bytes en el spooler de Windows (D61).
  *
- * Windows no deja mandar bytes crudos a una impresora sin pasar por el spooler, y el
- * spooler solo acepta un archivo. El camino que funciona sin instalar nada es
- * compartir la impresora y copiarle el archivo en binario a su recurso compartido;
- * por eso el README pide compartirla con un nombre corto y sin espacios.
+ * ---------------------------------------------------------------------------
+ * Por qué no se copia a un recurso compartido, como antes
+ * ---------------------------------------------------------------------------
+ * La primera versión compartía la impresora y le copiaba el archivo a
+ * `\\localhost\<nombre compartido>`. Funciona, pero obliga a que **dos** nombres
+ * coincidan letra por letra: el que Windows le puso al recurso compartido y el que
+ * un gerente tecleó en el panel. El 26 de septiembre de 2026 dejaron de coincidir en
+ * la PC de prueba y el agente contestó `No se encuentra el nombre de red
+ * especificado` — un mensaje que no dice nada de impresoras y manda a buscar el
+ * problema a la red, donde no estaba.
+ *
+ * Ahora se abre la impresora por **su propio nombre**, el que se ve en Windows. No
+ * hay que compartir nada, no hay segundo nombre que mantener sincronizado, y una PC
+ * nueva es "instala el driver y teclea el código".
+ *
+ * ---------------------------------------------------------------------------
+ * Por qué hace falta compilar esto y no basta un comando
+ * ---------------------------------------------------------------------------
+ * Windows no deja escribirle a una impresora como si fuera un archivo: hay que pasar
+ * por el spooler. Y el spooler, por omisión, *reinterpreta* lo que le llega según el
+ * driver — que es exactamente lo que destruye el ESC/POS, porque nuestros bytes no
+ * son un documento, son órdenes para la impresora. La única forma de decirle "esto
+ * pasa tal cual" es abrir el trabajo con el tipo de datos `RAW`, y eso solo se pide
+ * desde `winspool.drv`. De ahí las seis funciones de abajo: es el mínimo para abrir,
+ * escribir y cerrar un trabajo crudo.
+ *
+ * El nombre de la impresora y la ruta del archivo viajan por el ENTORNO, no pegados
+ * dentro de este texto. No es manía: el nombre lo escribe una persona en el panel, y
+ * si fuera parte del programa, un nombre con comillas podría ejecutar otra cosa.
  */
-function printToWindows(printer, payload) {
+const WINDOWS_PRINT_PS = String.raw`
+$ErrorActionPreference = 'Stop'
+$pedido = $env:EV2_PRINTER_NAME
+$ruta   = $env:EV2_PAYLOAD_PATH
+
+try { $todas = @(Get-Printer) } catch {
+  Write-Output ('EV2-ERR:no se pudo leer la lista de impresoras de esta PC: ' + $_.Exception.Message)
+  exit 3
+}
+if ($todas.Count -eq 0) {
+  Write-Output 'EV2-ERR:esta PC no tiene ninguna impresora instalada'
+  exit 2
+}
+
+# Se acepta el nombre de la impresora o el del recurso compartido: el panel pudo
+# haberse llenado con cualquiera de los dos, y las instalaciones viejas tienen el
+# compartido guardado. Lo que NO se hace es adivinar entre varias parecidas.
+$elegida = $todas | Where-Object { $_.Name -eq $pedido } | Select-Object -First 1
+if (-not $elegida) {
+  $elegida = $todas | Where-Object { $_.ShareName -eq $pedido } | Select-Object -First 1
+}
+if (-not $elegida) {
+  $p = $pedido.ToLower()
+  $parecidas = @($todas | Where-Object {
+    $_.Name.ToLower().Contains($p) -or $p.Contains($_.Name.ToLower())
+  })
+  if ($parecidas.Count -eq 1) { $elegida = $parecidas[0] }
+}
+if (-not $elegida) {
+  # El error dice qué hay instalado. Antes decia "no se encuentra el nombre de red",
+  # que mandaba a revisar el cableado por un nombre mal escrito en el panel.
+  $nombres = ($todas | ForEach-Object { $_.Name }) -join ' | '
+  Write-Output ('EV2-ERR:ninguna impresora de esta PC se llama asi. Instaladas: ' + $nombres)
+  exit 2
+}
+
+try { $bytes = [IO.File]::ReadAllBytes($ruta) } catch {
+  Write-Output ('EV2-ERR:no se pudo leer el archivo del ticket: ' + $_.Exception.Message)
+  exit 3
+}
+
+$codigo = @'
+using System;
+using System.Runtime.InteropServices;
+
+public class Ev2RawPrinter {
+  [StructLayout(LayoutKind.Sequential)]
+  public class DOCINFO {
+    [MarshalAs(UnmanagedType.LPStr)] public string pDocName;
+    [MarshalAs(UnmanagedType.LPStr)] public string pOutputFile;
+    [MarshalAs(UnmanagedType.LPStr)] public string pDataType;
+  }
+
+  [DllImport("winspool.drv", EntryPoint="OpenPrinterA", SetLastError=true, CharSet=CharSet.Ansi)]
+  static extern bool OpenPrinter(string src, out IntPtr hPrinter, IntPtr pd);
+  [DllImport("winspool.drv", EntryPoint="ClosePrinter", SetLastError=true)]
+  static extern bool ClosePrinter(IntPtr hPrinter);
+  [DllImport("winspool.drv", EntryPoint="StartDocPrinterA", SetLastError=true, CharSet=CharSet.Ansi)]
+  static extern bool StartDocPrinter(IntPtr hPrinter, int level, [In, MarshalAs(UnmanagedType.LPStruct)] DOCINFO di);
+  [DllImport("winspool.drv", EntryPoint="EndDocPrinter", SetLastError=true)]
+  static extern bool EndDocPrinter(IntPtr hPrinter);
+  [DllImport("winspool.drv", EntryPoint="StartPagePrinter", SetLastError=true)]
+  static extern bool StartPagePrinter(IntPtr hPrinter);
+  [DllImport("winspool.drv", EntryPoint="EndPagePrinter", SetLastError=true)]
+  static extern bool EndPagePrinter(IntPtr hPrinter);
+  [DllImport("winspool.drv", EntryPoint="WritePrinter", SetLastError=true)]
+  static extern bool WritePrinter(IntPtr hPrinter, IntPtr pBytes, int dwCount, out int dwWritten);
+
+  public static string Send(string printerName, byte[] bytes) {
+    IntPtr h;
+    if (!OpenPrinter(printerName, out h, IntPtr.Zero))
+      return "Windows no dejo abrir la impresora (error " + Marshal.GetLastWin32Error() + ")";
+    try {
+      DOCINFO di = new DOCINFO();
+      di.pDocName  = "EV2 ticket";
+      di.pDataType = "RAW";
+      if (!StartDocPrinter(h, 1, di))
+        return "Windows no acepto empezar el trabajo (error " + Marshal.GetLastWin32Error() + ")";
+      try {
+        if (!StartPagePrinter(h))
+          return "Windows no acepto empezar la pagina (error " + Marshal.GetLastWin32Error() + ")";
+        IntPtr buf = Marshal.AllocCoTaskMem(bytes.Length);
+        try {
+          Marshal.Copy(bytes, 0, buf, bytes.Length);
+          int escritos;
+          if (!WritePrinter(h, buf, bytes.Length, out escritos))
+            return "Windows corto la escritura (error " + Marshal.GetLastWin32Error() + ")";
+          if (escritos != bytes.Length)
+            return "solo entraron " + escritos + " de " + bytes.Length + " bytes";
+        } finally { Marshal.FreeCoTaskMem(buf); }
+        EndPagePrinter(h);
+      } finally { EndDocPrinter(h); }
+    } finally { ClosePrinter(h); }
+    return "OK";
+  }
+}
+'@
+
+try { Add-Type -TypeDefinition $codigo -Language CSharp -ErrorAction Stop } catch {
+  Write-Output ('EV2-ERR:esta PC no pudo preparar la llamada al spooler: ' + $_.Exception.Message)
+  exit 3
+}
+
+$r = [Ev2RawPrinter]::Send($elegida.Name, $bytes)
+if ($r -ne 'OK') { Write-Output ('EV2-ERR:' + $r); exit 4 }
+
+# "Sin conexion" es una marca de Windows, no un cable suelto: con ella puesta el
+# spooler acepta el trabajo, lo deja en la cola y no sale papel nunca. Es el fallo
+# silencioso que costo una noche, asi que se avisa aunque la escritura saliera bien.
+$aviso = ''
+if ($elegida.WorkOffline) { $aviso = '|OFFLINE' }
+Write-Output ('EV2-OK:' + $elegida.Name + $aviso)
+exit 0
+`;
+
+/**
+ * Manda los bytes a una impresora conectada a esta PC, a través del spooler.
+ *
+ * `printer.windows_name` es lo que el panel tiene guardado. Puede ser el nombre de la
+ * impresora o el del recurso compartido de una instalación vieja: el programa de
+ * arriba resuelve los dos, y si no encuentra ninguna, el error dice cuáles hay.
+ */
+function printToWindows(printer, payload, cfg = DEFAULTS) {
   return new Promise((resolve, reject) => {
     if (process.platform !== 'win32') {
       reject(new Error('esta impresora está configurada como USB de Windows, '
         + `y el agente está corriendo en ${process.platform}`));
       return;
     }
+    const pedido = String(printer.windows_name || '').trim();
+    if (!pedido) {
+      reject(new Error('esta impresora no tiene nombre de Windows guardado en el panel'));
+      return;
+    }
     const tmp = path.join(os.tmpdir(), `ev2-print-${Date.now()}-${Math.random().toString(16).slice(2)}.bin`);
     fs.writeFile(tmp, payload, (errEscritura) => {
       if (errEscritura) { reject(errEscritura); return; }
-      const destino = `\\\\localhost\\${printer.windows_name}`;
-      execFile('cmd', ['/c', 'copy', '/B', tmp, destino], (err, _stdout, stderr) => {
-        fs.unlink(tmp, () => {});
-        if (err) {
-          reject(new Error(`no se pudo imprimir en "${printer.windows_name}": `
-            + `${String(stderr || err.message).trim()}`));
-          return;
-        }
-        resolve();
-      });
+      execFile('powershell',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', WINDOWS_PRINT_PS],
+        { timeout: cfg.printTimeoutMs, env: { ...process.env, EV2_PRINTER_NAME: pedido, EV2_PAYLOAD_PATH: tmp } },
+        (err, stdout, stderr) => {
+          fs.unlink(tmp, () => {});
+          const salida = String(stdout || '');
+          const bien = salida.match(/EV2-OK:(.*)/);
+          if (bien) {
+            const [nombre, aviso] = bien[1].trim().split('|');
+            if (aviso === 'OFFLINE') {
+              log('AVISO', `"${nombre}" está marcada como "sin conexión" en Windows: `
+                + 'el ticket quedó en la cola y no va a salir hasta que se le quite esa marca');
+            }
+            resolve();
+            return;
+          }
+          const mal = salida.match(/EV2-ERR:(.*)/);
+          const motivo = mal ? mal[1]
+            : String(stderr || (err && err.message) || 'PowerShell no contestó nada');
+          reject(new Error(`no se pudo imprimir en "${pedido}": ${motivo.trim()}`));
+        });
     });
   });
 }
 
 const printOne = (printer, payload, cfg) => (printer.connection === 'windows'
-  ? printToWindows(printer, payload)
+  ? printToWindows(printer, payload, cfg)
   : printToNetwork(printer, payload, cfg));
 
 // ---------------------------------------------------------------- emparejarse
@@ -326,6 +489,10 @@ async function pair(cfg) {
   const archivo = saveConfig(completo);
   console.log('');
   log('INFO', `esta PC quedó dada de alta como "${agent.name}"`);
+  // Decir el área aquí es lo que convierte "quedó dada de alta" en algo verificable
+  // parado frente a la máquina: si dice otra barra, se ve ahora y no a las once de la
+  // noche cuando el bartender de al lado no recibe sus comandas (D61).
+  log('INFO', areaLabel(agent));
   log('INFO', `configuración guardada en ${archivo} — ya no hace falta volver a hacer esto`);
   console.log('');
   return completo;
@@ -412,6 +579,19 @@ function probePrinter(host, port, cfg) {
   });
 }
 
+/**
+ * El área de esta PC, dicha como la diría una persona (D61).
+ *
+ * Sin barra asignada imprime todo lo del club: es lo correcto para un club de una
+ * sola PC, y se dice así de claro, porque en un club de cuatro esa misma frase es la
+ * señal de que a esta le falta su barra.
+ */
+function areaLabel(agent) {
+  if (!agent || !agent.location_name) return 'imprime todo lo del club';
+  const papel = { orders: 'comandas de barra', service: 'comandas de meseros' }[agent.purpose];
+  return papel ? `${agent.location_name} · ${papel}` : `${agent.location_name} · todo`;
+}
+
 /** Las impresoras instaladas en esta PC de Windows, con su nombre compartido. */
 function windowsPrinters() {
   return new Promise((resolve) => {
@@ -426,8 +606,10 @@ function windowsPrinters() {
           resolve(lista.map((p) => ({
             kind: 'windows',
             name: p.Name || null,
-            // Sin recurso compartido no se le pueden mandar bytes crudos: el panel lo
-            // enseña igual, pero diciendo que hay que compartirla primero.
+            // Desde D61 el recurso compartido ya no hace falta para imprimir: se abre
+            // la impresora por su propio nombre. Se sigue informando porque las
+            // instalaciones viejas tienen el compartido guardado en el panel, y ver
+            // los dos nombres es lo que permite entender una de esas.
             share: p.Shared && p.ShareName ? p.ShareName : null,
             host: p.PortName || null,
           })));
@@ -525,7 +707,7 @@ async function tick(cfg, estado) {
     return;
   }
   if (!estado.conectado) {
-    log('INFO', `conectado como "${res.agent.name}"`);
+    log('INFO', `conectado como "${res.agent.name}" — ${areaLabel(res.agent)}`);
     estado.conectado = true;
   }
   for (const job of res.jobs) {
@@ -590,7 +772,8 @@ if (require.main === module) {
 }
 
 module.exports = {
-  VERSION, DEFAULTS, FatalError, loadConfig, printToNetwork, printToWindows, handleJob,
-  tick, isPrivateIPv4, ownSubnets, probePrinter, windowsPrinters, inBatches, scan,
+  VERSION, DEFAULTS, FatalError, WINDOWS_PRINT_PS,
+  loadConfig, printToNetwork, printToWindows, handleJob,
+  tick, isPrivateIPv4, ownSubnets, probePrinter, windowsPrinters, inBatches, scan, areaLabel,
   saveConfig, pair,
 };

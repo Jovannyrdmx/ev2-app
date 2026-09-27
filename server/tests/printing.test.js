@@ -801,6 +801,22 @@ describe('Instalar el agente desde el navegador (D57)', () => {
     const nginx = fs.readFileSync(path.join(raiz, 'deploy/nginx-web.conf'), 'utf8');
     expect(nginx).toMatch(/location \^~ \/api\/ \{/);
 
+    // Y que no vuelva a cachear la IP del upstream (D60). Esto tuvo el club caído
+    // quince horas: se recreó el contenedor de la API, le tocó otra IP, y nginx siguió
+    // hablándole a la vieja contestando 502 a todo con la API perfectamente sana.
+    //
+    // Se comprueba la FORMA porque el comportamiento solo se ve con un nginx de verdad
+    // y una IP cambiando por debajo (se verificó así, aparte). Las dos piezas hacen
+    // falta: sin el `resolver` la variable no tiene a quién preguntar, y sin la
+    // variable nginx resuelve al arrancar y no usa el resolver jamás.
+    expect(nginx).toMatch(/^\s*resolver 127\.0\.0\.11 /m);
+    expect(nginx).toMatch(/set \$ev2_api http:\/\/api:3000;\s*\n\s*proxy_pass \$ev2_api;/);
+    expect(nginx).toMatch(/set \$ev2_ws http:\/\/ws:4000;\s*\n\s*proxy_pass \$ev2_ws;/);
+    // Sin los comentarios: el propio comentario de arriba cita la forma vieja para
+    // explicar por qué se cambió, y esa cita no es configuración.
+    const sinComentarios = nginx.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+    expect(sinComentarios).not.toMatch(/proxy_pass http:\/\/(api|ws):/);
+
     // Y que el contexto no se lleve por delante el código de la propia API.
     const ignorar = fs.readFileSync(path.join(raiz, '.dockerignore'), 'utf8')
       .split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
@@ -813,5 +829,220 @@ describe('Instalar el agente desde el navegador (D57)', () => {
     // pasar de mano. La comprobación viaja dentro del script.
     const res = await api().get('/api/print-agent/install.ps1');
     expect(res.text).toContain("-notmatch '^https://'");
+  });
+});
+
+// ============================================================================
+
+/**
+ * Cada PC toma lo suyo, y nada más (D61).
+ *
+ * Hasta D60 una PC dada de alta tomaba **cualquier** trabajo de la cola del club.
+ * Con una sola PC eso está bien. Con cuatro —abajo, arriba, terraza y la comandera
+ * de meseros— la PC más rápida se lleva el ticket de la barra de al lado y lo
+ * imprime en su propia impresora. Y no es una carrera que a veces se pierda: se
+ * pierde siempre, porque la más rápida gana todas. Desde el panel se ve como si las
+ * otras barras no imprimieran, que es el sintoma equivocado.
+ *
+ * Todo lo de aquí abajo es esa regla, y la salvedad que la hace desplegable: una PC
+ * SIN barra asignada sigue viendo todo el club, para no dejar sin imprimir a los que
+ * ya estaban dados de alta la noche del despliegue.
+ */
+describe('Cada PC imprime lo de su barra (D61)', () => {
+  /** Una impresora en la barra que se diga, con el propósito que se diga. */
+  const impresoraEn = async (locationId, purpose, name) => (await api()
+    .post(url('/printers')).set(auth(manager)).send({
+      location_id: locationId, name, purpose, connection: 'network', host: '192.168.1.60',
+    })).body.printer;
+
+  /** Deja un papel en la cola para esa impresora, sin pasar por el resto del sistema. */
+  const encolar = (printer) => printing.enqueue(pool, {
+    nightclubId: club.id,
+    printer,
+    kind: 'order',
+    payload: Buffer.from([0x1b, 0x40]),
+    preview: 'prueba',
+  });
+
+  /** Lo que esta PC se lleva cuando pregunta. */
+  const pedirTrabajos = async (agent) => {
+    const res = await comoAgente(agent.token, 'get', '/api/print-agent/jobs');
+    return res.body.jobs;
+  };
+
+  const asignar = (agent, area) => api()
+    .patch(url(`/print-agents/${agent.id}`)).set(auth(manager)).send({ area });
+
+  it('la PC de abajo no se lleva la comanda de arriba', async () => {
+    const abajo = await impresoraEn(club.locations['barra-baja'], 'orders', 'Abajo comandas');
+    const arriba = await impresoraEn(club.locations['barra-alta'], 'orders', 'Arriba comandas');
+
+    const pcAbajo = await nuevoAgente('PC abajo');
+    await asignar(pcAbajo, { location_id: club.locations['barra-baja'] });
+
+    await encolar(arriba);
+    expect(await pedirTrabajos(pcAbajo)).toHaveLength(0);
+
+    // Y no es que no tome nada: lo suyo sí se lo lleva.
+    await encolar(abajo);
+    const suyos = await pedirTrabajos(pcAbajo);
+    expect(suyos).toHaveLength(1);
+    expect(suyos[0].printer.name).toBe('Abajo comandas');
+  });
+
+  it('el ticket de arriba lo recoge la PC de arriba, no se queda colgado', async () => {
+    const arriba = await impresoraEn(club.locations['barra-alta'], 'orders', 'Arriba comandas');
+    await impresoraEn(club.locations['barra-baja'], 'orders', 'Abajo comandas');
+
+    const pcAbajo = await nuevoAgente('PC abajo');
+    const pcArriba = await nuevoAgente('PC arriba');
+    await asignar(pcAbajo, { location_id: club.locations['barra-baja'] });
+    await asignar(pcArriba, { location_id: club.locations['barra-alta'] });
+
+    await encolar(arriba);
+    // La de abajo pregunta primero —es la carrera que antes se perdía— y se va vacía.
+    expect(await pedirTrabajos(pcAbajo)).toHaveLength(0);
+    expect(await pedirTrabajos(pcArriba)).toHaveLength(1);
+  });
+
+  it('una comandera de meseros no se lleva las comandas del bartender', async () => {
+    const bar = club.locations['barra-baja'];
+    const comandas = await impresoraEn(bar, 'orders', 'Bartender');
+    const cuentas = await impresoraEn(bar, 'service', 'Meseros');
+
+    const pcMeseros = await nuevoAgente('PC meseros');
+    await asignar(pcMeseros, { location_id: bar, purpose: 'service' });
+
+    await encolar(comandas);
+    expect(await pedirTrabajos(pcMeseros)).toHaveLength(0);
+
+    await encolar(cuentas);
+    const suyos = await pedirTrabajos(pcMeseros);
+    expect(suyos).toHaveLength(1);
+    expect(suyos[0].printer.name).toBe('Meseros');
+  });
+
+  it('una PC sin barra asignada sigue tomando todo el club', async () => {
+    // Es el club de una sola PC, y también toda PC dada de alta antes de D61: si esto
+    // fallara, la noche del despliegue el club entero deja de imprimir.
+    const abajo = await impresoraEn(club.locations['barra-baja'], 'orders', 'Abajo');
+    const arriba = await impresoraEn(club.locations['barra-alta'], 'orders', 'Arriba');
+    const unica = await nuevoAgente('PC única');
+
+    await encolar(abajo);
+    await encolar(arriba);
+    expect(await pedirTrabajos(unica)).toHaveLength(2);
+  });
+
+  it('soltarle la barra la devuelve a atender todo el club', async () => {
+    // Una barra que cierra por la noche deja a su PC sin nada que imprimir. El
+    // gerente tiene que poder soltarla sin borrarla y volver a darla de alta.
+    const arriba = await impresoraEn(club.locations['barra-alta'], 'orders', 'Arriba');
+    const pc = await nuevoAgente('PC abajo');
+    await asignar(pc, { location_id: club.locations['barra-baja'] });
+    await encolar(arriba);
+    expect(await pedirTrabajos(pc)).toHaveLength(0);
+
+    const res = await asignar(pc, { location_id: null });
+    expect(res.status).toBe(200);
+    expect(res.body.agent.location_id).toBeNull();
+    expect(await pedirTrabajos(pc)).toHaveLength(1);
+  });
+
+  it('el propósito se cae solo cuando se suelta la barra', async () => {
+    // "La comandera" ¿de cuál barra? Un propósito sin barra no se puede resolver, y
+    // la base lo rechaza: si la pantalla dejara uno colgado, el guardado siguiente
+    // fallaría con un error que no dice nada.
+    const pc = await nuevoAgente('PC abajo');
+    await asignar(pc, { location_id: club.locations['barra-baja'], purpose: 'service' });
+    const res = await asignar(pc, { location_id: null, purpose: 'service' });
+    expect(res.status).toBe(200);
+    expect(res.body.agent).toMatchObject({ location_id: null, purpose: null });
+  });
+
+  it('el panel recibe el nombre de la barra ya resuelto', async () => {
+    const pc = await nuevoAgente('PC abajo');
+    await asignar(pc, { location_id: club.locations['barra-baja'], purpose: 'orders' });
+    const res = await api().get(url('/print-agents')).set(auth(manager));
+    const mia = res.body.agents.find((a) => a.id === pc.id);
+    expect(mia).toMatchObject({ location_name: 'Barra planta baja', purpose: 'orders' });
+  });
+
+  it('el almacén no es una barra, y se dice con palabras', async () => {
+    // `supply_locations` también guarda el almacén y la caja fuerte. Asignarle el
+    // almacén a una PC la dejaría sin imprimir nunca, sin que nada avisara.
+    const pc = await nuevoAgente('PC abajo');
+    const res = await asignar(pc, { location_id: club.warehouse_id });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/barra/i);
+  });
+
+  it('una barra de otro club no se le puede poner a esta PC', async () => {
+    const otro = await f.createNightclub({ slug: 'otro-club' });
+    const pc = await nuevoAgente('PC abajo');
+    const res = await asignar(pc, { location_id: otro.bar_id });
+    expect(res.status).toBe(400);
+  });
+
+  it('prender y apagar sigue funcionando sin tocar el área', async () => {
+    const pc = await nuevoAgente('PC abajo');
+    await asignar(pc, { location_id: club.locations['barra-baja'] });
+    const res = await api().patch(url(`/print-agents/${pc.id}`))
+      .set(auth(manager)).send({ active: false });
+    expect(res.status).toBe(200);
+    const lista = await api().get(url('/print-agents')).set(auth(manager));
+    const mia = lista.body.agents.find((a) => a.id === pc.id);
+    expect(mia).toMatchObject({ active: false, location_id: club.locations['barra-baja'] });
+  });
+
+  it('un PATCH vacío no se toma por un cambio', async () => {
+    const pc = await nuevoAgente('PC abajo');
+    const res = await api().patch(url(`/print-agents/${pc.id}`)).set(auth(manager)).send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('el código de alta lleva la barra: la PC nace asignada', async () => {
+    // Sin esto, dar de alta son dos pasos, y entre uno y otro hay una PC llevándose
+    // el papel de todo el club — el mismo problema, metido en la instalación.
+    const { body } = await api().post(url('/print-agents/invite')).set(auth(manager))
+      .send({ location_id: club.locations['barra-alta'], purpose: 'orders' });
+    expect(body.invite.location_name).toBe('Barra planta alta');
+
+    const res = await api().post('/api/print-agent/pair')
+      .send({ code: body.invite.code, hostname: 'PC arriba', version: '1.0.0' });
+    expect(res.status).toBe(201);
+    expect(res.body.agent).toMatchObject({ purpose: 'orders', location_name: 'Barra planta alta' });
+
+    // Y desde el primer latido ya filtra: la comanda de abajo no es suya.
+    const abajo = await impresoraEn(club.locations['barra-baja'], 'orders', 'Abajo');
+    await encolar(abajo);
+    const agente = { ...res.body.agent, token: res.body.token };
+    expect(await pedirTrabajos(agente)).toHaveLength(0);
+  });
+
+  it('el agente se entera de su área en el mismo latido', async () => {
+    // Es lo que el agente escribe en su bitácora al conectarse. Parado frente a la
+    // PC de la barra, es la única forma de comprobar que quedó donde debía.
+    const pc = await nuevoAgente('PC abajo');
+    await asignar(pc, { location_id: club.locations['barra-baja'], purpose: 'orders' });
+    const res = await comoAgente(pc.token, 'get', '/api/print-agent/jobs');
+    expect(res.body.agent).toMatchObject({
+      location_name: 'Barra planta baja', purpose: 'orders',
+    });
+  });
+
+  it('dos PCs en la MISMA barra siguen sin duplicar el mismo ticket', async () => {
+    // El filtro por barra no reemplaza al SKIP LOCKED: dos PCs de respaldo en la
+    // misma barra son un caso real, y ahí el duplicado vuelve a ser posible.
+    const bar = club.locations['barra-baja'];
+    const impresora = await impresoraEn(bar, 'orders', 'Abajo');
+    const a = await nuevoAgente('PC abajo 1');
+    const b = await nuevoAgente('PC abajo 2');
+    await asignar(a, { location_id: bar });
+    await asignar(b, { location_id: bar });
+
+    await encolar(impresora);
+    const [unos, otros] = await Promise.all([pedirTrabajos(a), pedirTrabajos(b)]);
+    expect(unos.length + otros.length).toBe(1);
   });
 });

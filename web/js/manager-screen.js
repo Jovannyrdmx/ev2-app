@@ -1562,9 +1562,83 @@
         } catch (err) { listo(); showError(err); }
       };
 
-      card.append(left, apagar);
+      // La tarjeta pasa a dos renglones: arriba quién es y si está viva, abajo a qué
+      // barra atiende. El área va en la tarjeta y no en un diálogo aparte porque es
+      // lo que hay que poder comprobar de un vistazo cuando una barra no imprime.
+      card.className = 'card rounded-lg px-3 py-2 space-y-2';
+      const arriba = document.createElement('div');
+      arriba.className = 'flex items-center justify-between gap-3';
+      arriba.append(left, apagar);
+      card.append(arriba, agentAreaRow(a));
       caja.appendChild(card);
     }
+  }
+
+  /**
+   * A qué barra atiende esta PC (D61).
+   *
+   * Sin esto, cada PC toma de la cola lo que sea y la más rápida se lleva las
+   * comandas de las otras barras: no es una carrera que a veces se pierda, se pierde
+   * siempre. Dejar la barra en "todo el club" es lo correcto —y lo único que se
+   * puede hacer— mientras el club tenga una sola PC.
+   */
+  function agentAreaRow(a) {
+    const fila = document.createElement('div');
+    fila.className = 'flex items-center gap-2';
+
+    const barras = (state.locations || []).filter((l) => l.kind === 'bar');
+    const selBarra = document.createElement('select');
+    selBarra.className = 'card rounded-lg px-2 py-1 text-xs min-w-0 flex-1';
+    const todo = document.createElement('option');
+    todo.value = '';
+    todo.textContent = t('prn.areaAll');
+    selBarra.appendChild(todo);
+    for (const b of barras) {
+      const opt = document.createElement('option');
+      opt.value = b.id;
+      opt.textContent = b.name;
+      selBarra.appendChild(opt);
+    }
+    selBarra.value = a.location_id || '';
+
+    const selPapel = document.createElement('select');
+    selPapel.className = 'card rounded-lg px-2 py-1 text-xs min-w-0 flex-1';
+    for (const [valor, clave] of [['', 'prn.areaBoth'], ['orders', 'prn.pOrders'], ['service', 'prn.pService']]) {
+      const opt = document.createElement('option');
+      opt.value = valor;
+      opt.textContent = t(clave);
+      selPapel.appendChild(opt);
+    }
+    selPapel.value = a.purpose || '';
+    // Un propósito sin barra no se puede resolver ("la comandera" ¿de cuál barra?),
+    // y el servidor lo rechaza. Apagarlo aquí evita ofrecer algo que no se guarda.
+    selPapel.disabled = !selBarra.value;
+
+    const guardar = async () => {
+      selBarra.disabled = true;
+      selPapel.disabled = true;
+      try {
+        await api.patch(`/nightclubs/${clubId()}/print-agents/${a.id}`, {
+          area: { location_id: selBarra.value || null, purpose: selPapel.value || null },
+        });
+        await loadPrinting();
+      } catch (err) {
+        selBarra.value = a.location_id || '';
+        selPapel.value = a.purpose || '';
+        selBarra.disabled = false;
+        selPapel.disabled = !selBarra.value;
+        showError(err);
+      }
+    };
+    selBarra.onchange = () => {
+      if (!selBarra.value) selPapel.value = '';
+      selPapel.disabled = !selBarra.value;
+      guardar();
+    };
+    selPapel.onchange = guardar;
+
+    fila.append(selBarra, selPapel);
+    return fila;
   }
 
   function renderPrintJobs() {
@@ -1696,7 +1770,13 @@
   $('btn-agent-add').onclick = async () => {
     const listo = ocupado($('btn-agent-add'), 'prn.saving');
     try {
-      const { invite } = await api.post(`/nightclubs/${clubId()}/print-agents/invite`, {});
+      // Si el club ya tiene una sola barra, la PC nueva nace asignada a ella sin
+      // preguntar nada: con una barra no hay elección que ofrecer. Con varias, nace
+      // atendiendo todo el club y el gerente le pone su barra en la tarjeta — que es
+      // donde va a estar mirando cuando la PC aparezca (D61).
+      const barras = (state.locations || []).filter((l) => l.kind === 'bar');
+      const cuerpo = barras.length === 1 ? { location_id: barras[0].id } : {};
+      const { invite } = await api.post(`/nightclubs/${clubId()}/print-agents/invite`, cuerpo);
       printing.invite = invite;
       printing.pairUntil = new Date(invite.expires_at).getTime();
       renderPairing();

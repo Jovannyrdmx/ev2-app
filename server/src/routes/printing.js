@@ -304,7 +304,16 @@ agentRouter.get('/jobs',
       // internet del club, para algo que se pide una vez al mes.
       printing.pendingScan(pool, req.agent.id),
     ]);
-    res.json({ agent: { id: req.agent.id, name: req.agent.name }, jobs, scan });
+    res.json({
+      agent: {
+        id: req.agent.id,
+        name: req.agent.name,
+        location_name: req.agent.location_name || null,
+        purpose: req.agent.purpose || null,
+      },
+      jobs,
+      scan,
+    });
   }));
 
 agentRouter.post('/jobs/:jobId/done',
@@ -558,11 +567,28 @@ router.get('/nightclubs/:nightclubId/print-agents',
  */
 router.post('/nightclubs/:nightclubId/print-agents/invite',
   requireRole(...MANAGE),
-  validate({ params: z.object({ nightclubId: uuid }) }),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    // La barra va en el código (D61): la PC nace asignada en vez de pasar un rato
+    // llevándose el papel de todo el club mientras alguien vuelve al panel.
+    body: z.object({
+      location_id: uuid.nullish(),
+      purpose: z.enum(['orders', 'service']).nullish(),
+    }).default({}),
+  }),
   asyncHandler(async (req, res) => {
-    const invite = await printing.createInvite(pool, {
-      nightclubId: req.params.nightclubId, createdBy: req.user.id,
-    });
+    let invite;
+    try {
+      invite = await printing.createInvite(pool, {
+        nightclubId: req.params.nightclubId,
+        createdBy: req.user.id,
+        locationId: req.body.location_id || null,
+        purpose: req.body.purpose || null,
+      });
+    } catch (err) {
+      if (err.code === '23503') throw ApiError.badRequest('Esa barra no existe');
+      throw err;
+    }
     // `code` sale de aquí una sola vez: la base guarda su huella, no el código.
     res.status(201).json({ invite });
   }));
@@ -587,19 +613,53 @@ router.post('/nightclubs/:nightclubId/print-agents/scan',
     });
   }));
 
+/**
+ * Prender/apagar una PC, y decirle a qué barra atiende (D61).
+ *
+ * Los dos campos son opcionales y se pueden mandar juntos o por separado. `area` con
+ * `location_id: null` la devuelve a atender todo el club: una barra que cierra deja a
+ * su PC sin nada que imprimir, y el gerente tiene que poder soltarla sin borrarla.
+ */
 router.patch('/nightclubs/:nightclubId/print-agents/:agentId',
   requireRole(...MANAGE),
   validate({
     params: z.object({ nightclubId: uuid, agentId: uuid }),
-    body: z.object({ active: z.coerce.boolean() }),
+    body: z.object({
+      active: z.coerce.boolean().optional(),
+      area: z.object({
+        location_id: uuid.nullish(),
+        purpose: z.enum(['orders', 'service']).nullish(),
+      }).optional(),
+    }).refine((b) => b.active !== undefined || b.area !== undefined,
+      { message: 'No hay nada que cambiar' }),
   }),
   asyncHandler(async (req, res) => {
-    const agent = await printing.setAgentActive(pool, {
-      nightclubId: req.params.nightclubId,
-      agentId: req.params.agentId,
-      active: req.body.active,
-    });
-    if (!agent) throw ApiError.notFound('Ese agente no existe');
+    let agent = null;
+    if (req.body.active !== undefined) {
+      agent = await printing.setAgentActive(pool, {
+        nightclubId: req.params.nightclubId,
+        agentId: req.params.agentId,
+        active: req.body.active,
+      });
+      if (!agent) throw ApiError.notFound('Ese agente no existe');
+    }
+    if (req.body.area !== undefined) {
+      try {
+        agent = await printing.setAgentArea(pool, {
+          nightclubId: req.params.nightclubId,
+          agentId: req.params.agentId,
+          locationId: req.body.area.location_id || null,
+          purpose: req.body.area.purpose || null,
+        });
+      } catch (err) {
+        // Sin esto, elegir mal en la lista sale como "algo salió mal" a media noche.
+        // Son las mismas dos reglas que ya cuida la pantalla de impresoras.
+        if (err.code === '23503') throw ApiError.badRequest('Esa barra no existe');
+        if (err.code === '23514') throw ApiError.badRequest('Esa barra no es una barra de este club');
+        throw err;
+      }
+      if (!agent) throw ApiError.notFound('Ese agente no existe');
+    }
     res.json({ agent });
   }));
 

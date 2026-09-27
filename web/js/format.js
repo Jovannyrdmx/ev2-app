@@ -1399,6 +1399,10 @@
       'prn.agentDown': 'Sin señal desde hace {minutes} min',
       'prn.agentNever': 'Nunca se ha conectado',
       'prn.agentOff': 'Apagada',
+      // D61: a qué barra atiende cada PC. "Todo el club" no es un hueco sin llenar
+      // — es lo correcto para un club de una sola PC, y por eso se dice completo.
+      'prn.areaAll': 'Todo el club',
+      'prn.areaBoth': 'Comandas y cuentas',
       'prn.queue': 'Últimos tickets',
       'prn.queueNone': 'No se ha mandado imprimir nada todavía.',
       'prn.reprint': 'Reimprimir',
@@ -2973,6 +2977,8 @@
       'prn.agentDown': 'No signal for {minutes} min',
       'prn.agentNever': 'Never connected',
       'prn.agentOff': 'Turned off',
+      'prn.areaAll': 'The whole club',
+      'prn.areaBoth': 'Orders and bills',
       'prn.queue': 'Recent tickets',
       'prn.queueNone': 'Nothing has been sent to print yet.',
       'prn.reprint': 'Print again',

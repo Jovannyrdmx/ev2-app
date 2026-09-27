@@ -266,6 +266,21 @@ async function enqueueTest(runner, { nightclubId, printer, clubName, createdBy }
  * `FOR UPDATE SKIP LOCKED` es lo que permite tener dos PCs tomando de la misma cola
  * sin que el mismo ticket salga dos veces: la que llega segunda no espera al
  * renglón ocupado, se lo salta y toma el siguiente.
+ *
+ * ---------------------------------------------------------------------------
+ * Cada PC toma lo suyo y nada más (D61)
+ * ---------------------------------------------------------------------------
+ * Saltarse el renglón ocupado evita el duplicado, pero no dice **de quién** es cada
+ * papel. Mientras el club tuvo una sola PC daba igual. Con cuatro no: sin este
+ * filtro, la PC más rápida se lleva las comandas de las otras barras y las imprime
+ * en su propia impresora. No es una carrera que a veces se pierda —se pierde
+ * siempre, porque la más rápida gana todas— y desde el panel se ve como si las otras
+ * barras no imprimieran.
+ *
+ * La regla es del agente, no del trabajo: una PC asignada a una barra solo ve los
+ * trabajos cuya impresora está en esa barra, y si además tiene propósito, solo los de
+ * ese propósito. Una PC **sin** barra asignada sigue viendo todo el club, que es lo
+ * que hacía antes y lo que un club de una sola PC necesita.
  */
 async function claim(runner, { nightclubId, agentId, limit = 5 }) {
   const { rows } = await runner.query(
@@ -277,8 +292,17 @@ async function claim(runner, { nightclubId, agentId, limit = 5 }) {
            AND (c.status = 'pending'
                 OR (c.status = 'taken'
                     AND c.taken_at < now() - ($3::int * interval '1 minute')))
+           AND EXISTS (
+             SELECT 1 FROM print_agents a
+              WHERE a.id = $2
+                AND (a.location_id IS NULL
+                     OR EXISTS (
+                       SELECT 1 FROM printers p
+                        WHERE p.id = c.printer_id
+                          AND p.location_id = a.location_id
+                          AND (a.purpose IS NULL OR p.purpose = a.purpose))))
          ORDER BY c.created_at
-         FOR UPDATE SKIP LOCKED
+         FOR UPDATE OF c SKIP LOCKED
          LIMIT $4::int)
       RETURNING ${JOB_COLS}, payload,
                 (SELECT row_to_json(p) FROM (
@@ -450,15 +474,27 @@ const normalizeCode = (code) => String(code || '').toUpperCase().replace(/[^0-9A
 
 const hashCode = (code) => crypto.createHash('sha256').update(normalizeCode(code)).digest('hex');
 
-/** Emite un código para dar de alta una PC. Se enseña una vez, en la pantalla. */
-async function createInvite(runner, { nightclubId, createdBy }) {
+/**
+ * Emite un código para dar de alta una PC. Se enseña una vez, en la pantalla.
+ *
+ * Si se le pasa barra (y opcionalmente propósito), la PC que canjee este código nace
+ * ya asignada (D61). La alternativa —dar de alta y después ir al panel a decirle a
+ * cuál barra pertenece— deja una ventana en la que esa PC se lleva el papel de todo
+ * el club, que es justo el problema que la asignación resuelve.
+ */
+async function createInvite(runner, { nightclubId, createdBy, locationId = null, purpose = null }) {
   const code = newInviteCode();
+  const scopedPurpose = locationId ? purpose : null;
   const { rows } = await runner.query(
     `INSERT INTO print_agent_invites
-       (nightclub_id, code_hash, code_hint, expires_at, created_by)
-     VALUES ($1,$2,$3, now() + ($4::int * interval '1 minute'), $5)
-     RETURNING id::text AS id, code_hint, expires_at, created_at`,
-    [nightclubId, hashCode(code), code.slice(-4), INVITE_TTL_MINUTES, createdBy || null]);
+       (nightclub_id, code_hash, code_hint, expires_at, created_by, location_id, purpose)
+     VALUES ($1,$2,$3, now() + ($4::int * interval '1 minute'), $5, $6::uuid, $7::text)
+     RETURNING id::text AS id, code_hint, expires_at, created_at,
+               location_id::text AS location_id, purpose,
+               (SELECT l.name FROM supply_locations l WHERE l.id = print_agent_invites.location_id)
+                 AS location_name`,
+    [nightclubId, hashCode(code), code.slice(-4), INVITE_TTL_MINUTES, createdBy || null,
+      locationId || null, scopedPurpose || null]);
   return { ...rows[0], code: prettyCode(code), ttl_minutes: INVITE_TTL_MINUTES };
 }
 
@@ -475,7 +511,8 @@ async function createInvite(runner, { nightclubId, createdBy }) {
  */
 async function redeemInvite(client, { code, hostname, version = null, ip = null }) {
   const { rows } = await client.query(
-    `SELECT id, nightclub_id::text AS nightclub_id, expires_at, used_at, attempts
+    `SELECT id, nightclub_id::text AS nightclub_id, expires_at, used_at, attempts,
+            location_id, purpose
        FROM print_agent_invites
       WHERE code_hash = $1 FOR UPDATE`,
     [hashCode(code)]);
@@ -510,12 +547,16 @@ async function redeemInvite(client, { code, hostname, version = null, ip = null 
       const { rows: creado } = await client.query(
         `INSERT INTO print_agents
            (nightclub_id, name, token_hash, token_hint, hostname, agent_version,
-            paired_at, paired_by, scan_requested_at)
+            paired_at, paired_by, scan_requested_at, location_id, purpose)
          VALUES ($1,$2::text,$3,$4,$5::text,$6::text, now(),
-                 (SELECT created_by FROM print_agent_invites WHERE id = $7), now())
-         RETURNING id::text AS id, name`,
+                 (SELECT created_by FROM print_agent_invites WHERE id = $7), now(),
+                 $8::uuid, $9::text)
+         RETURNING id::text AS id, name,
+                   location_id::text AS location_id, purpose,
+                   (SELECT l.name FROM supply_locations l WHERE l.id = print_agents.location_id)
+                     AS location_name`,
         [invite.nightclub_id, intento, hashToken(token), token.slice(-6),
-          nombre, version, invite.id]);
+          nombre, version, invite.id, invite.location_id, invite.purpose]);
       await client.query(`RELEASE SAVEPOINT ${punto}`);
       agente = creado[0];
     } catch (err) {
@@ -549,7 +590,10 @@ async function countFailedPairing(runner, { nightclubId = null } = {}) {
 /** Los códigos que siguen vivos, para la pantalla del gerente. */
 async function openInvites(runner, { nightclubId }) {
   const { rows } = await runner.query(
-    `SELECT id::text AS id, code_hint, expires_at, attempts, created_at
+    `SELECT id::text AS id, code_hint, expires_at, attempts, created_at,
+            location_id::text AS location_id, purpose,
+            (SELECT l.name FROM supply_locations l WHERE l.id = print_agent_invites.location_id)
+              AS location_name
        FROM print_agent_invites
       WHERE nightclub_id = $1 AND used_at IS NULL AND expires_at > now()
       ORDER BY created_at DESC`,
@@ -571,10 +615,40 @@ async function createAgent(runner, { nightclubId, name, createdBy }) {
 async function listAgents(runner, { nightclubId }) {
   const { rows } = await runner.query(
     `SELECT id::text AS id, name, token_hint, last_seen_at, agent_version, active, created_at,
-            scan_requested_at, scan_at, scan_result, scan_error
+            scan_requested_at, scan_at, scan_result, scan_error,
+            location_id::text AS location_id, purpose,
+            -- El nombre de la barra viaja resuelto: la pantalla enseña "Barra de
+            -- abajo", no un identificador, y así no tiene que cruzar dos listas.
+            (SELECT l.name FROM supply_locations l WHERE l.id = print_agents.location_id)
+              AS location_name
        FROM print_agents WHERE nightclub_id = $1 ORDER BY name`,
     [nightclubId]);
   return rows;
+}
+
+/**
+ * A qué barra atiende esta PC, y con qué papel (D61).
+ *
+ * `locationId` en `null` la devuelve a atender todo el club. Es deliberado que se
+ * pueda deshacer: una barra que cierra por la noche deja a su PC sin nada que
+ * imprimir, y el gerente tiene que poder soltarla sin borrarla y volver a darla de
+ * alta.
+ */
+async function setAgentArea(runner, { nightclubId, agentId, locationId = null, purpose = null }) {
+  // Un propósito sin barra no se puede resolver, y la base lo rechaza. Se normaliza
+  // aquí para que el panel no tenga que acordarse de limpiar el segundo campo cuando
+  // alguien vacía el primero.
+  const scopedPurpose = locationId ? purpose : null;
+  const { rows } = await runner.query(
+    `UPDATE print_agents
+        SET location_id = $3::uuid, purpose = $4::text, updated_at = now()
+      WHERE id = $1 AND nightclub_id = $2
+      RETURNING id::text AS id, name, active,
+                location_id::text AS location_id, purpose,
+                (SELECT l.name FROM supply_locations l WHERE l.id = print_agents.location_id)
+                  AS location_name`,
+    [agentId, nightclubId, locationId || null, scopedPurpose || null]);
+  return rows[0] || null;
 }
 
 // ---------------------------------------------------------------- buscar impresoras
@@ -644,7 +718,13 @@ async function saveScan(runner, { agentId, found = [], error = null }) {
 async function agentByToken(runner, token) {
   if (!token) return null;
   const { rows } = await runner.query(
-    `SELECT id::text AS id, nightclub_id::text AS nightclub_id, name, active
+    `SELECT id::text AS id, nightclub_id::text AS nightclub_id, name, active,
+            location_id::text AS location_id, purpose,
+            -- El agente enseña el área en su bitácora al conectarse (D61): parado
+            -- frente a la PC de la barra, es la única forma de ver que quedó en la
+            -- barra correcta sin abrir el panel.
+            (SELECT l.name FROM supply_locations l WHERE l.id = print_agents.location_id)
+              AS location_name
        FROM print_agents WHERE token_hash = $1`,
     [hashToken(token)]);
   const agente = rows[0];
@@ -676,6 +756,7 @@ module.exports = {
   enqueue, enqueueSafely, enqueueTicket, enqueueTest,
   claim, markPrinted, markFailed, reprint, listJobs,
   newToken, hashToken, createAgent, listAgents, agentByToken, touchAgent, setAgentActive,
+  setAgentArea,
   SCAN_TTL_MINUTES, requestScan, pendingScan, saveScan,
   CODE_ALPHABET, CODE_LENGTH, INVITE_TTL_MINUTES, INVITE_MAX_ATTEMPTS,
   newInviteCode, prettyCode, normalizeCode, hashCode,
