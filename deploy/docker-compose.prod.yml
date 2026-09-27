@@ -112,7 +112,17 @@ services:
       # acceso por minuto se compartía entre todos, así que diez contraseñas
       # equivocadas de cualquiera dejaban a TODO el club sin poder entrar durante un
       # minuto. Si algún día se quita el salto de nginx, esto vuelve a 1.
-      TRUST_PROXY_HOPS: 2
+      #
+      # TRES desde D60, porque Cloudflare va delante: Cloudflare → Caddy → nginx → API.
+      # Cloudflare está ahí por una razón concreta y no por gusto: la IPv4 de este
+      # servidor no recibe conexiones entrantes (Hostinger la filtra en su red), y
+      # Cloudflare habla con el origen por IPv6 —que sí funciona— y atiende a los
+      # visitantes por IPv4. Sin eso, el club entero queda invisible para cualquier red
+      # sin IPv6, que es casi todas.
+      #
+      # Sale del `.env` para poder corregirlo sin reconstruir nada: si algún día se
+      # apaga el proxy de Cloudflare (nube gris), esto vuelve a 2 en una línea.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-3}
       # El dominio con el que el servidor arma los enlaces que salen de él (el pase
       # que el titular manda por WhatsApp). Se toma de aquí y NUNCA de la cabecera
       # `Host` de quien pide: un enlace armado con lo que manda el cliente es un

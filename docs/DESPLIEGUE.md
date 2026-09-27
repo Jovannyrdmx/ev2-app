@@ -207,6 +207,53 @@ No hay que volver a levantar nada ni se toca el certificado: es solo el cortafue
 
 ---
 
+## 3.6 Cloudflare delante (obligatorio, no opcional)
+
+Sin esto el club es invisible para casi todo el mundo, y lo descubrimos por las malas:
+la **IPv4 de este servidor no recibe conexiones entrantes** —Hostinger la filtra en su
+red, con el servidor perfectamente sano— mientras la IPv6 funciona. El resultado es que
+solo entra quien tenga IPv6. La mayoria de las redes, incluida la del punto de venta del
+club, no lo tienen: para ellas el sistema simplemente no existe.
+
+Cloudflare resuelve eso haciendo de traductor: habla con tu servidor por **IPv6**, que
+funciona, y atiende a los visitantes por **IPv4**, que es lo que casi todos tienen.
+
+1. Cuenta gratuita en Cloudflare, **Add a site**, tu dominio, plan **Free**.
+2. Cambia los nameservers del dominio a los dos que te de Cloudflare (en Hostinger:
+   Dominios entonces DNS / Nameservers, personalizados). Tarda desde minutos hasta horas.
+3. En Cloudflare, los registros:
+
+   ```
+   BORRA   A     tudominio.com  -> <la IPv4>           (no recibe conexiones)
+   CREA    AAAA  tudominio.com  -> <la IPv6 del VPS>   Proxied (nube NARANJA)
+   CREA    AAAA  www            -> <la IPv6 del VPS>   Proxied
+   ```
+
+   La nube **naranja** es lo que hace el trabajo. En gris (*DNS only*) no arregla nada:
+   el visitante seguiria yendo directo a tu servidor.
+4. **SSL/TLS, Overview, Full (strict)**. Cualquier otro modo deja el tramo entre
+   Cloudflare y tu servidor mal cifrado o roto.
+5. Espera a que Cloudflare diga *Active*.
+
+Comprueba desde una maquina **fuera** del servidor:
+
+```bash
+nslookup tudominio.com          # debe dar una IP de Cloudflare (104.x / 172.67.x)
+curl -4 -s https://tudominio.com/api/health
+```
+
+Ese `curl -4` es el que importa: es la prueba de que una red sin IPv6 ya entra.
+
+> **`TRUST_PROXY_HOPS` pasa a 3.** Con Cloudflare son tres proxies delante de la API
+> (Cloudflare, Caddy, nginx). Si se queda en 2, la API ve **una sola direccion para todo
+> el mundo** y el limite de 10 intentos de acceso por minuto se comparte entre todos:
+> diez contrasenas equivocadas de cualquiera dejan al club entero sin poder entrar. El
+> valor sale del `.env`, asi que se corrige sin reconstruir nada; si algun dia apagas el
+> proxy de Cloudflare, vuelve a 2.
+
+> **Para volver atras** son cinco minutos: pon la nube en gris y todo queda como antes.
+> Nada de este paso es irreversible.
+
 ## 4. Levantar
 
 ```bash
@@ -373,14 +420,23 @@ docker compose --env-file .env -f deploy/docker-compose.prod.yml logs -f api
 curl -s https://tudominio.com/api/health
 ```
 
-Para conectarte a la base con un cliente SQL desde tu máquina, **túnel SSH**, no abrir el
-puerto:
+Para mirar la base, lo mas simple es entrar por SSH y usar el psql del contenedor:
 
 ```bash
-ssh -L 5432:localhost:5432 ev2@IP-DEL-SERVIDOR
-# y en el túnel, dentro del servidor:
+cd ~/ev2
 docker compose --env-file .env -f deploy/docker-compose.prod.yml exec postgres psql -U postgres ev2
 ```
+
+> Aqui decia que se podia tunelizar con `ssh -L 5432:localhost:5432` y **eso nunca
+> funciono**: el archivo de produccion no publica ningun puerto de Postgres —es la regla
+> del proyecto—, asi que en el servidor no hay nada escuchando en ese puerto y el tunel
+> apunta a la nada.
+>
+> Si quieres un cliente grafico (DBeaver, pgAdmin), hay que publicar el puerto **solo en
+> el loopback** del servidor, agregando al servicio `postgres`:
+> `ports: ["127.0.0.1:5432:5432"]`. El `127.0.0.1:` del principio no es opcional: sin el,
+> `ports: ["5432:5432"]` publica tu base **a todo internet**. Con eso, desde tu maquina:
+> `ssh -L 5433:localhost:5432 <usuario>@<servidor>` y el cliente a `localhost:5433`.
 
 ---
 
