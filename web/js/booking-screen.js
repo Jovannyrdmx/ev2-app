@@ -541,6 +541,11 @@
     try {
       await loadEvents();
       await loadTables();
+    } catch (err) {
+      // Sin esto el panel se abría VACÍO y sin explicación: el cliente tocaba
+      // "Reservar", veía un selector de noches en blanco, y concluía que el club no
+      // tiene fechas disponibles. Un fallo de red no puede parecer un club cerrado.
+      ctx.showError(err);
     } finally {
       state.loading = false;
     }
@@ -564,6 +569,11 @@
   $('btn-pass-close').onclick = closePass;
   $('pass-sheet').onclick = (e) => { if (e.target === $('pass-sheet')) closePass(); };
 
-  EV2Screen.on('enter', (screen) => { ctx = screen; loadMine().catch(() => {}); });
+  EV2Screen.on('enter', (screen) => {
+    ctx = screen;
+    // "Mis reservaciones" vacío por un fallo de red se ve igual que "no tienes
+    // ninguna", y el cliente puede creer que la suya se perdió.
+    loadMine().catch((err) => ctx.showError(err));
+  });
   EV2Screen.on('language', () => { if (ctx) { renderTables(); renderQuote(); renderMine(); } });
 }());

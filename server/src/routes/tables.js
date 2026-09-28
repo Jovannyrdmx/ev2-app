@@ -14,6 +14,47 @@ const router = express.Router({ mergeParams: true });
 
 router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
 
+/**
+ * Los roles que atienden el piso, y que por tanto necesitan saber QUIÉN está en cada
+ * mesa: para llevarle su trago, para cobrarle, para saber a quién sentar.
+ */
+const FLOOR_STAFF = new Set(['waiter', 'bartender', 'hostess', 'manager', 'admin']);
+
+/**
+ * Quién puede ver el nombre de quién está sentado (D65).
+ *
+ * ---------------------------------------------------------------------------
+ * El defecto que esto cierra
+ * ---------------------------------------------------------------------------
+ * Esta ruta devolvía, por mesa, el identificador, el nombre y la hora de llegada de
+ * cada persona sentada — **a cualquier usuario con sesión**. Un cliente pedía
+ * `/tables` y obtenía el censo del club en tiempo real.
+ *
+ * Y lo más grave: **quien bloqueó a alguien seguía siendo visible para esa persona**,
+ * con mesa y hora, que es justo el escenario que `user_blocks` existe para cortar.
+ * De aquí salían además los identificadores para alcanzar a alguien por `/orders`.
+ *
+ * La contraparte correcta ya existía en el mismo archivo: `/floor-plan` solo devuelve
+ * un conteo, y `/flirts/people` sirve identidades con cuatro filtros.
+ *
+ * ---------------------------------------------------------------------------
+ * Por qué el cliente conserva su PROPIO renglón
+ * ---------------------------------------------------------------------------
+ * Porque la aplicación lo usa para saber en qué mesa está sentado uno mismo
+ * (`web/js/client.js`, `tableOf`). Borrarlo entero rompería que el cliente vea "estás
+ * en la mesa T-7", que es correcto y no filtra nada de nadie más.
+ *
+ * Así que a un cliente se le devuelven los renglones **anónimos** —el conteo sigue
+ * siendo exacto, que es lo que pinta el plano— y el suyo con su nombre.
+ */
+function visibleOccupants(occupants, user) {
+  const lista = Array.isArray(occupants) ? occupants : [];
+  if (user && FLOOR_STAFF.has(user.role)) return lista;
+  return lista.map((o) => (user && o.user_id === user.id
+    ? o
+    : { user_id: null, display_name: null, seated_at: o.seated_at }));
+}
+
 // Tables with their current open occupants (single query, no N+1).
 router.get('/nightclubs/:nightclubId/tables',
   validate({
@@ -47,7 +88,7 @@ router.get('/nightclubs/:nightclubId/tables',
       [req.params.nightclubId, req.query.section || null, req.query.status || null,
         req.query.floor || null],
     );
-    res.json({ tables: rows });
+    res.json({ tables: rows.map((t) => ({ ...t, occupants: visibleOccupants(t.occupants, req.user) })) });
   }));
 
 // Full floor plan: tables plus the landmarks that make the map readable
@@ -198,8 +239,13 @@ router.post('/nightclubs/:nightclubId/tables/:tableId/seat',
 
       await seating.seatUser(client, { tableId, userId: targetUserId });
 
+      // La audiencia NO es opcional (D65). Sin ella, este aviso llegaba a todo cliente
+      // con el socket abierto: cada vez que alguien se sentaba, el club entero recibía
+      // su identificador y su mesa en vivo. Va al personal del piso, que lo necesita
+      // para atender, y a la persona misma, que se está sentando.
       await events.publish({
         nightclubId, type: 'table_updated', client,
+        audience: { roles: ['waiter', 'bartender', 'hostess', 'manager', 'admin'], userIds: [targetUserId] },
         payload: { table_id: tableId, code: table.rows[0].code, action: 'seated', user_id: targetUserId },
       });
       await client.query('COMMIT');
@@ -248,6 +294,7 @@ router.post('/nightclubs/:nightclubId/tables/:tableId/release',
       }
       await events.publish({
         nightclubId, type: 'table_updated', client,
+        audience: { roles: ['waiter', 'bartender', 'hostess', 'manager', 'admin'], userIds: [targetUserId] },
         payload: { table_id: tableId, action: 'released', user_id: targetUserId },
       });
       await client.query('COMMIT');
@@ -336,8 +383,12 @@ router.put('/nightclubs/:nightclubId/tables/layout',
         );
         updated += r.rowCount;
       }
+      // Cambió el plano del club. No lleva identidades, pero igual necesita audiencia:
+      // desde D65 un evento sin ella no le llega a nadie, y a quien le importa que se
+      // movieron las mesas es a quien atiende el piso.
       await events.publish({
         nightclubId: req.params.nightclubId, type: 'table_updated', client,
+        audience: { roles: ['waiter', 'bartender', 'hostess', 'manager', 'admin'] },
         payload: { action: 'layout_changed', count: updated },
       });
       await client.query('COMMIT');

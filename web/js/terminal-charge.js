@@ -124,6 +124,15 @@
 
   const REMEMBER_KEY = 'ev2.terminal';
 
+  /**
+   * Cuántas consultas seguidas sin respuesta antes de dar salida.
+   *
+   * Tres, con la espera creciente de `pollDelay`, son más de veinte segundos sin saber
+   * nada de la terminal. Una sola puede ser el internet del club parpadeando; tres es
+   * que algo se quedó.
+   */
+  const FALLOS_PARA_SALIR = 3;
+
   const recordar = (id) => {
     try { localStorage.setItem(REMEMBER_KEY, id); } catch { /* modo privado: da igual */ }
   };
@@ -161,7 +170,12 @@
     doc.body.appendChild(caja);
 
     const $ = (id) => doc.getElementById(id);
-    const estado = { chargeId: null, status: null, started: 0, timer: null, expiresAt: null };
+    // `fallos` cuenta consultas seguidas sin respuesta y `salida` recuerda que ya se
+    // ofreció la puerta: sin recordarlo, el siguiente repintado la volvería a esconder.
+    const estado = {
+      chargeId: null, status: null, started: 0, timer: null, expiresAt: null,
+      fallos: 0, salida: false,
+    };
 
     function pintar(charge) {
       const head = headline(charge.status, charge);
@@ -191,18 +205,41 @@
       const cancelable = canCancel(charge.status);
       $('term-cancel').hidden = !cancelable;
       $('term-cancel').textContent = t('pay.termCancel');
-      $('term-close').hidden = cancelable;
-      $('term-close').textContent = t(isPaid(charge.status) ? 'pay.termDone' : 'pay.termBack');
+      // La puerta de salida, una vez abierta, NO se vuelve a cerrar (D65).
+      //
+      // Aquí decía `$('term-close').hidden = cancelable`, y eso dejaba el cuadro sin
+      // salida mientras el cobro no fuera final: sin X, sin cierre por fondo, y con el
+      // sondeo reintentando cada ocho segundos para siempre. Si la terminal no
+      // contestaba, el cantinero se quedaba con el cuadro girando a las dos de la
+      // mañana y la única salida era recargar la página.
+      $('term-close').hidden = cancelable && !estado.salida;
+      $('term-close').textContent = t(isPaid(charge.status) ? 'pay.termDone'
+        : (isFinal(charge.status) ? 'pay.termBack' : 'pay.termLeave'));
     }
 
     function parar() {
       if (estado.timer) { clearTimeout(estado.timer); estado.timer = null; }
     }
 
+    /** Abre la salida y explica por qué, sin decir que el cobro falló. */
+    function abrirSalida(motivo) {
+      if (estado.salida) return;
+      estado.salida = true;
+      $('term-spinner').hidden = true;
+      $('term-headline').textContent = t(motivo);
+      $('term-headline').style.color = '#fcd34d';
+      // El aviso importa tanto como el botón: el cobro PUEDE haber pasado, y volver a
+      // cobrar sin revisar es cobrarle dos veces al cliente.
+      $('term-detail').textContent = t('pay.termUnknown');
+      $('term-close').hidden = false;
+      $('term-close').textContent = t('pay.termLeave');
+    }
+
     async function preguntar() {
       if (!estado.chargeId) return;
       try {
         const res = await api.get(`/nightclubs/${clubId()}/terminal-charges/${estado.chargeId}`);
+        estado.fallos = 0;
         pintar(res.charge);
         if (isFinal(res.charge.status)) {
           parar();
@@ -210,8 +247,20 @@
           return;
         }
       } catch {
-        // Si la consulta falla se sigue esperando: el cobro puede estar pasando justo
-        // ahora, y enseñar "error" por un tropiezo de red sería mentir.
+        // Un tropiezo suelto no es noticia: el cobro puede estar pasando justo ahora, y
+        // enseñar "error" por eso sería mentir. Pero TRES seguidas ya no es un tropiezo
+        // —son más de veinte segundos sin saber nada— y ahí hay que dar salida en vez
+        // de girar para siempre.
+        estado.fallos += 1;
+        if (estado.fallos >= FALLOS_PARA_SALIR) abrirSalida('pay.termNoAnswer');
+      }
+      // Y aunque el servidor conteste bien, un cobro que ya venció no se va a resolver
+      // solo: se deja de preguntar y se da salida, en vez de sondear toda la noche.
+      const quedan = secondsLeft(estado.expiresAt);
+      if (quedan !== null && quedan <= 0 && !isFinal(estado.status)) {
+        parar();
+        abrirSalida('pay.termExpired');
+        return;
       }
       estado.timer = setTimeout(preguntar, pollDelay(Date.now() - estado.started));
     }
@@ -231,6 +280,10 @@
     };
 
     $('term-close').onclick = () => {
+      // Salirse de un cobro que NO terminó no es lo mismo que cerrar uno pagado. Se
+      // pregunta, porque lo que sigue —volver a cobrar— es lo que le cobra dos veces
+      // al cliente si la tarjeta sí había pasado.
+      if (!isFinal(estado.status) && deps.confirm && !deps.confirm(t('pay.termLeaveConfirm'))) return;
       parar();
       caja.hidden = true;
       if (onClose) onClose(estado.status);
@@ -243,6 +296,8 @@
         estado.chargeId = charge.id;
         estado.started = Date.now();
         estado.expiresAt = charge.expires_at || null;
+        estado.fallos = 0;
+        estado.salida = false;
         caja.hidden = false;
         pintar(charge);
         estado.timer = setTimeout(preguntar, 1500);
@@ -259,7 +314,7 @@
   }
 
   return {
-    FINAL, REMEMBER_KEY, isFinal, isPaid, headline, secondsLeft, pollDelay, canCancel,
+    FINAL, REMEMBER_KEY, FALLOS_PARA_SALIR, isFinal, isPaid, headline, secondsLeft, pollDelay, canCancel,
     pickTerminal, recordar, recordada, createSheet, DETAIL_KEYS, detailKey,
   };
 }));

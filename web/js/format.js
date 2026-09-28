@@ -1292,6 +1292,11 @@
       'pay.termUnknown': 'No sabemos si cobró. Revísalo antes de volver a cobrar.',
       'pay.termLeft': 'Quedan {n} s',
       'pay.termCancel': 'Cancelar el cobro',
+      // D65: la salida del cuadro cuando la terminal deja de contestar. El texto NO
+      // dice que el cobro falló, porque no se sabe: dice que no se puede consultar.
+      'pay.termNoAnswer': 'La terminal no contesta',
+      'pay.termLeave': 'Dejar de esperar',
+      'pay.termLeaveConfirm': 'Este cobro no ha terminado. Puede que la tarjeta SÍ haya pasado: revisa la terminal antes de volver a cobrar. ¿Salir de todas formas?',
       'pay.termDone': 'Listo',
       'pay.termBack': 'Volver',
       'pay.termAtTerminal': 'La terminal ya muestra el cobro: que pase su tarjeta',
@@ -2892,6 +2897,9 @@
       'pay.termUnknown': 'We do not know if it charged. Check before charging again.',
       'pay.termLeft': '{n} s left',
       'pay.termCancel': 'Cancel the charge',
+      'pay.termNoAnswer': 'The terminal is not answering',
+      'pay.termLeave': 'Stop waiting',
+      'pay.termLeaveConfirm': 'This charge has not finished. The card may HAVE gone through: check the terminal before charging again. Leave anyway?',
       'pay.termDone': 'Done',
       'pay.termBack': 'Back',
       'pay.termAtTerminal': 'The terminal is showing the charge: have them tap their card',

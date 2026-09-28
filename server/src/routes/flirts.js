@@ -20,17 +20,16 @@ const { validate, z, uuid, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const events = require('../services/events');
 const { createOrder, ORDER_SELECT } = require('../services/orders');
+// Las reglas de quien puede alcanzar a quien viven en un servicio desde D65: habia
+// DOS puertas a la misma habitacion —esta y `POST /orders`— y solo esta tenia
+// cerradura. Mientras la comprobacion viviera dentro de una ruta, la siguiente ruta
+// que hiciera lo mismo iba a volver a nacer sin ella.
+const consent = require('../services/consent');
 
 const router = express.Router({ mergeParams: true });
 
-// Limits (D18). Kept here so the tests and the contract quote the same numbers.
-const LIMITS = {
-  perHour: 20,
-  unansweredPerNight: 3,
-  nightHours: 12, // a flirt lives this long at most
-  openReportsToHide: 2, // used by part 2; discovery already honours it
-  messageMax: 140,
-};
+// Los topes viven en `services/consent.js` desde D65, junto a las reglas que los usan.
+const { LIMITS } = consent;
 
 // The only emojis a client may send. Keys are what travels; icons are for display.
 const EMOJI_CATALOGUE = {
@@ -61,24 +60,9 @@ const FLIRT_SELECT = `
 
 // ---------------------------------------------------------------- helpers
 
-/** The table this user is seated at right now, or null. */
-async function seatedAt(userId, runner = pool) {
-  const { rows } = await runner.query(
-    `SELECT t.id, t.code, t.section, t.floor
-       FROM table_occupants o JOIN tables t ON t.id = o.table_id
-      WHERE o.user_id = $1 AND o.left_at IS NULL`,
-    [userId]);
-  return rows[0] || null;
-}
-
-async function blockedEitherWay(a, b, runner = pool) {
-  const { rows } = await runner.query(
-    `SELECT 1 FROM user_blocks
-      WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)
-      LIMIT 1`,
-    [a, b]);
-  return rows.length > 0;
-}
+// Las dos viven en `services/consent.js`: el resto de este archivo las sigue usando
+// igual, pero ya no hay dos definiciones que puedan separarse con el tiempo.
+const { seatedAt, blockedEitherWay } = consent;
 
 async function preferencesFor(userId, runner = pool) {
   const { rows } = await runner.query(
@@ -95,61 +79,11 @@ async function preferencesFor(userId, runner = pool) {
  * right error; a block or a hidden recipient answers with the same neutral 404 so
  * the sender learns nothing.
  */
-async function assertCanSend({ nightclubId, sender, recipientId, runner }) {
-  if (sender.id === recipientId) throw ApiError.unprocessable('No puedes enviarte un flirt a ti mismo');
-
-  const senderTable = await seatedAt(sender.id, runner);
-  if (!senderTable) throw ApiError.unprocessable('Tienes que estar sentado en una mesa para enviar un flirt');
-
-  const rec = await runner.query(
-    `SELECT u.id, u.display_name, u.status, u.role,
-            p.accept_flirts,
-            (SELECT count(*)::int FROM user_reports r
-              WHERE r.reported_id = u.id AND r.status = 'open') AS open_reports
-       FROM users u LEFT JOIN user_preferences p ON p.user_id = u.id
-      WHERE u.id = $1 AND u.nightclub_id = $2`,
-    [recipientId, nightclubId]);
-  const recipient = rec.rows[0];
-  const unavailable = ApiError.notFound('Esa persona no está disponible');
-  if (!recipient || recipient.status !== 'active' || recipient.role !== 'guest') throw unavailable;
-  if (recipient.open_reports >= LIMITS.openReportsToHide) throw unavailable;
-  if (await blockedEitherWay(sender.id, recipientId, runner)) throw unavailable;
-
-  if (!recipient.accept_flirts) throw ApiError.forbidden('Esa persona no acepta flirts');
-
-  const recipientTable = await seatedAt(recipientId, runner);
-  if (!recipientTable) throw ApiError.unprocessable('Esa persona ya no está en el club');
-
-  // "Not interested" tonight ends the conversation for the night.
-  const silenced = await runner.query(
-    `SELECT 1 FROM flirt_reactions r JOIN flirts f ON f.id = r.flirt_id
-      WHERE f.sender_id = $1 AND f.recipient_id = $2 AND r.user_id = $2
-        AND r.reaction = 'not_interested' AND r.created_at > now() - make_interval(hours => $3)
-      LIMIT 1`,
-    [sender.id, recipientId, LIMITS.nightHours]);
-  if (silenced.rows.length > 0) throw ApiError.forbidden('Esa persona pidió no recibir más flirts tuyos esta noche');
-
-  const hourly = await runner.query(
-    `SELECT count(*)::int AS n FROM flirts
-      WHERE sender_id = $1 AND created_at > now() - interval '1 hour'`,
-    [sender.id]);
-  if (hourly.rows[0].n >= LIMITS.perHour) {
-    throw ApiError.tooMany(`Máximo ${LIMITS.perHour} flirts por hora`);
-  }
-
-  const unanswered = await runner.query(
-    `SELECT count(*)::int AS n FROM flirts f
-      WHERE f.sender_id = $1 AND f.recipient_id = $2
-        AND f.created_at > now() - make_interval(hours => $3)
-        AND f.status IN ('sent', 'viewed')
-        AND NOT EXISTS (SELECT 1 FROM flirt_reactions r WHERE r.flirt_id = f.id AND r.user_id = $2)`,
-    [sender.id, recipientId, LIMITS.nightHours]);
-  if (unanswered.rows[0].n >= LIMITS.unansweredPerNight) {
-    throw ApiError.tooMany(
-      `Ya enviaste ${LIMITS.unansweredPerNight} flirts sin respuesta a esa persona; espera a que responda`);
-  }
-
-  return { senderTable, recipient, recipientTable };
+async function assertCanSend(args) {
+  // La regla completa vive en `services/consent.js` desde D65. Aqui queda el nombre
+  // porque el resto del archivo lo usa, pero la decision es una sola y esta en un
+  // unico lugar: `POST /orders` llama exactamente a la misma.
+  return consent.assertCanSend(args);
 }
 
 // ---------------------------------------------------------------- preferences

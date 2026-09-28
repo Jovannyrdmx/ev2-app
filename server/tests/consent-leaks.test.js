@@ -16,12 +16,14 @@
  * todo el que esté sentado a cualquiera que pregunte, que es de donde salen los
  * identificadores que hacen falta para usarlo.
  *
- * Estas pruebas NO afirman que el sistema esté bien. Afirman lo que HOY hace, para
- * que quede escrito en negro sobre blanco y no se discuta. Cada una lleva marcado si
- * el comportamiento actual es el correcto o es el defecto.
+ * Estas pruebas nacieron documentando los defectos (auditoría del 28/09) y se
+ * invirtieron al arreglarlos (D65). Siguen aquí, y con el mismo detalle, porque un
+ * hueco de consentimiento no se cierra una vez: se cierra y **se queda vigilado**. La
+ * forma de que vuelva es que alguien agregue una tercera ruta que alcance a una
+ * persona sin pasar por `services/consent.js`.
  *
- * Las que documentan un defecto llevan `DEFECTO` en el nombre. Cuando se arreglen,
- * estas pruebas fallan, y ahí es cuando hay que invertirlas.
+ * Por eso cada prueba afirma las dos mitades: que el camino del pedido rechaza, Y que
+ * el del flirteo rechaza igual. Si un día se separan, la que falle dice cuál.
  */
 'use strict';
 
@@ -66,21 +68,38 @@ const regalar = (de, paraId, mensaje) => api().post(url('/orders')).set(auth(de)
 // ============================================================================
 
 describe('El consentimiento del flirteo se puede rodear por POST /orders', () => {
-  it('DEFECTO: se le manda un trago con mensaje a quien apagó el consentimiento', async () => {
-    // Por el camino de flirts esto se rechaza: `assertCanSend` exige `accept_flirts`.
-    // Por el camino de pedidos pasa sin que nadie pregunte.
+  it('a quien apagó el consentimiento NO se le manda nada, ni por pedido', async () => {
+    // Éste es el defecto que se arregló. Una persona que dijo "no quiero que me
+    // contacten" recibía mensajes de 280 caracteres, uno por trago, sin límite.
     await sentar(beto.id);
     await sentar(ana.id);
 
     const res = await regalar(beto, ana.id, 'Hola, te invito algo');
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(403);
+    expect(res.body.error.message).toMatch(/no acepta/i);
 
-    // Y el mensaje le llega de verdad: no se queda en la base sin salir.
+    // Y no quedó nada escrito: el pedido no existe a medias.
+    const { rows } = await pool.query(
+      'SELECT count(*)::int AS n FROM drink_orders WHERE recipient_id = $1', [ana.id]);
+    expect(rows[0].n).toBe(0);
+  });
+
+  it('con el consentimiento prendido SÍ se puede, que es el punto', async () => {
+    // El arreglo no puede ser "prohibir todo": Beto sí acepta, y a Beto sí se le
+    // puede invitar. Sin esta prueba, cerrar la puerta a cal y canto también pasaría.
+    const carla = await f.createUser(club.id, {
+      role: 'guest', display_name: 'Carla', accept_flirts: true,
+    });
+    await sentar(carla.id);
+    await sentar(beto.id);
+
+    const res = await regalar(carla, beto.id, 'Salud');
+    expect(res.status).toBe(201);
     const { rows } = await pool.query(
       'SELECT recipient_id::text AS recipient_id, message FROM drink_orders WHERE id = $1',
       [res.body.order.id]);
-    expect(rows[0].recipient_id).toBe(ana.id);
-    expect(rows[0].message).toBe('Hola, te invito algo');
+    expect(rows[0].recipient_id).toBe(beto.id);
+    expect(rows[0].message).toBe('Salud');
   });
 
   it('el camino del flirteo SÍ lo rechaza — o sea que la regla existe y se rodea', async () => {
@@ -94,41 +113,59 @@ describe('El consentimiento del flirteo se puede rodear por POST /orders', () =>
     expect(res.status).toBeGreaterThanOrEqual(400);
   });
 
-  it('DEFECTO: ni siquiera hace falta estar sentado', async () => {
-    // El flirteo exige que las dos personas estén sentadas. Aquí quien manda puede
-    // estar parado en la barra, o no estar en el club.
-    await sentar(ana.id);
-    const res = await regalar(beto, ana.id, 'Desde la barra');
-    expect(res.status).toBe(201);
+  it('hay que estar sentado para mandar, igual que en el flirteo', async () => {
+    // Estar sentado es lo que ata a una persona a una mesa y a una noche. Sin eso,
+    // alguien puede mandar desde la calle.
+    const carla = await f.createUser(club.id, {
+      role: 'guest', display_name: 'Carla', accept_flirts: true,
+    });
+    await sentar(carla.id); // la destinataria sí está
+    const res = await regalar(beto, carla.id, 'Desde la barra'); // Beto no
+    expect(res.status).toBe(422);
+    expect(res.body.error.message).toMatch(/sentado/i);
   });
 
-  it('el bloqueo SÍ se respeta, que es lo único que sí comprueba', async () => {
-    // Importante decirlo: no está todo roto. Pero el bloqueo es reactivo — solo
-    // sirve DESPUÉS de que ya la contactaron una primera vez.
+  it('y la otra persona también tiene que estar en el club', async () => {
+    const carla = await f.createUser(club.id, {
+      role: 'guest', display_name: 'Carla', accept_flirts: true,
+    });
+    await sentar(beto.id); // solo Beto
+    const res = await regalar(beto, carla.id, 'Hola');
+    expect(res.status).toBe(422);
+    expect(res.body.error.message).toMatch(/ya no está en el club/i);
+  });
+
+  it('el bloqueo se respeta en las DOS direcciones', async () => {
+    // Antes solo se miraba una dirección. Quien fue bloqueado tampoco debe poder
+    // seguir mandando, y el mensaje es el neutro: no confirma que lo bloquearon.
+    const carla = await f.createUser(club.id, {
+      role: 'guest', display_name: 'Carla', accept_flirts: true,
+    });
     await sentar(beto.id);
-    await sentar(ana.id);
+    await sentar(carla.id);
     await pool.query('INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1,$2)',
-      [ana.id, beto.id]);
-    const res = await regalar(beto, ana.id, 'Otra vez');
-    expect(res.status).toBe(403);
+      [beto.id, carla.id]); // BETO bloqueó a Carla, y Beto es quien manda
+    const res = await regalar(beto, carla.id, 'Otra vez');
+    expect(res.status).toBe(404);
+    expect(res.body.error.message).toMatch(/no está disponible/i);
   });
 });
 
 describe('Las protecciones de "invitarle un trago al personal" también se rodean', () => {
-  it('DEFECTO: se le manda un trago a una bailarina fuera de turno', async () => {
-    // `POST /staff/:id/drinks` exige tres cosas: que su rol acepte tragos, que esté
-    // EN TURNO, y que quien invita esté sentado. Además el trago entra a
-    // `staff_drinks` en estado pendiente, con botón de RECHAZAR.
+  it('al personal no se le llega por el camino del pedido: se manda a su puerta', async () => {
+    // Antes esto pasaba y dejaba a la persona SIN forma de rechazar el trago: no se
+    // creaba la fila de `staff_drinks`, que es donde vive el botón de rechazar.
     //
-    // Por `POST /orders` no se comprueba ninguna, y no se crea la fila de
-    // `staff_drinks`: la persona no tiene cómo rechazarlo.
+    // El error no es un "no puedes" seco: dice dónde está el botón correcto, porque
+    // quien lo lee está en el club queriendo invitar algo, no atacando nada.
     await sentar(beto.id);
     const res = await regalar(beto, bailarina.id, 'Para ti');
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(422);
+    expect(res.body.error.message).toMatch(/personal/i);
 
     const { rows } = await pool.query(
-      'SELECT count(*)::int AS n FROM staff_drinks WHERE to_user_id = $1', [bailarina.id]);
-    expect(rows[0].n).toBe(0); // sin fila, sin forma de rechazarlo
+      'SELECT count(*)::int AS n FROM drink_orders WHERE recipient_id = $1', [bailarina.id]);
+    expect(rows[0].n).toBe(0);
   });
 
   it('el camino del personal SÍ lo rechaza fuera de turno', async () => {
@@ -139,36 +176,62 @@ describe('Las protecciones de "invitarle un trago al personal" también se rodea
     expect(res.status).toBeGreaterThanOrEqual(400);
   });
 
-  it('DEFECTO: `recipient_id` no filtra por rol, así que acepta a cualquier empleado', async () => {
+  it('lo mismo con cualquier otro rol, no solo con las bailarinas', async () => {
     await sentar(beto.id);
-    expect((await regalar(beto, mesero.id, 'Para el mesero')).status).toBe(201);
+    const res = await regalar(beto, mesero.id, 'Para el mesero');
+    expect(res.status).toBe(422);
+    expect(res.body.error.message).toMatch(/personal/i);
   });
 });
 
 describe('GET /tables reparte quién está sentado y en qué mesa', () => {
-  it('DEFECTO: un cliente obtiene el identificador y el nombre de todos los sentados', async () => {
-    // De aquí salen los `recipient_id` que hacen triviales los defectos de arriba.
+  it('a un cliente no le dice quién está sentado', async () => {
+    // De aquí salían los identificadores para alcanzar a alguien. El conteo sigue
+    // siendo exacto —es lo que pinta el plano— pero sin nombres ni identificadores.
     await sentar(ana.id);
     const res = await api().get(url('/tables')).set(auth(beto));
     expect(res.status).toBe(200);
 
     const conGente = res.body.tables.find((t) => t.occupants && t.occupants.length);
     expect(conGente).toBeDefined();
-    expect(conGente.occupants[0]).toMatchObject({ display_name: 'Ana' });
-    expect(conGente.occupants[0].user_id).toBe(ana.id);
+    expect(conGente.occupants).toHaveLength(1); // el conteo no se pierde
+    expect(conGente.occupants[0].display_name).toBeNull();
+    expect(conGente.occupants[0].user_id).toBeNull();
+    expect(JSON.stringify(res.body)).not.toContain('Ana');
+    expect(JSON.stringify(res.body)).not.toContain(ana.id);
   });
 
-  it('DEFECTO: sigue apareciendo aunque lo haya bloqueado', async () => {
-    // Éste es el que más importa. `user_blocks` existe para cortar exactamente esto,
-    // y aquí no se consulta: quien bloqueó a alguien le sigue diciendo en qué mesa
-    // está y desde qué hora.
+  it('pero SÍ le dice en qué mesa está él mismo', async () => {
+    // La aplicación lo usa para enseñar "estás en la mesa T-1". Borrarlo entero
+    // rompería eso, y no filtra nada de nadie más.
+    await sentar(beto.id);
+    const res = await api().get(url('/tables')).set(auth(beto));
+    const mia = res.body.tables.find((t) => (t.occupants || [])
+      .some((o) => o.user_id === beto.id));
+    expect(mia).toBeDefined();
+    expect(mia.code).toBe('T-1');
+  });
+
+  it('al personal SÍ le dice quién está: lo necesita para atender', async () => {
+    // El arreglo no puede ser "esconderlo de todos": el mesero tiene que saber a
+    // quién le lleva el trago y a quién le cobra.
+    await sentar(ana.id);
+    const res = await api().get(url('/tables')).set(auth(mesero));
+    const conGente = res.body.tables.find((t) => (t.occupants || []).length);
+    expect(conGente.occupants[0]).toMatchObject({ display_name: 'Ana', user_id: ana.id });
+  });
+
+  it('quien la bloqueó ya no la ve, que es para lo que existe el bloqueo', async () => {
+    // Éste era el que más importaba: `user_blocks` existe para cortar exactamente
+    // esto, y esta ruta no lo consultaba. Ahora no hace falta consultarlo — a un
+    // cliente no se le dice el nombre de NADIE, así que el bloqueo se respeta por
+    // construcción y no por una comprobación que alguien pueda olvidar.
     await sentar(ana.id);
     await pool.query('INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1,$2)',
       [ana.id, beto.id]);
 
     const res = await api().get(url('/tables')).set(auth(beto));
-    const conGente = res.body.tables.find((t) => t.occupants && t.occupants.length);
-    expect(conGente.occupants.map((o) => o.display_name)).toContain('Ana');
+    expect(JSON.stringify(res.body)).not.toContain('Ana');
   });
 
   it('el camino del flirteo SÍ filtra por bloqueo y por consentimiento', async () => {
@@ -199,10 +262,10 @@ describe('GET /tables reparte quién está sentado y en qué mesa', () => {
 });
 
 describe('Los avisos en vivo de quién se sienta van a todo el club', () => {
-  it('DEFECTO: `table_updated` se publica sin audiencia, o sea para todos', async () => {
-    // `matchesAudience` (services/events.js) devuelve `true` cuando no hay audiencia:
-    // sin el campo, el evento es para cualquiera con el socket abierto. Son los
-    // únicos tres `publish` del sistema sin audiencia; los otros ~60 la declaran.
+  it('`table_updated` va al personal y a la persona, no a todo el club', async () => {
+    // Antes iba sin audiencia, y `matchesAudience` trataba eso como "para todos":
+    // cada vez que alguien se sentaba, su identificador y su mesa le llegaban en vivo
+    // a cualquier cliente con el socket abierto.
     await sentar(beto.id);
     const antes = await pool.query(
       "SELECT max(id) AS id FROM events WHERE nightclub_id = $1", [club.id]);
@@ -215,9 +278,14 @@ describe('Los avisos en vivo de quién se sienta van a todo el club', () => {
         WHERE nightclub_id = $1 AND id > COALESCE($2, 0) AND type = 'table_updated'`,
       [club.id, antes.rows[0].id]);
     expect(rows).toHaveLength(1);
-    // Sin audiencia: llega a todos, con el identificador de quien se sentó.
-    expect(rows[0].audience === null || Object.keys(rows[0].audience).length === 0).toBe(true);
-    expect(rows[0].payload.user_id).toBe(ana.id);
+    expect(rows[0].audience).not.toBeNull();
+    expect(rows[0].audience.roles).toContain('waiter');
+    // Y la persona que se sentó también lo recibe: es sobre ella.
+    expect(rows[0].audience.userIds).toContain(ana.id);
+    // Un cliente cualquiera, no.
+    const events = require('../src/services/events');
+    expect(events.matchesAudience(rows[0].audience, { id: beto.id, role: 'guest' })).toBe(false);
+    expect(events.matchesAudience(rows[0].audience, { id: mesero.id, role: 'waiter' })).toBe(true);
   });
 
   it('el resto del sistema SÍ declara audiencia — esto es el olvido, no la regla', async () => {

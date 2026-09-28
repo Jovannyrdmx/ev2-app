@@ -245,6 +245,7 @@
         t,
         money: (a, c) => EV2Format.money(a, c || 'MXN'),
         errorMessage: (err) => EV2Format.errorMessage(err),
+        confirm: (texto) => window.confirm(texto),
         onPaid: async () => { closeSale(); await loadQueue(); },
         onClose: async () => { await loadQueue(); },
       });

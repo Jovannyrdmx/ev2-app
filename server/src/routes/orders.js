@@ -9,6 +9,7 @@ const { authenticate, requireRole, sameNightclub } = require('../middleware/auth
 const events = require('../services/events');
 const inventory = require('../services/inventory');
 const tickets = require('../services/tickets');
+const consent = require('../services/consent');
 
 const router = express.Router({ mergeParams: true });
 
@@ -111,15 +112,32 @@ router.post('/nightclubs/:nightclubId/orders',
     try {
       await client.query('BEGIN');
 
+      // ---------------------------------------------------------------- regalar
+      //
+      // Un pedido con `recipient_id` no es un pedido: es **alcanzar a una persona
+      // concreta** con un trago y un mensaje libre de 280 caracteres. Es exactamente
+      // lo mismo que un flirt de tipo regalo, y por eso pasa por la misma puerta
+      // (D65).
+      //
+      // Aquí antes solo se comprobaba que existiera y que no hubiera bloqueo. El
+      // bloqueo es reactivo —solo sirve DESPUÉS de que ya la contactaron la primera
+      // vez—, así que una persona que apagó el consentimiento seguía recibiendo
+      // mensajes, uno por trago, sin límite por hora. Las otras siete comprobaciones
+      // que el módulo de flirteo hace con cuidado no se hacían aquí.
+      //
+      // El personal tiene su propia puerta y sus propias reglas, así que no entra por
+      // ésta: ver `services/consent.js`.
       if (b.recipient_id) {
-        const r = await client.query(
-          `SELECT u.id FROM users u WHERE u.id = $1 AND u.nightclub_id = $2 AND u.status = 'active'`,
+        const quien = await client.query(
+          'SELECT role FROM users WHERE id = $1 AND nightclub_id = $2',
           [b.recipient_id, nightclubId]);
-        if (r.rowCount === 0) throw ApiError.notFound('Recipient not found');
-        const blocked = await client.query(
-          'SELECT 1 FROM user_blocks WHERE blocker_id = $1 AND blocked_id = $2',
-          [b.recipient_id, req.user.id]);
-        if (blocked.rowCount > 0) throw ApiError.forbidden('You cannot send drinks to this user');
+        if (quien.rowCount === 0) throw ApiError.notFound('Esa persona no está disponible');
+        if (quien.rows[0].role !== 'guest') {
+          throw ApiError.unprocessable(consent.STAFF_GIFT_PATH);
+        }
+        await consent.assertCanSend({
+          nightclubId, sender: req.user, recipientId: b.recipient_id, runner: client,
+        });
       }
 
       const parties = await resolveParties(client, { req, nightclubId, tableId: b.table_id });

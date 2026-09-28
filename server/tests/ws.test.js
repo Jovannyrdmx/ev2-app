@@ -11,6 +11,18 @@ const { createRealtimeServer, extractToken, CLOSE } = require('../src/ws');
 const { Hub } = require('../src/realtime/hub');
 const f = require('./helpers/factories');
 
+/**
+ * "Para todo el club", dicho explícitamente.
+ *
+ * Estas pruebas usaban `audience: {}` con el significado que ese campo tenía antes de
+ * D65: vacío era para todos. Ahora vacío es para nadie —falla cerrado, porque olvidar
+ * el campo publicaba datos de más y nadie lo notaba—, así que lo que estas pruebas
+ * quieren decir se dice con todas sus letras. Lo que prueban no cambia: cómo se
+ * ENTREGA un evento, no qué significa una audiencia vacía (eso lo prueba
+ * `events-audience.test.js`).
+ */
+const TODO_EL_CLUB = { roles: ['guest', 'waiter', 'bartender', 'hostess', 'manager', 'admin'] };
+
 let realtime; let port;
 let club; let otherClub; let guest; let bartender; let manager; let outsider;
 
@@ -156,7 +168,20 @@ describe('El socket no cambia nada', () => {
 // ---------------------------------------------------------------- entrega dirigida
 
 describe('Entrega de eventos', () => {
-  it('un evento sin audiencia llega a todo el club y a nadie de otro', async () => {
+  it('un evento sin audiencia no le llega a NADIE, y el del club sí a los suyos', async () => {
+    // Cambió en D65: antes, sin audiencia era para todos, y por eso los tres `publish`
+    // de `table_updated` filtraban a quién se sentaba a cualquier cliente conectado.
+    // Ahora falla cerrado. La entrega dirigida, que es lo que esta prueba mide, sigue
+    // igual — solo que la audiencia se dice en vez de darse por hecha.
+    const nadie = await connected(guest); track(nadie.ws);
+    expect(realtime.deliver({
+      id: 100, nightclub_id: club.id, type: 'table_updated', audience: {},
+      payload: { table: 39 }, created_at: new Date().toISOString(),
+    })).toBe(0);
+    nadie.ws.close();
+  });
+
+  it('un evento para todo el club llega a todos los suyos y a nadie de otro', async () => {
     const ana = await connected(guest); track(ana.ws);
     const beto = await connected(bartender); track(beto.ws);
     const fuera = await connected(outsider); track(fuera.ws);
@@ -164,7 +189,7 @@ describe('Entrega de eventos', () => {
     const anaGot = nextMessage(ana.ws);
     const betoGot = nextMessage(beto.ws);
     const reached = realtime.deliver({
-      id: 101, nightclub_id: club.id, type: 'table_updated', audience: {},
+      id: 101, nightclub_id: club.id, type: 'table_updated', audience: TODO_EL_CLUB,
       payload: { table: 39 }, created_at: new Date().toISOString(),
     });
     expect(reached).toBe(2);
@@ -174,7 +199,7 @@ describe('Entrega de eventos', () => {
     // El de otro club no recibe nada: se comprueba con un evento propio suyo.
     const suyo = nextMessage(fuera.ws);
     realtime.deliver({
-      id: 102, nightclub_id: otherClub.id, type: 'table_updated', audience: {},
+      id: 102, nightclub_id: otherClub.id, type: 'table_updated', audience: TODO_EL_CLUB,
       payload: { table: 1 }, created_at: new Date().toISOString(),
     });
     expect((await suyo).id).toBe('102');
@@ -219,7 +244,7 @@ describe('Entrega de eventos', () => {
     const { ws } = await connected(guest); track(ws);
     const got = nextMessage(ws);
     realtime.deliver({
-      id: 9007199254740993n, nightclub_id: club.id, type: 'x', audience: {},
+      id: 9007199254740993n, nightclub_id: club.id, type: 'x', audience: TODO_EL_CLUB,
       payload: {}, created_at: new Date().toISOString(),
     });
     expect((await got).id).toBe('9007199254740993');

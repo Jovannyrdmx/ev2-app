@@ -1443,6 +1443,7 @@
         t,
         money: (a, c) => EV2Format.money(a, c || state.currency),
         errorMessage: (err) => EV2Format.errorMessage(err),
+        confirm: (texto) => window.confirm(texto),
         onPaid: async () => {
           toast(t('take.charged'), 'ok');
           await Promise.all([loadOrders(), loadTables()]);

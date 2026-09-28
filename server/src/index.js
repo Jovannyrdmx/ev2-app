@@ -9,6 +9,7 @@ const { pool } = require('./db/pool');
 const { redis } = require('./db/redis');
 const { EventRelay } = require('./realtime/relay');
 const paymentConfig = require('./config/payments');
+const clubNetwork = require('./services/club-network');
 const terminalCharges = require('./services/terminal-charges');
 const pins = require('./services/pins');
 
@@ -26,6 +27,17 @@ async function start() {
     }
     if (!process.env.BANK_ENCRYPTION_KEY || process.env.BANK_ENCRYPTION_KEY.length < 32) {
       throw new Error('BANK_ENCRYPTION_KEY is missing or shorter than 32 characters (employee bank accounts)');
+    }
+    // `PIN_LOOKUP_KEY` NO detiene el arranque, a diferencia de las dos de arriba: un
+    // club puede trabajar sin acceso por PIN. Pero sin ella no se le puede generar el
+    // PIN a NADIE, y eso se descubría a media noche, intentando dar de alta a alguien.
+    // Se dice al arrancar, que es cuando alguien está mirando la consola (D65).
+    const problemaPin = pins.configProblem();
+    if (problemaPin) {
+      console.warn(`AVISO: el acceso por PIN está apagado. ${problemaPin}`);
+    } else if (!clubNetwork.isConfigured()) {
+      console.warn('AVISO: CLUB_NETWORKS está vacía, así que la gerencia no puede entrar '
+        + 'con PIN en ningún lado. Lleva la IP pública del club.');
     }
     // Refuses to start with live payment keys outside production, which is the mistake
     // that charges a real card during a demo.

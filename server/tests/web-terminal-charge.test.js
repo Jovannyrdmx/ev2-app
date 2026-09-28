@@ -229,3 +229,136 @@ describe('Lo que la guía de Point añade a la espera', () => {
     dom.window.close();
   });
 });
+
+// ============================================================================
+
+/**
+ * El cuadro del cobro siempre tiene salida (D65).
+ *
+ * El defecto: "Cerrar" estaba oculto mientras el cobro no fuera final, el cuadro es
+ * un modal a pantalla completa sin X ni cierre por fondo, y el sondeo atrapaba los
+ * errores en silencio y se reprogramaba cada ocho segundos para siempre.
+ *
+ * A las dos de la mañana, con la fila esperando, si la terminal dejaba de contestar el
+ * cantinero se quedaba con el cuadro girando y la única salida era recargar la página.
+ */
+describe('Salir del cobro cuando la terminal no contesta (D65)', () => {
+  // El defecto: "Cerrar" estaba oculto mientras el cobro no fuera final, el cuadro es
+  // un modal a pantalla completa sin X ni cierre por fondo, y el sondeo atrapaba los
+  // errores en silencio y se reprogramaba para siempre. A las dos de la mañana, si la
+  // terminal dejaba de contestar, la única salida era recargar la página.
+  const ventanas = [];
+  const ventana = () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>',
+      { url: 'https://ev2.local/staff.html' });
+    ventanas.push(dom.window);
+    return dom.window;
+  };
+  afterAll(() => { for (const w of ventanas) w.close(); });
+
+  const esperar = (ms) => new Promise((r) => { setTimeout(r, ms); });
+  // Un cobro ya vencido abre la salida en la PRIMERA consulta: es el mismo camino que
+  // el fallo de red, sin esperar los tres intentos reales que tardarían medio minuto.
+  const vencido = {
+    id: 'ch1', amount: '250.00', currency: 'MXN', status: 'waiting',
+    terminal: { label: 'Barra baja' },
+    expires_at: new Date(Date.now() - 1000).toISOString(),
+  };
+
+  function hoja(over) {
+    const win = ventana();
+    const h = T.createSheet({
+      document: win.document,
+      api: { get: () => Promise.resolve({ charge: { ...vencido } }), post: () => Promise.resolve({}) },
+      clubId: () => 'club',
+      t: (k) => k,
+      money: (a) => String(a),
+      errorMessage: () => 'error',
+      confirm: () => true,
+      ...over,
+    });
+    return { hoja: h, $: (id) => win.document.getElementById(id) };
+  }
+
+  it('un cobro sin resolver acaba dando salida, y avisa que PUDO haber pasado', async () => {
+    // El aviso importa tanto como el botón: el texto no dice "falló", dice "no
+    // sabemos". Es lo que impide volver a cobrar y cobrarle dos veces al cliente.
+    const { hoja: h, $ } = hoja();
+    h.watch(vencido);
+    expect($('term-close').hasAttribute('hidden')).toBe(true); // al abrir, no
+    await esperar(1900);
+    expect($('term-close').hasAttribute('hidden')).toBe(false);
+    expect($('term-close').textContent).toBe('pay.termLeave');
+    expect($('term-detail').textContent).toBe('pay.termUnknown');
+    h.close();
+  }, 15000);
+
+  it('deja de preguntar en vez de sondear toda la noche', async () => {
+    let intentos = 0;
+    const { hoja: h } = hoja({
+      api: {
+        get: () => { intentos += 1; return Promise.resolve({ charge: { ...vencido } }); },
+        post: () => Promise.resolve({}),
+      },
+    });
+    h.watch(vencido);
+    await esperar(1900);
+    const tras = intentos;
+    await esperar(3000);
+    expect(intentos).toBe(tras);
+    h.close();
+  }, 15000);
+
+  it('una vez abierta, la salida NO se vuelve a esconder', async () => {
+    // El defecto exacto: `pintar()` recalculaba `hidden` en cada repintado.
+    const { hoja: h, $ } = hoja();
+    h.watch(vencido);
+    await esperar(1900);
+    expect($('term-close').hasAttribute('hidden')).toBe(false);
+    h.onEvent({ payload: { charge_id: 'ch1' } }); // fuerza un repintado
+    await esperar(300);
+    expect($('term-close').hasAttribute('hidden')).toBe(false);
+    h.close();
+  }, 15000);
+
+  it('salirse de un cobro sin terminar pregunta antes', async () => {
+    let preguntado = null;
+    let cerrado = false;
+    const { hoja: h, $ } = hoja({
+      confirm: (texto) => { preguntado = texto; return false; },
+      onClose: () => { cerrado = true; },
+    });
+    h.watch(vencido);
+    await esperar(1900);
+    $('term-close').click();
+    expect(preguntado).toBe('pay.termLeaveConfirm');
+    expect(cerrado).toBe(false);
+    expect($('term-sheet').hasAttribute('hidden')).toBe(false);
+    h.close();
+  }, 15000);
+
+  it('un cobro PAGADO se cierra sin preguntar nada', async () => {
+    // El arreglo no puede volver molesto el camino bueno.
+    let preguntas = 0;
+    let cerrado = false;
+    const { hoja: h, $ } = hoja({
+      api: {
+        get: () => Promise.resolve({ charge: { ...vencido, status: 'processed' } }),
+        post: () => Promise.resolve({}),
+      },
+      confirm: () => { preguntas += 1; return true; },
+      onClose: () => { cerrado = true; },
+    });
+    h.watch(vencido);
+    await esperar(1900);
+    expect($('term-close').textContent).toBe('pay.termDone');
+    $('term-close').click();
+    expect(preguntas).toBe(0);
+    expect(cerrado).toBe(true);
+  }, 15000);
+
+  it('una sola consulta fallida no abre la salida: puede ser el internet del club', () => {
+    // La constante es la regla: tres seguidas, no una.
+    expect(T.FALLOS_PARA_SALIR).toBe(3);
+  });
+});

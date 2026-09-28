@@ -15,6 +15,18 @@ const { EventSubscriber } = require('../src/realtime/subscriber');
 const events = require('../src/services/events');
 const f = require('./helpers/factories');
 
+/**
+ * "Para todo el club", dicho explícitamente.
+ *
+ * Estas pruebas usaban `audience: {}` con el significado que ese campo tenía antes de
+ * D65: vacío era para todos. Ahora vacío es para nadie —falla cerrado, porque olvidar
+ * el campo publicaba datos de más y nadie lo notaba—, así que lo que estas pruebas
+ * quieren decir se dice con todas sus letras. Lo que prueban no cambia: cómo se
+ * ENTREGA un evento, no qué significa una audiencia vacía (eso lo prueba
+ * `events-audience.test.js`).
+ */
+const TODO_EL_CLUB = { roles: ['guest', 'waiter', 'bartender', 'hostess', 'manager', 'admin'] };
+
 const redisOptions = {
   socket: {
     host: process.env.REDIS_HOST || 'localhost',
@@ -93,7 +105,7 @@ describe('Un evento sale solo cuando la transacción confirma', () => {
       const client = await pool.connect();
       await client.query('BEGIN');
       await events.publish({
-        nightclubId: club.id, type: 'order_created', audience: {}, payload: { n: 1 }, client,
+        nightclubId: club.id, type: 'order_created', audience: TODO_EL_CLUB, payload: { n: 1 }, client,
       });
       // Aún sin confirmar: nada debe haber salido.
       await wait(200);
@@ -116,13 +128,13 @@ describe('Un evento sale solo cuando la transacción confirma', () => {
       const client = await pool.connect();
       await client.query('BEGIN');
       await events.publish({
-        nightclubId: club.id, type: 'order_created', audience: {}, payload: { n: 2 }, client,
+        nightclubId: club.id, type: 'order_created', audience: TODO_EL_CLUB, payload: { n: 2 }, client,
       });
       await client.query('ROLLBACK');
       client.release();
 
       // Y un evento posterior sí sale, lo que prueba que el relevo seguía vivo.
-      await events.publish({ nightclubId: club.id, type: 'table_updated', payload: {} });
+      await events.publish({ nightclubId: club.id, type: 'table_updated', audience: TODO_EL_CLUB, payload: {} });
       const got = await tap.waitFor(1);
       expect(got).toHaveLength(1);
       expect(got[0].type).toBe('table_updated');
@@ -138,7 +150,7 @@ describe('Un evento sale solo cuando la transacción confirma', () => {
     const tap = await tapChannel();
     try {
       for (let i = 0; i < 10; i += 1) {
-        await events.publish({ nightclubId: club.id, type: 'tick', payload: { i } });
+        await events.publish({ nightclubId: club.id, type: 'tick', audience: TODO_EL_CLUB, payload: { i } });
       }
       const got = await tap.waitFor(10);
       expect(got).toHaveLength(10);
@@ -160,13 +172,13 @@ describe('El relevo no depende de que la notificación llegue', () => {
     await startRelay();
     const tap = await tapChannel();
     try {
-      await events.publish({ nightclubId: club.id, type: 'antes_de_caer', payload: {} });
+      await events.publish({ nightclubId: club.id, type: 'antes_de_caer', audience: TODO_EL_CLUB, payload: {} });
       await tap.waitFor(1);
 
       // Se cae el relevo. La notificación de lo siguiente no la oye nadie.
       await relay.stop();
       relay = null;
-      await events.publish({ nightclubId: club.id, type: 'mientras_caido', payload: {} });
+      await events.publish({ nightclubId: club.id, type: 'mientras_caido', audience: TODO_EL_CLUB, payload: {} });
       await wait(200);
       expect(tap.seen).toHaveLength(1);
 
@@ -181,7 +193,7 @@ describe('El relevo no depende de que la notificación llegue', () => {
 
   it('una instalación nueva no reproduce la noche entera', async () => {
     for (let i = 0; i < 3; i += 1) {
-      await events.publish({ nightclubId: club.id, type: 'viejo', payload: { i } });
+      await events.publish({ nightclubId: club.id, type: 'viejo', audience: TODO_EL_CLUB, payload: { i } });
     }
     // NULL: este relevo nunca ha corrido aquí.
     await pool.query('UPDATE realtime_relay_state SET last_event_id = NULL WHERE id = 1');
@@ -195,7 +207,7 @@ describe('El relevo no depende de que la notificación llegue', () => {
       expect(relay.cursor.toString()).toBe(max.rows[0].id);
 
       // Y lo que pase a partir de ahora sí sale.
-      await events.publish({ nightclubId: club.id, type: 'nuevo', payload: {} });
+      await events.publish({ nightclubId: club.id, type: 'nuevo', audience: TODO_EL_CLUB, payload: {} });
       expect((await tap.waitFor(1))[0].type).toBe('nuevo');
     } finally {
       await tap.stop();
@@ -203,7 +215,7 @@ describe('El relevo no depende de que la notificación llegue', () => {
   });
 
   it('no entrega en vivo eventos viejos: esos se recuperan al reconectar (3.3)', async () => {
-    const old = await events.publish({ nightclubId: club.id, type: 'antiguo', payload: {} });
+    const old = await events.publish({ nightclubId: club.id, type: 'antiguo', audience: TODO_EL_CLUB, payload: {} });
     await pool.query(
       `UPDATE events SET created_at = now() - ($2 || ' seconds')::interval WHERE id = $1`,
       [old.id, String(LIVE_WINDOW_SECONDS + 60)]);
@@ -213,7 +225,7 @@ describe('El relevo no depende de que la notificación llegue', () => {
     const tap = await tapChannel();
     try {
       await startRelay();
-      await events.publish({ nightclubId: club.id, type: 'reciente', payload: {} });
+      await events.publish({ nightclubId: club.id, type: 'reciente', audience: TODO_EL_CLUB, payload: {} });
       const got = await tap.waitFor(1);
       expect(got.map((e) => e.type)).toEqual(['reciente']);
       expect(relay.status().skipped_stale).toBe(1);
@@ -232,7 +244,7 @@ describe('El relevo no depende de que la notificación llegue', () => {
       expect(standby.isLeader).toBe(false);
       const tap = await tapChannel();
       try {
-        await events.publish({ nightclubId: club.id, type: 'unico', payload: {} });
+        await events.publish({ nightclubId: club.id, type: 'unico', audience: TODO_EL_CLUB, payload: {} });
         const got = await tap.waitFor(1);
         await wait(250);
         // Con dos relevos activos este evento habría salido dos veces.
@@ -260,7 +272,7 @@ describe('El relevo no depende de que la notificación llegue', () => {
 
       const tap = await tapChannel();
       try {
-        await events.publish({ nightclubId: club.id, type: 'tras_relevo', payload: {} });
+        await events.publish({ nightclubId: club.id, type: 'tras_relevo', audience: TODO_EL_CLUB, payload: {} });
         expect((await tap.waitFor(1))[0].type).toBe('tras_relevo');
       } finally {
         await tap.stop();
@@ -353,8 +365,8 @@ describe('De la API al socket', () => {
     const box = collect(ws);
     await box.waitFor('welcome');
 
-    await events.publish({ nightclubId: otherClub.id, type: 'order_created', payload: {} });
-    await events.publish({ nightclubId: club.id, type: 'table_updated', payload: {} });
+    await events.publish({ nightclubId: otherClub.id, type: 'order_created', audience: TODO_EL_CLUB, payload: {} });
+    await events.publish({ nightclubId: club.id, type: 'table_updated', audience: TODO_EL_CLUB, payload: {} });
     await box.waitFor('table_updated');
     expect(box.seen.some((m) => m.event_type === 'order_created')).toBe(false);
     ws.close();
@@ -382,7 +394,7 @@ describe('De la API al socket', () => {
 
     await redis.publish(CHANNEL, 'esto no es json');
     await redis.publish(CHANNEL, JSON.stringify({ sin: 'campos' }));
-    await events.publish({ nightclubId: club.id, type: 'table_updated', payload: { ok: true } });
+    await events.publish({ nightclubId: club.id, type: 'table_updated', audience: TODO_EL_CLUB, payload: { ok: true } });
     const got = await box.waitFor('table_updated');
     expect(got.payload).toEqual({ ok: true });
     expect(subscriber.status().malformed).toBe(2);

@@ -213,7 +213,12 @@
       const on = state.section === value;
       b.className = `px-3 py-1 rounded-full text-xs shrink-0 ${on ? 'tab-active' : 'card text-white/60'}`;
       b.textContent = label;
-      b.onclick = async () => { state.section = value; await loadPeople(); };
+      // `loadPeople` relanza todo lo que no sea 422. Sin este catch, el rechazo
+      // quedaba sin manejar y la lista seguía mostrando la zona anterior como si nada.
+      b.onclick = async () => {
+        state.section = value;
+        try { await loadPeople(); } catch (err) { ctx.showError(err); }
+      };
       return b;
     };
     bar.appendChild(make(null, t('flirt.allZones')));

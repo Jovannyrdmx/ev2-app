@@ -139,7 +139,21 @@ describe('POST /orders', () => {
     expect(res.status).toBe(404);
   });
 
+  /**
+   * Invitar un trago es alcanzar a una persona concreta, así que desde D65 pasa por
+   * las mismas reglas que el flirteo: los dos sentados y ella con el consentimiento
+   * prendido. Estas tres líneas son esas precondiciones.
+   */
+  async function puedenInvitarse() {
+    await pool.query(
+      'UPDATE user_preferences SET accept_flirts = true WHERE user_id = $1', [other.id]);
+    await pool.query(
+      'INSERT INTO table_occupants (table_id, user_id) VALUES ($1,$2), ($1,$3)',
+      [table.id, guest.id, other.id]);
+  }
+
   it('permite invitar una bebida a otra persona', async () => {
+    await puedenInvitarse();
     const res = await api().post(url('/orders')).set(auth(guest))
       .send(newOrder({ recipient_id: other.id, message: 'Salud' }));
     expect(res.status).toBe(201);
@@ -147,11 +161,25 @@ describe('POST /orders', () => {
   });
 
   it('impide invitar a alguien que te bloqueó', async () => {
+    await puedenInvitarse();
     await pool.query('INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1,$2)',
       [other.id, guest.id]);
     const res = await api().post(url('/orders')).set(auth(guest))
       .send(newOrder({ recipient_id: other.id }));
+    // 404 y no 403: un bloqueo contesta lo mismo que "no existe", para que quien
+    // acosa no aprenda que lo bloquearon y se haga otra cuenta (D65).
+    expect(res.status).toBe(404);
+  });
+
+  it('impide invitar a quien NO quiere que la contacten', async () => {
+    // El hueco que D65 cerró: `accept_flirts` apagado no se miraba por este camino.
+    await pool.query(
+      'INSERT INTO table_occupants (table_id, user_id) VALUES ($1,$2), ($1,$3)',
+      [table.id, guest.id, other.id]);
+    const res = await api().post(url('/orders')).set(auth(guest))
+      .send(newOrder({ recipient_id: other.id, message: 'Hola' }));
     expect(res.status).toBe(403);
+    expect(res.body.error.message).toMatch(/no acepta/i);
   });
 
   it('valida el cuerpo de la petición', async () => {
@@ -282,6 +310,12 @@ describe('Consultas de pedidos', () => {
   });
 
   it('cada quien ve sus pedidos enviados y recibidos', async () => {
+    // El regalo necesita sus precondiciones (D65): los dos sentados y ella aceptando.
+    await pool.query(
+      'UPDATE user_preferences SET accept_flirts = true WHERE user_id = $1', [other.id]);
+    await pool.query(
+      'INSERT INTO table_occupants (table_id, user_id) VALUES ($1,$2), ($1,$3)',
+      [table.id, guest.id, other.id]);
     await api().post(url('/orders')).set(auth(guest)).send(newOrder({ recipient_id: other.id }));
     const mine = await api().get(url('/orders/mine')).set(auth(guest));
     const theirs = await api().get(url('/orders/mine')).set(auth(other));

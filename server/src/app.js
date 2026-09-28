@@ -238,7 +238,11 @@ function createApp() {
   app.use('/api/print-agent', printingRoutes.agentRouter);
 
   // Interactive API documentation (disable in production with SERVE_API_DOCS=false).
-  if (process.env.SERVE_API_DOCS !== 'false') {
+  // Publicar el mapa completo de los 310 endpoints y sus esquemas tiene que ser una
+  // decisión, no un olvido (D65). Antes había que APAGARLO explícitamente: un servidor
+  // recién instalado, o uno donde alguien borró la variable, quedaba con Swagger UI
+  // abierto sin sesión. Ahora hay que encenderlo: `SERVE_API_DOCS=true`.
+  if (process.env.SERVE_API_DOCS === 'true') {
     const spec = loadOpenApi();
     if (spec) {
       const swaggerUi = require('swagger-ui-express');

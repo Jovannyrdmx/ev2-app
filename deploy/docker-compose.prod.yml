@@ -157,7 +157,8 @@ services:
       PAIRING_RATE_LIMIT_PER_MIN: ${PAIRING_RATE_LIMIT_PER_MIN:-}
       AGENT_DOWNLOAD_RATE_LIMIT_PER_MIN: ${AGENT_DOWNLOAD_RATE_LIMIT_PER_MIN:-}
       DB_POOL_MAX: ${DB_POOL_MAX:-}
-      SERVE_API_DOCS: ${SERVE_API_DOCS:-}
+      # Apagada por omisión desde D65: encenderla publica el mapa de los 310 endpoints.
+      SERVE_API_DOCS: ${SERVE_API_DOCS:-false}
       # ---------------------------------------------------------------- lectura de tickets
       OCR_TIMEOUT_MS: ${OCR_TIMEOUT_MS:-}
       TESSERACT_BIN: ${TESSERACT_BIN:-}
