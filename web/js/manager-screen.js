@@ -30,7 +30,7 @@
     reports: [], reportFilter: null,
     nights: [], staff: [], withdrawals: [], accounts: [],
     // Lo que espera a que el gerente cuente dinero (D51).
-    cashDrops: [], shiftCuts: [],
+    cashDrops: [], shiftCuts: [], tips: [], drinks: [],
     // El catálogo de covers del club. Vacío significa que la puerta todavía teclea el
     // precio; en cuanto tiene uno, el servidor deja de aceptar importes sueltos.
     covers: [],
@@ -61,7 +61,7 @@
   // papel (D52). `staleMinutes` lo dice el servidor: es el mismo umbral con el que
   // decide que una PC se murió con un trabajo en la mano.
   const printing = {
-    printers: [], agents: [], jobs: [], settings: null, staleMinutes: 2, health: [],
+    printers: [], agents: [], jobs: [], settings: null, staleMinutes: 2, health: [], zones: [],
     // La búsqueda de impresoras (D55). `scanUntil` es hasta cuándo se sigue
     // preguntando por el resultado: el que busca es el agente, en el club, y tarda.
     scanUntil: 0,
@@ -228,6 +228,7 @@
       get(`/nightclubs/${club}/drivers?include_inactive=true&limit=200`, (d) => { state.drivers = d.drivers || []; }),
       loadTerminals(),
       loadTerminalCharges(),
+      loadTips(),
       loadShiftCuts(),
       loadPrinting(),
       loadCovers(),
@@ -250,6 +251,9 @@
       get(`/nightclubs/${club}/supply-locations`, (d) => { state.locations = d.locations || []; }),
       get(`/nightclubs/${club}/supplies`, (d) => { state.supplies = d.supplies || []; }),
       get(`/nightclubs/${club}/recipes`, (d) => { state.recipes = d.recipes || []; }),
+      // La carta completa, incluidos los tragos apagados: apagar uno es lo que lo
+      // quita del menú del cliente, así que hay que poder verlo para volver a prenderlo.
+      get(`/nightclubs/${club}/drinks`, (d) => { state.drinks = d.drinks || []; }),
       get(`/nightclubs/${club}/supply-movements?limit=60`, (d) => { state.movements = d.movements || []; }),
       // Los cortes guardados. Van en el mismo lote porque el comparador vive en la
       // pestana de noches y tiene que estar listo cuando el gerente la abre.
@@ -1115,6 +1119,116 @@
     try { await loadTerminalCharges(); } finally { listo(); }
   };
 
+  // ---------------------------------------------------------------- propinas (D66)
+
+  /**
+   * Las propinas que esperan la palabra del gerente.
+   *
+   * `POST /tips/:id/confirm` existía desde el principio y no tenía botón. No es un
+   * detalle cosmético: **confirmar es lo que mete la propina al saldo del empleado**.
+   * Sin este panel, una propina en efectivo se quedaba en `pending` para siempre y esa
+   * persona nunca podía retirarla — el dinero existía en el libro y no en su bolsillo.
+   */
+  async function loadTips() {
+    try {
+      const d = await api.get(`/nightclubs/${clubId()}/tips?status=pending&limit=50`);
+      state.tips = d.tips || [];
+      $('tip-error').hidden = true;
+    } catch (err) {
+      // A diferencia de otros paneles, aquí el error se DICE: una lista vacía por un
+      // fallo de red se ve igual que "no hay propinas pendientes", y la diferencia
+      // entre las dos es dinero que alguien está esperando.
+      state.tips = [];
+      $('tip-error').hidden = false;
+      $('tip-error').textContent = EV2Format.errorMessage(err);
+    }
+    renderTips();
+  }
+
+  function renderTips() {
+    const lista = state.tips || [];
+    $('tip-empty').hidden = lista.length > 0;
+    const caja = $('tip-list');
+    caja.innerHTML = '';
+    for (const tip of lista) {
+      const card = document.createElement('div');
+      card.className = 'card rounded-lg px-3 py-2 flex items-center justify-between gap-3';
+
+      const izq = document.createElement('div');
+      izq.className = 'min-w-0';
+      const quien = document.createElement('p');
+      quien.className = 'font-display truncate';
+      quien.textContent = `${money(tip.amount, tip.currency)} · ${tip.to_name || '—'}`;
+      const detalle = document.createElement('p');
+      detalle.className = 'text-[11px] text-white/50 truncate';
+      detalle.textContent = [
+        tip.from_name ? t('tip.from', { name: tip.from_name }) : '',
+        EV2Format.dateTime(tip.created_at),
+      ].filter(Boolean).join(' · ');
+      izq.append(quien, detalle);
+
+      const confirmar = document.createElement('button');
+      confirmar.className = 'ev2-button rounded-lg px-3 py-2 text-xs font-display shrink-0';
+      confirmar.textContent = t('tip.confirm');
+      confirmar.onclick = async () => {
+        // Se pregunta con el monto y el nombre: confirmar mueve dinero al saldo de una
+        // persona, y deshacerlo después es una cancelación con motivo.
+        if (!window.confirm(t('tip.confirmAsk', {
+          amount: money(tip.amount, tip.currency), name: tip.to_name || '—',
+        }))) return;
+        const listo = ocupado(confirmar, 'tip.confirming');
+        try {
+          await api.post(`/nightclubs/${clubId()}/tips/${tip.id}/confirm`, { provider: 'cash' });
+          toast(t('tip.confirmed'), 'ok');
+          await loadTips();
+        } catch (err) { listo(); showError(err); }
+      };
+
+      card.append(izq, confirmar);
+      caja.appendChild(card);
+    }
+  }
+
+  $('btn-sup-add').onclick = async () => {
+    const nombre = $('sup-name').value.trim();
+    const tamano = Number($('sup-size').value);
+    const error = $('sup-error');
+    error.hidden = true;
+    if (!nombre) return avisar(error, t('sup.errName'));
+    if (!Number.isFinite(tamano) || tamano <= 0) return avisar(error, t('sup.errSize'));
+
+    const listo = ocupado($('btn-sup-add'), 'sup.adding');
+    try {
+      await api.post(`/nightclubs/${clubId()}/supplies`, {
+        name: nombre,
+        unit: $('sup-unit').value,
+        package_size: tamano,
+        category: $('sup-category').value.trim() || undefined,
+        package_label: $('sup-label').value.trim() || undefined,
+      });
+      $('sup-name').value = '';
+      $('sup-size').value = '';
+      $('sup-label').value = '';
+      toast(t('sup.added'), 'ok');
+      const d = await api.get(`/nightclubs/${clubId()}/supplies`);
+      state.supplies = d.supplies || [];
+      renderInventory();
+    } catch (err) {
+      showError(err, error);
+    } finally { listo(); }
+    return undefined;
+  };
+
+  $('btn-zb-reload').onclick = async () => {
+    const listo = ocupado($('btn-zb-reload'), 'prn.reload');
+    try { await loadPrinting(); } finally { listo(); }
+  };
+
+  $('btn-tip-reload').onclick = async () => {
+    const listo = ocupado($('btn-tip-reload'), 'tip.reload');
+    try { await loadTips(); } finally { listo(); }
+  };
+
   // ---------------------------------------------------------------- cortes de turno (D51)
 
   /**
@@ -1281,6 +1395,7 @@
       pedir(`/nightclubs/${club}/print-jobs?limit=20`, (d) => { printing.jobs = d.jobs || []; }),
       pedir(`/nightclubs/${club}/print-settings`, (d) => { printing.settings = d.settings; }),
       pedir(`/nightclubs/${club}/printing-health`, (d) => { printing.health = d.issues || []; }),
+      pedir(`/nightclubs/${club}/zone-bars`, (d) => { printing.zones = d.zones || []; }),
     ]);
     renderPrinting();
   }
@@ -1348,8 +1463,75 @@
     printed: 'var(--ev2-lime)', failed: '#fca5a5', taken: '#fcd34d', pending: '#fcd34d',
   };
 
+  /**
+   * Qué barra atiende cada zona del plano (D66).
+   *
+   * Es de lo que más depende esta pestaña y no tenía pantalla: la comanda de una mesa
+   * va a la barra que atiende SU zona, y una zona sin barra asignada no encola nada y
+   * no avisa. Va junto a los avisos de la revisión porque es donde se arregla lo que
+   * esos avisos señalan.
+   */
+  function renderZoneBars() {
+    const zonas = printing.zones || [];
+    $('zb-empty').hidden = zonas.length > 0;
+    const barras = (state.locations || []).filter((l) => l.kind === 'bar');
+    const caja = $('zb-list');
+    caja.innerHTML = '';
+
+    for (const zona of zonas) {
+      const fila = document.createElement('div');
+      fila.className = 'card rounded-lg px-3 py-2 flex items-center justify-between gap-3';
+
+      const izq = document.createElement('div');
+      izq.className = 'min-w-0';
+      const nombre = document.createElement('p');
+      nombre.className = 'font-display truncate';
+      nombre.textContent = zona.section;
+      const cuantas = document.createElement('p');
+      cuantas.className = 'text-[11px] truncate';
+      // Una zona sin barra se pinta en ámbar: es la que no va a imprimir nada.
+      cuantas.style.color = zona.location_id ? 'rgba(255,255,255,.5)' : '#fcd34d';
+      cuantas.textContent = zona.location_id
+        ? t('zb.tables', { n: zona.tables })
+        : t('zb.noBar', { n: zona.tables });
+      izq.append(nombre, cuantas);
+
+      const sel = document.createElement('select');
+      sel.className = 'card rounded-lg px-2 py-1 text-xs shrink-0';
+      const ninguna = document.createElement('option');
+      ninguna.value = '';
+      ninguna.textContent = t('zb.pick');
+      sel.appendChild(ninguna);
+      for (const b of barras) {
+        const opt = document.createElement('option');
+        opt.value = b.id;
+        opt.textContent = b.name;
+        sel.appendChild(opt);
+      }
+      sel.value = zona.location_id || '';
+      sel.onchange = async () => {
+        sel.disabled = true;
+        $('zb-error').hidden = true;
+        try {
+          await api.put(`/nightclubs/${clubId()}/zone-bars`, {
+            assignments: [{ section: zona.section, location_id: sel.value || null }],
+          });
+          await loadPrinting();
+        } catch (err) {
+          sel.value = zona.location_id || '';
+          $('zb-error').hidden = false;
+          $('zb-error').textContent = EV2Format.errorMessage(err);
+        } finally { sel.disabled = false; }
+      };
+
+      fila.append(izq, sel);
+      caja.appendChild(fila);
+    }
+  }
+
   function renderPrinting() {
     renderPrintHealth();
+    renderZoneBars();
     renderPairing();
     renderFoundPrinters();
     renderPrintersList();
@@ -3011,8 +3193,13 @@
       b.classList.toggle('on', b.dataset.inv === state.invView);
     }
 
+    // Cada formulario de alta solo se ve en la vista donde tiene sentido.
+    if ($('menu-add')) $('menu-add').hidden = state.invView !== 'menu';
+    if ($('sup-add')) $('sup-add').hidden = state.invView !== 'stock';
+
     if (state.invView === 'recipes') return renderRecipeList();
     if (state.invView === 'kardex') return renderKardex();
+    if (state.invView === 'menu') return renderMenuList();
     return renderStockList();
   }
 
@@ -3091,6 +3278,89 @@
   }
 
   /** Recetas: primero lo que no tiene, despues lo de menor margen. */
+  /**
+   * La carta: el precio de cada trago y si está a la venta (D66).
+   *
+   * Hasta ahora dar de alta un trago o cambiar un precio se hacía a mano en la base de
+   * datos. Las dos rutas existían desde el principio y no tenían pantalla.
+   *
+   * El precio se edita EN LA LISTA y se guarda al salir del campo: abrir una hoja para
+   * cambiar un número es el tipo de fricción que hace que nadie corrija un precio mal
+   * puesto, y un precio mal puesto se cobra toda la noche.
+   */
+  function renderMenuList() {
+    const lista = (state.drinks || [])
+      .filter((d) => invMatches(d.name) || invMatches(d.category));
+    if (lista.length === 0) return invEmpty(t('inv.emptyMenu'));
+    $('inv-empty').hidden = true;
+
+    const caja = $('inv-list');
+    caja.innerHTML = '';
+    for (const trago of lista) {
+      const card = document.createElement('article');
+      card.className = `card rounded-xl px-3 py-2 flex items-center gap-3 ${trago.available ? '' : 'opacity-50'}`;
+
+      const izq = document.createElement('div');
+      izq.className = 'min-w-0 flex-1';
+      const nombre = document.createElement('p');
+      nombre.className = 'text-sm font-semibold truncate';
+      nombre.textContent = trago.name;
+      const cat = document.createElement('p');
+      cat.className = 'text-xs text-white/50 truncate';
+      cat.textContent = [trago.category, trago.available ? '' : t('inv.menuOff')]
+        .filter(Boolean).join(' · ');
+      izq.append(nombre, cat);
+
+      const precio = document.createElement('input');
+      precio.type = 'number';
+      precio.min = '0';
+      precio.step = '1';
+      precio.className = 'field w-24 text-right shrink-0';
+      precio.value = Number(trago.price);
+      precio.onchange = async () => {
+        const nuevo = Number(precio.value);
+        if (!Number.isFinite(nuevo) || nuevo < 0) { precio.value = Number(trago.price); return; }
+        if (nuevo === Number(trago.price)) return;
+        // Se pregunta con el precio viejo y el nuevo: este número se le cobra al
+        // cliente en la siguiente ronda, y un dedazo aquí no avisa de ninguna otra forma.
+        if (!window.confirm(t('inv.menuPriceAsk', {
+          name: trago.name, from: money(trago.price, 'MXN'), to: money(nuevo, 'MXN'),
+        }))) { precio.value = Number(trago.price); return; }
+        precio.disabled = true;
+        try {
+          await api.patch(`/nightclubs/${clubId()}/drinks/${trago.id}`, { price: nuevo });
+          toast(t('inv.menuSaved'), 'ok');
+          await loadMenu();
+        } catch (err) {
+          precio.value = Number(trago.price);
+          showError(err);
+        } finally { precio.disabled = false; }
+      };
+
+      const prender = document.createElement('button');
+      prender.className = 'card rounded-lg px-3 py-2 text-xs shrink-0';
+      prender.textContent = t(trago.available ? 'inv.menuTurnOff' : 'inv.menuTurnOn');
+      prender.onclick = async () => {
+        const listo = ocupado(prender, 'prn.saving');
+        try {
+          await api.patch(`/nightclubs/${clubId()}/drinks/${trago.id}`,
+            { available: !trago.available });
+          await loadMenu();
+        } catch (err) { listo(); showError(err); }
+      };
+
+      card.append(izq, precio, prender);
+      caja.appendChild(card);
+    }
+  }
+
+  /** Vuelve a traer la carta y repinta. Se usa tras cada cambio. */
+  async function loadMenu() {
+    const d = await api.get(`/nightclubs/${clubId()}/drinks`);
+    state.drinks = d.drinks || [];
+    renderInventory();
+  }
+
   function renderRecipeList() {
     const list = EV2Manager.sortRecipes(state.recipes, { search: state.invSearch });
     if (list.length === 0) return invEmpty(t('inv.emptyRecipes'));
@@ -3254,6 +3524,33 @@
       renderInventory();
     } catch (err) { showError(err, $('recipe-error')); }
   }
+
+  $('btn-menu-add').onclick = async () => {
+    const nombre = $('menu-name').value.trim();
+    const precio = Number($('menu-price').value);
+    const categoria = $('menu-category').value.trim();
+    const error = $('menu-error');
+    error.hidden = true;
+    // Se comprueba aquí lo que el servidor va a comprobar: los tres campos son
+    // obligatorios allá, y un 400 después de teclear se lee como "algo salió mal".
+    if (!nombre) return avisar(error, t('inv.menuErrName'));
+    if (!categoria) return avisar(error, t('inv.menuErrCategory'));
+    if (!Number.isFinite(precio) || precio < 0) return avisar(error, t('inv.menuErrPrice'));
+
+    const listo = ocupado($('btn-menu-add'), 'inv.menuAdding');
+    try {
+      await api.post(`/nightclubs/${clubId()}/drinks`,
+        { name: nombre, category: categoria, price: precio });
+      $('menu-name').value = '';
+      $('menu-price').value = '';
+      // La categoría se queda: dar de alta la carta es teclear diez tragos de la misma.
+      toast(t('inv.menuAdded'), 'ok');
+      await loadMenu();
+    } catch (err) {
+      showError(err, error);
+    } finally { listo(); }
+    return undefined;
+  };
 
   for (const b of document.querySelectorAll('[data-inv]')) {
     b.onclick = () => {

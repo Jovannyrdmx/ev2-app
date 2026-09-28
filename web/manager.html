@@ -426,6 +426,23 @@
         </div>
 
         <!--
+          Las propinas pendientes (D66). `POST /tips/:id/confirm` existía desde el
+          principio y no tenía botón, y es LO QUE METE la propina al saldo del
+          empleado: sin él, una propina en efectivo se quedaba en 'pendiente' para
+          siempre y esa persona nunca podía retirarla.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tip.title">Propinas por confirmar</p>
+            <button id="btn-tip-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="tip.reload">Actualizar</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="tip.why">Confirmar es lo que le suma la propina al empleado. Hasta que lo hagas, ese dinero no está en su saldo y no lo puede retirar.</p>
+          <p id="tip-empty" class="text-sm text-white/40" data-i18n="tip.none" hidden>No hay propinas esperando confirmación.</p>
+          <div id="tip-list" class="space-y-2"></div>
+          <p id="tip-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
+        <!--
           Los cortes de turno (D51). Aquí el gerente cuenta el dinero que le entrega
           cada mesero y cada bartender: las entregas parciales de media noche y el
           corte final. Confirmar un corte cierra el turno de esa persona.
@@ -583,12 +600,58 @@
           <button class="chip tap px-3 on" data-inv="stock" data-i18n="inv.subStock">Existencias</button>
           <button class="chip tap px-3" data-inv="recipes" data-i18n="inv.subRecipes">Recetas y margen</button>
           <button class="chip tap px-3" data-inv="kardex" data-i18n="inv.subKardex">Movimientos</button>
+          <!--
+            D66: la carta. `POST /drinks` y `PATCH /drinks/:id` existían desde el
+            principio y no tenían pantalla: dar de alta un trago o cambiar un precio
+            había que hacerlo a mano en la base de datos.
+          -->
+          <button class="chip tap px-3" data-inv="menu" data-i18n="inv.subMenu">Carta</button>
         </nav>
 
         <input id="inv-search" type="search" class="field" placeholder="Buscar" data-i18n-placeholder="inv.search">
 
         <p id="inv-empty" class="text-center text-white/40 text-sm py-10" hidden></p>
         <div id="inv-list" class="space-y-2"></div>
+
+        <!--
+          D66: el alta de un insumo. `POST /supplies` es de gerente (el almacén no
+          puede), y no tenía pantalla: un producto nuevo se registraba a mano en la
+          base. Nace en CERO a propósito — la existencia entra por una recepción o un
+          conteo, nunca al darlo de alta, porque un saldo inicial tecleado es un número
+          sin respaldo.
+        -->
+        <div id="sup-add" class="card rounded-xl p-4 space-y-3" hidden>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="sup.new">Dar de alta un insumo</p>
+          <input id="sup-name" class="field" placeholder="Nombre" data-i18n-placeholder="sup.name">
+          <div class="grid grid-cols-6 gap-2">
+            <input id="sup-category" class="field col-span-3" placeholder="Categoría" data-i18n-placeholder="sup.category">
+            <select id="sup-unit" class="field col-span-3">
+              <option value="ml">ml</option>
+              <option value="g">g</option>
+              <option value="pza" selected>pza</option>
+            </select>
+          </div>
+          <div class="grid grid-cols-6 gap-2">
+            <input id="sup-size" type="number" min="0" step="any" class="field col-span-3" placeholder="Contenido" data-i18n-placeholder="sup.size">
+            <input id="sup-label" class="field col-span-3" placeholder="Presentación" data-i18n-placeholder="sup.label">
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="sup.note">El contenido es cuánto trae UNA presentación: una botella de 750 ml son 750 en ml. Nace en cero: la existencia entra por una recepción o un conteo.</p>
+          <p id="sup-error" class="text-sm text-red-300" hidden></p>
+          <button id="btn-sup-add" class="ev2-button w-full rounded-lg py-2" data-i18n="sup.add">Dar de alta</button>
+        </div>
+
+        <!-- El alta de un trago. Solo se ve en la pestaña de la carta. -->
+        <div id="menu-add" class="card rounded-xl p-4 space-y-3" hidden>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="inv.menuNew">Agregar a la carta</p>
+          <div class="grid grid-cols-5 gap-2">
+            <input id="menu-name" class="field col-span-3" placeholder="Nombre" data-i18n-placeholder="inv.menuName">
+            <input id="menu-price" type="number" min="0" step="1" class="field col-span-2" placeholder="Precio" data-i18n-placeholder="inv.menuPrice">
+          </div>
+          <input id="menu-category" class="field" placeholder="Categoría" data-i18n-placeholder="inv.menuCategory">
+          <p class="text-[11px] text-white/40" data-i18n="inv.menuNote">Un trago nuevo nace SIN receta, así que no descuenta inventario hasta que se la pongas en "Recetas y margen".</p>
+          <p id="menu-error" class="text-sm text-red-300" hidden></p>
+          <button id="btn-menu-add" class="ev2-button w-full rounded-lg py-2" data-i18n="inv.menuAdd">Agregar</button>
+        </div>
       </div>
 
       <!-- Editor de una receta. Se abre desde la lista de recetas. -->
@@ -661,6 +724,23 @@
           que es como tiene que estar casi siempre para que signifique algo.
         -->
         <div id="prn-health" class="space-y-2" hidden></div>
+
+        <!--
+          D66: qué barra atiende cada zona del plano. `GET/PUT /zone-bars` existían y no
+          tenían pantalla, y es de lo que más depende esta pestaña: la comanda de una
+          mesa va a la barra que atiende SU zona. Una zona sin barra asignada no encola
+          nada y no avisa — por eso va aquí arriba, junto a los avisos que lo delatan.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="zb.title">Qué barra atiende cada zona</p>
+            <button id="btn-zb-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.reload">Actualizar</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="zb.why">La comanda de una mesa va a la barra que atiende su zona. Una zona sin barra no manda nada a imprimir y no avisa.</p>
+          <p id="zb-empty" class="text-sm text-white/40" data-i18n="zb.none" hidden>Este club todavía no tiene zonas en el plano.</p>
+          <div id="zb-list" class="space-y-2"></div>
+          <p id="zb-error" class="text-sm text-red-300" hidden></p>
+        </div>
 
         <div class="card rounded-xl p-4 space-y-3">
           <div class="flex items-center justify-between gap-2">
