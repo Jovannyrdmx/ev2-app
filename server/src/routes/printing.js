@@ -693,6 +693,20 @@ router.post('/nightclubs/:nightclubId/print-jobs/:jobId/reprint',
     res.status(202).json({ job });
   }));
 
+/**
+ * Por qué no va a salir papel, antes de que alguien lo note (D63).
+ *
+ * Va junto al resto de la pestaña de impresoras porque es donde se arregla: quien lee
+ * "esta barra tiene impresora pero ninguna PC que la atienda" tiene el menú de esa PC
+ * a dos dedos.
+ */
+router.get('/nightclubs/:nightclubId/printing-health',
+  requireRole(...MANAGE),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    res.json(await printing.health(pool, { nightclubId: req.params.nightclubId }));
+  }));
+
 // ---------------------------------------------------------------- los ajustes
 
 router.get('/nightclubs/:nightclubId/print-settings',

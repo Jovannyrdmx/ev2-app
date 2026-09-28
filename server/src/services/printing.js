@@ -749,6 +749,153 @@ async function setAgentActive(runner, { nightclubId, agentId, active }) {
   return rows[0] || null;
 }
 
+// ---------------------------------------------------------------- la revisión
+
+/**
+ * Cuánto puede esperar un papel antes de que sea noticia.
+ *
+ * Un trabajo recién puesto siempre está `pending` un instante: la PC pregunta cada
+ * tres segundos. Cinco minutos es otra cosa — significa que nadie lo está tomando.
+ */
+const WAITING_MINUTES = 5;
+
+/**
+ * Por qué no va a salir papel, dicho antes de que alguien lo note (D63).
+ *
+ * ---------------------------------------------------------------------------
+ * De dónde sale esta función
+ * ---------------------------------------------------------------------------
+ * De dos noches perdidas. Las dos veces el club dejó de imprimir y las dos veces el
+ * sistema se quedó **callado**: la primera porque el nombre compartido de Windows no
+ * coincidía con el del panel, la segunda porque la única impresora estaba dada de
+ * alta en una barra y la única PC asignada a la otra. En los dos casos el panel tenía
+ * toda la información necesaria para decirlo en una línea, y no la decía.
+ *
+ * Un papel que no sale no avisa solo: no hay excepción, no hay renglón rojo, no hay
+ * nada. Alguien lo nota cuando un bartender se queja, y para entonces ya pasó la
+ * noche. Esto es lo contrario: mirar la configuración y decir qué falta.
+ *
+ * ---------------------------------------------------------------------------
+ * Qué NO hace
+ * ---------------------------------------------------------------------------
+ * Molestar a un club que no usa impresoras. Sin una sola impresora ni PC activa, no
+ * hay nada roto: hay un club que cobra sin papel, que es perfectamente válido y es
+ * como arranca cualquier club nuevo. Se contesta vacío y ya.
+ */
+async function health(runner, { nightclubId }) {
+  const [printers, agents, zonas, settings, esperando] = await Promise.all([
+    runner.query(
+      `SELECT p.id::text AS id, p.name, p.purpose, p.location_id::text AS location_id,
+              l.name AS location_name
+         FROM printers p JOIN supply_locations l ON l.id = p.location_id
+        WHERE p.nightclub_id = $1 AND p.active`, [nightclubId]),
+    runner.query(
+      `SELECT a.id::text AS id, a.name, a.purpose, a.location_id::text AS location_id,
+              l.name AS location_name
+         FROM print_agents a LEFT JOIN supply_locations l ON l.id = a.location_id
+        WHERE a.nightclub_id = $1 AND a.active`, [nightclubId]),
+    // Las zonas del plano con la barra que las atiende: es lo que decide a dónde va
+    // la comanda de una mesa, y por tanto qué barra NECESITA impresora de comandas.
+    runner.query(
+      `SELECT z.section, z.location_id::text AS location_id, l.name AS location_name
+         FROM zone_bars z JOIN supply_locations l ON l.id = z.location_id
+        WHERE z.nightclub_id = $1 ORDER BY z.section`, [nightclubId]),
+    settingsOf(runner, nightclubId),
+    runner.query(
+      `SELECT count(*)::int AS n,
+              COALESCE(max(extract(epoch FROM now() - created_at)), 0)::int AS oldest_seconds
+         FROM print_jobs
+        WHERE nightclub_id = $1 AND status = 'pending'
+          AND created_at < now() - ($2::int * interval '1 minute')`,
+      [nightclubId, WAITING_MINUTES]),
+  ]);
+
+  // Un club sin nada dado de alta no tiene nada roto: tiene un club que cobra sin
+  // papel. Callarse aquí es lo que hace que los avisos de abajo signifiquen algo.
+  if (printers.rows.length === 0 && agents.rows.length === 0) return { issues: [] };
+
+  const issues = [];
+  // Una PC sin barra atiende todo el club: mientras exista una, nada se queda
+  // colgado, y los dos primeros avisos no aplican.
+  const hayComodin = agents.rows.some((a) => !a.location_id);
+
+  /** ¿Alguna PC activa se lleva los papeles de esta impresora? */
+  const laAtiende = (p) => hayComodin || agents.rows.some((a) => (
+    a.location_id === p.location_id && (!a.purpose || a.purpose === p.purpose)));
+
+  for (const p of printers.rows) {
+    if (laAtiende(p)) continue;
+    // Es el defecto de anoche, exactamente. El trabajo se encola y envejece ahí.
+    issues.push({
+      code: 'printer_without_agent',
+      severity: 'warn',
+      location_id: p.location_id,
+      location_name: p.location_name,
+      purpose: p.purpose,
+      printer_name: p.name,
+    });
+  }
+
+  for (const a of agents.rows) {
+    if (!a.location_id) continue;
+    const tiene = printers.rows.some((p) => (
+      p.location_id === a.location_id && (!a.purpose || p.purpose === a.purpose)));
+    if (tiene) continue;
+    // El espejo del anterior: una PC esperando papel que nunca le van a mandar.
+    // Suele ser el mismo error de dedo visto desde el otro lado.
+    issues.push({
+      code: 'agent_without_printer',
+      severity: 'warn',
+      agent_name: a.name,
+      location_id: a.location_id,
+      location_name: a.location_name,
+      purpose: a.purpose,
+    });
+  }
+
+  // Una barra que atiende zonas del plano y no tiene impresora de comandas: los
+  // pedidos de esas mesas no encolan NADA. Es el silencio que no deja ni rastro, y
+  // por eso hay que decirlo desde la configuración o no se dice nunca.
+  const porBarra = new Map();
+  for (const z of zonas.rows) {
+    if (!porBarra.has(z.location_id)) {
+      porBarra.set(z.location_id, { name: z.location_name, sections: [] });
+    }
+    porBarra.get(z.location_id).sections.push(z.section);
+  }
+  for (const [locationId, barra] of porBarra) {
+    const tiene = printers.rows.some((p) => p.location_id === locationId && p.purpose === 'orders');
+    if (tiene) continue;
+    issues.push({
+      code: 'bar_without_order_printer',
+      severity: 'warn',
+      location_id: locationId,
+      location_name: barra.name,
+      sections: barra.sections,
+    });
+  }
+
+  // El interruptor. No es un defecto —arranca apagado a propósito— pero con
+  // impresoras de comandas ya puestas, apagado casi siempre es un olvido.
+  if (!settings.print_order_tickets && printers.rows.some((p) => p.purpose === 'orders')) {
+    issues.push({ code: 'order_tickets_off', severity: 'info' });
+  }
+
+  // Y el síntoma, que vale por sí solo: si hay papel esperando, algo de lo de arriba
+  // ya está pasando de verdad y no en teoría.
+  const cola = esperando.rows[0];
+  if (cola && cola.n > 0) {
+    issues.push({
+      code: 'jobs_waiting',
+      severity: 'warn',
+      count: cola.n,
+      oldest_minutes: Math.floor(cola.oldest_seconds / 60),
+    });
+  }
+
+  return { issues };
+}
+
 module.exports = {
   DEFAULTS, STALE_MINUTES, REROUTE_AFTER,
   settingsOf, saveSettings,
@@ -756,7 +903,7 @@ module.exports = {
   enqueue, enqueueSafely, enqueueTicket, enqueueTest,
   claim, markPrinted, markFailed, reprint, listJobs,
   newToken, hashToken, createAgent, listAgents, agentByToken, touchAgent, setAgentActive,
-  setAgentArea,
+  setAgentArea, health, WAITING_MINUTES,
   SCAN_TTL_MINUTES, requestScan, pendingScan, saveScan,
   CODE_ALPHABET, CODE_LENGTH, INVITE_TTL_MINUTES, INVITE_MAX_ATTEMPTS,
   newInviteCode, prettyCode, normalizeCode, hashCode,

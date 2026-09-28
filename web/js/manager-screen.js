@@ -61,7 +61,7 @@
   // papel (D52). `staleMinutes` lo dice el servidor: es el mismo umbral con el que
   // decide que una PC se murió con un trabajo en la mano.
   const printing = {
-    printers: [], agents: [], jobs: [], settings: null, staleMinutes: 2,
+    printers: [], agents: [], jobs: [], settings: null, staleMinutes: 2, health: [],
     // La búsqueda de impresoras (D55). `scanUntil` es hasta cuándo se sigue
     // preguntando por el resultado: el que busca es el agente, en el club, y tarda.
     scanUntil: 0,
@@ -1275,8 +1275,56 @@
       }),
       pedir(`/nightclubs/${club}/print-jobs?limit=20`, (d) => { printing.jobs = d.jobs || []; }),
       pedir(`/nightclubs/${club}/print-settings`, (d) => { printing.settings = d.settings; }),
+      pedir(`/nightclubs/${club}/printing-health`, (d) => { printing.health = d.issues || []; }),
     ]);
     renderPrinting();
+  }
+
+  /**
+   * Por qué no va a salir papel, dicho antes de que alguien lo note (D63).
+   *
+   * Cada aviso nombra la barra, la impresora o la PC que le falta algo, porque quien
+   * lo lee tiene el menú de esa PC a dos dedos y tiene que poder arreglarlo sin
+   * volver a preguntar cuál era.
+   *
+   * Cuando no hay nada que decir el bloque desaparece entero. Eso importa tanto como
+   * los avisos: un aviso permanente se vuelve parte del fondo de la pantalla y deja
+   * de leerse, y entonces el día que diga algo de verdad tampoco se va a leer.
+   */
+  function renderPrintHealth() {
+    const avisos = printing.health || [];
+    const caja = $('prn-health');
+    caja.hidden = avisos.length === 0;
+    caja.innerHTML = '';
+    for (const aviso of avisos) {
+      const grave = aviso.severity === 'warn';
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl px-4 py-3 text-sm';
+      card.style.borderLeft = `3px solid ${grave ? '#fca5a5' : '#fcd34d'}`;
+      const titulo = document.createElement('p');
+      titulo.className = 'font-display';
+      titulo.style.color = grave ? '#fca5a5' : '#fcd34d';
+      titulo.textContent = t(`prnHealth.${aviso.code}`, {
+        bar: aviso.location_name || '',
+        printer: aviso.printer_name || '',
+        agent: aviso.agent_name || '',
+        n: aviso.count || 0,
+        minutes: aviso.oldest_minutes || 0,
+      });
+      const que = document.createElement('p');
+      que.className = 'text-[11px] text-white/50 mt-1';
+      que.textContent = t(`prnHealth.${aviso.code}Fix`);
+      card.append(titulo, que);
+      // Las zonas que se quedan sin papel van completas: es lo que el gerente
+      // contrasta contra su plano para saber a qué mesas les afecta.
+      if (aviso.sections && aviso.sections.length) {
+        const zonas = document.createElement('p');
+        zonas.className = 'text-[11px] text-white/40 mt-1';
+        zonas.textContent = aviso.sections.join(' · ');
+        card.appendChild(zonas);
+      }
+      caja.appendChild(card);
+    }
   }
 
   /** Hace cuánto se asomó esa PC, dicho como lo diría una persona. */
@@ -1296,6 +1344,7 @@
   };
 
   function renderPrinting() {
+    renderPrintHealth();
     renderPairing();
     renderFoundPrinters();
     renderPrintersList();

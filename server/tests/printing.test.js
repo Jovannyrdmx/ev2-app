@@ -1046,3 +1046,196 @@ describe('Cada PC imprime lo de su barra (D61)', () => {
     expect(unos.length + otros.length).toBe(1);
   });
 });
+
+// ============================================================================
+
+/**
+ * El panel dice por qué no va a salir papel (D63).
+ *
+ * Dos noches perdidas, y las dos veces el sistema se quedó callado: primero porque el
+ * nombre compartido de Windows no coincidía con el del panel, después porque la única
+ * impresora estaba dada de alta en una barra y la única PC asignada a la otra. En los
+ * dos casos el panel tenía toda la información para decirlo en una línea.
+ *
+ * Un papel que no sale no avisa solo. Cada prueba de aquí abajo corresponde a un
+ * incidente que de verdad pasó, o al espejo de uno.
+ */
+describe('La revisión de la impresión (D63)', () => {
+  const revisar = async (quien) => (await api().get(url('/printing-health'))
+    .set(auth(quien || manager))).body;
+
+  const codigos = (salud) => salud.issues.map((i) => i.code).sort();
+
+  const impresoraEn = async (locationId, purpose, name) => (await api()
+    .post(url('/printers')).set(auth(manager)).send({
+      location_id: locationId, name, purpose, connection: 'network', host: '192.168.1.60',
+    })).body.printer;
+
+  const asignar = (agent, area) => api()
+    .patch(url(`/print-agents/${agent.id}`)).set(auth(manager)).send({ area });
+
+  const atender = (section, locationId) => pool.query(
+    `INSERT INTO zone_bars (nightclub_id, section, location_id) VALUES ($1,$2::text,$3)
+     ON CONFLICT (nightclub_id, section) DO UPDATE SET location_id = EXCLUDED.location_id`,
+    [club.id, section, locationId]);
+
+  const prenderComandas = () => api().patch(url('/print-settings')).set(auth(manager))
+    .send({ print_order_tickets: true });
+
+  it('un club que no usa impresoras no recibe ningún regaño', async () => {
+    // Es como arranca cualquier club, y es una forma válida de trabajar: se cobra sin
+    // papel. Callarse aquí es lo que hace que los demás avisos signifiquen algo.
+    expect((await revisar()).issues).toHaveLength(0);
+  });
+
+  it('delata la impresora que ninguna PC atiende — el defecto de anoche', async () => {
+    const abajo = club.locations['barra-baja'];
+    const arriba = club.locations['barra-alta'];
+    await impresoraEn(abajo, 'orders', 'Comandas abajo');
+    const pc = await nuevoAgente('PC arriba');
+    await asignar(pc, { location_id: arriba, purpose: 'orders' });
+    await prenderComandas();
+
+    const salud = await revisar();
+    const aviso = salud.issues.find((i) => i.code === 'printer_without_agent');
+    expect(aviso).toBeDefined();
+    // El aviso NOMBRA la barra y la impresora: quien lo lee tiene que poder arreglarlo
+    // sin volver a preguntar cuál era.
+    expect(aviso.location_name).toBe('Barra planta baja');
+    expect(aviso.printer_name).toBe('Comandas abajo');
+    expect(aviso.severity).toBe('warn');
+  });
+
+  it('y también la PC que espera papel que nunca le van a mandar', async () => {
+    // El espejo del anterior, y suele ser el mismo error de dedo visto del otro lado.
+    const abajo = club.locations['barra-baja'];
+    const arriba = club.locations['barra-alta'];
+    await impresoraEn(abajo, 'orders', 'Comandas abajo');
+    const pc = await nuevoAgente('PC arriba');
+    await asignar(pc, { location_id: arriba, purpose: 'orders' });
+
+    const aviso = (await revisar()).issues.find((i) => i.code === 'agent_without_printer');
+    expect(aviso).toBeDefined();
+    expect(aviso.agent_name).toBe('PC arriba');
+    expect(aviso.location_name).toBe('Barra planta alta');
+  });
+
+  it('con la PC en su barra, no hay nada que decir', async () => {
+    const abajo = club.locations['barra-baja'];
+    await impresoraEn(abajo, 'orders', 'Comandas abajo');
+    const pc = await nuevoAgente('PC abajo');
+    await asignar(pc, { location_id: abajo, purpose: 'orders' });
+    await prenderComandas();
+
+    expect(codigos(await revisar())).toEqual([]);
+  });
+
+  it('una PC sin barra asignada tapa los dos avisos, porque de verdad los tapa', async () => {
+    // Atiende todo el club: mientras exista una, ninguna impresora se queda sin quien
+    // la sirva. Avisar aquí sería enseñar a ignorar los avisos.
+    await impresoraEn(club.locations['barra-baja'], 'orders', 'Comandas abajo');
+    await nuevoAgente('PC única');
+    await prenderComandas();
+
+    expect(codigos(await revisar())).toEqual([]);
+  });
+
+  it('delata la barra que atiende mesas y no tiene impresora de comandas', async () => {
+    // El silencio que no deja NI rastro: los pedidos de esas mesas no encolan nada,
+    // así que no hay ni un trabajo pendiente que mirar. O se dice desde la
+    // configuración, o no se dice nunca.
+    const abajo = club.locations['barra-baja'];
+    const arriba = club.locations['barra-alta'];
+    await atender('ZONA ROJA', abajo);
+    await atender('ZONA ROSA', arriba);
+    await impresoraEn(abajo, 'orders', 'Comandas abajo');
+    const pc = await nuevoAgente('PC abajo');
+    await asignar(pc, { location_id: abajo });
+    await prenderComandas();
+
+    const aviso = (await revisar()).issues.find((i) => i.code === 'bar_without_order_printer');
+    expect(aviso).toBeDefined();
+    expect(aviso.location_name).toBe('Barra planta alta');
+    // Y dice QUÉ zonas se quedan sin papel: es lo que convierte el aviso en algo que
+    // el gerente puede contrastar con su plano.
+    expect(aviso.sections).toEqual(['ZONA ROSA']);
+  });
+
+  it('avisa del interruptor apagado solo si ya hay impresora de comandas', async () => {
+    // Arranca apagado a propósito. Con impresoras de comandas ya puestas, apagado
+    // casi siempre es un olvido — pero es aviso informativo, no defecto.
+    const abajo = club.locations['barra-baja'];
+    await impresoraEn(abajo, 'orders', 'Comandas abajo');
+    const pc = await nuevoAgente('PC abajo');
+    await asignar(pc, { location_id: abajo });
+
+    const aviso = (await revisar()).issues.find((i) => i.code === 'order_tickets_off');
+    expect(aviso).toBeDefined();
+    expect(aviso.severity).toBe('info');
+
+    await prenderComandas();
+    expect(codigos(await revisar())).toEqual([]);
+  });
+
+  it('no molesta con el interruptor si solo hay impresora de cuentas', async () => {
+    // Un club que solo imprime cuentas y recibos no tiene por qué encender las
+    // comandas automáticas.
+    const abajo = club.locations['barra-baja'];
+    await impresoraEn(abajo, 'service', 'Cuentas abajo');
+    const pc = await nuevoAgente('PC abajo');
+    await asignar(pc, { location_id: abajo });
+
+    expect(codigos(await revisar())).toEqual([]);
+  });
+
+  it('delata el papel que lleva rato esperando', async () => {
+    // Es el síntoma, y vale por sí solo: si hay papel esperando, algo de lo anterior
+    // ya está pasando de verdad y no en teoría.
+    const abajo = club.locations['barra-baja'];
+    const impresora = await impresoraEn(abajo, 'orders', 'Comandas abajo');
+    const pc = await nuevoAgente('PC abajo');
+    await asignar(pc, { location_id: abajo });
+    await prenderComandas();
+
+    await printing.enqueue(pool, {
+      nightclubId: club.id, printer: impresora, kind: 'order',
+      payload: Buffer.from([0x1b, 0x40]), preview: 'prueba',
+    });
+    // Recién puesto no es noticia: la PC pregunta cada tres segundos.
+    expect(codigos(await revisar())).toEqual([]);
+
+    // Uno viejo sí. Se INSERTA con la hora corrida en vez de envejecer uno existente:
+    // `print_jobs` no deja editar un trabajo —esa guarda es la que sostiene que un
+    // ticket impreso no se pueda reescribir— y una prueba no tiene por qué ser la
+    // excepción que la debilite.
+    await pool.query(
+      `INSERT INTO print_jobs (nightclub_id, printer_id, kind, copies, payload, preview, created_at)
+       VALUES ($1,$2,'order',1,$3,'viejo', now() - interval '7 minutes')`,
+      [club.id, impresora.id, Buffer.from([0x1b, 0x40])]);
+
+    const aviso = (await revisar()).issues.find((i) => i.code === 'jobs_waiting');
+    expect(aviso).toBeDefined();
+    expect(aviso.count).toBe(1);
+    expect(aviso.oldest_minutes).toBeGreaterThanOrEqual(6);
+  });
+
+  it('una impresora apagada ya no se toma en cuenta', async () => {
+    // Le pasó al club: cuatro impresoras dadas de alta y una sola activa. Si las
+    // inactivas contaran, la revisión sería una lista de avisos falsos que nadie lee.
+    const abajo = club.locations['barra-baja'];
+    const arriba = club.locations['barra-alta'];
+    const vieja = await impresoraEn(arriba, 'orders', 'Impresora prueba');
+    await impresoraEn(abajo, 'orders', 'Comandas abajo');
+    const pc = await nuevoAgente('PC abajo');
+    await asignar(pc, { location_id: abajo });
+    await prenderComandas();
+    expect(codigos(await revisar())).toContain('printer_without_agent');
+
+    await api().patch(url(`/printers/${vieja.id}`)).set(auth(manager)).send({ active: false });
+    expect(codigos(await revisar())).toEqual([]);
+  });
+
+  it('un mesero no revisa la impresión del club', async () => {
+    expect((await api().get(url('/printing-health')).set(auth(waiter))).status).toBe(403);
+  });
+});

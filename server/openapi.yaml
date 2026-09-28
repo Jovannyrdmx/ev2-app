@@ -1334,6 +1334,61 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/nightclubs/{nightclubId}/printing-health:
+    get:
+      operationId: getNightclubsByNightclubIdPrintingHealth
+      tags: [Impresión]
+      summary: Por qué no va a salir papel
+      description: |
+        Mira la configuración de impresión y dice qué falta, **antes** de que alguien
+        lo note porque un bartender se quejó. Un papel que no sale no avisa solo: no
+        hay excepción, no hay renglón rojo, no hay nada.
+
+        Un club sin impresoras ni PCs activas contesta vacío: no está roto, cobra sin
+        papel, que es como arranca cualquier club.
+
+        | `code` | Qué pasa |
+        |---|---|
+        | `printer_without_agent` | Esa impresora existe y ninguna PC activa recoge sus trabajos: se encolan y envejecen. |
+        | `agent_without_printer` | Esa PC atiende una barra que no tiene impresora: nunca va a recibir nada. |
+        | `bar_without_order_printer` | Esa barra atiende zonas del plano y no tiene impresora de comandas: los pedidos de esas mesas no encolan **nada**. |
+        | `order_tickets_off` | Hay impresora de comandas y el interruptor está apagado (`info`, no defecto). |
+        | `jobs_waiting` | Hay papel pendiente de hace rato: alguno de los anteriores ya está pasando de verdad. |
+
+        Una PC **sin barra asignada** atiende todo el club, así que mientras exista una
+        no se emiten `printer_without_agent` ni `agent_without_printer`.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+      responses:
+        '200':
+          description: La lista de lo que falta. Vacía es la respuesta buena.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  issues:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code:
+                          type: string
+                          enum: [printer_without_agent, agent_without_printer, bar_without_order_printer, order_tickets_off, jobs_waiting]
+                        severity: { type: string, enum: [warn, info] }
+                        location_id: { type: string, format: uuid }
+                        location_name: { type: string }
+                        purpose: { type: string, enum: [orders, service] }
+                        printer_name: { type: string }
+                        agent_name: { type: string }
+                        sections:
+                          type: array
+                          items: { type: string }
+                          description: Las zonas del plano que se quedan sin papel.
+                        count: { type: integer }
+                        oldest_minutes: { type: integer }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/nightclubs/{nightclubId}/orders/{orderId}/reprint:
     post:
       operationId: postNightclubsByNightclubIdOrdersByOrderIdReprint
