@@ -608,8 +608,13 @@
         });
       }
       if (actions.canResetPin) {
-        add('staff.resetPin', 'card rounded-lg px-3 py-2 text-sm flex-1', (b) => {
-          if (!window.confirm(t('staff.confirmResetPin'))) return;
+        // Asignar el primero y reiniciar el que ya existe son dos actos distintos, y
+        // solo el segundo deja a alguien fuera a media noche. El botón y la pregunta
+        // cambian con eso.
+        const clave = actions.hasPin ? 'staff.resetPin' : 'staff.assignPin';
+        const pregunta = actions.hasPin ? 'staff.confirmResetPin' : 'staff.confirmAssignPin';
+        add(clave, 'card rounded-lg px-3 py-2 text-sm flex-1', (b) => {
+          if (!window.confirm(t(pregunta))) return;
           patchEmployee(person, { reset_pin: true }, 'staff.tempPin', b);
         });
       }

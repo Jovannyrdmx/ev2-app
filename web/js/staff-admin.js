@@ -96,7 +96,20 @@
       // `password_hash` en nulo y entra solo con PIN. Ofrecer "reiniciar contraseña"
       // ahí es ofrecer reiniciar algo que no existe.
       canResetPassword: active && p.has_password !== false,
-      canResetPin: active && p.has_pin !== false,
+      // El PIN NO sigue la regla de la contraseña de arriba, aunque se le parezca.
+      //
+      // Aquí decía `active && p.has_pin !== false`, calcado del renglón anterior. En
+      // la contraseña esa regla es correcta —reiniciar algo que no existe no
+      // significa nada—, pero en el PIN dice exactamente lo contrario de lo que hace
+      // falta: quien NO tiene PIN es justo a quien hay que asignarle uno, y el botón
+      // desaparecía precisamente ahí. Un gerente sin PIN no tenía forma de recibir
+      // uno desde el panel.
+      canResetPin: active,
+      // Y por eso el botón tiene que poder decir dos cosas distintas: "asignar" la
+      // primera vez y "reiniciar" después. Con una sola palabra, o se le ofrece
+      // reiniciar a quien no tiene nada, o se le ofrece asignar a quien ya tiene —y
+      // esta segunda invita a regenerarle el PIN a alguien que está trabajando con él.
+      hasPin: p.has_pin !== false,
       canDeactivate: active,
       canReactivate: !active,
       // Reiniciar la contraseña de quien ya la tiene pendiente no aporta nada: ya está

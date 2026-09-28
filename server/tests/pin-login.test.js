@@ -419,3 +419,125 @@ describe('El error dice QUÉ le pasa a la llave', () => {
     }
   });
 });
+
+// ============================================================================
+
+/**
+ * Asignarle su PIN al gerente, desde el panel (D64).
+ *
+ * El PIN del gerente se generaba solo al darlo de alta. Un gerente que ya existía
+ * —porque se creó antes de que hubiera PINes, o porque se le quitó— no tenía forma de
+ * recibir uno: el botón del panel se escondía justo para quien no tenía PIN, calcado
+ * de la regla de la contraseña, donde esconderlo sí es correcto.
+ *
+ * Estas pruebas recorren el camino completo, que es lo que importa: el administrador
+ * se lo asigna desde el panel y el gerente entra con él.
+ */
+describe('Asignarle el PIN a un gerente que no tiene (D64)', () => {
+  const url = (p) => `/api/nightclubs/${club.id}${p}`;
+
+  /**
+   * La ficha de empleado, que es lo que las rutas de personal exigen para tocar a
+   * alguien (`JOIN employee_profiles`). El alta del panel la crea siempre; aquí se
+   * crea a mano porque el ayudante de pruebas hace usuarios, no empleados.
+   */
+  const conFicha = (userId) => pool.query(
+    `INSERT INTO employee_profiles (user_id, country) VALUES ($1,'MX')
+     ON CONFLICT (user_id) DO NOTHING`, [userId]);
+
+  beforeEach(async () => { await conFicha(manager.id); });
+
+  /** Como lo hace el panel: un PATCH con `reset_pin`. Devuelve el PIN en claro UNA vez. */
+  const asignarPin = (userId, quien) => api().patch(url(`/employees/${userId}`))
+    .set(auth(quien || admin)).send({ reset_pin: true });
+
+  const tienePin = async (userId) => (await pool.query(
+    'SELECT (pin_lookup IS NOT NULL) AS tiene FROM users WHERE id = $1', [userId])).rows[0].tiene;
+
+  it('el administrador se lo asigna y el PIN sale de seis dígitos', async () => {
+    expect(await tienePin(manager.id)).toBe(false);
+
+    const res = await asignarPin(manager.id);
+    expect(res.status).toBe(200);
+    expect(res.body.pin).toMatch(/^\d{6}$/);
+    expect(await tienePin(manager.id)).toBe(true);
+  });
+
+  it('y con ese PIN entra desde el club, que es para lo que sirve', async () => {
+    // El camino completo: sin esto, "se asignó el PIN" podría ser cierto y aun así
+    // no dejarlo entrar, que es la única pregunta que importa.
+    process.env.CLUB_NETWORKS = '127.0.0.0/8';
+    const { body } = await asignarPin(manager.id);
+
+    const entrada = await entrar(body.pin);
+    expect(entrada.status).toBe(200);
+    expect(entrada.body.user.role).toBe('manager');
+  });
+
+  it('nace obligado a cambiarlo: el que entrega el administrador es de un solo uso', async () => {
+    // El administrador lo ve en su pantalla al generarlo. Si sirviera para siempre,
+    // el gerente compartiría su PIN con quien se lo dio, sin quererlo.
+    await asignarPin(manager.id);
+    const { rows } = await pool.query(
+      'SELECT must_change_pin FROM users WHERE id = $1', [manager.id]);
+    expect(rows[0].must_change_pin).toBe(true);
+  });
+
+  it('el PIN viaja en claro UNA vez y no se guarda así', async () => {
+    const { body } = await asignarPin(manager.id);
+    const { rows } = await pool.query(
+      'SELECT pin_hash, pin_lookup FROM users WHERE id = $1', [manager.id]);
+    expect(rows[0].pin_hash).not.toContain(body.pin);
+    expect(rows[0].pin_lookup).not.toContain(body.pin);
+    // Y volver a pedir al empleado no lo devuelve: no hay dónde leerlo otra vez.
+    const otra = await api().get(url(`/employees/${manager.id}`)).set(auth(admin));
+    expect(JSON.stringify(otra.body)).not.toContain(body.pin);
+  });
+
+  it('un gerente no le asigna PIN a otro gerente', async () => {
+    // Entregarle el PIN a quien lo pidió es tomarle la cuenta. Si un gerente pudiera
+    // hacerle eso a otro, dos gerentes en desacuerdo se apagarían el uno al otro a
+    // media noche.
+    const otroGerente = await f.createUser(club.id, { role: 'manager', email: 'g2@ev2.test' });
+    await conFicha(otroGerente.id);
+    const res = await asignarPin(otroGerente.id, manager);
+    expect(res.status).toBe(403);
+    expect(await tienePin(otroGerente.id)).toBe(false);
+  });
+
+  it('reasignarlo tumba las sesiones abiertas de esa persona', async () => {
+    // Si pidió PIN nuevo porque alguien más supo el suyo, esto es lo que saca a ese
+    // alguien. Sin esto, el PIN viejo deja de servir pero la sesión robada sigue viva.
+    process.env.CLUB_NETWORKS = '127.0.0.0/8';
+    const primero = (await asignarPin(manager.id)).body.pin;
+    const sesion = await entrar(primero);
+    expect(sesion.status).toBe(200);
+
+    await asignarPin(manager.id);
+    const refrescar = await api().post('/api/auth/refresh')
+      .send({ refresh_token: sesion.body.refresh_token });
+    expect(refrescar.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it('el PIN nuevo no se parece al anterior', async () => {
+    // Dos PINes seguidos iguales significarían que no se está generando nada.
+    const uno = (await asignarPin(manager.id)).body.pin;
+    const dos = (await asignarPin(manager.id)).body.pin;
+    expect(uno).not.toBe(dos);
+  });
+
+  it('sin PIN_LOOKUP_KEY lo dice con lo que hay que arreglar, no con un 500', async () => {
+    // Es el caso de un servidor recién instalado. El mensaje tiene que mandar al .env,
+    // no a soporte: quien lee esto está en el panel a media tarde.
+    const antes = process.env.PIN_LOOKUP_KEY;
+    delete process.env.PIN_LOOKUP_KEY;
+    try {
+      const res = await asignarPin(manager.id);
+      expect(res.status).toBe(501);
+      expect(res.body.error.message).toMatch(/PIN_LOOKUP_KEY/);
+      expect(res.body.error.message).toMatch(/\.env/);
+    } finally {
+      process.env.PIN_LOOKUP_KEY = antes;
+    }
+  });
+});

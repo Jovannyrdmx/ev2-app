@@ -947,6 +947,11 @@
       'staff.stPendingPassword': 'No ha entrado nunca',
       'staff.resetPassword': 'Reiniciar contraseña',
       'staff.confirmReset': '¿Reiniciar su contraseña? La actual deja de servir.',
+      // D64: dos palabras distintas porque son dos actos distintos. Asignar el
+      // primero no le quita nada a nadie; reiniciar el que ya existe deja a esa
+      // persona fuera hasta que teclee el nuevo.
+      'staff.assignPin': 'Asignar PIN',
+      'staff.confirmAssignPin': '¿Generar su PIN de 6 dígitos? Se enseña UNA vez en esta pantalla y no se vuelve a poder leer.',
       'staff.resetPin': 'Reiniciar PIN',
       'staff.confirmResetPin': '¿Generar un PIN nuevo? El actual deja de servir y esa persona tendrá que teclear el nuevo.',
       'staff.tempPin': 'PIN nuevo',
@@ -2545,6 +2550,8 @@
       'staff.stPendingPassword': 'Never signed in',
       'staff.resetPassword': 'Reset password',
       'staff.confirmReset': 'Reset their password? The current one stops working.',
+      'staff.assignPin': 'Assign PIN',
+      'staff.confirmAssignPin': 'Issue their 6-digit PIN? It is shown ONCE on this screen and can never be read again.',
       'staff.resetPin': 'Reset PIN',
       'staff.confirmResetPin': 'Issue a new PIN? The current one stops working and they will have to type the new one.',
       'staff.tempPin': 'New PIN',

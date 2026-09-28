@@ -52,6 +52,39 @@ describe('El personal, visto por el gerente', () => {
     expect(alta).toMatchObject({ canReactivate: false, canDeactivate: true, canEdit: true });
   });
 
+  it('a quien NO tiene PIN se le puede asignar uno — es el punto (D64)', () => {
+    // Aquí vivía un defecto de copia: la condición del PIN se calcó de la de la
+    // contraseña (`has_password !== false`), donde sí es correcta —reiniciar algo que
+    // no existe no significa nada—. En el PIN dice lo contrario de lo que hace falta:
+    // quien NO tiene es justo a quien hay que asignarle uno, y el botón desaparecía
+    // precisamente ahí. Un gerente sin PIN no tenía forma de recibir uno del panel.
+    const sinPin = Admin.actionsFor({ active: true, has_pin: false });
+    expect(sinPin.canResetPin).toBe(true);
+    expect(sinPin.hasPin).toBe(false);
+  });
+
+  it('y a quien ya tiene, también — pero la pantalla sabe que es otra cosa', () => {
+    // Asignar el primero no le quita nada a nadie; reiniciar el que ya existe deja a
+    // esa persona fuera hasta que teclee el nuevo. `hasPin` es lo que deja que el
+    // botón diga cuál de los dos es.
+    const conPin = Admin.actionsFor({ active: true, has_pin: true });
+    expect(conPin).toMatchObject({ canResetPin: true, hasPin: true });
+  });
+
+  it('a alguien dado de baja no se le asigna ningún PIN', () => {
+    // Darle acceso a quien ya no trabaja aquí es lo único que este botón no debe hacer.
+    expect(Admin.actionsFor({ active: false, has_pin: false }).canResetPin).toBe(false);
+    expect(Admin.actionsFor({ active: false, has_pin: true }).canResetPin).toBe(false);
+  });
+
+  it('la contraseña SÍ conserva su regla, que es la que se copió mal', () => {
+    // El piso nace sin contraseña (D46): ofrecerle "reiniciar contraseña" es ofrecerle
+    // reiniciar algo que no existe. Esta prueba fija que el arreglo del PIN no se
+    // llevó por delante la regla de al lado.
+    expect(Admin.actionsFor({ active: true, has_password: false }).canResetPassword).toBe(false);
+    expect(Admin.actionsFor({ active: true, has_password: true }).canResetPassword).toBe(true);
+  });
+
   it('el estado dice lo más urgente primero', () => {
     // Una cuenta que nunca se ha usado importa más que si está en turno: significa que
     // esa persona todavía no puede trabajar.
