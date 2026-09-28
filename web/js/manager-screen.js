@@ -30,7 +30,7 @@
     reports: [], reportFilter: null,
     nights: [], staff: [], withdrawals: [], accounts: [],
     // Lo que espera a que el gerente cuente dinero (D51).
-    cashDrops: [], shiftCuts: [], tips: [], drinks: [],
+    cashDrops: [], shiftCuts: [], tips: [], drinks: [], lostFound: [],
     // El catálogo de covers del club. Vacío significa que la puerta todavía teclea el
     // precio; en cuanto tiene uno, el servidor deja de aceptar importes sueltos.
     covers: [],
@@ -229,6 +229,7 @@
       loadTerminals(),
       loadTerminalCharges(),
       loadTips(),
+      loadLostFound(),
       loadShiftCuts(),
       loadPrinting(),
       loadCovers(),
@@ -1117,6 +1118,163 @@
   $('btn-tch-reload').onclick = async () => {
     const listo = ocupado($('btn-tch-reload'), 'tch.reload');
     try { await loadTerminalCharges(); } finally { listo(); }
+  };
+
+  // ---------------------------------------------------------------- objetos perdidos (D67)
+
+  /**
+   * Lo perdido y lo encontrado, en una sola lista.
+   *
+   * Juntos y no en dos paneles a propósito: emparejar es mirar las dos mitades a la
+   * vez, y separarlas obliga a recordar de memoria lo que dice el otro lado.
+   *
+   * El código de entrega **no se enseña aquí**, solo sus últimos tres caracteres. Lo
+   * tiene el dueño en su teléfono y quien entrega lo teclea de ahí: si el personal
+   * pudiera leerlo, quien entrega y quien lo presenta serían la misma persona y el
+   * código no probaría nada.
+   */
+  async function loadLostFound() {
+    try {
+      const d = await api.get(`/nightclubs/${clubId()}/lost-items?limit=100`);
+      // Lo entregado y lo cerrado salen de la lista: es un panel para trabajar, no un
+      // archivo histórico.
+      state.lostFound = (d.items || []).filter((i) => i.status === 'open' || i.status === 'matched');
+      $('lfm-error').hidden = true;
+    } catch (err) {
+      state.lostFound = [];
+      $('lfm-error').hidden = false;
+      $('lfm-error').textContent = EV2Format.errorMessage(err);
+    }
+    renderLostFound();
+  }
+
+  function renderLostFound() {
+    const lista = state.lostFound || [];
+    $('lfm-empty').hidden = lista.length > 0;
+    const caja = $('lfm-list');
+    caja.innerHTML = '';
+    const encontrados = lista.filter((i) => i.kind === 'found' && i.status === 'open');
+
+    for (const item of lista) {
+      const card = document.createElement('div');
+      card.className = 'card rounded-lg px-3 py-2 space-y-2';
+      card.style.borderLeft = `3px solid ${item.kind === 'lost' ? '#fcd34d' : 'var(--ev2-cyan)'}`;
+
+      const arriba = document.createElement('div');
+      arriba.className = 'flex items-start justify-between gap-2';
+      const izq = document.createElement('div');
+      izq.className = 'min-w-0';
+      const que = document.createElement('p');
+      que.className = 'font-display truncate';
+      que.textContent = `${t(`lf.cat.${item.category}`)} · ${t(`lfm.kind.${item.kind}`)}`;
+      const senas = document.createElement('p');
+      senas.className = 'text-[11px] text-white/60';
+      senas.textContent = item.details || '';
+      const donde = document.createElement('p');
+      donde.className = 'text-[11px] text-white/40 truncate';
+      donde.textContent = [item.place, EV2Format.dateTime(item.happened_at),
+        item.storage_note].filter(Boolean).join(' · ');
+      izq.append(que, senas, donde);
+
+      const estado = document.createElement('span');
+      estado.className = 'text-[11px] shrink-0';
+      estado.textContent = t(`lf.status.${item.status}`);
+      arriba.append(izq, estado);
+      card.appendChild(arriba);
+
+      const acciones = document.createElement('div');
+      acciones.className = 'flex flex-wrap gap-2';
+
+      // Recibir: convierte "alguien dijo que lo dejó" en "está en la caja".
+      if (item.kind === 'found' && !item.received_at) {
+        const recibir = document.createElement('button');
+        recibir.className = 'card rounded-lg px-3 py-2 text-xs';
+        recibir.textContent = t('lfm.receive');
+        recibir.onclick = async () => {
+          const donde2 = window.prompt(t('lfm.whereAsk'));
+          if (donde2 === null) return;
+          const listo = ocupado(recibir, 'prn.saving');
+          try {
+            await api.post(`/nightclubs/${clubId()}/lost-items/${item.id}/receive`,
+              { storage_note: donde2.trim() || undefined });
+            await loadLostFound();
+          } catch (err) { listo(); showError(err); }
+        };
+        acciones.appendChild(recibir);
+      }
+
+      // Emparejar: solo desde el lado del reporte de pérdida, contra lo que hay guardado.
+      if (item.kind === 'lost' && item.status === 'open' && encontrados.length) {
+        const sel = document.createElement('select');
+        sel.className = 'card rounded-lg px-2 py-1 text-xs min-w-0 flex-1';
+        const vacio = document.createElement('option');
+        vacio.value = '';
+        vacio.textContent = t('lfm.matchWith');
+        sel.appendChild(vacio);
+        for (const f of encontrados) {
+          const opt = document.createElement('option');
+          opt.value = f.id;
+          // Se enseñan las señas del objeto guardado: es exactamente lo que hay que
+          // comparar contra las del reporte para decidir si es el mismo.
+          opt.textContent = `${t(`lf.cat.${f.category}`)} · ${(f.details || '').slice(0, 40)}`;
+          sel.appendChild(opt);
+        }
+        sel.onchange = async () => {
+          if (!sel.value) return;
+          if (!window.confirm(t('lfm.matchAsk'))) { sel.value = ''; return; }
+          sel.disabled = true;
+          try {
+            await api.post(`/nightclubs/${clubId()}/lost-items/${item.id}/match`,
+              { found_id: sel.value });
+            toast(t('lfm.matched'), 'ok');
+            await loadLostFound();
+          } catch (err) { sel.value = ''; sel.disabled = false; showError(err); }
+        };
+        acciones.appendChild(sel);
+      }
+
+      // Entregar: pide el código que el dueño trae en su teléfono.
+      if (item.kind === 'lost' && item.status === 'matched') {
+        const entregar = document.createElement('button');
+        entregar.className = 'ev2-button rounded-lg px-3 py-2 text-xs font-display';
+        entregar.textContent = t('lfm.handOver', { hint: item.handover_hint || '' });
+        entregar.onclick = async () => {
+          const code = window.prompt(t('lfm.codeAsk'));
+          if (!code) return;
+          const listo = ocupado(entregar, 'prn.saving');
+          try {
+            await api.post(`/nightclubs/${clubId()}/lost-items/${item.id}/hand-over`, { code });
+            toast(t('lfm.handedOver'), 'ok');
+            await loadLostFound();
+          } catch (err) { listo(); showError(err); }
+        };
+        acciones.appendChild(entregar);
+      }
+
+      // Cerrar: exige motivo, y queda escrito.
+      const cerrar = document.createElement('button');
+      cerrar.className = 'card rounded-lg px-3 py-2 text-xs text-red-300';
+      cerrar.textContent = t('lfm.closeIt');
+      cerrar.onclick = async () => {
+        const motivo = window.prompt(t('lfm.closeAsk'));
+        if (!motivo || motivo.trim().length < 3) return;
+        const listo = ocupado(cerrar, 'prn.saving');
+        try {
+          await api.post(`/nightclubs/${clubId()}/lost-items/${item.id}/close`,
+            { reason: motivo.trim() });
+          await loadLostFound();
+        } catch (err) { listo(); showError(err); }
+      };
+      acciones.appendChild(cerrar);
+
+      card.appendChild(acciones);
+      caja.appendChild(card);
+    }
+  }
+
+  $('btn-lfm-reload').onclick = async () => {
+    const listo = ocupado($('btn-lfm-reload'), 'tip.reload');
+    try { await loadLostFound(); } finally { listo(); }
   };
 
   // ---------------------------------------------------------------- propinas (D66)

@@ -618,6 +618,52 @@
           <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50" data-i18n="profile.account">Cuenta</span><span id="profile-role">—</span></div>
         </div>
         <!--
+          Objetos perdidos (D67). Vive en el perfil y no en una pestaña propia: se usa
+          una vez cada muchas noches, y el nav de abajo ya lleva siete.
+
+          Las señas que escribe aquí el cliente NO se le enseñan a nadie más. Es lo que
+          permite comprobar que algo es suyo: la única prueba de que un teléfono es tuyo
+          es que puedas describir lo que nadie más vio.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="lf.title">Objetos perdidos</p>
+            <button id="btn-lf-open" class="card rounded-lg px-3 py-2 text-xs" data-i18n="lf.open">Abrir</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="lf.why">Reporta algo que perdiste, o entrega algo que encontraste. Lo que escribas de sus señas solo lo ve el personal.</p>
+
+          <div id="lf-panel" class="space-y-3" hidden>
+            <!-- Lo que hay guardado, sin señas: categoría, zona y día. -->
+            <div class="space-y-2">
+              <p class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="lf.catalogue">Lo que está guardado</p>
+              <p id="lf-found-empty" class="text-sm text-white/40" data-i18n="lf.foundNone" hidden>No hay nada en resguardo ahora mismo.</p>
+              <div id="lf-found" class="space-y-2"></div>
+            </div>
+
+            <!-- Mis reportes, con mis señas y mi código de entrega. -->
+            <div class="space-y-2 border-t border-white/10 pt-3">
+              <p class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="lf.mine">Mis reportes</p>
+              <p id="lf-mine-empty" class="text-sm text-white/40" data-i18n="lf.mineNone" hidden>Todavía no has levantado ninguno.</p>
+              <div id="lf-mine" class="space-y-2"></div>
+            </div>
+
+            <!-- Levantar uno. -->
+            <div class="space-y-2 border-t border-white/10 pt-3">
+              <div class="grid grid-cols-2 gap-2">
+                <button id="btn-lf-kind-lost" class="chip tap px-3 py-2 text-xs on" data-i18n="lf.kindLost">Perdí algo</button>
+                <button id="btn-lf-kind-found" class="chip tap px-3 py-2 text-xs" data-i18n="lf.kindFound">Encontré algo</button>
+              </div>
+              <select id="lf-category" class="field"></select>
+              <input id="lf-place" class="field" placeholder="¿Dónde?" data-i18n-placeholder="lf.place">
+              <textarea id="lf-details" class="field" rows="3" placeholder="Cómo es" data-i18n-placeholder="lf.details"></textarea>
+              <p class="text-[11px] text-white/40" data-i18n="lf.detailsNote">Mientras más señas, más fácil comprobar que es tuyo: marca, color, funda, qué traía adentro. Esto no se le enseña a otros clientes.</p>
+              <p id="lf-error" class="text-sm text-red-300" hidden></p>
+              <button id="btn-lf-send" class="ev2-button w-full rounded-lg py-3 font-display" data-i18n="lf.send">Levantar el reporte</button>
+            </div>
+          </div>
+        </div>
+
+        <!--
           Los tres interruptores viven en el perfil, juntos y en palabras llanas. Un
           permiso que solo se puede encender es una trampa: los tres se apagan aquí, y
           apagarlos surte efecto en la misma noche.
@@ -882,6 +928,7 @@
 <script src="js/show-screen.js"></script>
 <script src="js/booking-screen.js"></script>
 <script src="js/flirt-screen.js"></script>
+<script src="js/lost-found-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>
 </html>

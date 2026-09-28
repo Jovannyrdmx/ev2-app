@@ -1444,6 +1444,288 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/nightclubs/{nightclubId}/lost-items:
+    post:
+      operationId: postNightclubsByNightclubIdLostItems
+      tags: [Objetos perdidos]
+      summary: Reportar algo perdido, o entregar algo encontrado
+      description: |
+        Las dos cosas son el mismo formulario porque son la misma información: qué es,
+        cómo era, dónde y cuándo. Lo único que cambia es de qué lado de la historia
+        está quien escribe.
+
+        **`details` —las señas particulares— nunca sale hacia un cliente que no las
+        escribió.** Es la regla que sostiene toda la función: si la aplicación enseñara
+        "iPhone negro con funda roja", cualquiera podría reclamarlo describiéndolo.
+
+        Un objeto entregado por un cliente nace **sin resguardo**: hasta que alguien del
+        club lo tenga en la mano (`/receive`), el catálogo no dice que está guardado.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, category, details]
+              properties:
+                kind: { type: string, enum: [lost, found] }
+                category:
+                  type: string
+                  enum: [phone, wallet, keys, bag, clothing, jewelry, document, other]
+                  description: Cerrada a propósito; un campo libre acabaría con el modelo del teléfono adentro.
+                details: { type: string, minLength: 3, maxLength: 1000 }
+                place: { type: string, maxLength: 80 }
+                happened_at: { type: string, format: date-time }
+      responses:
+        '201':
+          description: El reporte, con sus propias señas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item: { $ref: '#/components/schemas/LostItemOwner' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+    get:
+      operationId: getNightclubsByNightclubIdLostItems
+      tags: [Objetos perdidos]
+      summary: Todo, con señas (personal)
+      description: |
+        Para quien tiene que emparejar. Incluye `details`, que es justo lo que no se le
+        da a un cliente. El código de entrega no viaja nunca: solo `handover_hint`, sus
+        últimos tres caracteres, para poder nombrarlo si alguien pregunta.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { in: query, name: kind, schema: { type: string, enum: [lost, found] } }
+        - { in: query, name: status, schema: { type: string, enum: [open, matched, returned, closed] } }
+        - { in: query, name: category, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, default: 100, maximum: 200 } }
+      responses:
+        '200':
+          description: La lista completa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/LostItemStaff' }
+                  categories: { type: array, items: { type: string } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/lost-items/mine:
+    get:
+      operationId: getNightclubsByNightclubIdLostItemsMine
+      tags: [Objetos perdidos]
+      summary: Mis reportes, con mis señas y mi código
+      description: |
+        Sus propias señas sí, porque las escribió él. Y el **código de entrega**, que es
+        el único lugar del sistema donde aparece en claro.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+      responses:
+        '200':
+          description: Los reportes de esta persona
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/LostItemOwner' }
+
+  /api/nightclubs/{nightclubId}/lost-items/found:
+    get:
+      operationId: getNightclubsByNightclubIdLostItemsFound
+      tags: [Objetos perdidos]
+      summary: El catálogo de lo guardado, para un cliente
+      description: |
+        Categoría, zona y día. **Sin señas, sin dónde está guardado, sin quién lo
+        entregó.** Con esto alguien puede decir "sí, creo que es mío" y levantar su
+        reporte; sin las señas, no puede describir lo que no vio.
+
+        `in_custody` distingue "el club lo tiene en la mano" de "alguien dijo que lo
+        dejó": es lo que decide si vale la pena venir por él.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { in: query, name: category, schema: { type: string } }
+        - { in: query, name: days, schema: { type: integer, default: 30, maximum: 90 } }
+      responses:
+        '200':
+          description: Lo que hay guardado, sin señas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        category: { type: string }
+                        place: { type: [string, 'null'] }
+                        happened_at: { type: string, format: date-time }
+                        in_custody: { type: boolean }
+                  categories: { type: array, items: { type: string } }
+
+  /api/nightclubs/{nightclubId}/lost-items/{itemId}/receive:
+    post:
+      operationId: postNightclubsByNightclubIdLostItemsByItemIdReceive
+      tags: [Objetos perdidos]
+      summary: El club recibe físicamente el objeto
+      description: |
+        Es un paso aparte del alta porque "alguien dijo que lo dejó" y "está en la caja"
+        son cosas distintas, y el catálogo solo sirve si las distingue: un cliente que ve
+        "en resguardo" y viene manejando media hora merece que eso sea cierto.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { in: path, name: itemId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                storage_note: { type: string, maxLength: 120 }
+      responses:
+        '200':
+          description: En resguardo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item: { $ref: '#/components/schemas/LostItemStaff' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/lost-items/{itemId}/match:
+    post:
+      operationId: postNightclubsByNightclubIdLostItemsByItemIdMatch
+      tags: [Objetos perdidos]
+      summary: Emparejar un reporte de pérdida con un objeto guardado
+      description: |
+        `itemId` es el reporte de pérdida; `found_id`, el objeto guardado.
+
+        Emite el **código de entrega**, que viaja por un evento dirigido **solo al
+        dueño**. No se devuelve en claro a quien empareja: si el personal pudiera verlo,
+        quien entrega y quien lo presenta serían la misma persona y el código no
+        probaría nada.
+
+        Emparejar no entrega nada. Son dos actos y en ese orden a propósito: entre uno y
+        otro está el viaje de la persona al club.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { in: path, name: itemId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [found_id]
+              properties:
+                found_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Emparejado; el código ya va en camino al dueño
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item: { $ref: '#/components/schemas/LostItemStaff' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: No se pueden emparejar (mismo tipo, o de otro club)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/lost-items/{itemId}/hand-over:
+    post:
+      operationId: postNightclubsByNightclubIdLostItemsByItemIdHandOver
+      tags: [Objetos perdidos]
+      summary: Entregar el objeto a su dueño
+      description: |
+        El código es lo que lo autoriza. Sin él, la entrega depende de que quien está en
+        la barra a las cuatro de la mañana recuerde una cara.
+
+        Se acepta tecleado como sea: minúsculas, con guiones o con espacios. Una entrega
+        asentada no se puede reescribir ni borrar — es la constancia de que ese objeto
+        salió del club y con quién.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { in: path, name: itemId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, minLength: 4, maxLength: 20 }
+      responses:
+        '200':
+          description: Entregado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item: { $ref: '#/components/schemas/LostItemStaff' }
+        '403':
+          description: Ese código no es el de este objeto
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: Todavía no está emparejado con nada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/nightclubs/{nightclubId}/lost-items/{itemId}/close:
+    post:
+      operationId: postNightclubsByNightclubIdLostItemsByItemIdClose
+      tags: [Objetos perdidos]
+      summary: Cerrar sin entregar
+      description: |
+        El motivo es obligatorio: un "se cerró" solo, tres meses después, no le responde
+        nada a quien pregunta por su cartera. Solo el gerente.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { in: path, name: itemId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 200 }
+      responses:
+        '200':
+          description: Cerrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item: { $ref: '#/components/schemas/LostItemStaff' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   # ==========================================================================
   # El corte de la noche y el rol (migración 023)
   #
@@ -10460,6 +10742,58 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   schemas:
+
+    LostItemOwner:
+      type: object
+      description: |
+        Lo que ve el DUEÑO de su propio reporte: sus señas —las escribió él— y el código
+        de entrega, que es el único lugar del sistema donde aparece en claro.
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [lost, found] }
+        status: { type: string, enum: [open, matched, returned, closed] }
+        category: { type: string }
+        details: { type: [string, 'null'] }
+        place: { type: [string, 'null'] }
+        happened_at: { type: string, format: date-time }
+        match_id: { type: [string, 'null'], format: uuid }
+        storage_note:
+          type: [string, 'null']
+          description: Dónde recogerlo. Solo cuando ya hay algo que recoger.
+        handover_code:
+          type: [string, 'null']
+          description: El código de entrega. Llega por evento dirigido, una sola vez.
+        handover_hint: { type: [string, 'null'] }
+        returned_at: { type: [string, 'null'], format: date-time }
+        closed_reason: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+
+    LostItemStaff:
+      type: object
+      description: |
+        Lo que ve quien empareja y entrega: todo, incluidas las señas. El código **no**
+        viaja nunca aquí, solo `handover_hint`.
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [lost, found] }
+        status: { type: string, enum: [open, matched, returned, closed] }
+        category: { type: string }
+        details: { type: [string, 'null'] }
+        place: { type: [string, 'null'] }
+        happened_at: { type: string, format: date-time }
+        reported_by: { type: [string, 'null'], format: uuid }
+        reporter_name: { type: [string, 'null'] }
+        reporter_phone: { type: [string, 'null'] }
+        received_by: { type: [string, 'null'], format: uuid }
+        received_at: { type: [string, 'null'], format: date-time }
+        received_name: { type: [string, 'null'] }
+        storage_note: { type: [string, 'null'] }
+        match_id: { type: [string, 'null'], format: uuid }
+        handover_hint: { type: [string, 'null'] }
+        returned_at: { type: [string, 'null'], format: date-time }
+        returned_by: { type: [string, 'null'], format: uuid }
+        closed_reason: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
     ErrorResponse:
       type: object
       required: [error]

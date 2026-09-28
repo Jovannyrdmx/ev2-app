@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v29';
+const VERSION = 'ev2-v30';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -31,7 +31,7 @@ const SHELL = [
   // reservación, personal, pagos, turno, puerta y conecta se quedaban en blanco.
   'js/tipping.js', 'js/songs.js', 'js/booking.js', 'js/show-screen.js', 'js/booking-screen.js',
   'js/staff-admin.js', 'js/payouts.js', 'js/shift.js', 'js/door.js',
-  'js/flirt.js', 'js/flirt-screen.js', 'js/drink-art.js', 'js/order-taking.js',
+  'js/flirt.js', 'js/flirt-screen.js', 'js/lost-found-screen.js', 'js/drink-art.js', 'js/order-taking.js',
   'js/door-scan.js',
   // El almacen se cuenta en una bodega, que es donde peor entra la senal de todo el
   // edificio: si esta pantalla no abre sin red, el conteo se hace en papel.
