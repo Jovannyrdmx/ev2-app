@@ -1328,6 +1328,14 @@
       'tch.simulating': 'Simulando…',
       // La cuenta de la mesa, en papel (D53).
       'bill.print': 'Cuenta',
+      // D62: volver a sacar la comanda cuando el papel no llego a la barra. El texto
+      // dice "otra vez" a proposito: el mesero tiene que saber que la barra ya recibio
+      // una, para no pedirla tres veces mientras la primera esta saliendo.
+      'order.reprint': 'Comanda otra vez',
+      'order.reprintConfirm': '¿Volver a mandar a la barra {n} comanda(s) de la mesa {code}? Sale marcada como REIMPRESIÓN.',
+      'order.reprintSending': 'Mandando…',
+      'order.reprintOk': 'Comanda mandada a la barra ({n})',
+      'order.reprintNone': 'Esta mesa no tiene pedidos en la barra ahora mismo',
       'bill.asking': 'Sumando…',
       'bill.sending': 'Mandando…',
       'bill.empty': 'Esa mesa no ha consumido nada todavía.',
@@ -2906,6 +2914,11 @@
       'tch.simulating': 'Simulating…',
       // The table's bill, on paper (D53).
       'bill.print': 'Bill',
+      'order.reprint': 'Order ticket again',
+      'order.reprintConfirm': 'Send {n} order ticket(s) for table {code} to the bar again? It prints marked as a REPRINT.',
+      'order.reprintSending': 'Sending…',
+      'order.reprintOk': 'Sent to the bar ({n})',
+      'order.reprintNone': 'This table has nothing at the bar right now',
       'bill.asking': 'Adding up…',
       'bill.sending': 'Sending…',
       'bill.empty': 'Nothing has been ordered at that table yet.',

@@ -998,6 +998,9 @@
           <button class="card rounded-lg px-3 py-2 text-xs" data-bill="1">
             ${escape(t('bill.print'))}
           </button>
+          <button class="card rounded-lg px-3 py-2 text-xs" data-reprint="1">
+            ${escape(t('order.reprint'))}
+          </button>
           ${table.guests.map((g) => `
             <button class="card rounded-lg px-3 py-2 text-xs text-red-300" data-release="${escape(g.id)}">
               ${escape(t('floor.release'))}: ${escape(g.name || '—')}
@@ -1014,7 +1017,59 @@
       if (abrir) abrir.onclick = () => openTake(mesa);
       const cuenta = el.querySelector('[data-bill]');
       if (cuenta) cuenta.onclick = () => printBill(el.dataset.table, cuenta);
+      const otraVez = el.querySelector('[data-reprint]');
+      if (otraVez) otraVez.onclick = () => reprintTable(el.dataset.table, otraVez, mesa);
     });
+  }
+
+  /**
+   * Los pedidos de esta mesa que la barra debería estar preparando.
+   *
+   * Se dejan fuera los entregados: ya están en la mesa, y volver a mandar su comanda
+   * es pedirle a la barra que los prepare otra vez. También los pendientes, que no
+   * han ido a la barra porque no se han cobrado — el servidor los rechaza igual, pero
+   * ofrecerlos aquí sería prometer algo que va a fallar.
+   */
+  const EN_LA_BARRA = ['confirmed', 'preparing', 'ready'];
+  const enLaBarraDe = (tableId) => (state.orders || [])
+    .filter((o) => o.table_id === tableId && EN_LA_BARRA.includes(o.status));
+
+  /**
+   * Volver a sacar la comanda de esta mesa (D62).
+   *
+   * El caso de todas las noches: el papel se atascó, salió cortado o el bartender no
+   * lo vio, y la mesa espera un trago que nadie está preparando. El papel sale
+   * marcado como REIMPRESIÓN para que la barra no prepare dos veces.
+   *
+   * Se pregunta antes, con el número de comandas: "Reimprimir" sin confirmación, en
+   * un botón que vive junto a "Cuenta", es cómo alguien manda tres papeles a la barra
+   * queriendo ver el total de la mesa.
+   */
+  async function reprintTable(tableId, button, mesa) {
+    const pedidos = enLaBarraDe(tableId);
+    if (!pedidos.length) { toast(t('order.reprintNone'), 'info'); return; }
+    const code = (mesa && mesa.code) || '';
+    if (!window.confirm(t('order.reprintConfirm', { n: pedidos.length, code }))) return;
+
+    const antes = button.textContent;
+    button.disabled = true;
+    button.textContent = t('order.reprintSending');
+    let fallaron = 0;
+    for (const pedido of pedidos) {
+      try {
+        // Uno por uno y no en bloque: si una barra no tiene impresora, se dice cuál
+        // pedido no salió en vez de dar por perdidos todos los demás.
+        // eslint-disable-next-line no-await-in-loop
+        await api.post(`/nightclubs/${clubId()}/orders/${pedido.id}/reprint`, {});
+      } catch (err) {
+        fallaron += 1;
+        // Aquí no se puede callar: el bartender está esperando ese papel.
+        showError(err);
+      }
+    }
+    button.disabled = false;
+    button.textContent = antes;
+    if (!fallaron) toast(t('order.reprintOk', { n: pedidos.length }), 'ok');
   }
 
   /**

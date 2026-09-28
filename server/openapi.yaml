@@ -1334,6 +1334,61 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/nightclubs/{nightclubId}/orders/{orderId}/reprint:
+    post:
+      operationId: postNightclubsByNightclubIdOrdersByOrderIdReprint
+      tags: [Pedidos, Impresión]
+      summary: Volver a mandar la comanda de un pedido a su barra
+      description: |
+        El papel se atascó, salió cortado o el bartender no lo vio, y la mesa espera
+        un trago que nadie está preparando. Vuelve a encolar la **misma** comanda,
+        para la misma impresora que le toca a esa barra, marcada como
+        `** REIMPRESION **` arriba de todo — esa marca es lo que impide que la barra
+        prepare el pedido dos veces.
+
+        Lo pueden pedir `waiter`, `bartender`, `manager` y `admin`.
+
+        Dos diferencias con la comanda automática, las dos deliberadas:
+
+        * **No mira el interruptor** `print_order_tickets`. Ese decide si cada pedido
+          saca su papel solo; no puede decidir sobre uno que alguien pide a mano.
+        * **Falla con voz** (400) en vez de callarse, porque quien picó el botón está
+          esperando el papel.
+
+        Solo se reimprime un pedido que ya fue a la barra (`confirmed`, `preparing`,
+        `ready`, `delivered`). Uno `pending` no se ha cobrado y por tanto no ha ido a
+        la barra; uno `cancelled` no debe ir.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { $ref: '#/components/parameters/OrderId' }
+      responses:
+        '202':
+          description: La comanda quedó en la cola de su impresora
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      status: { type: string }
+                  printer:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      name: { type: string }
+        '400':
+          description: |
+            El pedido no ha ido a la barra, está cancelado, o esa barra no tiene
+            impresora de comandas. El mensaje nombra la zona para poder repetírselo
+            al gerente.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   # ==========================================================================
   # El corte de la noche y el rol (migración 023)
   #

@@ -88,6 +88,23 @@ async function clubOf(runner, nightclubId) {
 }
 
 /** El encabezado y el pie que el admin dejó puestos, o el nombre del club. */
+/**
+ * Los estados de un pedido que ya fue a la barra, y por tanto se pueden reimprimir.
+ *
+ * `pending` queda fuera a propósito: en este sistema el pedido llega a la barra
+ * cuando se paga, así que reimprimir uno pendiente mandaría a preparar un trago que
+ * nadie cobró — y en el papel se vería igual que uno legítimo.
+ */
+const REPRINTABLE = new Set(['confirmed', 'preparing', 'ready', 'delivered']);
+
+/** Cómo se llama quien pidió el papel. Va impreso: una reimpresión tiene dueño. */
+async function nameOf(runner, userId) {
+  if (!userId) return null;
+  const { rows } = await runner.query(
+    'SELECT display_name FROM users WHERE id = $1', [userId]);
+  return rows[0] ? rows[0].display_name : null;
+}
+
 function header(t, club, settings) {
   t.center();
   t.bold().tall(settings.header_text || club.name).normal().boldOff();
@@ -104,7 +121,7 @@ function footer(t, settings) {
 /** Lo que la barra necesita saber de un pedido. Sin precios: el bartender no cobra. */
 async function orderData(runner, { nightclubId, orderId }) {
   const { rows } = await runner.query(
-    `SELECT o.id::text AS id, o.created_at, o.message,
+    `SELECT o.id::text AS id, o.created_at, o.message, o.status,
             o.bar_location_id::text AS bar_location_id,
             t.code AS table_code, t.section AS table_section, t.floor AS table_floor,
             dp.name AS delivery_point_name,
@@ -196,8 +213,21 @@ function itemLines(item, width, currency = 'MXN') {
   });
 }
 
-function renderOrder(t, data, { club, settings }) {
+function renderOrder(t, data, { club, settings, reprint = false }) {
   header(t, club, settings);
+
+  // La marca de reimpresión va ARRIBA de todo, antes de la mesa (D62).
+  //
+  // No es un adorno: es lo único que impide que el bartender prepare el mismo pedido
+  // dos veces. Si el papel se atascó y el mesero lo vuelve a mandar, lo que llega a
+  // la barra es indistinguible de un pedido nuevo — mismos tragos, misma mesa— y la
+  // barra sirve otra ronda que nadie pidió ni pagó. Por eso va primero y en grande:
+  // tiene que leerse antes que el contenido, no después.
+  if (reprint) {
+    t.center().bold().tall('** REIMPRESION **').normal().boldOff();
+    if (data.reprinted_by_name) t.line(`Pidió: ${data.reprinted_by_name}`);
+    t.left().rule();
+  }
 
   // La mesa, en grande. Es lo único que el bartender busca cuando levanta la vista.
   t.center();
@@ -286,6 +316,75 @@ async function printOrder(client, { nightclubId, orderId, userId = null }) {
     createdBy: userId,
     ...build(printer, (t) => renderOrder(t, data, { club, settings })),
   });
+}
+
+/**
+ * Vuelve a mandar la comanda de un pedido a su barra (D62).
+ *
+ * ---------------------------------------------------------------------------
+ * En qué se parece a `printOrder`, y en qué NO
+ * ---------------------------------------------------------------------------
+ * El papel es el mismo, con la marca de reimpresión encima. Todo lo demás cambia,
+ * porque el origen es distinto: `printOrder` sale solo, pegado al cobro, y por eso se
+ * calla cuando no hay dónde imprimir —un club sin impresoras tiene que poder vender—.
+ * Esta la pide una persona que picó un botón con el bartender esperando, así que
+ * **falla con voz**: quedarse callado la deja mirando la pantalla sin saber si el
+ * papel viene o no, que es exactamente el problema que costó dos noches.
+ *
+ * Por lo mismo NO mira el interruptor de comandas automáticas. Ese interruptor
+ * decide si cada pedido saca su papel solo; no puede decidir sobre un papel que
+ * alguien está pidiendo a mano y en este momento.
+ *
+ * ---------------------------------------------------------------------------
+ * Lo que no se reimprime
+ * ---------------------------------------------------------------------------
+ * Un pedido sin confirmar. En este sistema el pedido llega a la barra cuando se
+ * paga; reimprimir uno pendiente mandaría a preparar un trago que nadie ha cobrado,
+ * y el bartender no tiene cómo notar la diferencia.
+ */
+async function reprintOrder(runner, { nightclubId, orderId, userId = null }) {
+  const data = await orderData(runner, { nightclubId, orderId });
+  if (!data || !data.items.length) return { error: 'Ese pedido no existe' };
+  if (!REPRINTABLE.has(data.status)) {
+    return {
+      error: data.status === 'cancelled'
+        ? 'Ese pedido está cancelado: no se manda a la barra'
+        : 'Ese pedido todavía no se cobra, así que no ha ido a la barra',
+    };
+  }
+
+  const printer = await printing.resolvePrinter(runner, {
+    nightclubId,
+    purpose: 'orders',
+    locationId: data.bar_location_id,
+    section: data.table_section,
+  });
+  if (!printer) {
+    // El mensaje nombra la zona porque el error casi siempre es de configuración —
+    // esa barra no tiene impresora de comandas— y quien lee esto está en el piso, no
+    // en el panel: tiene que poder repetirle al gerente qué le falta a qué barra.
+    return {
+      error: data.table_section
+        ? `No hay una impresora de comandas para ${data.table_section}`
+        : 'No hay una impresora de comandas configurada',
+    };
+  }
+
+  const [club, settings, quien] = await Promise.all([
+    clubOf(runner, nightclubId),
+    printing.settingsOf(runner, nightclubId),
+    nameOf(runner, userId),
+  ]);
+  const job = await printing.enqueue(runner, {
+    nightclubId,
+    printer,
+    kind: 'order',
+    refId: orderId,
+    createdBy: userId,
+    ...build(printer, (t) => renderOrder(t, { ...data, reprinted_by_name: quien },
+      { club, settings, reprint: true })),
+  });
+  return { job, printer: { id: printer.id, name: printer.name } };
 }
 
 // ---------------------------------------------------------------- la cuenta
@@ -706,7 +805,7 @@ function build(printer, render) {
 module.exports = {
   FALLBACK_HOURS, ORDER_STATES_ON_BILL, METHOD_LABEL, CONCEPT,
   money, localTime, folio,
-  orderData, renderOrder, printOrder, orderPaymentLabel, itemLines,
+  orderData, renderOrder, printOrder, reprintOrder, REPRINTABLE, orderPaymentLabel, itemLines,
   billWindow, billData, renderBill, printBill,
   receiptData, renderReceipt, printReceipt,
   cutData, renderCut, printShiftCut, ROLE_LABEL,

@@ -379,6 +379,36 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
   }));
 
 /**
+ * Volver a sacar la comanda de un pedido (D62).
+ *
+ * El caso es de todas las noches: el papel se atascó, salió cortado, se cayó atrás de
+ * la barra, o el bartender simplemente no lo vio. Hasta hoy la única salida era ir a
+ * buscar al gerente para que reimprimiera desde su panel, y mientras tanto la mesa
+ * espera un trago que nadie está preparando.
+ *
+ * Lo pueden pedir los cuatro roles que están en el piso —mesero, bartender, gerente y
+ * admin—, porque cualquiera de ellos puede ser el que note que falta el papel.
+ *
+ * El papel sale marcado como REIMPRESIÓN. Esa marca es lo que separa esta función de
+ * un botón que sirve tragos gratis: sin ella, lo que llega a la barra es idéntico a
+ * un pedido nuevo y la barra prepara otra ronda.
+ */
+router.post('/nightclubs/:nightclubId/orders/:orderId/reprint',
+  requireRole('waiter', 'bartender', 'manager', 'admin'),
+  validate({ params: z.object({ nightclubId: uuid, orderId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const out = await tickets.reprintOrder(pool, {
+      nightclubId: req.params.nightclubId,
+      orderId: req.params.orderId,
+      userId: req.user.id,
+    });
+    // Falla con voz, a diferencia de la comanda automática: quien picó el botón está
+    // parado esperando el papel, y un 202 mentiroso lo deja esperando para siempre.
+    if (out.error) throw ApiError.badRequest(out.error);
+    res.status(202).json({ job: out.job, printer: out.printer });
+  }));
+
+/**
  * El cantinero reacomoda su cola.
  *
  * Tres tragos del mismo whisky se preparan juntos, y obligar a la barra a seguir el
