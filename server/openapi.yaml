@@ -308,6 +308,95 @@ paths:
                       show_on_map: { type: boolean }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+    delete:
+      operationId: deleteAuthMe
+      tags: [Autenticación]
+      summary: Borrar la propia cuenta
+      description: |
+        Borra la cuenta de quien la pide. **No se puede deshacer.**
+
+        Lo que ocurre de verdad: la fila de `users` NO se elimina —hay 98 llaves
+        foráneas apuntando a ella y el libro contable tiene el borrado prohibido por
+        trigger— sino que se **vacía de todo lo que identifica a la persona**. Nombre,
+        correo, teléfono y fecha de nacimiento se sobrescriben; sesiones, cuentas
+        sociales ligadas, métodos de pago, preferencias, mensajes, el teléfono del valet
+        y el destino de los viajes en taxi se borran. Los montos se quedan en la
+        contabilidad, sin dueño identificable.
+
+        El correo real queda libre: la fila borrada pasa a `<id>@borrada.invalid`.
+
+        El cuerpo tiene que traer `confirm: "BORRAR"` (se compara sin espacios y en
+        mayúsculas). Sin eso es un `400`, no un borrado.
+
+        Se niega con `409` mientras haya un motivo: cuenta del personal, cobro sin
+        pagar, pedido en curso o coche en el valet. Consulta `GET /api/auth/me/deletion`
+        **antes** de enseñarle al cliente el campo de confirmación.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: string
+                  example: BORRAR
+      responses:
+        '200':
+          description: Cuenta borrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted_at: { type: string, format: date-time }
+                  cleared:
+                    type: object
+                    description: Cuántas filas se limpiaron, por tabla. Conteos, nunca contenido.
+                    additionalProperties: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: Todavía no se puede. `details.blockers` dice por qué.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/auth/me/deletion:
+    get:
+      operationId: getAuthMeDeletion
+      tags: [Autenticación]
+      summary: Qué impide borrar la cuenta ahora mismo
+      description: |
+        Devuelve **todos** los motivos a la vez, no el primero: quien tiene el coche en
+        el valet y además debe la cuenta merece enterarse de las dos cosas de una vez.
+
+        La pantalla lo llama al abrir el panel de borrado y solo enseña el campo de
+        confirmación si `ok` es `true`. Un error después de que alguien tecleó `BORRAR`
+        se lee como que el sistema no lo quiere dejar ir.
+      responses:
+        '200':
+          description: Estado del borrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    description: true cuando no hay nada que lo impida.
+                  blockers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        reason:
+                          type: string
+                          enum: [is_staff, unpaid, open_order, valet_open, already_deleted]
+                        message: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   # ==========================================================================
   # Entrar con una cuenta de otro (Facebook)
   #

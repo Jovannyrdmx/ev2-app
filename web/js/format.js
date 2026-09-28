@@ -49,6 +49,8 @@
       'auth.lastName': 'Apellido',
       'auth.newPassword': 'Contraseña (mínimo 8)',
       'auth.birthDate': 'Fecha de nacimiento',
+      'auth.termsLink': 'Términos',
+      'auth.privacyLink': 'Privacidad',
       'auth.terms': 'Tengo 18 años o más y acepto los términos y el código de conducta.',
       'auth.flirts': 'Quiero recibir invitaciones de otras personas.',
       'auth.flirtsNote': 'Puedes cambiarlo cuando quieras.',
@@ -164,6 +166,21 @@
       'profile.club': 'Club',
       'profile.account': 'Cuenta',
       'profile.signOut': 'Cerrar sesión',
+
+      // --- borrar la cuenta (D68) ---
+      'del.title': 'Borrar mi cuenta',
+      'del.open': 'Abrir',
+      'del.close': 'Cerrar',
+      'del.what': 'Se borran tu nombre, correo, teléfono, fecha de nacimiento, sesiones, cuentas ligadas y métodos de pago. Los montos de lo que consumiste se quedan en la contabilidad, sin tu nombre.',
+      'del.typeToConfirm': 'Escribe BORRAR para confirmar',
+      'del.go': 'Borrar mi cuenta para siempre',
+      'del.deleting': 'Borrando…',
+      'del.readMore': 'Qué se borra y qué no',
+      'del.blocker.is_staff': 'Las cuentas del personal las da de baja la gerencia.',
+      'del.blocker.unpaid': 'Tienes un cobro pendiente de pagar.',
+      'del.blocker.open_order': 'Tienes un pedido en curso.',
+      'del.blocker.valet_open': 'Tu coche sigue en el valet. Recógelo primero: si te borras, el sistema deja de saber de quién es.',
+      'del.blocker.already_deleted': 'Esta cuenta ya está borrada.',
 
       // --- empleado sin pantalla ---
       'staff.signedInAs': 'Entraste como',
@@ -1768,6 +1785,8 @@
       'auth.lastName': 'Last name',
       'auth.newPassword': 'Password (at least 8)',
       'auth.birthDate': 'Date of birth',
+      'auth.termsLink': 'Terms',
+      'auth.privacyLink': 'Privacy',
       'auth.terms': "I'm 18 or older and I accept the terms and the code of conduct.",
       'auth.flirts': 'I want to receive invitations from other people.',
       'auth.flirtsNote': 'You can change this anytime.',
@@ -1881,6 +1900,21 @@
       'profile.club': 'Club',
       'profile.account': 'Account',
       'profile.signOut': 'Sign out',
+
+      // --- delete your account (D68) ---
+      'del.title': 'Delete my account',
+      'del.open': 'Open',
+      'del.close': 'Close',
+      'del.what': 'Your name, email, phone, date of birth, sessions, linked accounts and payment methods are deleted. The amounts of what you consumed stay in the accounts, without your name.',
+      'del.typeToConfirm': 'Type BORRAR to confirm',
+      'del.go': 'Delete my account for good',
+      'del.deleting': 'Deleting…',
+      'del.readMore': 'What is deleted and what is not',
+      'del.blocker.is_staff': 'Staff accounts are closed by management.',
+      'del.blocker.unpaid': 'You have a charge still to pay.',
+      'del.blocker.open_order': 'You have an order in progress.',
+      'del.blocker.valet_open': 'Your car is still with the valet. Collect it first: if you delete your account, the system stops knowing whose car it is.',
+      'del.blocker.already_deleted': 'This account is already deleted.',
 
       // --- staff without a screen yet ---
       'staff.signedInAs': 'You signed in as',

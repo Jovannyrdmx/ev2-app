@@ -15,13 +15,17 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v30';
+const VERSION = 'ev2-v31';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
   // La página pública de verificación: la abre alguien SIN cuenta, en la calle,
   // posiblemente con mala señal. Es justo donde una caché sirve.
   'verificar.html', 'js/verify-screen.js',
+  // El aviso de privacidad y los terminos: los abre gente sin cuenta, y el enlace de
+  // eliminacion de datos que esta dado de alta en el panel de Meta apunta aqui. Una de
+  // las dos paginas en blanco por falta de senal es una revision de Meta reprobada.
+  'privacidad.html', 'terminos.html',
   'js/api.js', 'js/format.js', 'js/roles.js', 'js/password-gate.js', 'js/client.js',
   'js/floor-map.js', 'js/index-screen.js', 'js/bar-queue.js', 'js/bartender-screen.js',
   'js/taxi-ride.js', 'js/driver-screen.js', 'js/manager.js', 'js/manager-screen.js',
@@ -31,7 +35,7 @@ const SHELL = [
   // reservación, personal, pagos, turno, puerta y conecta se quedaban en blanco.
   'js/tipping.js', 'js/songs.js', 'js/booking.js', 'js/show-screen.js', 'js/booking-screen.js',
   'js/staff-admin.js', 'js/payouts.js', 'js/shift.js', 'js/door.js',
-  'js/flirt.js', 'js/flirt-screen.js', 'js/lost-found-screen.js', 'js/drink-art.js', 'js/order-taking.js',
+  'js/flirt.js', 'js/flirt-screen.js', 'js/lost-found-screen.js', 'js/account-delete.js', 'js/drink-art.js', 'js/order-taking.js',
   'js/door-scan.js',
   // El almacen se cuenta en una bodega, que es donde peor entra la senal de todo el
   // edificio: si esta pantalla no abre sin red, el conteo se hace en papel.

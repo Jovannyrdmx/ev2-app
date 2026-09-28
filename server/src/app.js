@@ -16,6 +16,7 @@ const pinoHttp = require('pino-http');
 const { errorHandler, notFoundHandler, ApiError } = require('./middleware/errors');
 
 const authRoutes = require('./routes/auth');
+const accountRoutes = require('./routes/account');
 const nightclubRoutes = require('./routes/nightclubs');
 const drinkRoutes = require('./routes/drinks');
 const inventoryRoutes = require('./routes/inventory');
@@ -211,6 +212,7 @@ function createApp() {
   }));
 
   app.use('/api/auth', authRoutes);
+  app.use('/api/auth', accountRoutes);
   app.use('/api', nightclubRoutes);
   app.use('/api', drinkRoutes);
   app.use('/api', inventoryRoutes);

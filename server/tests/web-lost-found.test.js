@@ -86,7 +86,10 @@ describe('Los textos', () => {
       // Las de categoría y estado se arman con una variable; se comprueban aparte.
       if (k.endsWith('.')) continue;
       for (const lang of ['es', 'en']) {
-        if (catalogo.t(k, { place: 'x' }, lang) === k) faltan.push(`${k} (${lang})`);
+        // Se leen las DOS tablas. `t(clave, respaldo)` no recibe idioma: su segundo
+        // parametro es el respaldo, asi que pasarselo comprobaba el espanol dos veces
+        // y habria dado por buena una pantalla sin traducir.
+        if (catalogo.STRINGS[lang][k] === undefined) faltan.push(`${k} (${lang})`);
       }
     }
     expect(faltan).toEqual([]);
@@ -98,7 +101,7 @@ describe('Los textos', () => {
     const faltan = [];
     for (const c of lf.CATEGORIES) {
       for (const lang of ['es', 'en']) {
-        if (catalogo.t(`lf.cat.${c}`, {}, lang) === `lf.cat.${c}`) faltan.push(`${c} (${lang})`);
+        if (catalogo.STRINGS[lang][`lf.cat.${c}`] === undefined) faltan.push(`${c} (${lang})`);
       }
     }
     expect(faltan).toEqual([]);
@@ -107,7 +110,7 @@ describe('Los textos', () => {
   it('cada estado tiene nombre en los dos idiomas', () => {
     for (const estado of ['open', 'matched', 'returned', 'closed']) {
       for (const lang of ['es', 'en']) {
-        expect(catalogo.t(`lf.status.${estado}`, {}, lang)).not.toBe(`lf.status.${estado}`);
+        expect(catalogo.STRINGS[lang][`lf.status.${estado}`]).toBeDefined();
       }
     }
   });

@@ -62,10 +62,17 @@ rechaza el viaje con un error que habla de la URI y no de la causa.
 La dirección exacta la dice el propio servidor. En el VPS:
 
 ```bash
-cd ~/ev2-app/deploy
-docker compose -f docker-compose.prod.yml exec api \
+cd ~/ev2-app
+docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api \
   node -e "console.log(require('./src/config/oauth').status().providers[0].redirect_uri)"
 ```
+
+> **El comando sale de la raíz del repositorio y lleva `--env-file .env`.** Las dos
+> cosas importan y las dos nos costaron un rato: las imágenes se construyen con
+> `context: ..`, así que el comando tiene que salir de `~/ev2-app` y no de `deploy/`;
+> y Compose busca el `.env` **junto al archivo compose**, o sea en `deploy/`, donde no
+> está. Sin `--env-file .env` la respuesta no es un error de conexión: es una lista de
+> `required variable ... is missing a value` que parece que falta medio `.env`.
 
 Sale algo así:
 
@@ -95,7 +102,7 @@ app** por parte de Meta que el club no tiene por qué pasar. Con estos dos no ha
 
 ## 5. Ponerlo en el `.env` y reiniciar
 
-En el VPS, en `~/ev2-app/deploy/.env`:
+En el VPS, en `~/ev2-app/.env`:
 
 ```
 FACEBOOK_APP_ID=1234567890123456
@@ -105,8 +112,8 @@ FACEBOOK_APP_SECRET=la-clave-secreta-del-panel
 Y se reinicia solo la API:
 
 ```bash
-cd ~/ev2-app/deploy
-docker compose -f docker-compose.prod.yml up -d api
+cd ~/ev2-app
+docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d api
 ```
 
 ## 6. Comprobar que quedó
@@ -133,7 +140,8 @@ Lo que tiene que decir:
 acceso. Si sale `false`, la vista del gerente dice qué falta:
 
 ```bash
-docker compose -f docker-compose.prod.yml exec api \
+cd ~/ev2-app
+docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api \
   node -e "console.log(JSON.stringify(require('./src/config/oauth').status(), null, 2))"
 ```
 
@@ -150,9 +158,15 @@ Mientras la app está en modo **desarrollo**, solo pueden entrar las cuentas de 
 estén dadas de alta como administrador, desarrollador o probador de la app. Para el público hay
 que pasarla a **modo activo** (el interruptor arriba en el panel), y para eso Meta pide:
 
-- **Política de privacidad** con URL pública. Es un requisito de Meta, no del sistema.
-- **URL de eliminación de datos** o instrucciones de cómo se borra una cuenta.
-- El **ícono** de la app (1024×1024) y la categoría del negocio.
+- **Política de privacidad** con URL pública → `https://ev2.systems/privacidad.html` (D68).
+- **URL de eliminación de datos** → `https://ev2.systems/privacidad.html#eliminar-datos` (D68).
+  El ancla es parte de la dirección: lleva a la sección que explica el borrado y cómo
+  pedirlo. Si alguien la renombra en `web/privacidad.html`, el enlace del panel de Meta
+  cae al principio de la página; hay una prueba que lo vigila
+  (`server/tests/web-account-delete.test.js`).
+- **Condiciones del servicio** → `https://ev2.systems/terminos.html` (D68).
+- El **ícono** de la app (1024×1024) y la categoría del negocio. Estos siguen pendientes:
+  son un archivo y una decisión del negocio, no código.
 
 Con `public_profile` y `email` no hace falta revisión de app, pero estos datos sí.
 

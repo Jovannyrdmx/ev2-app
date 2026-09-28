@@ -192,7 +192,7 @@
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       <label class="flex items-start gap-3 text-sm text-white/70 tap">
         <input id="reg-terms" type="checkbox" required class="mt-1 w-5 h-5 accent-cyan-400">
-        <span data-i18n="auth.terms">Tengo 18 años o más y acepto los términos y el código de conducta.</span>
+        <span><span data-i18n="auth.terms">Tengo 18 años o más y acepto los términos y el código de conducta.</span> <a href="terminos.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.termsLink">Términos</a> <span class="text-white/30">·</span> <a href="privacidad.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.privacyLink">Privacidad</a></span>
       </label>
       <label class="flex items-start gap-3 text-sm text-white/70 tap">
         <input id="reg-flirts" type="checkbox" class="mt-1 w-5 h-5 accent-pink-400">
@@ -231,7 +231,7 @@
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       <label class="flex items-start gap-3 text-sm text-white/70 tap">
         <input id="social-terms" type="checkbox" required class="mt-1 w-5 h-5 accent-cyan-400">
-        <span data-i18n="auth.terms">Tengo 18 años o más y acepto los términos y el código de conducta.</span>
+        <span><span data-i18n="auth.terms">Tengo 18 años o más y acepto los términos y el código de conducta.</span> <a href="terminos.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.termsLink">Términos</a> <span class="text-white/30">·</span> <a href="privacidad.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.privacyLink">Privacidad</a></span>
       </label>
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="social.finish">Terminar y entrar</button>
       <button type="button" id="social-finish-cancel" class="w-full text-sm text-white/50 underline" data-i18n="social.cancel">Cancelar</button>
@@ -705,6 +705,43 @@
         </div>
 
         <button id="btn-profile-logout" class="w-full py-3 rounded-xl card text-sm text-red-300" data-i18n="profile.signOut">Cerrar sesión</button>
+
+        <!--
+          Borrar la cuenta (D68).
+
+          Nace cerrado, al final de todo y sin color de alarma: es la única acción
+          irreversible que un cliente puede hacer sobre sí mismo, y no tiene por qué
+          estar compitiendo por la vista con "cerrar sesión", que es lo que la gente
+          viene a buscar aquí nueve de cada diez veces.
+
+          Al abrirlo se pregunta PRIMERO al servidor qué lo impide, para que quien tiene
+          el coche en el valet lo lea antes de escribir nada y no después.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="del.title">Borrar mi cuenta</p>
+            <button id="btn-del-open" class="card rounded-lg px-3 py-2 text-xs" data-i18n="del.open">Abrir</button>
+          </div>
+
+          <div id="del-panel" class="space-y-3" hidden>
+            <p class="text-[11px] text-white/50" data-i18n="del.what">Se borran tu nombre, correo, teléfono, fecha de nacimiento, sesiones, cuentas ligadas y métodos de pago. Los montos de lo que consumiste se quedan en la contabilidad, sin tu nombre.</p>
+
+            <!-- Los motivos que lo impiden, cada uno en su renglón. -->
+            <div id="del-blockers" class="space-y-1" hidden></div>
+
+            <div id="del-form" class="space-y-2" hidden>
+              <label class="block text-[11px] text-white/50" for="del-confirm" data-i18n="del.typeToConfirm">Escribe BORRAR para confirmar</label>
+              <input id="del-confirm" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-red-400 outline-none font-display tracking-widest text-center"
+                     maxlength="10" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="BORRAR">
+              <button id="btn-del-go" class="w-full py-3 rounded-xl text-sm text-red-300 border border-red-400/40" data-i18n="del.go">Borrar mi cuenta para siempre</button>
+            </div>
+
+            <p id="del-error" class="text-sm text-red-300" hidden></p>
+            <p class="text-[11px] text-white/30">
+              <a href="privacidad.html#eliminar-datos" target="_blank" rel="noopener" class="underline" data-i18n="del.readMore">Qué se borra y qué no</a>
+            </p>
+          </div>
+        </div>
       </div>
     </main>
 
@@ -929,6 +966,7 @@
 <script src="js/booking-screen.js"></script>
 <script src="js/flirt-screen.js"></script>
 <script src="js/lost-found-screen.js"></script>
+<script src="js/account-delete.js"></script>
 <script src="js/pwa.js"></script>
 </body>
 </html>
