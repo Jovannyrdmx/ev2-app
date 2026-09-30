@@ -420,23 +420,46 @@ docker compose --env-file .env -f deploy/docker-compose.prod.yml logs -f api
 curl -s https://tudominio.com/api/health
 ```
 
-Para mirar la base, lo mas simple es entrar por SSH y usar el psql del contenedor:
+### Panel para ver las tablas (Adminer, D69)
+
+El panel corre en el servidor como el contenedor `ev2-adminer`, publicado **solo en
+`127.0.0.1:8081`**: desde internet no existe. Se llega a el con un tunel SSH.
+
+**Una sola vez, en el servidor** (despues de `git pull` y `up -d`):
 
 ```bash
-cd ~/ev2
-docker compose --env-file .env -f deploy/docker-compose.prod.yml exec postgres psql -U postgres ev2
+cd ~/ev2-app
+bash deploy/panel-bd-lectura.sh     # crea el usuario ev2_lectura y muestra su contrasena UNA vez
 ```
 
-> Aqui decia que se podia tunelizar con `ssh -L 5432:localhost:5432` y **eso nunca
-> funciono**: el archivo de produccion no publica ningun puerto de Postgres —es la regla
-> del proyecto—, asi que en el servidor no hay nada escuchando en ese puerto y el tunel
-> apunta a la nada.
->
-> Si quieres un cliente grafico (DBeaver, pgAdmin), hay que publicar el puerto **solo en
-> el loopback** del servidor, agregando al servicio `postgres`:
-> `ports: ["127.0.0.1:5432:5432"]`. El `127.0.0.1:` del principio no es opcional: sin el,
-> `ports: ["5432:5432"]` publica tu base **a todo internet**. Con eso, desde tu maquina:
-> `ssh -L 5433:localhost:5432 <usuario>@<servidor>` y el cliente a `localhost:5433`.
+**Cada vez que quieras ver la base, en tu PC con Windows:** doble clic en
+`deploy\Abrir-Panel-BD.bat`. Abre el tunel y el navegador en `http://localhost:8081` con
+todo lleno menos la contrasena. Deja la ventana negra abierta mientras lo uses.
+
+A mano, desde cualquier sistema:
+
+```bash
+ssh -N -L 8081:127.0.0.1:8081 ev2@45.93.100.244
+# y en el navegador: http://localhost:8081
+#   Sistema: PostgreSQL · Servidor: postgres · Usuario: ev2_lectura · Base: ev2
+```
+
+- **`ev2_lectura` no puede cambiar nada**: la base rechaza cualquier edicion, aunque el
+  panel muestre los botones. Cada consulta se corta a los 30 s para no frenar el club.
+- **Para corregir un dato**, no uses el panel con `postgres`: hazlo desde la app (deja
+  rastro de quien) o con SQL por SSH. Dos clics en el panel borran una fila de la caja.
+- **Si la contrasena de `ev2_lectura` se filtro**, vuelve a correr
+  `bash deploy/panel-bd-lectura.sh`: genera otra y la anterior deja de servir.
+- **Nunca** cambies el puerto del panel a `8081:8080` sin el `127.0.0.1:` delante:
+  publicaria la pantalla de acceso a la base a todo internet (Docker se salta `ufw`).
+  `server/tests/compose-ports.test.js` falla si alguien lo hace.
+
+Para una consulta rapida sin panel, por SSH:
+
+```bash
+cd ~/ev2-app
+docker compose --env-file .env -f deploy/docker-compose.prod.yml exec postgres psql -U postgres ev2
+```
 
 ---
 

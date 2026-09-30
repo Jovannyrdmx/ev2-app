@@ -276,6 +276,39 @@ services:
     logging: *logging
     networks: [ev2]
 
+  # Panel para VER las tablas desde el navegador (Adminer). Decisión D69.
+  #
+  # Se publica SOLO en el loopback del servidor (127.0.0.1): desde internet no existe.
+  # Docker se salta `ufw` (ver deploy/firewall.sh), así que lo que protege al panel no es
+  # el cortafuegos sino ese `127.0.0.1:` del principio. Sin él, `8081:8080` publicaría la
+  # pantalla de acceso a la base a todo internet. Una prueba (compose-ports.test.js)
+  # falla si alguien lo quita.
+  #
+  # Para entrar: túnel SSH desde tu PC (deploy/Abrir-Panel-BD.bat lo hace solo) y
+  # http://localhost:8081. Para consultar se usa el usuario de solo lectura
+  # `ev2_lectura` (deploy/panel-bd-lectura.sh), no `postgres`.
+  #
+  # Versión fija a propósito: una imagen `latest` cambia sola el día que alguien hace
+  # `pull`, y el panel que ve la base no es lugar para sorpresas.
+  adminer:
+    image: adminer:5.5.1
+    container_name: ev2-adminer
+    ports:
+      - "127.0.0.1:8081:8080"
+    environment:
+      # El nombre del contenedor de la base dentro de la red de Docker.
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+    networks: [ev2]
+
   caddy:
     image: caddy:2-alpine
     container_name: ev2-caddy
