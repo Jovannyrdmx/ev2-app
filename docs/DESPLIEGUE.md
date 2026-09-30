@@ -420,6 +420,21 @@ docker compose --env-file .env -f deploy/docker-compose.prod.yml logs -f api
 curl -s https://tudominio.com/api/health
 ```
 
+### Reiniciar los datos de prueba (D70)
+
+Vacia toda la actividad (inventario y bodega, eventos y noches, PCs e impresoras,
+pedidos, cobros, reservaciones, propinas, turnos...) y conserva la configuracion
+(usuarios y PIN, carta, recetas, insumos, plano, precios). Saca un respaldo antes y pide
+escribir `BORRAR`:
+
+```bash
+cd ~/ev2-app
+bash deploy/reiniciar-datos-prueba.sh
+```
+
+Al final imprime el comando exacto para deshacerlo con el respaldo. **Nunca** con el
+club abierto ni con dinero real de por medio: el libro de transacciones tambien se vacia.
+
 ### Panel para ver las tablas (Adminer, D69)
 
 El panel corre en el servidor como el contenedor `ev2-adminer`, publicado **solo en
