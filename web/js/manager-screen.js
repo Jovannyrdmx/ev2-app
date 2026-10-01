@@ -307,6 +307,7 @@
       b.classList.toggle('active', b.dataset.tab === state.tab);
     });
     renderSummary();
+    renderInbox();
     renderNights();
     renderStaff();
     renderPayouts();
@@ -441,6 +442,7 @@
    * ruta para pedirlo — leer conversaciones ajenas no es moderar.
    */
   function renderReports() {
+    renderInbox();
     const summary = EV2Manager.moderationSummary(state.reports);
     $('mod-open').textContent = String(summary.open);
     $('mod-urgent').textContent = String(summary.urgent);
@@ -1155,6 +1157,7 @@
   }
 
   function renderLostFound() {
+    renderInbox();
     const lista = state.lostFound || [];
     $('lfm-empty').hidden = lista.length > 0;
     const caja = $('lfm-list');
@@ -1310,6 +1313,7 @@
   }
 
   function renderTips() {
+    renderInbox();
     const lista = state.tips || [];
     $('tip-empty').hidden = lista.length > 0;
     const caja = $('tip-list');
@@ -3040,9 +3044,54 @@
     } catch (err) { showError(err); }
   };
 
+  function goTab(tab) {
+    state.tab = tab;
+    renderAll();
+    // Al cambiar de seccion se empieza arriba, y en el telefono la pestana elegida se
+    // asoma completa aunque estuviera al final del renglon.
+    const main = document.querySelector('.mgr-main');
+    if (main) main.scrollTop = 0;
+    if (typeof window.scrollTo === 'function') { try { window.scrollTo(0, 0); } catch { /* jsdom */ } }
+    const btn = document.querySelector(`[data-tab="${tab}"]`);
+    if (btn && typeof btn.scrollIntoView === 'function') btn.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }
+
   document.querySelectorAll('[data-tab]').forEach((b) => {
-    b.onclick = () => { state.tab = b.dataset.tab; renderAll(); };
+    b.onclick = () => goTab(b.dataset.tab);
   });
+
+  /** La bandeja de pendientes (D75): lo que pide una accion del gerente, en un lugar. */
+  function renderInbox() {
+    const s = EV2Manager.summary(state.dashboard, state.currency);
+    const items = EV2Manager.pendingWork({
+      withdrawals: state.withdrawals, accounts: state.accounts, tips: state.tips,
+      reports: state.reports, lostFound: state.lostFound, nights: state.nights,
+      posErrors: s.orders.posErrors,
+    });
+    const total = items.reduce((n, i) => n + i.count, 0);
+    $('inbox-total').textContent = String(total);
+    $('inbox-total').className = `pill ${items.some((i) => i.urgent) ? 'pill-bad' : total ? 'pill-wait' : 'pill-ok'}`;
+    $('inbox-count').hidden = total === 0;
+    $('inbox-count').textContent = String(total);
+    $('inbox-empty').hidden = items.length > 0;
+    const box = $('inbox-list');
+    box.innerHTML = '';
+    for (const item of items) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = `w-full flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-left ${item.urgent ? 'btn-danger' : 'btn-secondary'}`;
+      const label = document.createElement('span');
+      label.className = 'text-sm';
+      label.textContent = t(item.key, { n: item.count });
+      const go = document.createElement('span');
+      go.className = 'text-xs text-white/50 shrink-0';
+      go.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
+      row.append(label, go);
+      // Si ya esta en esta pestana (los pedidos rechazados viven en Turno), no se mueve.
+      row.onclick = () => { if (item.tab !== state.tab) goTab(item.tab); };
+      box.appendChild(row);
+    }
+  }
 
   function renderSummary() {
     const s = EV2Manager.summary(state.dashboard, state.currency);

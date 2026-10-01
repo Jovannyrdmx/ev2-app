@@ -535,6 +535,44 @@
     };
   }
 
+  /**
+   * Lo que espera al gerente (D75), en un solo lugar.
+   *
+   * Antes cada pendiente vivia en su pestana: los retiros en Pagos, las cuentas por
+   * verificar mas abajo en la misma, las propinas en efectivo en otra tarjeta, los
+   * reportes en Reportes y las noches sin publicar en Noches. El gerente tenia que
+   * recorrer diez pestanas para saber si habia algo. Esto lo junta, en orden de lo que
+   * mas urge, y dice a que pestana ir. Solo cuenta lo que pide una accion suya.
+   */
+  function pendingWork(input) {
+    const i = input || {};
+    const now = i.now ? new Date(i.now) : new Date();
+    const list = (xs) => (Array.isArray(xs) ? xs : []);
+    const items = [];
+    const add = (key, count, tab, urgent) => { if (count > 0) items.push({ key, count, tab, urgent: Boolean(urgent) }); };
+
+    const reports = list(i.reports).filter((r) => r.status === 'open');
+    const urgentReports = reports.filter((r) => reportSeverity(r) === 'urgent').length;
+    add('inbox.reportsUrgent', urgentReports, 'reports', true);
+    add('inbox.reports', reports.length - urgentReports, 'reports', false);
+    add('inbox.posErrors', Number(i.posErrors) || 0, 'summary', true);
+    add('inbox.withdrawals', list(i.withdrawals).filter((w) => w.status === 'pending').length, 'payouts', false);
+    add('inbox.tips', list(i.tips).length, 'payouts', false);
+    add('inbox.accounts', list(i.accounts).filter((a) => a && a.id && !(a.verified_at || a.verified === true)).length, 'payouts', false);
+    add('inbox.lostFound', list(i.lostFound).filter((x) => x.status === 'matched').length, 'payouts', false);
+
+    // Una noche en borrador que es en los proximos siete dias nadie la puede reservar.
+    const week = new Date(now.getTime() + 7 * 86400000);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    add('inbox.drafts', list(i.nights).filter((n) => {
+      if (n.status !== 'draft') return false;
+      const d = new Date(`${String(n.event_date).slice(0, 10)}T12:00:00`);
+      return d >= today && d <= week;
+    }).length, 'nights', false);
+
+    return items.sort((a, b) => Number(b.urgent) - Number(a.urgent));
+  }
+
   return {
     revenueFor,
     recipeMargin,
@@ -566,5 +604,6 @@
     resolutionPayload,
     moderationSummary,
     affectsModeration,
+    pendingWork,
   };
 }));

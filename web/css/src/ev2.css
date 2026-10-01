@@ -314,3 +314,24 @@ body.bar-board .bar-main { min-height: 64px; font-size: 1.15rem; }
 body.bar-board .bar-move { min-height: 64px; }
 body.bar-board #lane-list article .font-display { font-size: 1.35rem; }
 body.bar-board #lane-list article p.text-sm { font-size: 1rem; }
+
+/* ---------------------------------------------------------------- Manager sections (D75) */
+.mgr-group { display: none; }
+.mgr-icon { display: none; }
+.mgr-tab { display: inline-flex; align-items: center; gap: .55rem; }
+@media (min-width: 1024px) {
+  .mgr-group {
+    display: block; font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
+    color: rgba(244,244,248,.4); padding: 1.1rem .75rem .35rem;
+  }
+  .mgr-group:first-child { padding-top: .25rem; }
+  .mgr-icon { display: inline-block; width: 1.2rem; text-align: center; opacity: .8; }
+  .mgr-tab {
+    border-bottom: 0; border-left: 3px solid transparent; border-radius: 10px;
+    padding: .7rem .75rem; margin: 1px 0;
+  }
+  .mgr-tab:hover { background: rgba(255,255,255,.05); color: var(--ev2-text); }
+  .mgr-tab.active { background: rgba(30,200,255,.10); border-left-color: var(--ev2-cyan); }
+  .mgr-tab .tab-count { margin-left: auto; }
+  .mgr-main > div { max-width: 72rem; margin-left: auto; margin-right: auto; }
+}

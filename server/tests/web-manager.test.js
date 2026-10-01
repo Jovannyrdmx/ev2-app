@@ -509,3 +509,55 @@ describe('el anticipo de una noche, desde la pantalla del gerente', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------- pendientes (D75)
+
+describe('Pendientes del gerente (D75)', () => {
+  const M = require('../../web/js/manager.js');
+  const now = new Date('2026-10-02T20:00:00Z');
+
+  it('sin nada que hacer, la lista está vacía', () => {
+    expect(M.pendingWork({ now })).toEqual([]);
+  });
+
+  it('junta lo de cada pestaña y dice a cuál ir; lo urgente va primero', () => {
+    const items = M.pendingWork({
+      now,
+      withdrawals: [{ status: 'pending' }, { status: 'pending' }, { status: 'paid' }],
+      accounts: [{ id: 'a' }, { id: 'b', verified_at: '2026-09-01' }],
+      tips: [{ id: 't' }],
+      reports: [{ status: 'open', reason: 'underage' }, { status: 'open', reason: 'spam' }, { status: 'actioned' }],
+      lostFound: [{ status: 'matched' }, { status: 'open' }],
+      nights: [
+        { status: 'draft', event_date: '2026-10-04' },
+        { status: 'draft', event_date: '2026-11-20' },
+        { status: 'published', event_date: '2026-10-03' },
+      ],
+      posErrors: 0,
+    });
+    expect(items[0]).toEqual({ key: 'inbox.reportsUrgent', count: 1, tab: 'reports', urgent: true });
+    const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
+    expect(byKey['inbox.reports']).toMatchObject({ count: 1, tab: 'reports' });
+    expect(byKey['inbox.withdrawals']).toMatchObject({ count: 2, tab: 'payouts' });
+    expect(byKey['inbox.accounts'].count).toBe(1);
+    expect(byKey['inbox.tips'].count).toBe(1);
+    expect(byKey['inbox.lostFound'].count).toBe(1);
+    // Solo la de esta semana: la de noviembre todavía no urge.
+    expect(byKey['inbox.drafts']).toMatchObject({ count: 1, tab: 'nights' });
+  });
+
+  it('los pedidos rechazados por la caja cuentan como urgentes', () => {
+    expect(M.pendingWork({ now, posErrors: 2 })).toEqual([
+      { key: 'inbox.posErrors', count: 2, tab: 'summary', urgent: true }]);
+  });
+
+  it('cada clave existe en los dos idiomas', () => {
+    const F = require('../../web/js/format.js');
+    for (const key of ['inbox.title', 'inbox.none', 'inbox.reportsUrgent', 'inbox.reports',
+      'inbox.posErrors', 'inbox.withdrawals', 'inbox.tips', 'inbox.accounts',
+      'inbox.lostFound', 'inbox.drafts']) {
+      expect(F.STRINGS.es[key]).toBeTruthy();
+      expect(F.STRINGS.en[key]).toBeTruthy();
+    }
+  });
+});
