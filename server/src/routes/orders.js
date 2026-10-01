@@ -18,7 +18,10 @@ router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
 // Allowed state transitions. 'pos_error' is set by the POS sync (phase 4).
 const TRANSITIONS = {
   pending: ['confirmed', 'cancelled'],
-  confirmed: ['preparing', 'cancelled'],
+  // Ready straight from confirmed is the bar's one-tap path (D73): a beer or a shot is
+  // poured in seconds, and making the bartender press "start" first only slowed the
+  // queue down. "preparing" stays for what really takes time (a round, a bucket).
+  confirmed: ['preparing', 'ready', 'cancelled'],
   preparing: ['ready', 'cancelled'],
   ready: ['delivered'],
   delivered: [],
@@ -332,7 +335,7 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
       }
 
       const stamp = TIMESTAMP_FOR[next];
-      const setBartender = ['confirmed', 'preparing'].includes(next) && isStaff;
+      const setBartender = ['confirmed', 'preparing', 'ready'].includes(next) && isStaff;
       const { rows } = await client.query(
         `UPDATE drink_orders
             SET status = $3

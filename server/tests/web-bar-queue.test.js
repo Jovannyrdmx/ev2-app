@@ -32,7 +32,9 @@ describe('En qué carril cae cada pedido', () => {
   it('los seis estados vivos se reparten en tres carriles', () => {
     expect(Bar.laneOf('pending')).toBe('new');
     expect(Bar.laneOf('pos_error')).toBe('new');
-    expect(Bar.laneOf('confirmed')).toBe('prep');
+    // Pagado = por preparar (D73): antes caia en "En preparacion" sin que nadie lo
+    // tocara, y la pantalla abria en un carril vacio.
+    expect(Bar.laneOf('confirmed')).toBe('new');
     expect(Bar.laneOf('preparing')).toBe('prep');
     expect(Bar.laneOf('ready')).toBe('ready');
   });
@@ -58,16 +60,20 @@ describe('El botón que se ofrece', () => {
   it('cada estado ofrece exactamente la transición que el servidor permite', () => {
     // Espejo de TRANSITIONS en server/src/routes/orders.js.
     expect(Bar.nextAction('pending').status).toBe('confirmed');
-    expect(Bar.nextAction('confirmed').status).toBe('preparing');
+    // Un pagado se marca listo de un toque; "empezar" es el boton secundario (D73).
+    expect(Bar.nextAction('confirmed').status).toBe('ready');
+    expect(Bar.secondAction('confirmed').status).toBe('preparing');
+    expect(Bar.secondAction('preparing')).toBe(null);
     expect(Bar.nextAction('preparing').status).toBe('ready');
     expect(Bar.nextAction('ready').status).toBe('delivered');
     expect(Bar.nextAction('pos_error').status).toBe('confirmed');
   });
 
-  it('nunca se salta un estado: no hay atajo de pendiente a listo', () => {
-    // Encadenar dos llamadas en un toque deja el pedido en un limbo si la segunda falla.
+  it('no hay atajo de pendiente a listo: lo sin pagar se acepta primero', () => {
+    // Encadenar dos llamadas en un toque deja el pedido en un limbo si la segunda falla;
+    // el atajo de confirmado a listo es UNA sola transicion del servidor.
     expect(Bar.nextAction('pending').status).not.toBe('ready');
-    expect(Bar.nextAction('confirmed').status).not.toBe('ready');
+    expect(Bar.nextAction('pos_error').status).not.toBe('ready');
   });
 
   it('un pedido entregado ya no ofrece nada', () => {
@@ -142,12 +148,22 @@ describe('El orden dentro del carril', () => {
     expect(lanes.new.map((o) => o.id)).toEqual(['viejo', 'medio', 'nuevo']);
   });
 
-  it('confirmado y preparando comparten carril, y el viejo sigue arriba', () => {
+  it('pendiente y confirmado comparten carril, y el viejo sigue arriba', () => {
     const lanes = Bar.groupByLane([
-      order({ id: 'prep', status: 'preparing', created_at: agoMinutes(2) }),
+      order({ id: 'pend', status: 'pending', created_at: agoMinutes(2) }),
       order({ id: 'conf', status: 'confirmed', created_at: agoMinutes(9) }),
+      order({ id: 'prep', status: 'preparing', created_at: agoMinutes(12) }),
     ]);
-    expect(lanes.prep.map((o) => o.id)).toEqual(['conf', 'prep']);
+    expect(lanes.new.map((o) => o.id)).toEqual(['conf', 'pend']);
+    expect(lanes.prep.map((o) => o.id)).toEqual(['prep']);
+  });
+
+  it('lo que no esta pagado baja al final de "por preparar" (D73)', () => {
+    const lanes = Bar.groupByLane([
+      order({ id: 'debe', status: 'pending', payment_status: 'pending', created_at: agoMinutes(15) }),
+      order({ id: 'pagado', status: 'confirmed', payment_status: 'paid', created_at: agoMinutes(2) }),
+    ]);
+    expect(lanes.new.map((o) => o.id)).toEqual(['pagado', 'debe']);
   });
 
   it('un pedido sin fecha va al final, no al principio', () => {
@@ -172,7 +188,7 @@ describe('El orden dentro del carril', () => {
       order({ id: 'd', status: 'ready' }),
       order({ id: 'e', status: 'delivered' }),
     ];
-    expect(Bar.counts(orders)).toEqual({ new: 1, prep: 2, ready: 1, total: 4 });
+    expect(Bar.counts(orders)).toEqual({ new: 2, prep: 1, ready: 1, total: 4 });
   });
 });
 

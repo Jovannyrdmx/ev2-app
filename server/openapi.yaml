@@ -1383,7 +1383,7 @@ paths:
         | Desde | Hacia |
         |---|---|
         | `pending` | `confirmed`, `cancelled` |
-        | `confirmed` | `preparing`, `cancelled` |
+        | `confirmed` | `preparing`, `ready`, `cancelled` |
         | `preparing` | `ready`, `cancelled` |
         | `ready` | `delivered` |
         | `pos_error` | `confirmed`, `cancelled` |

@@ -31,6 +31,9 @@
 
   const state = {
     orders: [], lane: 'new', realtime: null, busy: new Set(), arrived: new Set(),
+    // En la PC de la barra (pantalla ancha y tactil) se ven los tres carriles a la vez,
+    // como un tablero: nada se esconde detras de una pestana (D73).
+    board: false,
     alert: true,
     // La barra en la que esta parado el cantinero. Se recuerda en el aparato, porque
     // el telefono de la barra de arriba es siempre el de la barra de arriba.
@@ -204,6 +207,17 @@
     setInterval(renderAll, 30000);
   }
 
+  // Tablero de tres columnas cuando cabe. `matchMedia` no existe en las pruebas.
+  const wide = typeof window.matchMedia === 'function' ? window.matchMedia('(min-width: 1024px)') : null;
+  function syncBoard() {
+    state.board = Boolean(wide && wide.matches);
+    document.body.classList.toggle('bar-board', state.board);
+  }
+  syncBoard();
+  if (wide && typeof wide.addEventListener === 'function') {
+    wide.addEventListener('change', () => { syncBoard(); renderAll(); });
+  }
+
   /**
    * Las terminales del club, para poder cobrar con tarjeta desde la barra.
    *
@@ -335,8 +349,25 @@
     });
 
     const lanes = EV2Bar.groupByLane(state.orders);
-    const list = lanes[state.lane] || [];
     const empty = { new: 'bar.emptyNew', prep: 'bar.emptyPrep', ready: 'bar.emptyReady' };
+
+    if (state.board) {
+      // Las tres columnas a la vez. Cada una con su conteo, para que el cantinero sepa
+      // de un vistazo si se le esta juntando trabajo en "listos" sin recoger.
+      $('lane-empty').hidden = true;
+      const titles = { new: 'bar.laneNew', prep: 'bar.lanePrep', ready: 'bar.laneReady' };
+      $('lane-list').innerHTML = `<div class="bar-columns">${EV2Bar.LANES.map((lane) => `
+        <section class="bar-column" data-column="${lane}">
+          <h2 class="bar-column-title">${escape(t(titles[lane]))}<span class="lane-count">${lanes[lane].length}</span></h2>
+          ${lanes[lane].length
+    ? lanes[lane].map((order) => card(order, now)).join('')
+    : `<p class="text-center text-white/40 text-sm py-10">${escape(t(empty[lane]))}</p>`}
+        </section>`).join('')}</div>`;
+      wireCards();
+      return;
+    }
+
+    const list = lanes[state.lane] || [];
     $('lane-empty').textContent = t(empty[state.lane]);
     $('lane-empty').hidden = list.length > 0;
 
@@ -348,6 +379,7 @@
     const minutes = EV2Bar.waitMinutes(order, now);
     const level = EV2Bar.urgency(minutes, EV2Bar.DEFAULT_THRESHOLDS);
     const action = EV2Bar.nextAction(order.status);
+    const second = EV2Bar.secondAction(order.status);
     const table = EV2Bar.destination(order);
     const busy = state.busy.has(order.id);
     const flash = state.arrived.has(order.id) ? ' just-arrived' : '';
@@ -381,10 +413,11 @@
         </div>
       </div>
       <div class="flex gap-2 mt-3">
-        ${action ? `<button class="ev2-button flex-1 rounded-lg" data-do="${escape(action.status)}" ${busy || !paid ? 'disabled' : ''}>${escape(t(action.key))}</button>` : ''}
+        ${action ? `<button class="${action.status === 'ready' ? 'btn-ok' : 'ev2-button'} bar-main flex-1 rounded-lg" data-do="${escape(action.status)}" ${busy || !paid ? 'disabled' : ''}>${escape(t(action.key))}</button>` : ''}
+        ${second ? `<button class="btn-secondary rounded-lg px-4 text-sm" data-do="${escape(second.status)}" ${busy || !paid ? 'disabled' : ''}>${escape(t(second.key))}</button>` : ''}
         ${EV2Bar.canCancel(order.status) ? `<button class="card rounded-lg px-4 text-sm text-red-300" data-do="cancelled" ${busy ? 'disabled' : ''}>${escape(t('bar.cancel'))}</button>` : ''}
-        <button class="card rounded-lg px-3 text-sm" data-move="up" title="${escape(t('bar.moveUp'))}" ${busy ? 'disabled' : ''}>↑</button>
-        <button class="card rounded-lg px-3 text-sm" data-move="down" title="${escape(t('bar.moveDown'))}" ${busy ? 'disabled' : ''}>↓</button>
+        <button class="card rounded-lg px-3 text-sm bar-move" data-move="up" title="${escape(t('bar.moveUp'))}" ${busy ? 'disabled' : ''}>↑</button>
+        <button class="card rounded-lg px-3 text-sm bar-move" data-move="down" title="${escape(t('bar.moveDown'))}" ${busy ? 'disabled' : ''}>↓</button>
       </div>
     </article>`;
   }
@@ -409,7 +442,9 @@
    * de verdad cada cliente.
    */
   async function move(orderId, direction) {
-    const ids = EV2Bar.reorder(state.orders, state.lane, orderId, direction);
+    const order = state.orders.find((o) => o.id === orderId);
+    const lane = state.board && order ? EV2Bar.laneOf(order.status) : state.lane;
+    const ids = EV2Bar.reorder(state.orders, lane, orderId, direction);
     if (!ids) return;
     // Se pinta antes de que el servidor conteste: mover una tarjeta tiene que sentirse
     // inmediato, y si falla se recarga la cola, que es la verdad.
@@ -487,6 +522,32 @@
    * `navigator.vibrate` no existe en escritorio ni en iOS, así que la tarjeta también
    * destella — el aviso no puede depender de una sola vía.
    */
+  /**
+   * Un tono corto. La PC de la barra no vibra, y su bocina, si la tiene, se oye a un
+   * metro aunque la musica este alta. Si el navegador no deja sonar (sin un toque
+   * previo en la pagina) no pasa nada: queda el destello y el aviso.
+   */
+  let audio = null;
+  function beep() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      audio = audio || new Ctx();
+      const now = audio.currentTime;
+      [0, 0.18].forEach((delay) => {
+        const osc = audio.createOscillator();
+        const gain = audio.createGain();
+        osc.frequency.value = 1320;
+        gain.gain.setValueAtTime(0.0001, now + delay);
+        gain.gain.exponentialRampToValueAtTime(0.25, now + delay + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 0.14);
+        osc.connect(gain).connect(audio.destination);
+        osc.start(now + delay);
+        osc.stop(now + delay + 0.15);
+      });
+    } catch { /* sin audio, queda el aviso visual */ }
+  }
+
   function alertNewOrder(orderId) {
     state.arrived.add(orderId);
     setTimeout(() => { state.arrived.delete(orderId); }, 3000);
@@ -494,6 +555,7 @@
     try {
       if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
     } catch { /* algunos navegadores lo bloquean sin interacción previa */ }
+    beep();
     toast(t('bar.newOrder'), 'ok');
   }
 
@@ -538,7 +600,7 @@
         try {
           const { order } = await api.get(`/nightclubs/${clubId()}/orders/${change.fetch}`);
           if (!state.orders.some((o) => o.id === order.id)) state.orders.push(order);
-          if (message.type === 'order_created') alertNewOrder(order.id);
+          if (['order_created', 'order_confirmed'].includes(message.type)) alertNewOrder(order.id);
         } catch (err) { showError(err); }
       }
       renderAll();

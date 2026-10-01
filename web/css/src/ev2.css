@@ -302,3 +302,15 @@ select.field option { background: var(--ev2-panel); }
 :target { scroll-margin-top: 1rem; }
 #eliminar-datos, #delete-data { border-left: 3px solid var(--ev2-gold); padding-left: 1rem; }
 body.page-legal h2 { font-family: 'Poppins', sans-serif; font-weight: 600; }
+
+/* ---------------------------------------------------------------- Bar board (D73) */
+.bar-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+.bar-column { background: rgba(255,255,255,.025); border: 1px solid var(--ev2-border); border-radius: 16px; padding: .75rem; min-height: 60vh; }
+.bar-column > article + article { margin-top: .75rem; }
+.bar-column-title { font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 1.05rem; display: flex; align-items: center; justify-content: space-between; padding: .25rem .25rem .75rem; color: var(--ev2-muted); }
+.bar-column[data-column="new"] .bar-column-title { color: var(--ev2-cyan); }
+.bar-column[data-column="ready"] .bar-column-title { color: var(--ev2-lime); }
+body.bar-board .bar-main { min-height: 64px; font-size: 1.15rem; }
+body.bar-board .bar-move { min-height: 64px; }
+body.bar-board #lane-list article .font-display { font-size: 1.35rem; }
+body.bar-board #lane-list article p.text-sm { font-size: 1rem; }

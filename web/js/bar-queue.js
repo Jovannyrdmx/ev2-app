@@ -17,16 +17,20 @@
   'use strict';
 
   /**
-   * Tres carriles, no seis. El bartender no piensa en "confirmed" y "preparing" como
-   * cosas distintas: piensa en "me acaba de entrar", "lo estoy haciendo" y "ya está,
-   * que lo recojan".
+   * Tres carriles, no seis. El bartender no piensa en "pending", "confirmed" y
+   * "preparing": piensa en "lo tengo que hacer", "lo estoy haciendo" y "ya esta, que
+   * lo recojan".
+   *
+   * Un pedido pagado entra CONFIRMADO, y antes caia en "En preparacion" aunque nadie lo
+   * hubiera tocado: la pantalla abria en "Nuevos" vacio mientras la cola real esperaba
+   * en la otra pestana (D73). Ahora todo lo que falta por hacer esta en el primero.
    */
   const LANES = ['new', 'prep', 'ready'];
 
   const LANE_OF = {
     pending: 'new',
     pos_error: 'new',
-    confirmed: 'prep',
+    confirmed: 'new',
     preparing: 'prep',
     ready: 'ready',
   };
@@ -38,17 +42,27 @@
   const isClosed = (status) => CLOSED.includes(status);
 
   /**
-   * El botón principal de un pedido. Cada uno es UNA transición del servidor; no se
+   * El boton principal de un pedido. Cada uno es UNA transicion del servidor; no se
    * encadenan dos llamadas en un toque, porque si la segunda falla el pedido queda en
    * un estado que la pantalla no muestra y nadie se entera.
+   *
+   * Un pedido pagado se marca LISTO de un solo toque (D73): el servidor acepta
+   * confirmed -> ready. "Empezar" queda como boton secundario para lo que de verdad
+   * tarda (una ronda, una cubeta) y el mesero quiere saber que ya va.
    */
   const NEXT_ACTION = {
     pending: { status: 'confirmed', key: 'bar.accept' },
     pos_error: { status: 'confirmed', key: 'bar.retry' },
-    confirmed: { status: 'preparing', key: 'bar.start' },
+    confirmed: { status: 'ready', key: 'bar.markReady' },
     preparing: { status: 'ready', key: 'bar.markReady' },
     ready: { status: 'delivered', key: 'bar.markDelivered' },
   };
+
+  /** El boton chico, junto al principal. Solo existe donde hay dos caminos. */
+  const SECOND_ACTION = {
+    confirmed: { status: 'preparing', key: 'bar.start' },
+  };
+  const secondAction = (status) => SECOND_ACTION[status] || null;
 
   const nextAction = (status) => NEXT_ACTION[status] || null;
 
@@ -95,6 +109,9 @@
       if (lane) lanes[lane].push(order);
     }
     for (const lane of LANES) lanes[lane].sort(queueOrder);
+    // Lo que no esta pagado no se puede preparar: se queda visible, pero debajo de lo
+    // que si se puede hacer ya, para que no tape la cola real (D73).
+    lanes.new = lanes.new.filter((o) => isPaid(o)).concat(lanes.new.filter((o) => !isPaid(o)));
     return lanes;
   }
 
@@ -269,6 +286,7 @@
     laneOf,
     isClosed,
     nextAction,
+    secondAction,
     canCancel,
     waitMinutes,
     urgency,

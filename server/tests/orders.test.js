@@ -237,6 +237,26 @@ describe('Flujo de estados', () => {
     expect(rows[0].bartender_id).toBe(bartender.id);
   });
 
+  it('la barra lo marca listo de un solo toque, sin pasar por "preparando" (D73)', async () => {
+    const id = await makeOrder();
+    await payFor(id);
+    const res = await setStatus(id, 'ready', bartender);
+    expect(res.status).toBe(200);
+    expect(res.body.order.status).toBe('ready');
+    const { rows } = await pool.query(
+      'SELECT prep_started_at, ready_at, bartender_id FROM drink_orders WHERE id = $1', [id]);
+    // No se inventa cuando empezo: no se sabe, y la hora queda vacia.
+    expect(rows[0].prep_started_at).toBeNull();
+    expect(rows[0].ready_at).toBeInstanceOf(Date);
+    expect(rows[0].bartender_id).toBe(bartender.id);
+  });
+
+  it('un pedido sin pagar no se salta a listo', async () => {
+    const id = await makeOrder();
+    const res = await setStatus(id, 'ready', bartender);
+    expect(res.status).toBe(409);
+  });
+
   it('rechaza saltarse etapas', async () => {
     const id = await makeOrder();
     const res = await setStatus(id, 'delivered', bartender);
