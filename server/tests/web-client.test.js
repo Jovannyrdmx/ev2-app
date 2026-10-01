@@ -498,3 +498,46 @@ describe('Origen no permitido', () => {
     process.env.ALLOWED_ORIGINS = saved;
   });
 });
+
+// ---------------------------------------------------------------- la carta (D74)
+
+describe('La carta del cliente (D74)', () => {
+  const C = require('../../web/js/client.js');
+  const carta = [
+    { id: '1', name: '30-30 AÑEJO', category: 'Botellas' },
+    { id: '2', name: 'AZULITO', category: 'Drinks' },
+    { id: '3', name: 'TECATE ROJA 1/4', category: 'Cervezas' },
+    { id: '4', name: 'CUB. TECATE LIGHT 1/4', category: 'Cervezas' },
+    { id: '5', name: 'PIÑA COLADA', category: 'Drinks' },
+  ];
+
+  it('las categorías van en el orden de la barra, no del abecedario', () => {
+    expect(C.orderCategories(['Botellas', 'Sin alcohol', 'Drinks', 'Cervezas', 'Shots', 'Nueva', 'Drinks']))
+      .toEqual(['Drinks', 'Cervezas', 'Shots', 'Botellas', 'Sin alcohol', 'Nueva']);
+  });
+
+  it('"Todo" respeta ese mismo orden', () => {
+    expect(C.filterMenu(carta, {}).map((d) => d.id)).toEqual(['2', '5', '3', '4', '1']);
+  });
+
+  it('buscar ignora acentos, mayúsculas y la categoría elegida', () => {
+    expect(C.filterMenu(carta, { search: 'anejo', category: 'Drinks' }).map((d) => d.id)).toEqual(['1']);
+    expect(C.filterMenu(carta, { search: 'pina' }).map((d) => d.id)).toEqual(['5']);
+    expect(C.filterMenu(carta, { search: 'tecate light' }).map((d) => d.id)).toEqual(['4']);
+  });
+
+  it('sin búsqueda filtra por categoría', () => {
+    expect(C.filterMenu(carta, { category: 'Cervezas' }).map((d) => d.id)).toEqual(['3', '4']);
+  });
+
+  it('"repetir lo último" toma el pedido más reciente que no se canceló', () => {
+    const pedidos = [
+      { id: 'c', status: 'cancelled', items: [{ drink_id: '1', quantity: 1 }] },
+      { id: 'b', status: 'delivered', items: [{ drink_id: '2', quantity: 2 }] },
+      { id: 'a', status: 'delivered', items: [{ drink_id: '3', quantity: 1 }] },
+    ];
+    expect(C.lastRepeatable(pedidos).id).toBe('b');
+    expect(C.lastRepeatable([{ id: 'x', status: 'pending', items: [] }])).toBeNull();
+    expect(C.lastRepeatable(undefined)).toBeNull();
+  });
+});

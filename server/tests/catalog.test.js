@@ -233,3 +233,39 @@ describe('Club', () => {
     expect(barra.body.events.filter((e) => e.type === 'order_created')).toHaveLength(1);
   });
 });
+
+describe('Vitrina pública (D74)', () => {
+  const showcase = (slug) => api().get(`/api/nightclubs/by-slug/${slug}/showcase`);
+
+  it('enseña la carta y las noches publicadas sin pedir cuenta', async () => {
+    await pool.query(
+      `INSERT INTO events_calendar (nightclub_id, name, event_date, doors_open_at, ticket_price, status)
+       VALUES ($1,'Viernes',CURRENT_DATE + 2, now() + interval '2 days',150,'published'),
+              ($1,'Borrador',CURRENT_DATE + 3, now() + interval '3 days',150,'draft')`, [club.id]);
+    const res = await showcase('ev2-cat');
+    expect(res.status).toBe(200);
+    expect(res.body.nightclub.slug).toBe('ev2-cat');
+    expect(res.body.drinks.map((d) => d.name).sort()).toEqual(['Cerveza nacional', 'Margarita']);
+    expect(res.body.events.map((e) => e.name)).toEqual(['Viernes']);
+  });
+
+  it('no dice cuánto queda: la existencia no es pública', async () => {
+    const res = await showcase('ev2-cat');
+    for (const d of res.body.drinks) {
+      expect(d).not.toHaveProperty('stock');
+      expect(d).not.toHaveProperty('low_stock');
+    }
+    expect(res.body.events.every((e) => !('reservations_count' in e))).toBe(true);
+  });
+
+  it('lo dado de baja o no disponible no se anuncia', async () => {
+    await pool.query('UPDATE drinks SET active = false WHERE id = $1', [beer.id]);
+    await pool.query('UPDATE drinks SET available = false WHERE id = $1', [cocktail.id]);
+    const res = await showcase('ev2-cat');
+    expect(res.body.drinks).toEqual([]);
+  });
+
+  it('un club que no existe es 404', async () => {
+    expect((await showcase('no-existe')).status).toBe(404);
+  });
+});

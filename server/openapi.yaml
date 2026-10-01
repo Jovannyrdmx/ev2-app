@@ -755,6 +755,55 @@ paths:
                   nightclub: { $ref: '#/components/schemas/NightclubPublic' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/nightclubs/by-slug/{slug}/showcase:
+    get:
+      operationId: getNightclubsBySlugShowcase
+      tags: [Club]
+      summary: Vitrina pública — la carta y las próximas noches
+      description: |
+        Público (D74). Lo mismo que el club ya imprime en su carta y sus carteles: nombre,
+        categoría y precio de lo disponible, y las noches publicadas. Sin existencias, sin
+        conteo de reservaciones, sin personas. Pedir y reservar siguen pidiendo cuenta.
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string, example: ev2 }
+      responses:
+        '200':
+          description: Carta y noches publicadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nightclub: { $ref: '#/components/schemas/NightclubPublic' }
+                  drinks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        name: { type: string }
+                        category: { type: [string, 'null'] }
+                        price: { type: string, example: '60.00' }
+                        currency: { type: string, example: MXN }
+                        description: { type: [string, 'null'] }
+                        image_url: { type: [string, 'null'] }
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        name: { type: string }
+                        event_date: { type: string, format: date }
+                        doors_open_at: { type: string, format: date-time }
+                        ticket_price: { type: string }
+                        currency: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/nightclubs/{nightclubId}:
     get:
       operationId: getNightclubsByNightclubId

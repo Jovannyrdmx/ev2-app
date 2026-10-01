@@ -536,7 +536,7 @@
 
   function renderBadges() {
     const nuevos = EV2Flirt.unread(state.inbox);
-    for (const id of ['flirt-badge', 'flirt-inbox-badge']) {
+    for (const id of ['flirt-badge', 'flirt-badge-show', 'flirt-inbox-badge']) {
       const el = $(id);
       if (!el) continue;
       el.textContent = String(nuevos);

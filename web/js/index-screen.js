@@ -27,7 +27,7 @@
   const CLUB_SLUG = meta('ev2:club', 'ev2');
 
   const state = {
-    club: null, drinks: [], categories: [], category: null,
+    club: null, drinks: [], categories: [], category: null, search: '',
     tables: [], landmarks: [], canvas: null, floors: [], floor: null,
     selectedId: null, myTable: null, orders: [], realtime: null,
     taxi: { availability: null, ride: null, rides: [], fares: [], pickup: null,
@@ -146,6 +146,8 @@
     $('btn-use-pin').hidden = !(staff && access.staffPassword);
 
     $('auth-error').hidden = true;
+    // Ver la carta sin cuenta es cosa del cliente; en la tableta del personal estorba.
+    if ($('btn-preview')) $('btn-preview').hidden = !cliente;
     renderSocialButtons();
     if (teclado) renderPin();
   }
@@ -658,7 +660,8 @@
     renderMenu();
     renderCart();
     renderOrders();
-    if (!$('screen-app').hidden) { renderFloor(); renderTaxi(); }
+    if (!$('screen-app').hidden) { renderFloor(); renderTaxi(); renderHome(); }
+    if (!$('screen-preview').hidden) renderPreview();
     if (!$('screen-staff').hidden) renderStaffPending();
     renderSocialButtons();
     // El teclado se vuelve a armar: las teclas de borrar y limpiar llevan texto.
@@ -779,6 +782,7 @@
       }
       if (state.myTable) state.selectedId = state.myTable.id;
       renderFloor();
+      renderHome();
     } catch (err) { showError(err); }
   }
 
@@ -786,7 +790,7 @@
     try {
       const data = await api.get(`/nightclubs/${clubId()}/drinks`);
       state.drinks = data.drinks || [];
-      state.categories = [...new Set(state.drinks.map((d) => d.category).filter(Boolean))].sort();
+      state.categories = EV2Client.orderCategories(state.drinks.map((d) => d.category));
       renderMenu();
     } catch (err) { showError(err); }
   }
@@ -975,7 +979,7 @@
       b.onclick = () => { state.category = b.dataset.cat || null; renderMenu(); };
     });
 
-    const list = state.drinks.filter((d) => !state.category || d.category === state.category);
+    const list = EV2Client.filterMenu(state.drinks, { category: state.category, search: state.search });
     $('menu-list').innerHTML = list.map((d) => {
       const qty = cart.quantityOf(d.id);
       const out = d.available === false || Number(d.stock) <= 0;
@@ -984,17 +988,17 @@
         ${thumb(d)}
         <div class="flex-1 min-w-0">
           <p class="font-semibold">${escape(d.name)}</p>
-          <p class="text-xs text-white/50">${escape(d.category || '')}${out ? ` · ${escape(t('menu.soldOut'))}` : ''}</p>
+          ${state.category && !out ? '' : `<p class="text-xs text-white/50">${state.category ? '' : escape(d.category || '')}${out ? `${state.category ? '' : ' · '}${escape(t('menu.soldOut'))}` : ''}</p>`}
           <p class="text-sm mt-1">${money(d.price, d.currency)}</p>
         </div>
         ${out ? '' : `
         <div class="flex items-center gap-2">
-          ${qty > 0 ? `<button data-less="${d.id}" class="w-9 h-9 rounded-full card">−</button>
-                       <span class="w-5 text-center">${qty}</span>` : ''}
-          <button data-more="${d.id}" class="w-9 h-9 rounded-full ev2-button">+</button>
+          ${qty > 0 ? `<button data-less="${d.id}" class="w-11 h-11 rounded-full card text-lg" aria-label="−">−</button>
+                       <span class="w-5 text-center font-semibold">${qty}</span>` : ''}
+          <button data-more="${d.id}" class="w-11 h-11 rounded-full ev2-button text-lg" aria-label="+">+</button>
         </div>`}
       </div>`;
-    }).join('') || `<p class="text-white/40 text-sm text-center py-10">${escape(t('menu.empty'))}</p>`;
+    }).join('') || `<p class="text-white/40 text-sm text-center py-10">${escape(t(state.search ? 'menu.noMatch' : 'menu.empty'))}</p>`;
 
     $('menu-list').querySelectorAll('[data-more]').forEach((b) => {
       b.onclick = () => {
@@ -1049,6 +1053,7 @@
   // ---------------------------------------------------------------- pedidos
 
   function renderOrders() {
+    renderHome();
     const lang = EV2Format.getLanguage();
     const open = state.orders.filter((o) => EV2Client.isOpenOrder(o.status)).length;
     $('orders-badge').hidden = open === 0;
@@ -1177,6 +1182,7 @@
     // La insignia de la pestaña: se ve el aviso aunque estés en el menú pidiendo.
     $('taxi-badge').hidden = !head.urgent;
     $('taxi-badge').textContent = '!';
+    renderHome();
 
     const pickup = state.taxi.pickup;
     $('taxi-pickup').hidden = !pickup;
@@ -1367,18 +1373,176 @@
 
   // ---------------------------------------------------------------- navegación
 
-  const VIEWS = ['map', 'menu', 'orders', 'show', 'flirt', 'taxi', 'profile'];
+  const VIEWS = ['home', 'map', 'menu', 'orders', 'show', 'flirt', 'taxi', 'profile'];
+  // Las vistas que no tienen pestaña propia encienden la de donde se llega a ellas.
+  const TAB_OF = { map: 'home', taxi: 'home', flirt: 'show' };
 
   function showView(name) {
     for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
+    const tab = TAB_OF[name] || name;
     document.querySelectorAll('.nav-tab').forEach((b) => {
-      b.className = `nav-tab py-3 text-[10px] ${b.dataset.view === name ? 'tab-active' : 'text-white/50'}`;
+      const on = b.dataset.view === tab;
+      b.className = `nav-tab py-2.5 text-[11px] ${on ? 'tab-active' : 'text-white/50'}`;
+      if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     });
+    if (name === 'home') renderHome();
+    const main = document.querySelector('#screen-app main');
+    if (main) main.scrollTop = 0;
     // El lienzo se mide al mostrarse: dibujarlo mientras estaba oculto lo deja en blanco.
     if (name === 'map') drawMap();
     hub.emit('view', name);
   }
   document.querySelectorAll('.nav-tab').forEach((b) => { b.onclick = () => showView(b.dataset.view); });
+  document.querySelectorAll('[data-goto]').forEach((b) => { b.onclick = () => showView(b.dataset.goto); });
+
+  // ---------------------------------------------------------------- vitrina sin cuenta (D74)
+
+  // Antes de la cuenta: la carta y las noches, de solo lectura. Pedir y reservar siguen
+  // pidiendo cuenta, porque cobran dinero y necesitan un nombre.
+  const preview = { drinks: [], events: [], categories: [], category: null, search: '', loaded: false, failed: false };
+
+  async function openPreview() {
+    $('screen-auth').hidden = true;
+    $('screen-preview').hidden = false;
+    window.scrollTo(0, 0);
+    if (!preview.loaded) {
+      try {
+        const res = await fetch(`${meta('ev2:api', '/api')}/nightclubs/by-slug/${encodeURIComponent(CLUB_SLUG)}/showcase`);
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        preview.drinks = data.drinks || [];
+        preview.events = data.events || [];
+        preview.categories = EV2Client.orderCategories(preview.drinks.map((d) => d.category));
+        preview.loaded = true;
+        preview.failed = false;
+      } catch {
+        preview.failed = true;
+      }
+    }
+    renderPreview();
+  }
+
+  function renderPreview() {
+    const nights = preview.events;
+    $('preview-nights-wrap').hidden = nights.length === 0;
+    $('preview-nights').innerHTML = nights.map((e) => {
+      const date = new Date(`${String(e.event_date).slice(0, 10)}T12:00:00`);
+      const day = Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString(lang() === 'en' ? 'en-US' : 'es-MX',
+        { weekday: 'long', day: 'numeric', month: 'long' });
+      const doors = e.doors_open_at ? new Date(e.doors_open_at).toLocaleTimeString(lang() === 'en' ? 'en-US' : 'es-MX',
+        { hour: 'numeric', minute: '2-digit' }) : '';
+      return `
+      <div class="card rounded-xl p-4">
+        <p class="font-display text-lg leading-tight">${escape(e.name)}</p>
+        <p class="text-sm text-white/60 mt-0.5 capitalize">${escape(day)}</p>
+        <p class="text-xs text-white/45 mt-1">${doors ? escape(t('preview.doors', { time: doors })) : ''}${Number(e.ticket_price) > 0 ? ` · ${escape(t('preview.cover', { amount: money(e.ticket_price, e.currency) }))}` : ''}</p>
+      </div>`;
+    }).join('');
+
+    const cats = $('preview-categories');
+    cats.innerHTML = [null, ...preview.categories].map((c) => `
+      <button data-pcat="${c === null ? '' : escape(c)}"
+              class="px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${preview.category === c ? 'ev2-button' : 'card'}">
+        ${c === null ? escape(t('menu.all')) : escape(c)}
+      </button>`).join('');
+    cats.querySelectorAll('[data-pcat]').forEach((b) => {
+      b.onclick = () => { preview.category = b.dataset.pcat || null; renderPreview(); };
+    });
+
+    if (preview.failed) {
+      $('preview-list').innerHTML = `<p class="text-sm text-red-300 text-center py-8">${escape(t('preview.error'))}</p>`;
+      return;
+    }
+    const list = EV2Client.filterMenu(preview.drinks, { category: preview.category, search: preview.search });
+    $('preview-list').innerHTML = list.map((d) => `
+      <div class="card rounded-xl p-3 flex items-center gap-3">
+        ${thumb(d)}
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold">${escape(d.name)}</p>
+          ${preview.category ? '' : `<p class="text-xs text-white/50">${escape(d.category || '')}</p>`}
+        </div>
+        <p class="text-sm font-semibold">${money(d.price, d.currency)}</p>
+      </div>`).join('') || `<p class="text-white/40 text-sm text-center py-10">${escape(t(preview.search ? 'menu.noMatch' : 'menu.empty'))}</p>`;
+  }
+
+  $('btn-preview').onclick = openPreview;
+  $('btn-preview-back').onclick = () => { $('screen-preview').hidden = true; $('screen-auth').hidden = false; };
+  $('btn-preview-join').onclick = () => {
+    $('screen-preview').hidden = true;
+    $('screen-auth').hidden = false;
+    switchMode('client');
+    switchAuthTab('register');
+  };
+  $('preview-search').addEventListener('input', (e) => { preview.search = e.target.value; renderPreview(); });
+
+  // ---------------------------------------------------------------- inicio (D74)
+
+  function renderHome() {
+    if (!$('view-home')) return;
+    const user = api.session.user || {};
+    $('home-name').textContent = user.display_name || '';
+    const table = state.myTable;
+    $('home-where').textContent = table ? t('home.atTable', { code: table.code }) : t('home.noTable');
+    // La tarjeta de la mesa cambia de trabajo: sin mesa invita a elegir; con mesa, lleva al plano.
+    const seat = $('home-seat').querySelectorAll('span span');
+    seat[0].textContent = table ? t('home.seatedTitle', { code: table.code }) : t('home.seatTitle');
+    seat[1].textContent = table ? t('home.seatedHint') : t('home.seatHint');
+
+    const last = EV2Client.lastRepeatable(state.orders);
+    $('home-repeat').hidden = !last;
+    $('home-orders').classList.toggle('col-span-2', !last);
+
+    const live = state.orders.filter((o) => EV2Client.isOpenOrder(o.status));
+    $('home-live').hidden = live.length === 0;
+    if (live.length) {
+      const o = live[0];
+      $('home-live-status').textContent = EV2Client.orderLabel(o.status, lang());
+      $('home-live-items').textContent = (o.items || [])
+        .map((i) => `${i.quantity}× ${i.name || i.drink_name || ''}`).join(', ');
+      $('home-live-bar').style.width = `${Math.round(EV2Client.orderProgress(o.status) * 100)}%`;
+      $('home-live-count').hidden = live.length < 2;
+      $('home-live-count').textContent = t('home.liveMore', { n: live.length - 1 });
+    }
+
+    const ride = state.taxi.ride;
+    const rideLive = Boolean(ride && EV2Taxi.isLive(ride.status));
+    $('home-exit-hint').textContent = t(rideLive ? 'home.exitLive' : 'home.exitHint');
+    $('home-exit').style.borderColor = rideLive ? 'var(--ev2-lime)' : '';
+  }
+
+  $('home-seat').onclick = () => showView('map');
+  $('home-menu').onclick = () => showView('menu');
+  $('home-orders').onclick = () => showView('orders');
+  $('home-live').onclick = () => showView('orders');
+  $('home-show').onclick = () => showView('show');
+  $('home-flirt').onclick = () => showView('flirt');
+  $('home-exit').onclick = () => showView('taxi');
+  $('show-flirt').onclick = () => showView('flirt');
+  $('profile-taxi').onclick = () => showView('taxi');
+  $('profile-map').onclick = () => showView('map');
+
+  // Repetir lo ultimo: se llena el carrito y la persona lo revisa antes de pedir. No se
+  // manda solo: un toque accidental no puede costar dinero.
+  $('home-repeat').onclick = () => {
+    const last = EV2Client.lastRepeatable(state.orders);
+    if (!last) return;
+    let missing = 0;
+    for (const item of last.items || []) {
+      const drink = state.drinks.find((d) => d.id === item.drink_id);
+      for (let i = 0; i < Number(item.quantity || 0); i += 1) {
+        if (!drink || !cart.add(drink)) { missing += 1; break; }
+      }
+    }
+    renderMenu(); renderCart();
+    showView('menu');
+    toast(t(missing ? 'home.repeatPartial' : 'home.repeated'), missing ? 'info' : 'ok');
+  };
+
+  // Buscar en la carta: mientras se escribe, sin boton.
+  $('menu-search').addEventListener('input', (e) => {
+    state.search = e.target.value;
+    renderMenu();
+  });
 
   // ---------------------------------------------------------------- tiempo real
 
