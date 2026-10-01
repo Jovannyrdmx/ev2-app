@@ -10,78 +10,9 @@
     <meta name="ev2:api" content="/api">
     <meta name="ev2:ws" content="">
     <meta name="ev2:club" content="ev2">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
-
-        :root {
-            --ev2-cyan: #00BFFF;
-            --ev2-pink: #FF1493;
-            --ev2-lime: #00FF00;
-            --ev2-gold: #FFD700;
-            --ev2-red: #FF4444;
-        }
-
-        body { font-family: 'Inter', system-ui, sans-serif; background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%); }
-        .font-display { font-family: 'Poppins', sans-serif; font-weight: 700; }
-
-        .ev2-gradient {
-            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
-            -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-        }
-        .ev2-button {
-            background: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink));
-            color: #000; font-weight: 700;
-            transition: filter .15s ease, transform .1s ease;
-        }
-        .ev2-button:active { transform: scale(.98); }
-        .ev2-button:disabled { filter: grayscale(1) brightness(.55); cursor: not-allowed; }
-
-        button, select, input, textarea, .tap { min-height: 44px; }
-        textarea { min-height: 96px; }
-
-        .card { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10); }
-
-        .stat-card {
-            background: rgba(0,191,255,.10); border: 1px solid var(--ev2-pink);
-            border-radius: 10px; padding: 10px 8px; text-align: center;
-        }
-        .stat-number { font-size: 1.5rem; font-weight: 700; color: var(--ev2-lime); line-height: 1.1; }
-        .stat-label { font-size: .62rem; color: var(--ev2-cyan); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
-        .stat-card.warn { border-color: var(--ev2-red); }
-        .stat-card.warn .stat-number { color: var(--ev2-red); }
-
-        .tab { border-bottom: 3px solid transparent; color: rgba(255,255,255,.5); font-weight: 600; }
-        .tab.active { color: var(--ev2-cyan); border-bottom-color: var(--ev2-cyan); }
-
-        .pill { font-size: .65rem; padding: .15rem .5rem; border-radius: 9999px; font-weight: 700; white-space: nowrap; }
-        .pill-ok { background: rgba(0,255,0,.18); color: var(--ev2-lime); }
-        .pill-wait { background: rgba(255,215,0,.18); color: var(--ev2-gold); }
-        .pill-off { background: rgba(255,255,255,.12); color: rgba(255,255,255,.6); }
-        .pill-bad { background: rgba(255,68,68,.18); color: var(--ev2-red); }
-
-        .chip {
-            padding: .25rem .6rem; border-radius: 9999px; font-size: .7rem;
-            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
-        }
-        .chip.on { background: var(--ev2-cyan); color: #000; border-color: var(--ev2-cyan); font-weight: 700; }
-
-        .field { width: 100%; padding: .6rem 1rem; border-radius: .6rem; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); outline: none; }
-        .field:focus { border-color: var(--ev2-cyan); }
-        .field.bad { border-color: var(--ev2-red); }
-        .field-error { font-size: .7rem; color: var(--ev2-red); margin-top: .15rem; }
-        .label { font-size: .68rem; color: rgba(255,255,255,.5); display: block; margin-bottom: .2rem; }
-
-        .dot { width: .5rem; height: .5rem; border-radius: 9999px; display: inline-block; }
-        .dot-on { background: var(--ev2-lime); }
-        .dot-off { background: var(--ev2-red); }
-        .dot-wait { background: var(--ev2-gold); }
-
-        [hidden] { display: none !important; }
-    </style>
+    <link rel="stylesheet" href="css/ev2.css">
 </head>
-<body class="text-white">
+<body class="text-white page-manager">
 <div class="max-w-2xl mx-auto min-h-screen flex flex-col">
 
   <!-- ============================ ENTRAR ============================ -->
@@ -990,6 +921,7 @@
 
 <script src="js/api.js"></script>
 <script src="js/format.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/roles.js"></script>
 <script src="js/password-gate.js"></script>
 <script src="js/warehouse.js"></script>

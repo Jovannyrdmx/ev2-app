@@ -19,6 +19,10 @@
 /* global module */
 (function (root, factory) {
   'use strict';
+  // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
+  const ask = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.confirm(text, opts) : Promise.resolve(window.confirm(text)));
+
   const lib = factory();
   if (typeof module === 'object' && module.exports) module.exports = lib;
   root.EV2ShiftCut = lib;
@@ -257,7 +261,7 @@
         return;
       }
       if (tipo === 'declare'
-        && !window.confirm(t('cut.confirmDeclare', { amount: dinero(monto) }))) return;
+        && !(await ask(t('cut.confirmDeclare', { amount: dinero(monto) })))) return;
 
       estado.busy = true;
       const boton = $(tipo === 'drop' ? 'cut-drop' : 'cut-declare');

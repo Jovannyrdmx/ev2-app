@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v31';
+const VERSION = 'ev2-v32';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -61,6 +61,14 @@ const SHELL = [
   // se puso es un PNG. Apuntar a 'ev2-logo.svg' -- que no existe -- dejaba la app sin
   // icono grande al agregarla a la pantalla de inicio, y el service worker fallaba al
   // guardarlo en silencio.
+  'js/ui.js',
+  // La hoja de estilo, las letras y los iconos viven aquí mismo (D71): sin señal la app
+  // abre con su diseño, no con los botones grises del navegador.
+  'css/ev2.css',
+  'fonts/inter-latin-400-normal.woff2', 'fonts/inter-latin-500-normal.woff2',
+  'fonts/inter-latin-600-normal.woff2', 'fonts/inter-latin-700-normal.woff2',
+  'fonts/poppins-latin-500-normal.woff2', 'fonts/poppins-latin-600-normal.woff2',
+  'fonts/poppins-latin-700-normal.woff2',
   'images/favicon-32x32.png', 'images/ev2-logo.svg.png',
 ];
 

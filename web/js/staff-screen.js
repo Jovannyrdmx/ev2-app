@@ -8,6 +8,10 @@
           EV2Client, EV2DrinkArt, EV2OrderTaking */
 (function () {
   'use strict';
+  // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
+  const ask = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.confirm(text, opts) : Promise.resolve(window.confirm(text)));
+
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -813,9 +817,9 @@
             ? 'ev2-button rounded-lg px-4 py-3 font-display flex-1'
             : 'card rounded-lg px-3 py-3 text-sm text-red-300';
           b.textContent = t(action.key);
-          b.onclick = () => {
+          b.onclick = async () => {
             // Marcar que no llegó libera una mesa que alguien pagó: se confirma.
-            if (action.confirm && !window.confirm(t('door.confirmNoShow'))) return;
+            if (action.confirm && !(await ask(t('door.confirmNoShow'), { danger: true }))) return;
             setReservation(r, action.status, b);
           };
           row.appendChild(b);
@@ -1049,7 +1053,7 @@
     const pedidos = enLaBarraDe(tableId);
     if (!pedidos.length) { toast(t('order.reprintNone'), 'info'); return; }
     const code = (mesa && mesa.code) || '';
-    if (!window.confirm(t('order.reprintConfirm', { n: pedidos.length, code }))) return;
+    if (!(await ask(t('order.reprintConfirm', { n: pedidos.length, code })))) return;
 
     const antes = button.textContent;
     button.disabled = true;
@@ -1096,7 +1100,7 @@
         : t('bill.confirm', {
           code: bill.table.code, total: money(bill.total, bill.currency),
         });
-      if (!window.confirm(resumen)) return;
+      if (!(await ask(resumen))) return;
 
       button.textContent = t('bill.sending');
       await api.post(`/nightclubs/${clubId()}/tables/${tableId}/bill/print`, {});
@@ -1443,7 +1447,7 @@
         t,
         money: (a, c) => EV2Format.money(a, c || state.currency),
         errorMessage: (err) => EV2Format.errorMessage(err),
-        confirm: (texto) => window.confirm(texto),
+        confirm: (texto) => ask(texto),
         onPaid: async () => {
           toast(t('take.charged'), 'ok');
           await Promise.all([loadOrders(), loadTables()]);
@@ -1491,7 +1495,7 @@
   }
 
   async function releaseGuest(tableId, userId) {
-    if (!window.confirm(t('floor.confirmRelease'))) return;
+    if (!(await ask(t('floor.confirmRelease'), { danger: true }))) return;
     try {
       await api.post(`/nightclubs/${clubId()}/tables/${tableId}/release`, { user_id: userId });
       await loadTables();
@@ -1548,7 +1552,7 @@
 
   $('btn-shift').onclick = async () => {
     const onShift = Boolean(state.employee && state.employee.on_shift);
-    if (onShift && !window.confirm(t('floor.confirmEndShift'))) return;
+    if (onShift && !(await ask(t('floor.confirmEndShift')))) return;
     try {
       await api.post(`/nightclubs/${clubId()}/staff/shifts/${onShift ? 'end' : 'start'}`, {});
       const d = await api.get('/employees/me');

@@ -8,6 +8,10 @@
 /* global EV2, EV2Format, EV2Earnings, EV2Roles, EV2PasswordGate, EV2Songs, EV2Shift, EV2Roster */
 (function () {
   'use strict';
+  // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
+  const ask = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.confirm(text, opts) : Promise.resolve(window.confirm(text)));
+
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -337,10 +341,10 @@
       const decline = document.createElement('button');
       decline.className = 'card rounded-lg py-2 text-sm text-red-300';
       decline.textContent = t('drink.decline');
-      decline.onclick = () => {
+      decline.onclick = async () => {
         // Rechazar NO lo cancela: ya se le cobró al cliente y vuelve a su mesa (D20).
         // Quien rechaza tiene derecho a hacerlo, pero debe saber qué pasa del otro lado.
-        if (!window.confirm(`${t('drink.declineNote')}\n\n${t('drink.confirmDecline')}`)) return;
+        if (!(await ask(`${t('drink.declineNote')}\n\n${t('drink.confirmDecline')}`))) return;
         answerDrink(drink, 'decline', 'drink.declined', decline);
       };
       row.appendChild(decline);
@@ -588,7 +592,7 @@
   };
 
   async function removeAccount(accountId) {
-    if (!window.confirm(t('earn.confirmDeleteAccount'))) return;
+    if (!(await ask(t('earn.confirmDeleteAccount'), { danger: true }))) return;
     try {
       await api.del(`/employees/me/bank-accounts/${accountId}`);
       await loadAll();

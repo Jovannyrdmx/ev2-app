@@ -8,6 +8,11 @@
 (function () {
   'use strict';
 
+  // Preguntas con el cuadro de la app (js/ui.js), no con el prompt() del navegador.
+  const askText = (text, value) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.prompt(text, { value }) : Promise.resolve(window.prompt(text, value == null ? '' : value)));
+
+
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
     const el = document.querySelector(`meta[name="${name}"]`);
@@ -299,7 +304,7 @@
   async function act(ticketId, action) {
     if (action === 'deliver') { openDeliver(ticketId); return; }
     if (action === 'cancel') {
-      const reason = window.prompt(t('valet.cancelReason'));
+      const reason = (await askText(t('valet.cancelReason')));
       if (!reason || reason.trim().length < 3) return;
       await call(ticketId, 'cancel', { reason: reason.trim() });
       return;

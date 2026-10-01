@@ -9,6 +9,10 @@
    EV2PinPad */
 (function () {
   'use strict';
+  // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
+  const ask = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.confirm(text, opts) : Promise.resolve(window.confirm(text)));
+
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -1354,7 +1358,7 @@
 
   $('btn-taxi-cancel').onclick = async () => {
     const ride = state.taxi.ride;
-    if (!ride || !window.confirm(t('taxi.confirmCancel'))) return;
+    if (!ride || !(await ask(t('taxi.confirmCancel'), { danger: true }))) return;
     try {
       await api.post(`/nightclubs/${clubId()}/taxi/rides/${ride.id}/cancel`, {});
       await loadTaxi();

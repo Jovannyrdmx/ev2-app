@@ -12,112 +12,9 @@
     <meta name="ev2:ws" content="">
     <!-- Debe coincidir con el slug del club en la base (el seed crea "ev2"). -->
     <meta name="ev2:club" content="ev2">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
-
-        /* Paleta del plano original (table-selector.html). */
-        :root {
-            --ev2-cyan: #00BFFF;
-            --ev2-pink: #FF1493;
-            --ev2-purple: #9D00FF;
-            --ev2-lime: #00FF00;
-            --ev2-gold: #FFD700;
-            --ev2-red: #FF4444;
-        }
-
-        body {
-            font-family: 'Inter', system-ui, sans-serif;
-            background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%);
-        }
-
-        .font-display { font-family: 'Poppins', sans-serif; font-weight: 700; }
-
-        .ev2-gradient {
-            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .ev2-button {
-            background: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink));
-            color: #000;
-            font-weight: 600;
-            transition: filter .15s ease, transform .1s ease;
-        }
-        .ev2-button:active { transform: scale(.98); }
-        .ev2-button:disabled { filter: grayscale(1) brightness(.55); cursor: not-allowed; }
-
-        .tab-active { color: var(--ev2-cyan); border-bottom: 3px solid var(--ev2-cyan); }
-
-        /* Objetivos táctiles grandes: esto se usa de noche, con poca luz y una mano. */
-        button, .tap { min-height: 44px; }
-
-        .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
-
-        /* Tarjetas de conteo del diseño original. */
-        .stat-card {
-            background: rgba(0, 191, 255, .10);
-            border: 1px solid var(--ev2-pink);
-            border-radius: 10px;
-            padding: 10px 6px;
-            text-align: center;
-        }
-        .stat-number { font-size: 1.5rem; font-weight: 700; color: var(--ev2-lime); line-height: 1.1; }
-        .stat-label { font-size: .62rem; color: var(--ev2-cyan); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
-
-        .floor-btn {
-            padding: 10px 18px;
-            border: 2px solid var(--ev2-cyan);
-            background: transparent;
-            color: var(--ev2-cyan);
-            border-radius: 8px;
-            font-weight: 700;
-            font-size: .8rem;
-            white-space: nowrap;
-            transition: all .25s ease;
-        }
-        .floor-btn.active {
-            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
-            color: #000;
-            border-color: var(--ev2-pink);
-        }
-
-        .canvas-wrapper {
-            background: #000;
-            border: 2px solid var(--ev2-cyan);
-            border-radius: 12px;
-            padding: 8px;
-            box-shadow: 0 0 24px rgba(0, 191, 255, .28);
-        }
-        #floor-canvas { width: 100%; height: auto; display: block; border-radius: 8px; cursor: crosshair; }
-
-        .info-panel {
-            background: linear-gradient(135deg, rgba(0,191,255,.10) 0%, rgba(255,20,147,.10) 100%);
-            border: 2px solid var(--ev2-cyan);
-            border-radius: 10px;
-            padding: 14px;
-        }
-        .info-item { background: rgba(0,191,255,.05); padding: 8px 10px; border-radius: 6px; border-left: 3px solid var(--ev2-cyan); }
-        .info-label { font-size: .62rem; color: #9aa4b8; text-transform: uppercase; letter-spacing: .04em; }
-        .info-value { font-size: 1rem; color: var(--ev2-lime); font-weight: 700; margin-top: 2px; }
-
-        .legend-color { width: 14px; height: 14px; border-radius: 4px; border: 1px solid rgba(255,255,255,.7); flex: none; }
-
-        .dot { width: .5rem; height: .5rem; border-radius: 9999px; display: inline-block; }
-        .dot-on { background: var(--ev2-lime); }
-        .dot-off { background: var(--ev2-red); }
-        .dot-wait { background: var(--ev2-gold); }
-
-        @keyframes pulse-soft { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
-        .pulsing { animation: pulse-soft 1.6s ease-in-out infinite; }
-
-        [hidden] { display: none !important; }
-    </style>
+    <link rel="stylesheet" href="css/ev2.css">
 </head>
-<body class="text-white">
+<body class="text-white page-index">
 <div class="max-w-md mx-auto min-h-screen flex flex-col">
 
   <!-- ============================ ENTRAR ============================ -->
@@ -950,6 +847,7 @@
 
 <script src="js/api.js"></script>
 <script src="js/format.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/roles.js"></script>
 <script src="js/pin-pad.js"></script>
 <script src="js/floor-map.js"></script>

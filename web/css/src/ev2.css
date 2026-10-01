@@ -1,0 +1,304 @@
+/*
+ * EV2 Night UI — the one stylesheet every screen loads (D71, D72).
+ *
+ * Source file. `npm run build:css` (in web/) compiles it with Tailwind into
+ * `css/ev2.css`, which is what the pages link and what the service worker keeps.
+ *
+ * Rules of the system:
+ *   - Neon is for accents and states, never for paragraphs of text.
+ *   - Body text 15px+, inputs 16px (iOS does not zoom), touch targets 48px+.
+ *   - One meaning per color: cyan = action/selected, green = ok/paid,
+ *     amber = waiting/attention, red = late/error/danger, pink = brand/social.
+ */
+
+@import './icons.css';
+
+/* ---------------------------------------------------------------- Fonts */
+@font-face { font-family: 'Inter'; font-style: normal; font-display: swap; font-weight: 400; src: url('../fonts/inter-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-display: swap; font-weight: 500; src: url('../fonts/inter-latin-500-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-display: swap; font-weight: 600; src: url('../fonts/inter-latin-600-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-display: swap; font-weight: 700; src: url('../fonts/inter-latin-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Poppins'; font-style: normal; font-display: swap; font-weight: 500; src: url('../fonts/poppins-latin-500-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Poppins'; font-style: normal; font-display: swap; font-weight: 600; src: url('../fonts/poppins-latin-600-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Poppins'; font-style: normal; font-display: swap; font-weight: 700; src: url('../fonts/poppins-latin-700-normal.woff2') format('woff2'); }
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------- Tokens */
+:root {
+  /* Brand */
+  --ev2-cyan: #1EC8FF;
+  --ev2-pink: #FF3D9A;
+  --ev2-purple: #9D4DFF;
+  /* States (softened: pure #00FF00 tired the eyes in a dark room) */
+  --ev2-lime: #4ADE80;
+  --ev2-gold: #FBBF24;
+  --ev2-red: #F87171;
+  /* Surfaces and text */
+  --ev2-bg: #0A0A14;
+  --ev2-bg-2: #160B28;
+  --ev2-surface: rgba(255, 255, 255, .05);
+  --ev2-surface-2: rgba(255, 255, 255, .09);
+  --ev2-border: rgba(255, 255, 255, .11);
+  --ev2-text: #F4F4F8;
+  --ev2-muted: rgba(244, 244, 248, .62);
+  --ev2-panel: #15152A;
+  --ev2-radius: 14px;
+  --ev2-tap: 48px;
+  color-scheme: dark;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: linear-gradient(135deg, var(--ev2-bg) 0%, var(--ev2-bg-2) 100%);
+  background-attachment: fixed;
+  color: var(--ev2-text);
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
+}
+[hidden] { display: none !important; }
+
+:focus-visible { outline: 2px solid var(--ev2-cyan); outline-offset: 2px; }
+
+/* Touch targets. Night, low light, one hand. */
+button, select, input, .tap { min-height: var(--ev2-tap); }
+input, select, textarea { font-size: 16px; }
+textarea { min-height: 96px; }
+button { touch-action: manipulation; }
+body.page-driver button, body.page-driver select, body.page-driver input, body.page-driver .tap {
+  min-height: 52px; font-size: 1rem;
+}
+
+/* ---------------------------------------------------------------- Type */
+.font-display { font-family: 'Poppins', 'Inter', sans-serif; font-weight: 700; }
+.ev2-gradient {
+  background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.label { font-size: .75rem; color: var(--ev2-muted); display: block; margin-bottom: .25rem; }
+.muted { color: var(--ev2-muted); }
+
+/* ---------------------------------------------------------------- Buttons */
+.ev2-button {
+  background: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink));
+  color: #05050A; font-weight: 700;
+  transition: filter .15s ease, transform .1s ease;
+}
+.ev2-button:hover { filter: brightness(1.08); }
+.ev2-button:active { transform: scale(.98); }
+.ev2-button:disabled { filter: grayscale(1) brightness(.55); cursor: not-allowed; }
+
+.btn-secondary {
+  background: var(--ev2-surface-2); border: 1px solid var(--ev2-border);
+  color: var(--ev2-text); font-weight: 600;
+  transition: background .15s ease, transform .1s ease;
+}
+.btn-secondary:hover { background: rgba(255, 255, 255, .14); }
+.btn-secondary:active { transform: scale(.98); }
+.btn-danger {
+  background: rgba(248, 113, 113, .16); border: 1px solid rgba(248, 113, 113, .55);
+  color: #FECACA; font-weight: 700;
+}
+.btn-danger:active { transform: scale(.98); }
+.btn-ok {
+  background: var(--ev2-lime); color: #04140A; font-weight: 800;
+}
+.btn-ok:active { transform: scale(.98); }
+.btn-secondary:disabled, .btn-danger:disabled, .btn-ok:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ---------------------------------------------------------------- Surfaces */
+.card { background: var(--ev2-surface); border: 1px solid var(--ev2-border); }
+.sheet { background: var(--ev2-panel); border-top: 1px solid rgba(255, 255, 255, .15); }
+
+/* ---------------------------------------------------------------- Tabs */
+.tab, .lane-tab {
+  border-bottom: 3px solid transparent; color: var(--ev2-muted); font-weight: 600;
+}
+.tab.active, .lane-tab.active { color: var(--ev2-cyan); border-bottom-color: var(--ev2-cyan); }
+.tab-active { color: var(--ev2-cyan); border-bottom: 3px solid var(--ev2-cyan); }
+.tab-count, .lane-count {
+  display: inline-block; min-width: 1.4rem; padding: 0 .35rem; margin-left: .35rem;
+  border-radius: 9999px; background: rgba(255, 255, 255, .12); font-size: .72rem; font-weight: 700;
+  text-align: center;
+}
+.tab.active .tab-count, .lane-tab.active .lane-count { background: var(--ev2-cyan); color: #000; }
+
+/* ---------------------------------------------------------------- KPI tiles */
+.stat-card {
+  background: var(--ev2-surface); border: 1px solid var(--ev2-border);
+  border-radius: 12px; padding: 10px 8px; text-align: center;
+}
+.stat-number {
+  font-family: 'Poppins', 'Inter', sans-serif;
+  font-size: 1.45rem; font-weight: 700; color: var(--ev2-text); line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.stat-label {
+  font-size: .64rem; color: var(--ev2-muted); text-transform: uppercase;
+  letter-spacing: .06em; margin-top: 3px;
+}
+.stat-card.warn { border-color: rgba(248, 113, 113, .7); }
+.stat-card.warn .stat-number { color: var(--ev2-red); }
+.stat-card.good .stat-number { color: var(--ev2-lime); }
+
+/* ---------------------------------------------------------------- Pills & chips */
+.pill { font-size: .7rem; padding: .15rem .55rem; border-radius: 9999px; font-weight: 700; white-space: nowrap; }
+.pill-ok { background: rgba(74, 222, 128, .16); color: var(--ev2-lime); }
+.pill-wait { background: rgba(251, 191, 36, .16); color: var(--ev2-gold); }
+.pill-off { background: rgba(255, 255, 255, .12); color: var(--ev2-muted); }
+.pill-bad { background: rgba(248, 113, 113, .16); color: var(--ev2-red); }
+
+.chip {
+  padding: .25rem .65rem; border-radius: 9999px; font-size: .78rem;
+  background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .12);
+}
+.chip.on { background: var(--ev2-cyan); color: #000; border-color: var(--ev2-cyan); font-weight: 700; }
+
+/* ---------------------------------------------------------------- Forms */
+.field {
+  width: 100%; padding: .65rem 1rem; border-radius: .7rem;
+  background: var(--ev2-surface); border: 1px solid rgba(255, 255, 255, .14);
+  color: var(--ev2-text); outline: none;
+}
+.field::placeholder { color: rgba(244, 244, 248, .38); }
+.field:focus { border-color: var(--ev2-cyan); box-shadow: 0 0 0 3px rgba(30, 200, 255, .18); }
+.field.bad { border-color: var(--ev2-red); }
+.field-error { font-size: .75rem; color: var(--ev2-red); margin-top: .2rem; }
+select.field option { background: var(--ev2-panel); }
+
+/* ---------------------------------------------------------------- Live dot */
+.dot { width: .5rem; height: .5rem; border-radius: 9999px; display: inline-block; }
+.dot-on { background: var(--ev2-lime); }
+.dot-off { background: var(--ev2-red); }
+.dot-wait { background: var(--ev2-gold); }
+
+@keyframes pulse-soft { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
+.pulsing { animation: pulse-soft 1.6s ease-in-out infinite; }
+@keyframes flash-in { from { background: rgba(30, 200, 255, .32); } to { background: var(--ev2-surface); } }
+.just-arrived { animation: flash-in 1.5s ease-out; }
+
+/* Waiting time: the color says how long, without reading the number. */
+.wait-ok { border-left: 5px solid var(--ev2-cyan); }
+.wait-warn { border-left: 5px solid var(--ev2-gold); }
+.wait-late { border-left: 5px solid var(--ev2-red); box-shadow: 0 0 16px rgba(248, 113, 113, .22); }
+
+/* Storeroom rows */
+.row-low { border-left: 4px solid var(--ev2-gold); }
+.row-empty { border-left: 4px solid var(--ev2-red); }
+.row-unconfirmed { border-left: 4px dashed var(--ev2-pink); }
+
+/* ---------------------------------------------------------------- Skeleton */
+.skeleton {
+  border-radius: 8px; min-height: 1rem;
+  background: linear-gradient(90deg, rgba(255,255,255,.05) 25%, rgba(255,255,255,.11) 50%, rgba(255,255,255,.05) 75%);
+  background-size: 200% 100%; animation: skeleton 1.3s ease-in-out infinite;
+}
+@keyframes skeleton { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ---------------------------------------------------------------- Dialog & toast (js/ui.js) */
+.ev2-overlay {
+  position: fixed; inset: 0; z-index: 90; background: rgba(0, 0, 0, .6);
+  display: flex; align-items: flex-end; justify-content: center;
+  animation: fade-in .15s ease-out;
+}
+@media (min-width: 768px) { .ev2-overlay { align-items: center; } }
+.ev2-dialog {
+  width: 100%; max-width: 28rem; background: var(--ev2-panel);
+  border: 1px solid rgba(255, 255, 255, .14); border-radius: 18px 18px 0 0;
+  padding: 1.25rem 1.25rem calc(1.25rem + env(safe-area-inset-bottom));
+  animation: sheet-up .2s ease-out;
+}
+@media (min-width: 768px) { .ev2-dialog { border-radius: 18px; } }
+.ev2-dialog h2 { font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 1.1rem; margin-bottom: .4rem; }
+.ev2-dialog p { color: var(--ev2-muted); font-size: .95rem; line-height: 1.5; white-space: pre-line; }
+.ev2-dialog .ev2-dialog-actions { display: flex; gap: .6rem; margin-top: 1.1rem; }
+.ev2-dialog .ev2-dialog-actions button { flex: 1; border-radius: 12px; padding: 0 1rem; }
+@keyframes sheet-up { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.ev2-toasts {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 95;
+  bottom: calc(5.5rem + env(safe-area-inset-bottom)); width: min(28rem, calc(100% - 2rem));
+  display: flex; flex-direction: column; gap: .5rem; pointer-events: none;
+}
+.ev2-toast {
+  pointer-events: auto; display: flex; align-items: center; gap: .75rem;
+  background: #1F1F38; border: 1px solid rgba(255, 255, 255, .16); border-radius: 12px;
+  padding: .55rem .6rem .55rem 1rem; font-size: .92rem; box-shadow: 0 10px 30px rgba(0,0,0,.45);
+  animation: sheet-up .18s ease-out;
+}
+.ev2-toast.bad { border-color: rgba(248, 113, 113, .6); }
+.ev2-toast.ok { border-color: rgba(74, 222, 128, .55); }
+.ev2-toast span { flex: 1; }
+.ev2-toast button { min-height: 40px; padding: 0 .8rem; border-radius: 8px; font-weight: 700; color: var(--ev2-cyan); }
+
+/* ---------------------------------------------------------------- Icons */
+.fa-solid, .fa-regular, .fa-brands { font-style: normal; line-height: 1; }
+.fa-solid::before, .fa-regular::before, .fa-brands::before {
+  content: ''; display: inline-block; width: 1.15em; height: 1em; vertical-align: -.125em;
+  background-color: currentColor;
+  -webkit-mask: var(--fa-icon) center / contain no-repeat;
+  mask: var(--fa-icon) center / contain no-repeat;
+}
+
+/* ---------------------------------------------------------------- Client floor map */
+.floor-btn {
+  padding: 10px 18px; border: 2px solid var(--ev2-cyan); background: transparent;
+  color: var(--ev2-cyan); border-radius: 10px; font-weight: 700; font-size: .85rem;
+  white-space: nowrap; transition: all .2s ease;
+}
+.floor-btn.active {
+  background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
+  color: #000; border-color: transparent;
+}
+.canvas-wrapper {
+  background: #000; border: 1px solid rgba(30, 200, 255, .55); border-radius: 14px; padding: 8px;
+  box-shadow: 0 0 24px rgba(30, 200, 255, .18);
+}
+#floor-canvas { width: 100%; height: auto; display: block; border-radius: 8px; cursor: pointer; }
+.info-panel {
+  background: linear-gradient(135deg, rgba(30,200,255,.08) 0%, rgba(255,61,154,.08) 100%);
+  border: 1px solid rgba(30, 200, 255, .45); border-radius: 14px; padding: 14px;
+}
+.info-item { background: rgba(255, 255, 255, .04); padding: 8px 10px; border-radius: 8px; }
+.info-label { font-size: .64rem; color: var(--ev2-muted); text-transform: uppercase; letter-spacing: .05em; }
+.info-value { font-size: 1rem; color: var(--ev2-text); font-weight: 700; margin-top: 2px; }
+.legend-color { width: 14px; height: 14px; border-radius: 4px; border: 1px solid rgba(255,255,255,.7); flex: none; }
+
+/* ---------------------------------------------------------------- Driver */
+.switch {
+  border: 2px solid var(--ev2-cyan); color: var(--ev2-cyan);
+  background: transparent; border-radius: 12px; font-weight: 700;
+}
+.switch.on {
+  background: linear-gradient(135deg, var(--ev2-lime), var(--ev2-cyan));
+  color: #000; border-color: var(--ev2-lime);
+}
+.eta-choice {
+  border: 2px solid rgba(255,255,255,.2); border-radius: 12px;
+  background: transparent; color: #fff; font-weight: 700; padding: 0 .25rem;
+}
+.eta-choice.on { border-color: var(--ev2-lime); background: rgba(74, 222, 128, .15); color: var(--ev2-lime); }
+
+/* ---------------------------------------------------------------- Guest pass */
+/* The QR sits on plain white: a cheap scanner fails on inverted or low contrast. */
+#pass-qr { background: #fff; border-radius: .75rem; padding: .75rem; }
+#pass-qr svg { display: block; width: 100%; height: auto; }
+.dead #pass-qr { opacity: .25; }
+
+/* ---------------------------------------------------------------- Legal pages */
+.doc h2 { font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 1.05rem; margin-top: 2rem; margin-bottom: .5rem; color: #fff; }
+.doc h3 { font-weight: 600; margin-top: 1.1rem; margin-bottom: .25rem; font-size: .95rem; }
+.doc p, .doc li { color: rgba(255,255,255,.75); font-size: .92rem; line-height: 1.65; }
+.doc p { margin-bottom: .6rem; }
+.doc ul { list-style: disc; padding-left: 1.2rem; margin-bottom: .6rem; }
+.doc li { margin-bottom: .3rem; }
+.doc strong { color: #fff; font-weight: 600; }
+.doc a { color: var(--ev2-cyan); text-decoration: underline; }
+.lang-btn.on { background: rgba(255,255,255,.14); color: #fff; }
+:target { scroll-margin-top: 1rem; }
+#eliminar-datos, #delete-data { border-left: 3px solid var(--ev2-gold); padding-left: 1rem; }
+body.page-legal h2 { font-family: 'Poppins', sans-serif; font-weight: 600; }

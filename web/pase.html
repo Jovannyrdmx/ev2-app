@@ -24,26 +24,9 @@
           teléfono en la fila, y entonces lo dicta.
     -->
     <meta name="robots" content="noindex, nofollow">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
-        :root { --ev2-cyan: #00BFFF; --ev2-pink: #FF1493; --ev2-lime: #00FF00; }
-        body {
-            font-family: 'Inter', system-ui, sans-serif;
-            background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%);
-            min-height: 100vh;
-        }
-        .font-display { font-family: 'Poppins', sans-serif; font-weight: 700; }
-        .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
-        /* El QR va sobre blanco y sin filtros: un lector barato falla con un QR
-           invertido o con poco contraste, y aquí fallar significa una fila detenida. */
-        #pass-qr { background: #fff; border-radius: .75rem; padding: .75rem; }
-        #pass-qr svg { display: block; width: 100%; height: auto; }
-        .dead #pass-qr { opacity: .25; }
-        button, .tap { min-height: 44px; }
-    </style>
+    <link rel="stylesheet" href="css/ev2.css">
 </head>
-<body class="text-white">
+<body class="text-white page-pase">
 <main class="max-w-sm mx-auto px-5 py-8 space-y-5">
 
     <header class="text-center space-y-1">
@@ -112,6 +95,7 @@
 </main>
 
 <script src="js/format.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/door-scan.js"></script>
 <script src="js/pass-screen.js"></script>
 </body>

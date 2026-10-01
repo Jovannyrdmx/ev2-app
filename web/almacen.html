@@ -10,77 +10,9 @@
     <meta name="ev2:api" content="/api">
     <meta name="ev2:ws" content="">
     <meta name="ev2:club" content="ev2">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
-
-        :root {
-            --ev2-cyan: #00BFFF;
-            --ev2-pink: #FF1493;
-            --ev2-lime: #00FF00;
-            --ev2-gold: #FFD700;
-            --ev2-red: #FF4444;
-        }
-
-        body {
-            font-family: 'Inter', system-ui, sans-serif;
-            background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%);
-        }
-
-        .font-display { font-family: 'Poppins', sans-serif; font-weight: 700; }
-
-        .ev2-gradient {
-            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
-            -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-        }
-
-        .ev2-button {
-            background: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink));
-            color: #000; font-weight: 700;
-            transition: filter .15s ease, transform .1s ease;
-        }
-        .ev2-button:active { transform: scale(.98); }
-        .ev2-button:disabled { filter: grayscale(1) brightness(.55); cursor: not-allowed; }
-
-        /* El almacén se cuenta de pie, con una caja en la otra mano. */
-        button, .tap { min-height: 48px; }
-
-        .card { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10); }
-        .row-low { border-left: 4px solid var(--ev2-gold); }
-        .row-empty { border-left: 4px solid var(--ev2-red); }
-        .row-unconfirmed { border-left: 4px dashed var(--ev2-pink); }
-
-        .tab { border-bottom: 3px solid transparent; color: rgba(255,255,255,.5); }
-        .tab.active { color: var(--ev2-cyan); border-bottom-color: var(--ev2-cyan); }
-        .tab-count {
-            display: inline-block; min-width: 1.4rem; padding: 0 .35rem; margin-left: .35rem;
-            border-radius: 9999px; background: rgba(255,255,255,.12); font-size: .7rem; font-weight: 700;
-        }
-        .tab.active .tab-count { background: var(--ev2-cyan); color: #000; }
-
-        .stat-card {
-            background: rgba(0,191,255,.10); border: 1px solid var(--ev2-pink);
-            border-radius: 10px; padding: 8px 6px; text-align: center;
-        }
-        .stat-number { font-size: 1.3rem; font-weight: 700; color: var(--ev2-lime); line-height: 1.1; }
-        .stat-label { font-size: .6rem; color: var(--ev2-cyan); text-transform: uppercase; letter-spacing: .05em; }
-
-        .chip {
-            padding: .2rem .55rem; border-radius: 9999px; font-size: .68rem;
-            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
-        }
-        .chip.on { background: var(--ev2-cyan); color: #000; border-color: var(--ev2-cyan); font-weight: 700; }
-
-        .field { width: 100%; padding: .6rem 1rem; border-radius: .6rem; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); outline: none; color: #fff; }
-        .field:focus { border-color: var(--ev2-cyan); }
-        select.field option { background: #14142a; }
-
-        .sheet { background: #14142a; border-top: 1px solid rgba(255,255,255,.15); }
-        [hidden] { display: none !important; }
-    </style>
+    <link rel="stylesheet" href="css/ev2.css">
 </head>
-<body class="text-white">
+<body class="text-white page-almacen">
 <div class="max-w-3xl mx-auto min-h-screen flex flex-col">
 
   <!-- ============================ ENTRAR ============================ -->
@@ -299,6 +231,7 @@
 
 <script src="js/api.js"></script>
 <script src="js/format.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/roles.js"></script>
 <script src="js/password-gate.js"></script>
 <script src="js/warehouse.js"></script>

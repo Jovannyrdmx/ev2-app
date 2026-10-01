@@ -9,6 +9,10 @@
 /* global EV2Screen, EV2Booking */
 (function () {
   'use strict';
+  // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
+  const ask = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.confirm(text, opts) : Promise.resolve(window.confirm(text)));
+
 
   if (!window.EV2Screen) return;
 
@@ -521,7 +525,7 @@
   }
 
   async function cancelReservation(reservation) {
-    if (!window.confirm(t('book.confirmCancel'))) return;
+    if (!(await ask(t('book.confirmCancel'), { danger: true }))) return;
     try {
       await ctx.api.post(
         `/nightclubs/${ctx.clubId()}/reservations/${reservation.id}/cancel`, {});

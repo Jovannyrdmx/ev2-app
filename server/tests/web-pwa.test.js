@@ -99,4 +99,31 @@ describe('La cáscara guardada para trabajar sin señal', () => {
     expect(cuerpo.indexOf('await fetch(request)'))
       .toBeLessThan(cuerpo.indexOf('caches.match(request)'));
   });
+
+  it('ninguna pantalla depende de un servidor ajeno para verse (D71)', () => {
+    // Tailwind, los iconos y las letras venian de tres CDN. El service worker solo
+    // guarda lo del mismo origen, asi que sin senal la app abria con los botones
+    // grises del navegador. Todo lo que una pagina pide tiene que ser nuestro.
+    const ajenos = {};
+    for (const pagina of fs.readdirSync(ROOT).filter((f) => f.endsWith('.html'))) {
+      const html = leer(pagina);
+      const urls = [...html.matchAll(/<(?:script|link)[^>]+(?:src|href)="(https?:\/\/[^"]+)"/g)]
+        .map((m) => m[1]).concat([...html.matchAll(/@import url\('?(https?:[^')]+)/g)].map((m) => m[1]));
+      if (urls.length) ajenos[pagina] = urls;
+    }
+    expect(ajenos).toEqual({});
+  });
+
+  it('la hoja de estilo, sus letras y sus iconos se guardan con la cascara', () => {
+    for (const pagina of paginas) {
+      const hojas = [...leer(pagina).matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map((m) => m[1]);
+      expect({ pagina, hojas }).toEqual({ pagina, hojas: ['css/ev2.css'] });
+    }
+    const css = leer('css/ev2.css');
+    const letras = [...css.matchAll(/url\(\.\.\/(fonts\/[^)]+\.woff2)\)/g)].map((m) => m[1]);
+    expect(letras.length).toBeGreaterThan(0);
+    expect(letras.filter((f) => !guardados.has(f))).toEqual([]);
+    // Los iconos van dentro de la hoja: si uno se pidiera aparte, sin senal faltaria.
+    expect(css).toMatch(/\.fa-taxi\{--fa-icon:url\("data:image\/svg\+xml/);
+  });
 });

@@ -9,6 +9,12 @@
    EV2Payouts, EV2NightReport, EV2Roster */
 (function () {
   'use strict';
+  // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
+  const ask = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.confirm(text, opts) : Promise.resolve(window.confirm(text)));
+  const askText = (text, value) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.prompt(text, { value }) : Promise.resolve(window.prompt(text, value == null ? '' : value)));
+
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -359,9 +365,9 @@
       const cambiar = document.createElement('button');
       cambiar.className = 'card rounded-lg px-3 py-2 text-xs';
       cambiar.textContent = t('cover.change');
-      cambiar.onclick = () => {
+      cambiar.onclick = async () => {
         // Cambiar el precio NO toca lo ya vendido: cada entrada guarda el suyo.
-        const dicho = window.prompt(t('cover.newAmount', { name: cover.name }), cover.amount);
+        const dicho = (await askText(t('cover.newAmount', { name: cover.name }), cover.amount));
         if (dicho === null) return;
         const monto = Number(dicho);
         if (!(monto >= 0)) { showError(new Error(t('cover.errAmount')), $('cover-error')); return; }
@@ -540,7 +546,7 @@
       errorEl.hidden = false;
       return;
     }
-    if (status === 'actioned' && !window.confirm(t('mod.confirmActioned'))) return;
+    if (status === 'actioned' && !(await ask(t('mod.confirmActioned')))) return;
     button.disabled = true;
     try {
       await api.patch(`/nightclubs/${clubId()}/reports/${reportId}`,
@@ -607,8 +613,8 @@
         row.appendChild(b);
       };
       if (actions.canResetPassword) {
-        add('staff.resetPassword', 'card rounded-lg px-3 py-2 text-sm flex-1', (b) => {
-          if (!window.confirm(t('staff.confirmReset'))) return;
+        add('staff.resetPassword', 'card rounded-lg px-3 py-2 text-sm flex-1', async (b) => {
+          if (!(await ask(t('staff.confirmReset')))) return;
           patchEmployee(person, { reset_password: true }, 'staff.tempPassword', b);
         });
       }
@@ -618,14 +624,14 @@
         // cambian con eso.
         const clave = actions.hasPin ? 'staff.resetPin' : 'staff.assignPin';
         const pregunta = actions.hasPin ? 'staff.confirmResetPin' : 'staff.confirmAssignPin';
-        add(clave, 'card rounded-lg px-3 py-2 text-sm flex-1', (b) => {
-          if (!window.confirm(t(pregunta))) return;
+        add(clave, 'card rounded-lg px-3 py-2 text-sm flex-1', async (b) => {
+          if (!(await ask(t(pregunta)))) return;
           patchEmployee(person, { reset_pin: true }, 'staff.tempPin', b);
         });
       }
       if (actions.canDeactivate) {
-        add('staff.deactivate', 'card rounded-lg px-3 py-2 text-sm text-red-300', (b) => {
-          if (!window.confirm(t('staff.confirmDeactivate'))) return;
+        add('staff.deactivate', 'card rounded-lg px-3 py-2 text-sm text-red-300', async (b) => {
+          if (!(await ask(t('staff.confirmDeactivate'), { danger: true }))) return;
           patchEmployee(person, { active: false }, 'staff.deactivated', b);
         });
       }
@@ -1077,11 +1083,11 @@
   async function refundCharge(c, button, nota) {
     nota.hidden = true;
     const total = money(Number(c.amount) + Number(c.tip_amount || 0), c.currency);
-    const motivo = window.prompt(t('tch.reason', { amount: total }), '');
+    const motivo = (await askText(t('tch.reason', { amount: total }), ''));
     if (motivo === null) return;
     if (motivo.trim().length < 5) { avisar(nota, t('tch.errReason')); return; }
     const tarjeta = c.card ? c.card.brand : '';
-    if (!window.confirm(t('tch.confirm', { amount: total, card: tarjeta }))) return;
+    if (!(await ask(t('tch.confirm', { amount: total, card: tarjeta })))) return;
 
     const listo = ocupado(button, 'tch.refunding');
     try {
@@ -1191,7 +1197,7 @@
         recibir.className = 'card rounded-lg px-3 py-2 text-xs';
         recibir.textContent = t('lfm.receive');
         recibir.onclick = async () => {
-          const donde2 = window.prompt(t('lfm.whereAsk'));
+          const donde2 = (await askText(t('lfm.whereAsk')));
           if (donde2 === null) return;
           const listo = ocupado(recibir, 'prn.saving');
           try {
@@ -1221,7 +1227,7 @@
         }
         sel.onchange = async () => {
           if (!sel.value) return;
-          if (!window.confirm(t('lfm.matchAsk'))) { sel.value = ''; return; }
+          if (!(await ask(t('lfm.matchAsk')))) { sel.value = ''; return; }
           sel.disabled = true;
           try {
             await api.post(`/nightclubs/${clubId()}/lost-items/${item.id}/match`,
@@ -1239,7 +1245,7 @@
         entregar.className = 'ev2-button rounded-lg px-3 py-2 text-xs font-display';
         entregar.textContent = t('lfm.handOver', { hint: item.handover_hint || '' });
         entregar.onclick = async () => {
-          const code = window.prompt(t('lfm.codeAsk'));
+          const code = (await askText(t('lfm.codeAsk')));
           if (!code) return;
           const listo = ocupado(entregar, 'prn.saving');
           try {
@@ -1256,7 +1262,7 @@
       cerrar.className = 'card rounded-lg px-3 py-2 text-xs text-red-300';
       cerrar.textContent = t('lfm.closeIt');
       cerrar.onclick = async () => {
-        const motivo = window.prompt(t('lfm.closeAsk'));
+        const motivo = (await askText(t('lfm.closeAsk')));
         if (!motivo || motivo.trim().length < 3) return;
         const listo = ocupado(cerrar, 'prn.saving');
         try {
@@ -1331,9 +1337,9 @@
       confirmar.onclick = async () => {
         // Se pregunta con el monto y el nombre: confirmar mueve dinero al saldo de una
         // persona, y deshacerlo después es una cancelación con motivo.
-        if (!window.confirm(t('tip.confirmAsk', {
+        if (!(await ask(t('tip.confirmAsk', {
           amount: money(tip.amount, tip.currency), name: tip.to_name || '—',
-        }))) return;
+        })))) return;
         const listo = ocupado(confirmar, 'tip.confirming');
         try {
           await api.post(`/nightclubs/${clubId()}/tips/${tip.id}/confirm`, { provider: 'cash' });
@@ -2333,7 +2339,7 @@
       verify.className = 'ev2-button w-full rounded-lg py-2 text-sm';
       verify.textContent = t('pay.verify');
       verify.onclick = async () => {
-        if (!window.confirm(t('pay.confirmVerify'))) return;
+        if (!(await ask(t('pay.confirmVerify')))) return;
         verify.disabled = true;
         try {
           await api.post(
@@ -2396,8 +2402,8 @@
         const b = document.createElement('button');
         b.className = 'card rounded-lg px-3 py-2 text-sm text-red-300';
         b.textContent = t('pay.reject');
-        b.onclick = () => {
-          const reason = window.prompt(t('pay.reason'));
+        b.onclick = async () => {
+          const reason = (await askText(t('pay.reason')));
           if (reason === null) return;
           const problem = EV2Payouts.validateRejection(reason);
           if (problem) { toast(t(problem), 'error'); return; }
@@ -2409,12 +2415,12 @@
         const b = document.createElement('button');
         b.className = 'ev2-button rounded-lg px-3 py-2 text-sm flex-1';
         b.textContent = t('pay.markPaid');
-        b.onclick = () => {
-          const reference = window.prompt(t('pay.reference')) || '';
+        b.onclick = async () => {
+          const reference = (await askText(t('pay.reference'))) || '';
           // Sin referencia no se puede conciliar tres semanas después, cuando el
           // empleado dice que nunca le llegó. Se advierte, no se impone.
           const warn = EV2Payouts.payWarning(w, reference);
-          if (warn && !window.confirm(t(warn))) return;
+          if (warn && !(await ask(t(warn)))) return;
           withdrawalAction(w, 'paid', { reference: reference.trim() || undefined }, 'pay.paid1', b);
         };
         row.appendChild(b);
@@ -2494,8 +2500,8 @@
           (b) => setNightStatus(night, 'draft', 'night.created', b));
       }
       if (actions.canCancel) {
-        add('night.cancelNight', 'card rounded-lg px-3 py-2 text-sm text-red-300 flex-1', (b) => {
-          if (!window.confirm(t('night.confirmCancel'))) return;
+        add('night.cancelNight', 'card rounded-lg px-3 py-2 text-sm text-red-300 flex-1', async (b) => {
+          if (!(await ask(t('night.confirmCancel'), { danger: true }))) return;
           setNightStatus(night, 'cancelled', 'night.cancelled', b);
         });
       }
@@ -2676,7 +2682,7 @@
   $('btn-cut-save').onclick = async () => {
     const c = state.cut;
     if (!c || state.busy) return;
-    if (!window.confirm(t('cut.confirmClose'))) return;
+    if (!(await ask(t('cut.confirmClose')))) return;
     state.busy = true;
     $('btn-cut-save').disabled = true;
     $('cut-error').hidden = true;
@@ -2955,7 +2961,7 @@
   }
 
   async function deleteNight(night, button) {
-    if (!window.confirm(t('night.confirmDelete'))) return;
+    if (!(await ask(t('night.confirmDelete'), { danger: true }))) return;
     button.disabled = true;
     try {
       await api.del(`/nightclubs/${clubId()}/events/${night.id}`);
@@ -3416,12 +3422,12 @@
     const bars = state.locations.filter((l) => l.kind === 'bar' || l.kind === 'warehouse');
     if (bars.length === 0) return;
     const nombres = bars.map((b, i) => `${i + 1}) ${b.name}`).join('  ');
-    const cual = window.prompt(t('inv.askPlace', { list: nombres }), '1');
+    const cual = (await askText(t('inv.askPlace', { list: nombres }), '1'));
     const place = bars[Number(cual) - 1];
     if (!place) return;
     const actual = (supply.locations || []).find((l) => l.location_id === place.id);
     const previo = actual ? EV2Warehouse.packagesOf(actual.min_stock, supply.package_size) : 0;
-    const raw = window.prompt(t('inv.askMin', { name: supply.name, place: place.name }), String(previo));
+    const raw = (await askText(t('inv.askMin', { name: supply.name, place: place.name }), String(previo)));
     if (raw === null) return;
     const packages = Number(raw);
     if (!Number.isFinite(packages) || packages < 0) { toast(t('inv.badMin'), 'error'); return; }
@@ -3481,9 +3487,9 @@
         if (nuevo === Number(trago.price)) return;
         // Se pregunta con el precio viejo y el nuevo: este número se le cobra al
         // cliente en la siguiente ronda, y un dedazo aquí no avisa de ninguna otra forma.
-        if (!window.confirm(t('inv.menuPriceAsk', {
+        if (!(await ask(t('inv.menuPriceAsk', {
           name: trago.name, from: money(trago.price, 'MXN'), to: money(nuevo, 'MXN'),
-        }))) { precio.value = Number(trago.price); return; }
+        })))) { precio.value = Number(trago.price); return; }
         precio.disabled = true;
         try {
           await api.patch(`/nightclubs/${clubId()}/drinks/${trago.id}`, { price: nuevo });

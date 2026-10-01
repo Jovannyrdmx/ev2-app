@@ -279,11 +279,11 @@
       }
     };
 
-    $('term-close').onclick = () => {
+    $('term-close').onclick = async () => {
       // Salirse de un cobro que NO terminó no es lo mismo que cerrar uno pagado. Se
       // pregunta, porque lo que sigue —volver a cobrar— es lo que le cobra dos veces
       // al cliente si la tarjeta sí había pasado.
-      if (!isFinal(estado.status) && deps.confirm && !deps.confirm(t('pay.termLeaveConfirm'))) return;
+      if (!isFinal(estado.status) && deps.confirm && !(await deps.confirm(t('pay.termLeaveConfirm')))) return;
       parar();
       caja.hidden = true;
       if (onClose) onClose(estado.status);
