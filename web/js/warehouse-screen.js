@@ -877,6 +877,22 @@
     const malo = problemas.length > 0;
     const unidad = supply ? supply.unit : 'ml';
     const sugeridos = (line.read && line.read.candidates) || [];
+    const enCajas = line.mode === 'packages';
+    const porCaja = EV2Receiving.perBoxOf(line);
+    const variasPiezas = enCajas && Number.isFinite(porCaja) && porCaja > 1;
+    // Lo que se le enseña a quien captura para que confirme la cuenta antes de mandar:
+    // "2 cajas × 12 pzas = 24 pzas" y, con costo, cuánto sale cada pieza.
+    const desglose = variasPiezas && totales.boxes !== null
+      ? t('wh.boxBreakdown', {
+        boxes: totales.boxes.toLocaleString(lang() === 'en' ? 'en-US' : 'es-MX'),
+        per: porCaja,
+        pieces: totales.packages.toLocaleString(lang() === 'en' ? 'en-US' : 'es-MX'),
+      }) : '';
+    const costoPieza = variasPiezas && line.package_cost !== '' && Number(line.package_cost) >= 0
+      ? t('wh.costPerPiece', {
+        box: EV2Format.money(Number(line.package_cost), 'MXN'),
+        piece: EV2Format.money(Number(line.package_cost) / porCaja, 'MXN'),
+      }) : '';
 
     return `
       <article class="card rounded-xl px-3 py-2 ${malo ? 'row-empty' : ''}" data-row="${index}">
@@ -900,10 +916,17 @@
             <button type="button" class="chip tap px-2 ${line.mode === 'base' ? 'on' : ''}"
                     data-entry="mode" data-mode="base" data-index="${index}">${escape(unidad)}</button>
           </div>
+          ${enCajas ? `<input type="number" step="1" min="1" inputmode="numeric" class="field w-20 shrink-0"
+                 placeholder="${escape(t('wh.perBox'))}" title="${escape(t('wh.perBoxHint'))}"
+                 aria-label="${escape(t('wh.perBoxHint'))}"
+                 value="${escape(line.per_box || '')}" data-entry="perbox" data-index="${index}">` : ''}
           <input type="number" step="0.01" min="0" inputmode="decimal" class="field"
-                 placeholder="${escape(t('wh.packageCostShort'))}"
+                 placeholder="${escape(t(variasPiezas ? 'wh.packageCostPerBox' : 'wh.packageCostShort'))}"
+                 aria-label="${escape(t(variasPiezas ? 'wh.packageCostPerBox' : 'wh.packageCostShort'))}"
                  value="${escape(line.package_cost)}" data-entry="cost" data-index="${index}">
         </div>
+        ${desglose ? `<p class="text-[11px] text-cyan-300/80 mt-1">${escape(desglose)}${
+    costoPieza ? ` · ${escape(costoPieza)}` : ''}</p>` : ''}
         <div class="flex items-center justify-between mt-1 text-[11px]">
           <span class="text-white/40">
             ${totales.quantity !== null && supply
@@ -977,6 +1000,8 @@
         el.onchange = () => { state.draft[index].amount = el.value; repintar(); };
       } else if (campo === 'cost') {
         el.onchange = () => { state.draft[index].package_cost = el.value; repintar(); };
+      } else if (campo === 'perbox') {
+        el.onchange = () => { state.draft[index].per_box = el.value; repintar(); };
       } else if (campo === 'mode') {
         el.onclick = () => { state.draft[index].mode = el.dataset.mode; repintar(); };
       } else if (campo === 'remove') {

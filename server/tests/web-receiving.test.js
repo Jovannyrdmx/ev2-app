@@ -240,6 +240,81 @@ describe('EV2Receiving.lineTotals', () => {
   });
 });
 
+// ===========================================================================
+// Piezas por caja
+// ===========================================================================
+
+describe('EV2Receiving: piezas por caja', () => {
+  const CERVEZA = { id: 'b1', name: 'Tecate', unit: 'pza', package_size: 1, package_label: 'Botella 1/4', active: true };
+
+  it('2 cajas de 12 botellas de 750 ml son 24 botellas y 18,000 ml', () => {
+    const r = R.lineTotals(line({ mode: 'packages', amount: '2', per_box: '12' }), WHISKY);
+    expect(r.quantity).toBe(18000);
+    expect(r.packages).toBe(24);
+    expect(r.boxes).toBe(2);
+    expect(r.per_box).toBe(12);
+  });
+
+  it('con varias piezas el costo es de la CAJA: 2 cajas a $2,400 son $4,800', () => {
+    const r = R.lineTotals(
+      line({ mode: 'packages', amount: '2', per_box: '12', package_cost: '2400' }), WHISKY);
+    expect(r.total).toBe(4800);
+  });
+
+  it('vacío o 1 es lo de siempre: una caja es una presentación', () => {
+    for (const per of ['', '1', null, undefined]) {
+      const r = R.lineTotals(
+        line({ mode: 'packages', amount: '6', per_box: per, package_cost: '900' }), WHISKY);
+      expect(r.quantity).toBe(4500);
+      expect(r.packages).toBe(6);
+      expect(r.total).toBe(5400);
+    }
+  });
+
+  it('en unidad base las piezas por caja no cuentan', () => {
+    const r = R.lineTotals(line({ mode: 'base', amount: '4500', per_box: '12' }), WHISKY);
+    expect(r.quantity).toBe(4500);
+    expect(r.packages).toBe(6);
+  });
+
+  it('cerveza por pieza: 3 cajas de 24 son 72 piezas', () => {
+    const r = R.lineTotals(
+      line({ mode: 'packages', amount: '3', per_box: '24', package_cost: '480' }), CERVEZA);
+    expect(r.quantity).toBe(72);
+    expect(r.total).toBe(1440);
+  });
+
+  it('piezas por caja que no son un entero de 1 o más se marcan en su renglón', () => {
+    for (const malo of ['0', '-3', '2.5', 'abc']) {
+      const problemas = R.validateDraft(
+        [line({ supply_id: WHISKY.id, mode: 'packages', amount: '2', per_box: malo })], SUPPLIES);
+      expect(problemas).toEqual([{ row: 1, field: 'per_box', code: 'invalid' }]);
+    }
+  });
+
+  it('al servidor viajan las piezas totales y el costo de UNA pieza', () => {
+    const body = R.receiptRequest({
+      locationId: 'loc1',
+      lines: [
+        line({ supply_id: WHISKY.id, mode: 'packages', amount: '2', per_box: '12', package_cost: '2400' }),
+        line({ supply_id: RON.id, mode: 'packages', amount: '1', per_box: '6', package_cost: '1000' }),
+        line({ supply_id: REFRESCO.id, mode: 'packages', amount: '4', package_cost: '50' }),
+      ],
+    });
+    expect(body.lines[0]).toEqual({ supply_id: 'w1', packages: 24, package_cost: 200 });
+    // $1,000 / 6 no es exacto: viaja con seis decimales y el servidor guarda el costo
+    // por mililitro con su propia precisión.
+    expect(body.lines[1]).toEqual({ supply_id: RON.id, packages: 6, package_cost: 166.666667 });
+    expect(body.lines[2]).toEqual({ supply_id: REFRESCO.id, packages: 4, package_cost: 50 });
+  });
+
+  it('el borrador precargado de un proveedor empieza con 1 pieza por caja', () => {
+    const borrador = R.draftFromSupplier([{ supply_id: WHISKY.id, last_cost: 900 }]);
+    expect(borrador[0].per_box).toBe('');
+    expect(R.perBoxOf(borrador[0])).toBe(1);
+  });
+});
+
 describe('EV2Receiving.draftSummary', () => {
   it('suma el total de la entrega', () => {
     const resumen = R.draftSummary([

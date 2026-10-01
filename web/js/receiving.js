@@ -37,7 +37,23 @@
 
   /** Un renglón vacío, listo para capturar. */
   function emptyLine() {
-    return { supply_id: null, mode: 'packages', amount: '', package_cost: '' };
+    return { supply_id: null, mode: 'packages', amount: '', package_cost: '', per_box: '' };
+  }
+
+  /**
+   * Cuántas piezas trae cada caja capturada.
+   *
+   * Vacío es 1: así se capturaba antes de que existiera el campo (una "caja" era una
+   * botella), y un borrador viejo o precargado sigue dando lo mismo. Solo cuenta en
+   * modo cajas: en unidad base no hay cajas que multiplicar. Algo que no sea un
+   * entero de 1 o más devuelve NaN, y el validador lo dice en su renglón.
+   */
+  function perBoxOf(line) {
+    if (!line || line.mode !== 'packages') return 1;
+    const crudo = line.per_box;
+    if (crudo === '' || crudo === null || crudo === undefined) return 1;
+    const n = Number(crudo);
+    return Number.isInteger(n) && n >= 1 && n <= 10000 ? n : NaN;
   }
 
   /**
@@ -48,7 +64,7 @@
    * cotiza por mililitro. La división entre `package_size` pasa una sola vez, aquí.
    */
   function lineTotals(line, supply) {
-    if (!supply) return { quantity: null, packages: null, total: null };
+    if (!supply) return { quantity: null, packages: null, total: null, boxes: null, per_box: null };
     const size = Number(supply.package_size);
     // `Number('')` es 0, no NaN. Sin este guardia, un renglón donde nadie escribió
     // la cantidad se leería como "entraron cero", que es un dato, y no como "falta
@@ -57,18 +73,26 @@
     const escrito = line.amount;
     const vacio = escrito === '' || escrito === null || escrito === undefined;
     const amount = vacio ? NaN : Number(escrito);
-    if (!Number.isFinite(amount) || !(size > 0)) {
-      return { quantity: null, packages: null, total: null };
+    const perBox = perBoxOf(line);
+    if (!Number.isFinite(amount) || !(size > 0) || !Number.isFinite(perBox)) {
+      return { quantity: null, packages: null, total: null, boxes: null, per_box: null };
     }
-    const packages = line.mode === 'packages' ? amount : amount / size;
-    const quantity = line.mode === 'packages' ? round3(amount * size) : round3(amount);
+    // En modo cajas, `amount` son cajas y cada una trae `perBox` presentaciones.
+    const packages = line.mode === 'packages' ? amount * perBox : amount / size;
+    const quantity = line.mode === 'packages' ? round3(amount * perBox * size) : round3(amount);
 
+    // El costo capturado es el de lo que dice la factura: la CAJA cuando trae varias
+    // piezas, la presentación cuando no. Por eso en modo cajas se multiplica por las
+    // cajas y no por las piezas.
     const cost = line.package_cost;
     const hasCost = cost !== '' && cost !== null && cost !== undefined && Number.isFinite(Number(cost));
+    const unidadesCobradas = line.mode === 'packages' ? amount : packages;
     return {
       quantity,
       packages: Math.round(packages * 100) / 100,
-      total: hasCost ? money(packages * Number(cost)) : null,
+      total: hasCost ? money(unidadesCobradas * Number(cost)) : null,
+      boxes: line.mode === 'packages' ? amount : null,
+      per_box: perBox,
     };
   }
 
@@ -114,6 +138,10 @@
       }
       usados.set(line.supply_id, row);
 
+      if (!Number.isFinite(perBoxOf(line))) {
+        problems.push({ row, field: 'per_box', code: 'invalid' });
+        return;
+      }
       const { quantity, total } = lineTotals(line, supply);
       if (quantity === null) problems.push({ row, field: 'amount', code: 'required' });
       else if (quantity <= 0) problems.push({ row, field: 'amount', code: 'positive' });
@@ -188,10 +216,16 @@
       ...(reason && String(reason).trim() ? { reason: String(reason).trim() } : {}),
       lines: lines.filter((l) => !isEmptyLine(l)).map((line) => {
         const cuerpo = { supply_id: line.supply_id };
-        cuerpo[line.mode === 'packages' ? 'packages' : 'quantity'] = Number(line.amount);
+        // El servidor sabe de presentaciones, no de cajas: se le mandan las piezas
+        // totales y el costo de UNA pieza. Con `per_box` vacío o 1 sale exactamente
+        // lo que se mandaba antes de que existiera el campo.
+        const perBox = perBoxOf(line);
+        if (line.mode === 'packages') cuerpo.packages = Number(line.amount) * perBox;
+        else cuerpo.quantity = Number(line.amount);
         if (line.package_cost !== '' && line.package_cost !== null
           && line.package_cost !== undefined) {
-          cuerpo.package_cost = Number(line.package_cost);
+          const costo = Number(line.package_cost);
+          cuerpo.package_cost = perBox > 1 ? Math.round((costo / perBox) * 1e6) / 1e6 : costo;
         }
         return cuerpo;
       }),
@@ -213,6 +247,9 @@
       mode: 'packages',
       amount: '',
       package_cost: s.last_cost !== null && s.last_cost !== undefined ? String(s.last_cost) : '',
+      // Vacío = 1 pieza: `last_cost` es de UNA presentación, así que precargarlo con
+      // otra cantidad por caja lo haría pasar por costo de la caja.
+      per_box: '',
     }));
     lines.push(emptyLine());
     return lines;
@@ -349,6 +386,7 @@
     REQUEST_STATUS,
     round3,
     emptyLine,
+    perBoxOf,
     isEmptyLine,
     lineTotals,
     validateDraft,
