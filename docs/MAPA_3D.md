@@ -1,7 +1,7 @@
 # EV2: mapa 3D y editor de distribución
 
-Implementación autorizada para clientes y administrador. El desarrollo y las pruebas
-locales están terminados; la publicación de este bloque en el VPS está pendiente.
+Implementación autorizada para clientes y administrador. Publicada el 2 de octubre
+de 2026 en el VPS de EV2, versión `b5d53c9d056bb0551c0351e365c1d529b8510da4`.
 No se modificó la distribución de producción ni se hicieron cobros.
 
 ## Uso
@@ -82,16 +82,34 @@ limpian tablas del entorno de prueba. Las pruebas de navegador se hicieron en
 Chromium con emulación de tamaños y tacto, no certifican todos los dispositivos
 físicos, Safari/iOS ni una compilación nativa de Android o iOS.
 
-## Publicación pendiente
+## Publicación verificada
 
-Rama `fase5/mapa-3d-editor`; PWA preparada como `ev2-v36`. Requiere acceso temporal
-al VPS y publicación supervisada de API/web, con respaldo y reversión. No ejecutar
-seeds ni mover mesas en la base de producción durante la publicación.
+Rama `fase5/mapa-3d-editor`; PWA `ev2-v36`. Publicación autorizada en
+`45.93.100.244`, carpeta `/root/ev2-app`. API y web fueron los únicos contenedores
+recreados. No se ejecutaron seeds ni cambios de distribución.
 
-Verificar antes: commit actual, árbol limpio, migraciones pendientes, estado de
-API/web, pagos y reembolsos pendientes. Después: salud de contenedores, HTTPS,
-recursos 3D y PWA, autenticación y funcionamiento con una cuenta autorizada.
-Mantener PostgreSQL, Redis, WebSocket, Caddy y credenciales sin cambios.
+- **Respaldo local al VPS:** `/root/respaldos/mapa3d-20261002-133750/`.
+  Base de datos en formato custom de PostgreSQL (612 KB), imágenes previas (99 MB),
+  código, configuración privada e inventarios de contenedores. El índice del dump
+  se validó con `pg_restore --list`; no se hizo una restauración de la base activa.
+- **Salud:** API `1082f3183137` y web `15af6bbb9a08`, saludables.
+  `/api/health` respondió HTTP 200. Recursos HTML, JS, CSS, renderer y PWA: HTTP 200.
+  El SHA-256 del renderer público coincide con el compilado local.
+- **Datos conservados:** checksum del plano idéntico antes y después; 55 mesas y
+  8 áreas. Persisten 37 migraciones aplicadas, sin pendientes. Sin cargos Point
+  ni reembolsos pendientes al publicar; Mercado Pago sigue en modo de prueba.
+- **Infraestructura conservada:** mismos contenedores de PostgreSQL, Redis,
+  WebSocket y Caddy. `.env` y configuración privada de Caddy idénticos al respaldo.
+- **Acceso:** PUT de edición sin sesión responde 401. Navegador público en
+  390 px abre el formulario de acceso sin desbordamiento ni errores JavaScript;
+  abrir el editor sin sesión redirige a administración.
+- **Reversión disponible:** imágenes `ev2-api:before-venue-b5d53c9` y
+  `ev2-web:before-venue-b5d53c9`; código anterior `109f308`.
+
+La aceptación final dentro del sistema publicado corresponde al administrador
+con su cuenta habitual. No se crearon cuentas ni reservaciones de prueba en
+producción. Las pruebas de edición y reservación completas se hicieron en el
+entorno aislado descrito anteriormente.
 
 La terminal física de Mercado Pago continúa siendo un pendiente independiente:
 este bloque no activa cobros reales ni cambia su configuración. El audit de npm

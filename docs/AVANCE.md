@@ -14,7 +14,11 @@ Verificación local: 43 suites / 1,371 pruebas aprobadas; build web, lint sin er
 OpenAPI y diff correctos. Chromium: arrastre con ratón y tacto, guardado/recarga,
 deshacer/cancelar, conflicto entre sesiones, permisos, reservación desde mapa 3D
 sin dinero real y alternativas sin WebGL. Sin desbordamiento a 320/390/768/1440 px.
-PWA `ev2-v36`. Pendiente publicación supervisada en VPS. Sin PR ni cambios a main.
+PWA `ev2-v36`. Publicado en VPS el 2 de octubre de 2026: código `b5d53c9`,
+API/web saludables, `/api/health` y recursos públicos HTTP 200, hash del renderer
+verificado y checksum del plano intacto (55 mesas, 8 áreas). Respaldo con dump de
+base, imágenes y código en `/root/respaldos/mapa3d-20261002-133750/`.
+Sin PR ni cambios a main. Sin cuentas, reservaciones ni cobros de prueba en producción.
 Detalle: [MAPA_3D.md](MAPA_3D.md).
 
 ## Mercado Pago Point: confirmación segura, 1 de octubre de 2026
