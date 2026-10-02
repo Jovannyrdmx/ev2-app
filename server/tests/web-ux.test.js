@@ -84,4 +84,10 @@ describe('Production assets and navigation', () => {
       expect(fs.existsSync(path.join(WEB, file))).toBe(true);
     }
   });
+  it('missing club location is filtered rather than rendered as null', () => {
+    const script = read('js/index-screen.js');
+    expect(script).toContain("[data.nightclub.city, data.nightclub.country]");
+    expect(script).toContain("typeof value === 'string' && value.trim()");
+    expect(script).toContain("$('club-city').hidden = !locationLabel");
+  });
 });

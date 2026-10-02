@@ -1524,7 +1524,10 @@
       // Viene del servidor, no del catálogo: se le quita la marca para que un cambio
       // de idioma no lo reemplace por el texto por omisión.
       $('club-city').removeAttribute('data-i18n');
-      $('club-city').textContent = `${data.nightclub.city}, ${data.nightclub.country}`;
+      const locationLabel = [data.nightclub.city, data.nightclub.country]
+        .filter((value) => typeof value === 'string' && value.trim()).join(', ');
+      $('club-city').textContent = locationLabel;
+      $('club-city').hidden = !locationLabel;
     } catch {
       // Sin club no se puede entrar, pero la pantalla de acceso debe verse igual.
     }
