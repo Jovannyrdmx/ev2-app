@@ -7,8 +7,9 @@ estén verificadas. Los pagos manuales existentes se conservan.
 
 ## Revisión Point del 1 de octubre de 2026
 
-Rama de desarrollo: `fase7/mercadopago-notificaciones`. No activar cobros reales ni
-considerar este bloque desplegado hasta completar la verificación del VPS y la cuenta.
+Rama: `fase7/mercadopago-notificaciones`. Código `109f308` publicado en el VPS el
+1 de octubre por la noche, conservando `MERCADOPAGO_ENV=test`. No activar cobros reales
+hasta completar la configuración y aceptación de la terminal física.
 
 - Un cobro aprobado se registra junto con sus avisos en una sola transacción SQL.
 - Un rechazo muestra el motivo de la tarjeta cuando está disponible.
@@ -39,6 +40,20 @@ físicas asociadas. Esto valida la configuración preexistente del servidor, no 
 que corresponda a la credencial recién compartida ni verifica la entrega del webhook.
 En EV2 solo estaba registrada la terminal virtual **Prueba**; no había cobros Point
 ni devoluciones pendientes y las 37 migraciones existentes ya estaban aplicadas.
+
+Después del despliegue: página principal, `/api/health`, `sw.js` y el componente de
+terminal respondieron HTTP 200. La PWA sirve `ev2-v35`. Una solicitud de diagnóstico
+sin firma recibió 401; una firmada con el secreto del servidor y un ID inexistente
+recibió 200/ignorada, sin crear cobros. Esto prueba la ruta y el validador del servidor,
+no una entrega iniciada por Mercado Pago ni un pago real.
+
+Solo se recrearon API (`dd0e6b12135a`) y web (`d440184ccb59`), ambas saludables.
+PostgreSQL, Redis, WebSocket y Caddy conservaron sus contenedores. Respaldo:
+`/root/respaldos/mercadopago-20261002-064414/`; imágenes de reversión:
+`ev2-api:before-point-109f308` y `ev2-web:before-point-109f308`.
+El primer intento se revirtió por permisos de lectura de los archivos; se corrigió
+la máscara de creación y se verificó la lectura de las imágenes antes del segundo
+intento, que pasó. No hubo migraciones nuevas ni cargos.
 
 ## Dónde van las llaves
 

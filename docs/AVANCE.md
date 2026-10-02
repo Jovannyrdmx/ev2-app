@@ -4,8 +4,9 @@ Cada fila se agrega al terminar y verificar un paso del manual. Formato: fecha �
 
 ## Mercado Pago Point: confirmación segura, 1 de octubre de 2026
 
-Desarrollo autorizado en `fase7/mercadopago-notificaciones`, sin cargos reales y sin
-publicación en el VPS todavía. Firma de webhook obligatoria, resultado consultado al
+Desarrollo autorizado en `fase7/mercadopago-notificaciones`, sin cargos reales.
+Código `109f308` publicado en el VPS el 1 de octubre por la noche, en modo de prueba.
+Firma de webhook obligatoria, resultado consultado al
 proveedor, importe/referencia verificados, notificación de aprobación guardada con el
 pago en una transacción SQL, recuperación con solicitud idéntica, bloqueo ante
 resultados ambiguos y avisos en español mexicano. Sin migraciones nuevas.
@@ -15,7 +16,12 @@ adicionales de pedidos, propinas, cortes y recibos; compilación web correcta y 
 errores. Los conjuntos se superponen. Revisión del VPS autorizada: cuenta preexistente
 de prueba de México verificada por GET, sin terminales físicas, sin cobros/devoluciones
 pendientes y sin migraciones pendientes (37 aplicadas). Pendientes: modelo y cuenta
-receptora de la terminal física, validación del webhook y publicación verificada.
+receptora de la terminal física y entrega real del webhook del proveedor.
+Publicación verificada: API/web saludables, HTTP 200 público, PWA `ev2-v35`,
+webhook sin firma 401 y firmado para orden inexistente 200/ignorado. No se crearon
+cobros; permanecieron 37 migraciones aplicadas. PostgreSQL/Redis/WS/Caddy no se
+recrearon. Primer intento revertido por permisos; segundo correcto tras preflight.
+Respaldo: `/root/respaldos/mercadopago-20261002-064414/`.
 Detalles y aceptación en [PAGOS_SETUP.md](PAGOS_SETUP.md).
 
 ## Actualización UX del 1 de octubre de 2026
