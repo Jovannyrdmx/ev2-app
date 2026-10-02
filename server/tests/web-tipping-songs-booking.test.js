@@ -15,6 +15,61 @@ const Tip = require(path.join(WEB, 'tipping.js'));
 const Songs = require(path.join(WEB, 'songs.js'));
 const Book = require(path.join(WEB, 'booking.js'));
 
+describe('reservation map uses event availability and ignores stale quotes', () => {
+  const { JSDOM } = require('jsdom');
+  const fs = require('fs');
+  let dom; let hooks; let pending; let mapOptions; let api;
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  beforeEach(async () => {
+    dom = new JSDOM(fs.readFileSync(path.join(WEB,'../index.html'),'utf8'), {runScripts:'outside-only',url:'https://ev2.systems/'});
+    const w = dom.window; hooks = {}; pending = [];
+    const tables = [{id:'a',code:'A',capacity:8,section:'VIP',floor:'baja',price:'5000',currency:'MXN'}];
+    api = {
+      get: jest.fn(async (url) => {
+        if (url.includes('/events?')) return {events:[{id:'e',name:'Future',doors_open_at:'2099-01-01',status:'published'}]};
+        if (url.includes('/availability?')) return {tables};
+        if (url.endsWith('/floor-plan')) return {tables:[...tables,{id:'b',code:'B',floor:'baja'}],landmarks:[],canvas:{width:800,height:580}};
+        return {};
+      }),
+      post: jest.fn(() => new Promise((resolve) => pending.push(resolve))),
+    };
+    w.HTMLCanvasElement.prototype.getContext = () => null;
+    w.EV2Screen = {on:(name,fn) => { hooks[name] = fn; }};
+    w.EV2Booking = Book;
+    w.EV2Format = require(path.join(WEB,'format.js'));
+    w.EV2VenueLayout = {load3D:async () => ({create:(_el,options) => {
+      mapOptions = options; return {update:jest.fn(),resize:jest.fn()};
+    }})};
+    w.eval(fs.readFileSync(path.join(WEB,'booking-screen.js'),'utf8'));
+    hooks.enter({api,clubId:()=>'club',t:(key)=>key,money:String,toast:jest.fn(),showError:jest.fn()});
+    w.document.getElementById('btn-book-open').click();
+    await flush(); await flush();
+  });
+  afterEach(() => dom.window.close());
+  it('an unavailable 3D table cannot request a quote', () => {
+    mapOptions.onSelect({kind:'table',key:'b'});
+    expect(api.post).not.toHaveBeenCalled();
+    mapOptions.onSelect({kind:'table',key:'a'});
+    expect(api.post).toHaveBeenCalledWith('/nightclubs/club/reservations/quote',
+      expect.objectContaining({event_id:'e',table_id:'a',guest_count:2}));
+  });
+  it('changing party size invalidates an in-flight quote', async () => {
+    mapOptions.onSelect({kind:'table',key:'a'});
+    const guests = dom.window.document.getElementById('book-guests'); guests.value='3';
+    guests.dispatchEvent(new dom.window.Event('change')); await flush();
+    pending[0]({quote:{total:'5000',currency:'MXN'}});
+    await flush();
+    expect(dom.window.document.getElementById('book-quote').hidden).toBe(true);
+    expect(dom.window.document.getElementById('btn-book-confirm').disabled).toBe(true);
+  });
+  it('a saved layout notification refreshes event availability', async () => {
+    api.get.mockClear();
+    hooks.event({event_type:'floor_plan_updated',payload:{revision:2}}); await flush();
+    expect(api.get).toHaveBeenCalledWith('/nightclubs/club/reservations/availability?event_id=e&guests=2');
+    expect(api.get).toHaveBeenCalledWith('/nightclubs/club/floor-plan');
+  });
+});
+
 // --------------------------------------------------------------------- propinas
 
 describe('propinas al personal', () => {

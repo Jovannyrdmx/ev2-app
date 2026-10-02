@@ -4,7 +4,7 @@ const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
 
-let club; let guest; let other; let waiter; let manager; let small; let vip;
+let club; let guest; let other; let waiter; let manager; let admin; let small; let vip;
 
 beforeAll(setupSchema);
 afterAll(closePool);
@@ -15,6 +15,7 @@ beforeEach(async () => {
   other = await f.createUser(club.id, { role: 'guest' });
   waiter = await f.createUser(club.id, { role: 'waiter' });
   manager = await f.createUser(club.id, { role: 'manager' });
+  admin = await f.createUser(club.id, { role: 'admin' });
   small = await f.createTable(club.id, { code: 'T-1', capacity: 2, section: 'main' });
   vip = await f.createTable(club.id, { code: 'VIP-1', capacity: 6, section: 'vip', type: 'vip' });
 });
@@ -162,8 +163,8 @@ describe('Ocupación', () => {
 });
 
 describe('PUT /tables/layout', () => {
-  it('el gerente guarda coordenadas y capacidad', async () => {
-    const res = await api().put(url('/tables/layout')).set(auth(manager)).send({
+  it('solo el administrador guarda coordenadas y capacidad', async () => {
+    const res = await api().put(url('/tables/layout')).set(auth(admin)).send({
       tables: [
         { id: small.id, x: 120.5, y: 80, radius: 30, capacity: 6 },
         { id: vip.id, section: 'terraza' },
@@ -186,7 +187,7 @@ describe('PUT /tables/layout', () => {
   it('no toca mesas de otro club aunque se manden sus ids', async () => {
     const otherClub = await f.createNightclub({ slug: 'otro3' });
     const foreign = await f.createTable(otherClub.id, { code: 'X', x: 0 });
-    const res = await api().put(url('/tables/layout')).set(auth(manager))
+    const res = await api().put(url('/tables/layout')).set(auth(admin))
       .send({ tables: [{ id: foreign.id, x: 999 }] });
 
     expect(res.body.updated).toBe(0);
@@ -195,7 +196,11 @@ describe('PUT /tables/layout', () => {
   });
 
   it('valida el cuerpo', async () => {
-    const res = await api().put(url('/tables/layout')).set(auth(manager)).send({ tables: [] });
+    const res = await api().put(url('/tables/layout')).set(auth(admin)).send({ tables: [] });
     expect(res.status).toBe(400);
+  });
+  it('el gerente no tiene un acceso alterno para editar', async () => {
+    expect((await api().put(url('/tables/layout')).set(auth(manager))
+      .send({ tables: [{ id: small.id, x: 80 }] })).status).toBe(403);
   });
 });

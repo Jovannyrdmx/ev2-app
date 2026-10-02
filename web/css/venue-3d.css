@@ -1,0 +1,26 @@
+.venue-frame{border:1px solid #354057;border-radius:14px;overflow:hidden;background:#0b101b;color:#edf5ff;min-width:0}
+.venue-tools{display:flex;flex-wrap:wrap;gap:8px;padding:10px;border-bottom:1px solid #354057}
+.venue-tools button,.venue-editor button,.venue-editor select,.venue-editor input{font:inherit;min-height:44px;border:1px solid #43516a;border-radius:8px;padding:8px 12px;background:#182334;color:#edf5ff}
+.venue-tools button{font-size:12px}
+.venue-tools button:focus-visible,.venue-editor :focus-visible{outline:3px solid #6fddec;outline-offset:2px}
+.venue-viewport{height:clamp(300px,52vw,530px);position:relative}
+.venue-viewport canvas{display:block;width:100%;height:100%;touch-action:none}
+.venue-note{font-size:12px;line-height:1.6;color:#a9b9ce;margin:10px 0}
+.venue-editor{font-family:Inter,sans-serif;background:#0b101b;color:#edf5ff;margin:0;min-height:100vh}
+.venue-editor *{box-sizing:border-box}
+.venue-editor header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 24px;border-bottom:1px solid #354057}
+.venue-editor a{color:#6fddec}
+.venue-editor h1{font-size:24px;margin:0 0 8px;font-weight:600}
+.venue-editor h2{font-size:18px;margin:0 0 14px}
+.venue-editor main{max-width:1440px;padding:24px;margin:auto}
+.venue-workspace{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px}
+.venue-inspector{background:#141d2c;border:1px solid #354057;border-radius:12px;padding:20px;align-self:start}
+.venue-inspector label{display:block;font-size:13px;color:#bac8d9;margin:16px 0 6px}
+.venue-inspector select,.venue-inspector input{width:100%}
+.venue-actions{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}
+.venue-editor .venue-primary{background:#55d5e9;color:#071c22;font-weight:600}
+.venue-editor button:disabled{opacity:.45;cursor:not-allowed}
+.venue-editor #editor-status{min-height:48px;padding:12px;background:#182334;border-radius:8px;font-size:14px;line-height:1.5}
+.venue-editor [hidden]{display:none!important}
+@media(max-width:850px){.venue-workspace{grid-template-columns:1fr}.venue-editor main{padding:16px}.venue-editor header{padding:16px;flex-wrap:wrap}.venue-inspector{width:100%}}
+@media(max-height:500px) and (orientation:landscape){.venue-viewport{height:300px}}

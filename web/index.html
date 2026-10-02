@@ -117,6 +117,7 @@
         [hidden] { display: none !important; }
     </style>
     <link rel="stylesheet" href="css/ux.css">
+    <link rel="stylesheet" href="css/venue-3d.css">
 </head>
 <body class="text-white">
 <div class="max-w-md mx-auto min-h-screen flex flex-col">
@@ -312,7 +313,11 @@
 
         <div id="floor-buttons" class="flex gap-2 justify-center overflow-x-auto pb-1"></div>
 
-        <div class="canvas-wrapper">
+        <div class="venue-tools"><button id="map-view-3d" type="button" data-i18n="venue.view3d" aria-pressed="true">Mapa 3D</button><button id="map-view-2d" type="button" data-i18n="venue.view2d" aria-pressed="false">Plano 2D</button></div>
+        <p id="map-3d-note" class="venue-note" data-i18n="venue.hint"></p>
+        <div id="map-3d"></div>
+        <p class="venue-note" data-i18n="venue.liveHint"></p>
+        <div class="canvas-wrapper" id="map-2d">
           <canvas id="floor-canvas" width="800" height="580" role="img" aria-label="Plano del club. También puedes consultar las mesas en la lista." data-i18n-aria-label="ux.floorPlan"></canvas>
         </div>
         <details class="ux-table-toolbar">
@@ -367,7 +372,15 @@
 
           <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="book.tables">Mesas libres</p>
           <p id="book-no-tables" class="text-sm text-white/50" data-i18n="book.noTables" hidden>No queda ninguna mesa para esa cantidad de personas.</p>
-          <div id="book-tables" class="space-y-2"></div>
+          <div class="venue-tools">
+            <label for="book-floor" data-i18n="venue.floor">Piso</label><select id="book-floor" class="bg-slate-800 rounded-lg px-3 py-2"><option value="baja" data-i18n="map.floorBaja">Planta baja</option><option value="alta" data-i18n="map.floorAlta">Planta alta</option></select>
+            <button id="book-view-3d" type="button" data-i18n="venue.view3d" aria-pressed="true">Mapa 3D</button><button id="book-view-2d" type="button" data-i18n="venue.view2d" aria-pressed="false">Plano 2D</button>
+          </div>
+          <p id="book-3d-note" class="venue-note" data-i18n="venue.hint"></p>
+          <div id="book-3d"></div>
+          <canvas id="book-2d" width="800" height="580" class="w-full" role="img" aria-label="Plano de mesas disponibles para reservar" data-i18n-aria-label="ux.floorPlan"></canvas>
+          <p class="venue-note" data-i18n="venue.availableHint"></p>
+          <details open class="ux-table-toolbar"><summary data-i18n="ux.tableList">Ver mesas en lista</summary><div id="book-tables" class="space-y-2"></div></details>
 
           <input id="book-notes" maxlength="500" placeholder="Cumpleaños, silla de ruedas, etc." data-i18n-placeholder="book.notesHint"
                  class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
@@ -985,6 +998,7 @@
 <script src="js/roles.js"></script>
 <script src="js/pin-pad.js"></script>
 <script src="js/floor-map.js"></script>
+<script src="js/venue-layout.js"></script>
 <script src="js/taxi-ride.js"></script>
 <script src="js/tipping.js"></script>
 <script src="js/songs.js"></script>

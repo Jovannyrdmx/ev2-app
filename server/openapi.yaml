@@ -1070,6 +1070,7 @@ paths:
                       width: { type: integer }
                       height: { type: integer }
                   floors: { type: array, items: { type: string } }
+                  revision: { type: integer, minimum: 0, description: Revisión necesaria para guardar una distribución sin sobrescribir otra edición. }
                   tables:
                     type: array
                     items:
@@ -1083,6 +1084,67 @@ paths:
                     items: { $ref: '#/components/schemas/Landmark' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/floor-plan/layout:
+    put:
+      operationId: saveVenueLayout
+      tags: [Mesas]
+      summary: Guardar posiciones de mesas y áreas
+      description: |
+        Solo administrador del mismo club. Guarda un lote atómico de posiciones XY.
+        No modifica capacidad, precios, sección, piso ni reservaciones. Una zona se
+        representa como las posiciones de todas sus mesas. Rechaza revisiones viejas,
+        elementos duplicados, ajenos al club o fuera del lienzo. Publica
+        floor_plan_updated con la nueva revisión, sin datos personales.
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [revision]
+              properties:
+                revision: { type: integer, minimum: 0 }
+                tables:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [id, x, y]
+                    properties:
+                      id: { type: string, format: uuid }
+                      x: { type: number }
+                      y: { type: number }
+                landmarks:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [code, x, y]
+                    properties:
+                      code: { type: string, minLength: 1, maxLength: 40 }
+                      x: { type: number }
+                      y: { type: number }
+      responses:
+        '200':
+          description: Posiciones guardadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revision: { type: integer }
+                  updated: { type: integer }
+        '400': { description: 'Cuerpo inválido, vacío o elementos repetidos' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Elemento inexistente o ajeno al club }
+        '409': { description: Otra sesión modificó el plano; recargar antes de editar }
+        '422': { description: Posición fuera del lienzo }
 
   /api/nightclubs/{nightclubId}/tables/stats:
     get:
@@ -1130,8 +1192,9 @@ paths:
       tags: [Mesas]
       summary: Guardar el plano de mesas
       description: |
-        Requiere rol `manager`. Actualiza en bloque coordenadas, radio, sección,
-        capacidad y estado. Se usa desde el editor visual del portal de gerencia.
+        Requiere rol `admin`. Ruta de compatibilidad para coordenadas, radio, sección,
+        capacidad y estado. Incrementa la revisión del plano. El editor 3D utiliza
+        floor-plan/layout, que solo modifica posiciones y exige revisión.
       parameters: [{ $ref: '#/components/parameters/NightclubId' }]
       requestBody:
         required: true

@@ -196,6 +196,7 @@
     $('screen-wrong-role').hidden = true;
     $('screen-manager').hidden = false;
     $('me-name').textContent = (api.session.user && api.session.user.display_name) || '';
+    $('btn-venue-editor').hidden = role !== 'admin';
     await loadAll();
     connectRealtime();
   }

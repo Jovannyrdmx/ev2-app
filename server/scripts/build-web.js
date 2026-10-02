@@ -6,6 +6,14 @@ const { execFileSync } = require('child_process');
 const root = path.resolve(__dirname, '../..');
 const vendor = path.join(root, 'web/vendor');
 fs.mkdirSync(vendor, { recursive: true });
+require('esbuild').buildSync({
+  entryPoints: [path.join(root, 'web/js/venue-3d.js')],
+  bundle: true, format: 'iife', globalName: 'EV2Venue3D',
+  outfile: path.join(vendor, 'venue-3d.js'), minify: true, target: ['es2020'],
+  nodePaths: [path.join(root, 'server/node_modules')],
+});
+fs.copyFileSync(path.resolve(path.dirname(require.resolve('three')), '../LICENSE'),
+  path.join(vendor, 'three-LICENSE.txt'));
 execFileSync(process.execPath, [
   require.resolve('tailwindcss/lib/cli.js'),
   '-c', path.join(root, 'server/tailwind.config.js'),

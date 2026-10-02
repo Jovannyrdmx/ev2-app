@@ -2,6 +2,21 @@
 
 Cada fila se agrega al terminar y verificar un paso del manual. Formato: fecha · paso · qué se hizo · verificación · commit/PR.
 
+## Plano 3D y editor de distribución, 2 de octubre de 2026
+
+Rama `fase5/mapa-3d-editor`, bloque autorizado: mapa 3D de clientes y reservaciones,
+alternativas 2D/lista, editor de mesas, zonas y áreas por arrastre, guardado exclusivo
+del administrador, revisión optimista y transacción atómica. Conserva coordenadas
+actuales, precios, capacidades, identidades de mesas y reservaciones.
+Sin migraciones, seeds ni cambios de distribución en producción.
+
+Verificación local: 43 suites / 1,371 pruebas aprobadas; build web, lint sin errores,
+OpenAPI y diff correctos. Chromium: arrastre con ratón y tacto, guardado/recarga,
+deshacer/cancelar, conflicto entre sesiones, permisos, reservación desde mapa 3D
+sin dinero real y alternativas sin WebGL. Sin desbordamiento a 320/390/768/1440 px.
+PWA `ev2-v36`. Pendiente publicación supervisada en VPS. Sin PR ni cambios a main.
+Detalle: [MAPA_3D.md](MAPA_3D.md).
+
 ## Mercado Pago Point: confirmación segura, 1 de octubre de 2026
 
 Desarrollo autorizado en `fase7/mercadopago-notificaciones`, sin cargos reales.

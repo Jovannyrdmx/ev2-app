@@ -215,3 +215,69 @@ describe('Listado de mesas con el plano real', () => {
     expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
   });
 });
+
+describe('Editor del plano, solo administrador', () => {
+  let admin; let plan;
+  beforeEach(async () => {
+    await loadFloorPlan({ slug: 'ev2' });
+    admin = await f.createUser(club.id, { role: 'admin' });
+    plan = (await api().get(url('/floor-plan')).set(auth(admin))).body;
+  });
+  const save = (body, by) => api().put(url('/floor-plan/layout')).set(auth(by || admin)).send(body);
+  const body = () => ({ revision: plan.revision, tables: [{ id: plan.tables[0].id, x: 120, y: 160 }],
+    landmarks: [{ code: plan.landmarks[0].code, x: 30, y: 40 }] });
+  it('guarda mesas y áreas de forma atómica sin alterar sus demás datos', async () => {
+    const before = plan.tables[0];
+    const res = await save(body());
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ updated: 2, revision: 1 });
+    const after = (await api().get(url('/floor-plan')).set(auth(guest))).body;
+    expect(after.tables.find((r) => r.id === before.id)).toMatchObject({ ...before, x: '120.00', y: '160.00' });
+    expect(after.revision).toBe(1);
+    expect(Number(after.landmarks[0].x)).toBe(30);
+    const events = (await pool.query("SELECT audience,payload FROM events WHERE type='floor_plan_updated'")).rows;
+    expect(events).toHaveLength(1);
+    expect(events[0].payload).toEqual({ revision: 1 });
+    expect(events[0].audience.roles).toContain('guest');
+  });
+  it.each(['guest','manager','waiter'])('rechaza el rol %s', async (role) => {
+    const user = { guest, manager, waiter }[role];
+    expect((await save(body(), user)).status).toBe(403);
+  });
+  it('rechaza una revisión vieja sin sobrescribir', async () => {
+    expect((await save(body())).status).toBe(200);
+    expect((await save({ ...body(), tables: [{ id: plan.tables[0].id, x: 160, y: 200 }] })).status).toBe(409);
+    expect(Number((await pool.query('SELECT x FROM tables WHERE id=$1', [plan.tables[0].id])).rows[0].x)).toBe(120);
+  });
+  it('una llamada concurrente gana y la otra conserva la revisión anterior', async () => {
+    const results = await Promise.all([save(body()), save(body())]);
+    expect(results.map((r) => r.status).sort()).toEqual([200,409]);
+  });
+  it('revierte todo si un área sale del plano', async () => {
+    expect((await save({ ...body(), landmarks: [{ code: plan.landmarks[0].code, x: 799, y: 579 }] })).status).toBe(422);
+    const after = (await api().get(url('/floor-plan')).set(auth(admin))).body;
+    expect(after).toEqual(plan);
+  });
+  it('no permite cambiar capacidad, precios, zona ni estado', async () => {
+    for (const field of ['capacity','price','section','status']) {
+      const b = body(); b.tables[0][field] = 10;
+      expect((await save(b)).status).toBe(400);
+    }
+  });
+  it('rechaza elementos repetidos', async () => {
+    const b = body(); b.tables.push(b.tables[0]);
+    expect((await save(b)).status).toBe(400);
+  });
+  it('rechaza una mesa de otro club y revierte el lote', async () => {
+    const foreignClub = await f.createNightclub({ slug: 'foreign-plan' });
+    const foreign = await f.createTable(foreignClub.id);
+    const b = body(); b.tables.push({ id: foreign.id, x: 80, y: 80 });
+    expect((await save(b)).status).toBe(404);
+    expect((await api().get(url('/floor-plan')).set(auth(admin))).body).toEqual(plan);
+  });
+  it('editar por la ruta anterior también invalida un borrador viejo', async () => {
+    expect((await api().put(url('/tables/layout')).set(auth(admin))
+      .send({ tables: [{ id: plan.tables[0].id, x: 120 }] })).status).toBe(200);
+    expect((await save(body())).status).toBe(409);
+  });
+});

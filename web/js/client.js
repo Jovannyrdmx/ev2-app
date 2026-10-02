@@ -200,7 +200,7 @@
       return { changed: 'orders', orderId: id, status: order.status };
     }
 
-    if (type === 'table_updated') return { changed: 'floorPlan' };
+    if (type === 'table_updated' || type === 'floor_plan_updated') return { changed: 'floorPlan' };
     if (type === 'flirt_received') return { changed: 'flirts', payload };
     return null;
   }

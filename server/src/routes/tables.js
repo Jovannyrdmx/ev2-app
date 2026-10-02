@@ -9,6 +9,7 @@ const { authenticate, requireRole, sameNightclub } = require('../middleware/auth
 const events = require('../services/events');
 const seating = require('../services/seating');
 const tickets = require('../services/tickets');
+const floorLayout = require('../services/floor-layout');
 
 const router = express.Router({ mergeParams: true });
 
@@ -102,9 +103,11 @@ router.get('/nightclubs/:nightclubId/floor-plan',
     const { nightclubId } = req.params;
     const floor = req.query.floor || null;
 
-    const [club, tables, landmarks] = await Promise.all([
-      pool.query('SELECT settings FROM nightclubs WHERE id = $1', [nightclubId]),
-      pool.query(
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const club = await client.query('SELECT settings FROM nightclubs WHERE id = $1', [nightclubId]);
+      const tables = await client.query(
         `SELECT t.id, t.code, t.table_number, t.name, t.section, t.floor, t.type, t.capacity,
                 t.x, t.y, t.radius, t.color, t.status, t.bottle_service,
                 COALESCE(o.seated, 0)::int AS seated
@@ -117,24 +120,45 @@ router.get('/nightclubs/:nightclubId/floor-plan',
             AND ($2::text IS NULL OR t.floor = $2)
           ORDER BY t.floor, t.section, t.table_number NULLS LAST, t.code`,
         [nightclubId, floor],
-      ),
-      pool.query(
+      );
+      const landmarks = await client.query(
         `SELECT code, name, type, description, floor, x, y, width, height
            FROM venue_landmarks
           WHERE nightclub_id = $1 AND active
             AND ($2::text IS NULL OR floor = $2 OR floor = 'ambas')
           ORDER BY sort_order, name`,
         [nightclubId, floor],
-      ),
-    ]);
+      );
+      await client.query('COMMIT');
 
-    const settings = club.rows[0] ? club.rows[0].settings : {};
-    res.json({
-      canvas: (settings && settings.floor_plan && settings.floor_plan.canvas) || null,
-      floors: [...new Set(tables.rows.map((t) => t.floor))],
-      tables: tables.rows,
-      landmarks: landmarks.rows,
-    });
+      const settings = club.rows[0] ? club.rows[0].settings : {};
+      res.json({
+        canvas: (settings && settings.floor_plan && settings.floor_plan.canvas) || null,
+        floors: [...new Set(tables.rows.map((t) => t.floor))],
+        tables: tables.rows,
+        landmarks: landmarks.rows,
+        revision: Number(settings?.floor_plan?.revision || 0),
+      });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally { client.release(); }
+  }));
+
+router.put('/nightclubs/:nightclubId/floor-plan/layout',
+  requireRole('admin'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      revision: z.number().int().min(0),
+      tables: z.array(z.object({ id: uuid, x: z.number().finite(), y: z.number().finite() }).strict()).max(200).default([]),
+      landmarks: z.array(z.object({
+        code: z.string().min(1).max(40), x: z.number().finite(), y: z.number().finite(),
+      }).strict()).max(100).default([]),
+    }).strict().refine((b) => b.tables.length + b.landmarks.length > 0, { message: 'No hay cambios para guardar.' }),
+  }),
+  asyncHandler(async (req, res) => {
+    res.json(await floorLayout.save(pool, req.params.nightclubId, req.body));
   }));
 
 // Occupancy for the manager: how full the room is, by floor and by section.
@@ -363,7 +387,7 @@ const layoutItem = z.object({
 });
 
 router.put('/nightclubs/:nightclubId/tables/layout',
-  requireRole('manager'),
+  requireRole('admin'),
   validate({
     params: z.object({ nightclubId: uuid }),
     body: z.object({ tables: z.array(layoutItem).min(1).max(200) }),
@@ -372,6 +396,7 @@ router.put('/nightclubs/:nightclubId/tables/layout',
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await floorLayout.lock(client, req.params.nightclubId);
       let updated = 0;
       for (const t of req.body.tables) {
         const fields = Object.keys(t).filter((k) => k !== 'id');
@@ -391,6 +416,7 @@ router.put('/nightclubs/:nightclubId/tables/layout',
         audience: { roles: ['waiter', 'bartender', 'hostess', 'manager', 'admin'] },
         payload: { action: 'layout_changed', count: updated },
       });
+      await floorLayout.bump(client, req.params.nightclubId);
       await client.query('COMMIT');
       res.json({ updated });
     } catch (err) {
