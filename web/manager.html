@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es-MX">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -91,7 +91,7 @@
       <h1 class="font-display text-3xl ev2-gradient mb-1">EV2 · <span data-i18n="manager.title">Gerente</span></h1>
     </div>
     <form id="form-login" class="space-y-3">
-      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo" data-i18n-placeholder="auth.email" class="field">
+      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo electrónico" data-i18n-placeholder="auth.email" class="field">
       <input id="login-password" type="password" autocomplete="current-password" required placeholder="Contraseña" data-i18n-placeholder="auth.password" class="field">
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.enter">Entrar al club</button>
     </form>
@@ -107,15 +107,15 @@
   <!-- ====== CONTRASEÑA TEMPORAL: el servidor bloquea todo hasta cambiarla ====== -->
   <section id="screen-password" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto" hidden>
     <h2 class="font-display text-2xl ev2-gradient mb-1" data-i18n="gate.title">Cambia tu contraseña</h2>
-    <p class="text-sm text-white/60 mb-6" data-i18n="gate.note">Entraste con una contraseña temporal.</p>
+    <p class="text-sm text-white/60 mb-6" data-i18n="gate.note">Entraste con una contraseña temporal. Elige una tuya para poder trabajar.</p>
     <form id="form-password" class="space-y-3">
       <input id="pw-current" type="password" autocomplete="current-password" required placeholder="Contraseña temporal" data-i18n-placeholder="gate.current" class="field">
-      <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" placeholder="Contraseña nueva (mínimo 8)" data-i18n-placeholder="gate.new" class="field">
-      <input id="pw-repeat" type="password" autocomplete="new-password" required placeholder="Repite la nueva" data-i18n-placeholder="gate.repeat" class="field">
+      <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" placeholder="Nueva contraseña (mínimo 8 caracteres)" data-i18n-placeholder="gate.new" class="field">
+      <input id="pw-repeat" type="password" autocomplete="new-password" required placeholder="Confirma la nueva contraseña" data-i18n-placeholder="gate.repeat" class="field">
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="gate.save">Cambiar y entrar</button>
     </form>
     <p id="pw-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
-    <button id="btn-pw-logout" class="mt-6 text-sm text-white/50 underline" data-i18n="top.signOut">Salir</button>
+    <button id="btn-pw-logout" class="mt-6 text-sm text-white/50 underline" data-i18n="top.signOut">Cerrar sesión</button>
   </section>
 
   <!-- ============ ENTRÓ ALGUIEN QUE NO ES GERENTE ============ -->
@@ -123,7 +123,7 @@
     <p class="text-xs uppercase tracking-widest text-white/40" data-i18n="staff.signedInAs">Entraste como</p>
     <h2 id="wrong-role" class="font-display text-2xl ev2-gradient mb-4">—</h2>
     <p id="wrong-role-note" class="text-sm text-white/60"></p>
-    <button id="btn-wrong-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Salir</button>
+    <button id="btn-wrong-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Cerrar sesión</button>
   </section>
 
   <!-- ============================ PANEL ============================ -->
@@ -142,7 +142,7 @@
         <a id="btn-warehouse" href="almacen.html" class="text-xs text-white/60 px-2" data-i18n-title="manager.openWarehouse" title="Abrir almacén"><i class="fa-solid fa-boxes-stacked"></i></a>
         <button id="btn-refresh" class="text-xs text-white/60 px-2" data-i18n-title="manager.refresh" title="Actualizar"><i class="fa-solid fa-rotate"></i></button>
         <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
-        <button id="btn-logout" class="text-xs text-white/60 px-2" data-i18n-title="top.signOut" title="Salir"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
+        <button id="btn-logout" class="text-xs text-white/60 px-2" data-i18n-title="top.signOut" title="Cerrar sesión"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
       </div>
     </header>
 
@@ -164,12 +164,12 @@
       </div>
 
       <p id="secret-both" class="text-[11px] text-white/60 mt-2" data-i18n="manager.pinAndPassword" hidden>El PIN es para entrar en el club. La contraseña, desde fuera.</p>
-      <p class="text-[11px] text-white/60 mt-1" data-i18n="manager.tempPasswordNote">Anótala ahora: solo se muestra una vez.</p>
+      <p class="text-[11px] text-white/60 mt-1" data-i18n="manager.tempPasswordNote">Anótala ahora: solo se muestra una vez. Esa persona la cambia al entrar.</p>
       <button id="btn-secret-ok" class="ev2-button rounded-lg px-4 py-2 mt-3 text-sm" data-i18n="manager.gotIt">Ya la anoté</button>
     </div>
 
-    <button id="ux-manager-menu" class="ux-manager-menu" aria-expanded="false" aria-controls="ux-manager-nav" data-i18n="ux.openNavigation">Abrir navegación</button>
-    <nav id="ux-manager-nav" class="ux-manager-nav flex px-2 border-b border-white/10 overflow-x-auto" aria-label="Navegación de gestión" data-i18n-aria-label="ux.navigation">
+    <button id="ux-manager-menu" class="ux-manager-menu" aria-expanded="false" aria-controls="ux-manager-nav" data-i18n="ux.openNavigation">Navegación y módulos</button>
+    <nav id="ux-manager-nav" class="ux-manager-nav flex px-2 border-b border-white/10 overflow-x-auto" aria-label="Navegación principal" data-i18n-aria-label="ux.navigation">
       <span class="ux-group" data-i18n="ux.operation">Operación</span>
       <button data-tab="summary" class="tab active flex-1 py-3 text-sm whitespace-nowrap" data-i18n="ux.today">Hoy</button>
       <button data-tab="nights" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="night.tab">Noches</button>
@@ -177,7 +177,7 @@
       <button data-tab="reports" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="ux.incidents">Incidencias</button>
       <span class="ux-group" data-i18n="ux.finance">Dinero</span>
       <button data-tab="payouts" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="ux.paymentsCuts">Pagos y cortes</button>
-      <span class="ux-group" data-i18n="ux.services">Servicios</span>
+      <span class="ux-group" data-i18n="ux.services">Servicios y configuración</span>
       <button data-tab="drivers" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabDrivers">Conductores</button>
       <button data-tab="taxi" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabTaxi">Taxi</button>
       <button data-tab="inventory" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="inv.tab">Inventario</button>
@@ -293,7 +293,7 @@
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="label" for="n-deadline" data-i18n="night.deadline">Minutos para llegar antes de soltar la mesa</label>
+              <label class="label" for="n-deadline" data-i18n="night.deadline">Tiempo límite de llegada antes de liberar la mesa (minutos)</label>
               <input id="n-deadline" type="number" min="15" max="720" step="15" class="field" value="180">
             </div>
             <div>
@@ -304,7 +304,7 @@
                 cobrar. Por eso el campo nace vacio y no en un numero.
               -->
               <input id="n-deposit" type="number" min="0" max="100" step="5" class="field"
-                     placeholder="—" data-i18n-placeholder="night.depositHint">
+                     placeholder="vacío = el del club" data-i18n-placeholder="night.depositHint">
               <p id="n-deposit-note" class="text-[11px] text-white/40 mt-1" data-i18n="night.depositNote">Si lo dejas vacío se cobra el anticipo normal del club.</p>
               <p class="field-error" data-error="deposit_pct" hidden></p>
             </div>
@@ -340,11 +340,11 @@
       <div id="tab-staff" class="space-y-3" hidden>
         <div class="grid grid-cols-3 gap-2">
           <div class="stat-card"><div class="stat-number" id="st-onshift">—</div><div class="stat-label" data-i18n="staff.stOnShift">En turno</div></div>
-          <div class="stat-card"><div class="stat-number" id="st-active">—</div><div class="stat-label" data-i18n="manager.tabSummary">Activos</div></div>
+          <div class="stat-card"><div class="stat-number" id="st-active">—</div><div class="stat-label" data-i18n="manager.tabSummary">Turno</div></div>
           <div class="stat-card"><div class="stat-number" id="st-inactive">—</div><div class="stat-label" data-i18n="staff.stInactive">De baja</div></div>
         </div>
 
-        <button id="btn-new-staff" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="staff.new">Dar de alta a alguien</button>
+        <button id="btn-new-staff" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="staff.new">Registrar empleado</button>
 
         <form id="staff-form" class="card rounded-xl p-4 space-y-3" hidden>
           <div class="grid grid-cols-2 gap-3">
@@ -360,7 +360,7 @@
             </div>
           </div>
           <div>
-            <label class="label" for="s-role" data-i18n="staff.role">Qué hace</label>
+            <label class="label" for="s-role" data-i18n="staff.role">Puesto</label>
             <select id="s-role" class="field"></select>
             <p class="field-error" data-error="role" hidden></p>
           </div>
@@ -434,7 +434,7 @@
             <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tch.title">Cobros con terminal</p>
             <button id="btn-tch-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="tch.reload">Actualizar</button>
           </div>
-          <p class="text-[11px] text-white/40" data-i18n="tch.why">Las últimas 24 horas. Desde aquí se devuelve un cobro a la tarjeta, y el libro se entera.</p>
+          <p class="text-[11px] text-white/40" data-i18n="tch.why">Cobros de las últimas 24 horas. Los reembolsos se envían a la tarjeta y quedan registrados en la contabilidad.</p>
           <p id="tch-empty" class="text-sm text-white/40" data-i18n="tch.none" hidden>No hubo cobros con terminal en las últimas 24 horas.</p>
           <div id="tch-list" class="space-y-2"></div>
           <p id="tch-error" class="text-sm text-red-300" hidden></p>
@@ -486,8 +486,8 @@
             <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="cuts.title">Cortes de turno</p>
             <button id="btn-cuts-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="cuts.reload">Actualizar</button>
           </div>
-          <p class="text-[11px] text-white/40" data-i18n="cuts.why">Cuenta el dinero antes de confirmar: al confirmar, el turno de esa persona queda cerrado.</p>
-          <p id="cuts-empty" class="text-sm text-white/40" data-i18n="cuts.none" hidden>Nadie tiene entregas ni cortes pendientes.</p>
+          <p class="text-[11px] text-white/40" data-i18n="cuts.why">Por dónde salió el efectivo esta noche y cómo cerró cada turno. Los retiros y los cortes se autorizan en el momento, con tu código.</p>
+          <p id="cuts-empty" class="text-sm text-white/40" data-i18n="cuts.none" hidden>No hubo retiros ni cortes en las últimas 24 horas.</p>
           <div id="cuts-drops" class="space-y-2"></div>
           <div id="cuts-list" class="space-y-2"></div>
           <p id="cuts-error" class="text-sm text-red-300" hidden></p>
@@ -495,7 +495,7 @@
 
         <div class="card rounded-xl p-4 space-y-2">
           <div class="flex justify-between items-baseline">
-            <span class="text-sm text-white/60" data-i18n="pay.owed">Se debe</span>
+            <span class="text-sm text-white/60" data-i18n="pay.owed">Pendiente por pagar</span>
             <span id="p-owed" class="font-display text-2xl" style="color:var(--ev2-gold)">—</span>
           </div>
           <div class="flex justify-between text-sm"><span class="text-white/50" data-i18n="pay.inbox">Por resolver</span><span id="p-inbox">—</span></div>
@@ -506,7 +506,7 @@
         <p id="acc-empty" class="text-sm text-white/40" data-i18n="pay.noAccounts" hidden>No hay cuentas esperando verificación.</p>
         <div id="acc-list" class="space-y-2"></div>
 
-        <p class="text-xs uppercase tracking-wider text-white/40 pt-2" data-i18n="pay.tab">Retiros</p>
+        <p class="text-xs uppercase tracking-wider text-white/40 pt-2" data-i18n="pay.tab">Pagos</p>
         <p id="pay-empty" class="text-sm text-white/40" data-i18n="pay.none" hidden>No hay retiros pendientes.</p>
         <div id="pay-list" class="space-y-2"></div>
       </div>
@@ -520,7 +520,7 @@
             <p id="mod-open" class="font-display text-2xl">0</p>
           </div>
           <div class="card rounded-xl p-3 text-center">
-            <p class="text-[11px] text-white/40" data-i18n="mod.urgent">Graves</p>
+            <p class="text-[11px] text-white/40" data-i18n="mod.urgent">Prioritarios</p>
             <p id="mod-urgent" class="font-display text-2xl text-red-300">0</p>
           </div>
           <div class="card rounded-xl p-3 text-center">
@@ -528,9 +528,9 @@
             <p id="mod-actioned" class="font-display text-2xl">0</p>
           </div>
         </div>
-        <p class="text-[11px] text-white/40" data-i18n="mod.privacyNote">Aquí nunca se ve el mensaje del flirt: solo quién, por qué y cuándo.</p>
+        <p class="text-[11px] text-white/40" data-i18n="mod.privacyNote">Aquí no se muestra el contenido del mensaje de Conecta, solo las personas involucradas, el motivo y la fecha.</p>
         <div id="mod-filters" class="flex gap-2 overflow-x-auto pb-1"></div>
-        <p id="mod-empty" class="text-sm text-white/40 text-center py-6" data-i18n="mod.empty" hidden>No hay reportes. Buena señal.</p>
+        <p id="mod-empty" class="text-sm text-white/40 text-center py-6" data-i18n="mod.empty" hidden>No hay reportes.</p>
         <div id="mod-list" class="space-y-3"></div>
       </div>
 
@@ -579,7 +579,7 @@
           </label>
           <div><label class="label" for="taxi-pickup" data-i18n="manager.pickupPoint">Punto de encuentro</label><input id="taxi-pickup" class="field" maxlength="120"></div>
           <div>
-            <label class="label" for="taxi-ttl" data-i18n="manager.certTtl">La constancia vale (minutos)</label>
+            <label class="label" for="taxi-ttl" data-i18n="manager.certTtl">Vigencia de la constancia (minutos)</label>
             <input id="taxi-ttl" type="number" min="15" max="720" step="15" class="field">
             <p class="text-[11px] text-white/40 mt-1" data-i18n="manager.certTtlNote">Cuánto tiempo se puede verificar el folio después de que arranca el viaje. Entre 15 minutos y 12 horas.</p>
           </div>
@@ -593,7 +593,7 @@
 
         <div class="card rounded-xl p-4 space-y-3">
           <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="manager.zones">Zonas y tarifas</p>
-          <p id="zones-empty" class="text-sm text-white/40" data-i18n="manager.noZones" hidden>No hay zonas configuradas.</p>
+          <p id="zones-empty" class="text-sm text-white/40" data-i18n="manager.noZones" hidden>No hay zonas configuradas. Sin ellas el precio se acuerda con el conductor.</p>
           <div id="zones-list" class="space-y-2"></div>
           <div class="grid grid-cols-5 gap-2 pt-2 border-t border-white/10">
             <input id="zone-name" class="field col-span-3" placeholder="Zona" data-i18n-placeholder="manager.zoneName">
@@ -627,7 +627,7 @@
         </div>
 
         <div id="inv-unconfirmed" class="card rounded-xl p-3 border border-pink-400/40 text-sm" hidden>
-          <p class="text-pink-200"><span id="inv-unconfirmed-n">0</span> <span data-i18n="inv.unconfirmed">presentaciones sin confirmar: hasta que se confirmen, el conteo de esas botellas no es de fiar.</span></p>
+          <p class="text-pink-200"><span id="inv-unconfirmed-n">0</span> <span data-i18n="inv.unconfirmed">presentaciones pendientes de confirmar. El conteo de esos productos puede no ser correcto.</span></p>
         </div>
 
         <nav class="flex gap-2 text-xs">
@@ -639,7 +639,7 @@
             principio y no tenían pantalla: dar de alta un trago o cambiar un precio
             había que hacerlo a mano en la base de datos.
           -->
-          <button class="chip tap px-3" data-inv="menu" data-i18n="inv.subMenu">Carta</button>
+          <button class="chip tap px-3" data-inv="menu" data-i18n="inv.subMenu">Menú</button>
         </nav>
 
         <input id="inv-search" type="search" class="field" placeholder="Buscar" data-i18n-placeholder="inv.search">
@@ -669,20 +669,20 @@
             <input id="sup-size" type="number" min="0" step="any" class="field col-span-3" placeholder="Contenido" data-i18n-placeholder="sup.size">
             <input id="sup-label" class="field col-span-3" placeholder="Presentación" data-i18n-placeholder="sup.label">
           </div>
-          <p class="text-[11px] text-white/40" data-i18n="sup.note">El contenido es cuánto trae UNA presentación: una botella de 750 ml son 750 en ml. Nace en cero: la existencia entra por una recepción o un conteo.</p>
+          <p class="text-[11px] text-white/40" data-i18n="sup.note">Indica el contenido de una presentación. Por ejemplo: botella de 750 ml = 750, con unidad ml. El insumo se registra sin existencias; estas se agregan al recibir mercancía o registrar un conteo.</p>
           <p id="sup-error" class="text-sm text-red-300" hidden></p>
           <button id="btn-sup-add" class="ev2-button w-full rounded-lg py-2" data-i18n="sup.add">Dar de alta</button>
         </div>
 
         <!-- El alta de un trago. Solo se ve en la pestaña de la carta. -->
         <div id="menu-add" class="card rounded-xl p-4 space-y-3" hidden>
-          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="inv.menuNew">Agregar a la carta</p>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="inv.menuNew">Agregar bebida</p>
           <div class="grid grid-cols-5 gap-2">
             <input id="menu-name" class="field col-span-3" placeholder="Nombre" data-i18n-placeholder="inv.menuName">
             <input id="menu-price" type="number" min="0" step="1" class="field col-span-2" placeholder="Precio" data-i18n-placeholder="inv.menuPrice">
           </div>
           <input id="menu-category" class="field" placeholder="Categoría" data-i18n-placeholder="inv.menuCategory">
-          <p class="text-[11px] text-white/40" data-i18n="inv.menuNote">Un trago nuevo nace SIN receta, así que no descuenta inventario hasta que se la pongas en "Recetas y margen".</p>
+          <p class="text-[11px] text-white/40" data-i18n="inv.menuNote">Una bebida nueva no tiene receta y no descuenta inventario. Configura sus ingredientes en «Recetas y margen».</p>
           <p id="menu-error" class="text-sm text-red-300" hidden></p>
           <button id="btn-menu-add" class="ev2-button w-full rounded-lg py-2" data-i18n="inv.menuAdd">Agregar</button>
         </div>
@@ -729,7 +729,7 @@
         </div>
 
         <div class="card rounded-xl p-4 space-y-3">
-          <p class="text-xs text-white/50" data-i18n="manager.spotsHint">Escribe los cajones separados por coma o salto de línea. Los rangos funcionan: A1-A20.</p>
+          <p class="text-xs text-white/50" data-i18n="manager.spotsHint">Escribe los números de cajón separados por comas o saltos de línea. También puedes usar rangos, por ejemplo: A1-A20.</p>
           <textarea id="spots-text" class="field" placeholder="A1-A20, B1-B10"></textarea>
           <input id="spots-zone" class="field" placeholder="Zona (opcional)" data-i18n-placeholder="manager.spotsZone" maxlength="40">
           <p id="spots-preview" class="text-xs text-white/50"></p>
@@ -875,7 +875,7 @@
             <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.agents">PCs que imprimen</p>
             <button id="btn-agent-add" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.agentAdd">Nueva PC</button>
           </div>
-          <p class="text-[11px] text-white/40" data-i18n="prn.agentsWhy">El servidor no alcanza las impresoras del club: un programa en una PC de barra las alcanza por él. Con dos, si apagan una la otra sigue sacando todo el papel.</p>
+          <p class="text-[11px] text-white/40" data-i18n="prn.agentsWhy">El servidor no alcanza las impresoras del club: un programa en una PC de barra las alcanza por él. Con dos, si apagan una la otra sigue sacando todo el papel. No hay nada que copiar: se da de alta con un código.</p>
           <p id="prn-agents-empty" class="text-sm text-white/40" data-i18n="prn.agentsNone" hidden>Ninguna PC está dada de alta todavía. Sin esto no sale ningún papel.</p>
 
           <!--
@@ -903,7 +903,7 @@
                 <code id="prn-install-cmd" class="block text-[11px] break-all rounded p-2" style="background:rgba(0,0,0,.45);color:var(--ev2-lime)">—</code>
                 <div class="flex gap-2">
                   <button id="btn-prn-copy" class="card rounded-lg px-3 py-2 text-xs flex-1" data-i18n="prn.installCopy">Copiar la línea</button>
-                  <a id="prn-install-dl" class="card rounded-lg px-3 py-2 text-xs flex-1 text-center tap" href="#" download="instalar-agente-ev2.ps1" data-i18n="prn.installDownload">Bajar el archivo</a>
+                  <a id="prn-install-dl" class="card rounded-lg px-3 py-2 text-xs flex-1 text-center tap" href="#" download="instalar-agente-ev2.ps1" data-i18n="prn.installDownload">Descargar archivo</a>
                 </div>
                 <p class="text-[11px] text-white/40" data-i18n="prn.installNode">Hace falta Node.js en esa PC. Si no lo tiene, la línea te lo dice y te manda a nodejs.org.</p>
               </div>
@@ -945,7 +945,7 @@
   <div id="cut-sheet" class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur flex flex-col" hidden>
     <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
       <div class="min-w-0">
-        <p class="font-display text-lg" data-i18n="cut.title">Corte de la noche</p>
+        <p class="font-display text-lg" data-i18n="nightCut.title">Corte de la noche</p>
         <p id="cut-night" class="text-xs text-white/50 truncate">—</p>
       </div>
       <button id="btn-cut-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="manager.close">Cerrar</button>
@@ -958,7 +958,7 @@
       <input id="cut-note" class="field" maxlength="300" placeholder="Nota del corte (opcional)"
              data-i18n-placeholder="cut.note">
       <button id="btn-cut-save" class="ev2-button w-full py-3 rounded-xl font-display"
-              data-i18n="cut.close">Cerrar la noche</button>
+              data-i18n="nightCut.close">Cerrar la noche</button>
       <p id="cut-error" class="text-sm text-red-300" hidden></p>
     </div>
   </div>
@@ -970,7 +970,7 @@
   <div id="roster-sheet" class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur flex flex-col" hidden>
     <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
       <div class="min-w-0">
-        <p class="font-display text-lg" data-i18n="roster.title">Rol de la noche</p>
+        <p class="font-display text-lg" data-i18n="roster.title">Asignación de personal</p>
         <p id="roster-night" class="text-xs text-white/50 truncate">—</p>
       </div>
       <button id="btn-roster-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="manager.close">Cerrar</button>
@@ -980,9 +980,7 @@
     <div id="roster-body" class="flex-1 overflow-y-auto px-4 py-3 space-y-3"></div>
 
     <div class="px-4 py-3 border-t border-white/10 space-y-2 bg-black/40">
-      <p class="text-[11px] text-white/40" data-i18n="roster.assignNote">
-        Asignar no abre el turno: el empleado marca su entrada al llegar.
-      </p>
+      <p class="text-[11px] text-white/40" data-i18n="roster.assignNote">Asignar no abre el turno: el empleado marca su entrada al llegar.</p>
       <p id="roster-error" class="text-sm text-red-300" hidden></p>
     </div>
   </div>
@@ -993,7 +991,7 @@
   <section id="pick-sheet" class="fixed bottom-0 left-0 right-0 z-50 card rounded-t-2xl px-4 pt-3 pb-6 max-w-3xl mx-auto max-h-[80vh] overflow-y-auto" hidden>
     <div class="flex items-start justify-between mb-2">
       <div>
-        <p class="font-display text-lg" data-i18n="roster.pick">Poner a alguien</p>
+        <p class="font-display text-lg" data-i18n="roster.pick">Asignar persona</p>
         <p id="pick-where" class="text-xs text-white/50">—</p>
       </div>
       <button id="pick-close" class="text-white/50 px-2" aria-label="Cerrar">✕</button>

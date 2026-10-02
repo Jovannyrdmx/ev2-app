@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es-MX">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -88,11 +88,11 @@
   <!-- ============================ ENTRAR ============================ -->
   <section id="screen-auth" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto">
     <div class="text-center mb-8">
-      <h1 class="font-display text-3xl ev2-gradient mb-1">EV2 · <span data-i18n="valet.title">—</span></h1>
-      <p class="text-white/50 text-sm" data-i18n="auth.signin">—</p>
+      <h1 class="font-display text-3xl ev2-gradient mb-1">EV2 · <span data-i18n="valet.title">Valet</span></h1>
+      <p class="text-white/50 text-sm" data-i18n="auth.signin">Entrar</p>
     </div>
     <form id="form-login" class="space-y-3">
-      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo" data-i18n-placeholder="auth.email" class="field">
+      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo electrónico" data-i18n-placeholder="auth.email" class="field">
       <input id="login-password" type="password" autocomplete="current-password" required placeholder="Contraseña" data-i18n-placeholder="auth.password" class="field">
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.enter">Entrar al club</button>
     </form>
@@ -107,15 +107,15 @@
   <!-- ====== CONTRASEÑA TEMPORAL: el servidor bloquea todo hasta cambiarla ====== -->
   <section id="screen-password" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto" hidden>
     <h2 class="font-display text-2xl ev2-gradient mb-1" data-i18n="gate.title">Cambia tu contraseña</h2>
-    <p class="text-sm text-white/60 mb-6" data-i18n="gate.note">Entraste con una contraseña temporal.</p>
+    <p class="text-sm text-white/60 mb-6" data-i18n="gate.note">Entraste con una contraseña temporal. Elige una tuya para poder trabajar.</p>
     <form id="form-password" class="space-y-3">
       <input id="pw-current" type="password" autocomplete="current-password" required placeholder="Contraseña temporal" data-i18n-placeholder="gate.current" class="field">
-      <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" placeholder="Contraseña nueva (mínimo 8)" data-i18n-placeholder="gate.new" class="field">
-      <input id="pw-repeat" type="password" autocomplete="new-password" required placeholder="Repite la nueva" data-i18n-placeholder="gate.repeat" class="field">
+      <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" placeholder="Nueva contraseña (mínimo 8 caracteres)" data-i18n-placeholder="gate.new" class="field">
+      <input id="pw-repeat" type="password" autocomplete="new-password" required placeholder="Confirma la nueva contraseña" data-i18n-placeholder="gate.repeat" class="field">
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="gate.save">Cambiar y entrar</button>
     </form>
     <p id="pw-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
-    <button id="btn-pw-logout" class="mt-6 text-sm text-white/50 underline" data-i18n="top.signOut">Salir</button>
+    <button id="btn-pw-logout" class="mt-6 text-sm text-white/50 underline" data-i18n="top.signOut">Cerrar sesión</button>
   </section>
 
   <!-- ============ ENTRÓ ALGUIEN QUE NO ES DE ESTE PUESTO ============ -->
@@ -123,7 +123,7 @@
     <p class="text-xs uppercase tracking-widest text-white/40" data-i18n="staff.signedInAs">Entraste como</p>
     <h2 id="wrong-role" class="font-display text-2xl ev2-gradient mb-4">—</h2>
     <p id="wrong-role-note" class="text-sm text-white/60"></p>
-    <button id="btn-wrong-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Salir</button>
+    <button id="btn-wrong-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Cerrar sesión</button>
   </section>
 
 
@@ -139,7 +139,7 @@
           <span id="rt-dot" class="dot dot-off"></span><span id="rt-text">Conectando…</span>
         </span>
         <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
-        <button id="btn-logout" class="text-xs text-white/60 px-2" data-i18n-title="top.signOut" title="Salir"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
+        <button id="btn-logout" class="text-xs text-white/60 px-2" data-i18n-title="top.signOut" title="Cerrar sesión"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
       </div>
     </header>
     <div id="banner" class="px-4 py-2 text-sm text-center bg-amber-500/20 text-amber-100" hidden></div>
@@ -148,8 +148,8 @@
     <div id="secret-box" class="m-4 rounded-xl p-4" style="background:rgba(0,255,0,.08);border:2px solid var(--ev2-lime)" hidden>
       <p class="text-xs uppercase tracking-wider" style="color:var(--ev2-lime)"><span data-i18n="valet.qrForGuest">Código para el cliente</span> — <span id="secret-plate"></span></p>
       <p id="secret-value" class="font-display text-xl tracking-wider my-2 select-all break-all">—</p>
-      <p class="text-[11px] text-white/60" data-i18n="valet.qrForGuestNote">Se muestra una sola vez.</p>
-      <button id="btn-secret-ok" class="ev2-button rounded-lg px-4 py-2 mt-3 text-sm" data-i18n="manager.gotIt">Ya lo anoté</button>
+      <p class="text-[11px] text-white/60" data-i18n="valet.qrForGuestNote">Se muestra una sola vez. Dáselo al cliente: sin él no puede recoger su auto.</p>
+      <button id="btn-secret-ok" class="ev2-button rounded-lg px-4 py-2 mt-3 text-sm" data-i18n="manager.gotIt">Ya la anoté</button>
     </div>
 
     <div class="px-4 pt-3 space-y-2">
@@ -159,7 +159,7 @@
 
     <form id="ticket-form" class="card rounded-xl p-4 m-4 space-y-3" hidden>
       <div><label class="label" for="t-plate" data-i18n="valet.plate">Placa</label><input id="t-plate" class="field" maxlength="20"><p class="field-error" data-error="plate" hidden></p></div>
-      <div><label class="label" for="t-desc" data-i18n="valet.vehicleDesc">Cómo es el coche</label><input id="t-desc" class="field" maxlength="120"></div>
+      <div><label class="label" for="t-desc" data-i18n="valet.vehicleDesc">Descripción del auto</label><input id="t-desc" class="field" maxlength="120"></div>
       <div><label class="label" for="t-spot" data-i18n="valet.spot">Cajón</label><select id="t-spot" class="field"></select></div>
       <div><label class="label" for="t-phone" data-i18n="valet.phone">Teléfono del cliente (opcional)</label><input id="t-phone" class="field" maxlength="30"></div>
       <div class="grid grid-cols-2 gap-2">
@@ -169,9 +169,9 @@
     </form>
 
     <nav class="flex px-2 border-b border-white/10 sticky top-[57px] bg-black/80 backdrop-blur z-10">
-      <button data-lane="requested" class="tab active flex-1 py-3 text-sm"><span data-i18n="valet.laneRequested">Lo pidieron</span><span class="tab-count" id="count-requested">0</span></button>
+      <button data-lane="requested" class="tab active flex-1 py-3 text-sm"><span data-i18n="valet.laneRequested">Solicitados</span><span class="tab-count" id="count-requested">0</span></button>
       <button data-lane="ready" class="tab flex-1 py-3 text-sm"><span data-i18n="valet.laneReady">En la puerta</span><span class="tab-count" id="count-ready">0</span></button>
-      <button data-lane="parked" class="tab flex-1 py-3 text-sm"><span data-i18n="valet.laneParked">Guardados</span><span class="tab-count" id="count-parked">0</span></button>
+      <button data-lane="parked" class="tab flex-1 py-3 text-sm"><span data-i18n="valet.laneParked">Estacionados</span><span class="tab-count" id="count-parked">0</span></button>
     </nav>
 
     <main class="flex-1 overflow-y-auto p-4 space-y-3">
@@ -183,10 +183,10 @@
     <div id="qr-box" class="fixed inset-0 bg-black/85 flex items-end z-40" hidden>
       <div class="w-full max-w-md mx-auto p-5 space-y-3 rounded-t-2xl" style="background:#12081f;border-top:2px solid var(--ev2-cyan)">
         <p class="font-display text-lg" data-i18n="valet.qrTitle">Pide el QR al cliente</p>
-        <p class="text-xs text-white/50" data-i18n="valet.qrNote">Es lo único que impide entregar un coche a quien no es.</p>
+        <p class="text-xs text-white/50" data-i18n="valet.qrNote">Verifica el código QR antes de entregar el auto. Si el cliente lo perdió, solicita la intervención del gerente y revisa su identificación.</p>
         <p id="qr-plate" class="text-sm" style="color:var(--ev2-cyan)"></p>
         <input id="qr-token" class="field" placeholder="Código del cliente" data-i18n-placeholder="valet.qrToken" autocomplete="off">
-        <div><label class="label" for="qr-payment" data-i18n="valet.payment">Cómo paga</label>
+        <div><label class="label" for="qr-payment" data-i18n="valet.payment">Forma de pago</label>
           <select id="qr-payment" class="field">
             <option value="cash" data-i18n="taxi.payCash">Efectivo</option>
             <option value="courtesy" data-i18n="taxi.payCourtesy">Cortesía</option>

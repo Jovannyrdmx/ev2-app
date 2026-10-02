@@ -2540,7 +2540,7 @@
       }
       // El corte y el rol viven en la noche a la que pertenecen, no en una pestaña
       // aparte: el gerente piensa "cómo salió el viernes", no "abre el reporte".
-      add('cut.open', 'card rounded-lg px-3 py-2 text-sm flex-1', () => openCut(night));
+      add('nightCut.open', 'card rounded-lg px-3 py-2 text-sm flex-1', () => openCut(night));
       add('roster.open', 'card rounded-lg px-3 py-2 text-sm flex-1', () => openRoster(night));
 
       if (row.children.length) card.appendChild(row);
@@ -2644,7 +2644,7 @@
       ${cats.length > 0 ? `
         <section class="card rounded-xl p-3 space-y-1">
           <p class="text-xs uppercase tracking-wider text-white/40">${escape(t('cut.byCategory'))}</p>
-          ${cats.map((c2) => fila(`${c2.category} · ${c2.units}`, money(c2.revenue, cur))).join('')}
+          ${cats.map((c2) => fila(`${EV2Format.categoryLabel(c2.category)} · ${c2.units}`, money(c2.revenue, cur))).join('')}
         </section>` : ''}
 
       ${(s.bar.by_bar || []).length > 0 ? `
@@ -2659,7 +2659,7 @@
         ${fila(t('cut.showedUp'), String(s.staff.showed_up),
     s.staff.showed_up < s.staff.assigned ? 'text-amber-200' : '')}
         ${(s.tips.by_person || []).slice(0, 5).map((p) => fila(
-    `${p.display_name} · ${t('cut.tips')}`, money(p.total, cur), 'text-white/50',
+    `${p.display_name} · ${t('nightCut.tips')}`, money(p.total, cur), 'text-white/50',
   )).join('')}
       </section>`;
 
@@ -3424,13 +3424,14 @@
 
   /** Existencias: el total del club y el desglose por estante, en presentaciones. */
   function renderStockList() {
-    const list = state.supplies.filter((x) => invMatches(x.name) || invMatches(x.category));
+    const list = state.supplies.filter((x) => invMatches(x.name) || invMatches(x.category)
+      || invMatches(EV2Format.categoryLabel(x.category)));
     if (list.length === 0) return invEmpty(t('inv.emptyStock'));
     $('inv-empty').hidden = true;
 
     $('inv-list').innerHTML = EV2Warehouse.byCategory(list).map((group) => `
       <section class="mb-3">
-        <h3 class="text-xs uppercase tracking-widest text-white/40 mb-1 px-1">${escape(group.category)}</h3>
+        <h3 class="text-xs uppercase tracking-widest text-white/40 mb-1 px-1">${escape(EV2Format.categoryLabel(group.category))}</h3>
         <div class="space-y-2">
           ${group.items.map((supply) => `
             <article class="card rounded-xl px-3 py-2 ${supply.low ? 'border-l-4 border-amber-400' : ''}">
@@ -3500,7 +3501,8 @@
    */
   function renderMenuList() {
     const lista = (state.drinks || [])
-      .filter((d) => invMatches(d.name) || invMatches(d.category));
+      .filter((d) => invMatches(d.name) || invMatches(d.category)
+        || invMatches(EV2Format.categoryLabel(d.category)));
     if (lista.length === 0) return invEmpty(t('inv.emptyMenu'));
     $('inv-empty').hidden = true;
 
@@ -3517,7 +3519,7 @@
       nombre.textContent = trago.name;
       const cat = document.createElement('p');
       cat.className = 'text-xs text-white/50 truncate';
-      cat.textContent = [trago.category, trago.available ? '' : t('inv.menuOff')]
+      cat.textContent = [EV2Format.categoryLabel(trago.category), trago.available ? '' : t('inv.menuOff')]
         .filter(Boolean).join(' · ');
       izq.append(nombre, cat);
 

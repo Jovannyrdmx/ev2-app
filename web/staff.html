@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es-MX">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -88,11 +88,11 @@
   <!-- ============================ ENTRAR ============================ -->
   <section id="screen-auth" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto">
     <div class="text-center mb-8">
-      <h1 class="font-display text-3xl ev2-gradient mb-1">EV2 · <span data-i18n="floor.title">—</span></h1>
-      <p class="text-white/50 text-sm" data-i18n="auth.signin">—</p>
+      <h1 class="font-display text-3xl ev2-gradient mb-1">EV2 · <span data-i18n="floor.title">Piso</span></h1>
+      <p class="text-white/50 text-sm" data-i18n="auth.signin">Entrar</p>
     </div>
     <form id="form-login" class="space-y-3">
-      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo" data-i18n-placeholder="auth.email" class="field">
+      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo electrónico" data-i18n-placeholder="auth.email" class="field">
       <input id="login-password" type="password" autocomplete="current-password" required placeholder="Contraseña" data-i18n-placeholder="auth.password" class="field">
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.enter">Entrar al club</button>
     </form>
@@ -107,15 +107,15 @@
   <!-- ====== CONTRASEÑA TEMPORAL: el servidor bloquea todo hasta cambiarla ====== -->
   <section id="screen-password" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto" hidden>
     <h2 class="font-display text-2xl ev2-gradient mb-1" data-i18n="gate.title">Cambia tu contraseña</h2>
-    <p class="text-sm text-white/60 mb-6" data-i18n="gate.note">Entraste con una contraseña temporal.</p>
+    <p class="text-sm text-white/60 mb-6" data-i18n="gate.note">Entraste con una contraseña temporal. Elige una tuya para poder trabajar.</p>
     <form id="form-password" class="space-y-3">
       <input id="pw-current" type="password" autocomplete="current-password" required placeholder="Contraseña temporal" data-i18n-placeholder="gate.current" class="field">
-      <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" placeholder="Contraseña nueva (mínimo 8)" data-i18n-placeholder="gate.new" class="field">
-      <input id="pw-repeat" type="password" autocomplete="new-password" required placeholder="Repite la nueva" data-i18n-placeholder="gate.repeat" class="field">
+      <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" placeholder="Nueva contraseña (mínimo 8 caracteres)" data-i18n-placeholder="gate.new" class="field">
+      <input id="pw-repeat" type="password" autocomplete="new-password" required placeholder="Confirma la nueva contraseña" data-i18n-placeholder="gate.repeat" class="field">
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="gate.save">Cambiar y entrar</button>
     </form>
     <p id="pw-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
-    <button id="btn-pw-logout" class="mt-6 text-sm text-white/50 underline" data-i18n="top.signOut">Salir</button>
+    <button id="btn-pw-logout" class="mt-6 text-sm text-white/50 underline" data-i18n="top.signOut">Cerrar sesión</button>
   </section>
 
   <!-- ============ ENTRÓ ALGUIEN QUE NO ES DE ESTE PUESTO ============ -->
@@ -123,7 +123,7 @@
     <p class="text-xs uppercase tracking-widest text-white/40" data-i18n="staff.signedInAs">Entraste como</p>
     <h2 id="wrong-role" class="font-display text-2xl ev2-gradient mb-4">—</h2>
     <p id="wrong-role-note" class="text-sm text-white/60"></p>
-    <button id="btn-wrong-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Salir</button>
+    <button id="btn-wrong-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Cerrar sesión</button>
   </section>
 
 
@@ -139,16 +139,16 @@
           <span id="rt-dot" class="dot dot-off"></span><span id="rt-text">Conectando…</span>
         </span>
         <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
-        <button id="btn-logout" class="text-xs text-white/60 px-2" data-i18n-title="top.signOut" title="Salir"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
+        <button id="btn-logout" class="text-xs text-white/60 px-2" data-i18n-title="top.signOut" title="Cerrar sesión"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
       </div>
     </header>
     <div id="banner" class="px-4 py-2 text-sm text-center bg-amber-500/20 text-amber-100" hidden></div>
 
     <div class="grid grid-cols-4 gap-2 px-4 pt-3">
       <div class="stat-card"><div class="stat-number" id="s-trays">—</div><div class="stat-label" data-i18n="floor.trays">Charolas</div></div>
-      <div class="stat-card"><div class="stat-number" id="s-items">—</div><div class="stat-label" data-i18n="floor.items">Tragos</div></div>
+      <div class="stat-card"><div class="stat-number" id="s-items">—</div><div class="stat-label" data-i18n="floor.items">Bebidas</div></div>
       <div class="stat-card"><div class="stat-number" id="s-coming">—</div><div class="stat-label" data-i18n="floor.coming">En la barra</div></div>
-      <div class="stat-card"><div class="stat-number" id="s-oldest">—</div><div class="stat-label" data-i18n="floor.oldest">La más vieja</div></div>
+      <div class="stat-card"><div class="stat-number" id="s-oldest">—</div><div class="stat-label" data-i18n="floor.oldest">Mayor espera</div></div>
     </div>
 
     <nav class="flex px-2 pt-3 border-b border-white/10">
@@ -156,7 +156,7 @@
       <button data-tab="tables" class="tab flex-1 py-3 text-sm"><span data-i18n="floor.tabTables">Mesas</span><span class="tab-count" id="count-unpaid" hidden>0</span></button>
       <!-- Solo para la anfitriona y el gerente: es quien recibe en la entrada. -->
       <button data-tab="door" class="tab flex-1 py-3 text-sm" data-i18n="door.tab" hidden>Puerta</button>
-      <button data-tab="me" class="tab flex-1 py-3 text-sm" data-i18n="floor.tabMe">Lo mío</button>
+      <button data-tab="me" class="tab flex-1 py-3 text-sm" data-i18n="floor.tabMe">Mi turno</button>
     </nav>
 
     <main class="flex-1 overflow-y-auto p-4 space-y-3">
@@ -171,7 +171,7 @@
           <div class="stat-card"><div class="stat-number" id="o-free">—</div><div class="stat-label" data-i18n="floor.free">Libres</div></div>
           <div class="stat-card"><div class="stat-number" id="o-guests">—</div><div class="stat-label" data-i18n="floor.guests">Personas</div></div>
         </div>
-        <p class="text-[11px] text-white/40" data-i18n="floor.seatNote">Se entra por la puerta: el pase se lee ahí y la mesa queda ocupada sola.</p>
+        <p class="text-[11px] text-white/40" data-i18n="floor.seatNote">La mesa se ocupa al escanear el pase en la entrada. Desde aquí puedes tomar pedidos o registrar que una persona dejó su lugar.</p>
 
         <!--
           Lo que alguien pidió desde su teléfono y todavía no paga. Va arriba de las
@@ -193,9 +193,7 @@
         </div>
 
         <!-- En la pista no hay mesa: el pedido se levanta contra un punto de entrega. -->
-        <button id="btn-take-floor" class="w-full card rounded-xl py-3 text-sm" data-i18n="take.onFloor">
-          Levantar un pedido en la pista
-        </button>
+        <button id="btn-take-floor" class="w-full card rounded-xl py-3 text-sm" data-i18n="take.onFloor">Levantar un pedido en la pista</button>
 
         <div id="tables-list" class="space-y-2"></div>
       </div>
@@ -210,8 +208,8 @@
         <div class="grid grid-cols-4 gap-2">
           <div class="stat-card"><div class="stat-number" id="d-expected">—</div><div class="stat-label" data-i18n="door.expected">Por llegar</div></div>
           <div class="stat-card"><div class="stat-number" id="d-seated">—</div><div class="stat-label" data-i18n="door.seated">Ya adentro</div></div>
-          <div class="stat-card"><div class="stat-number" id="d-late">—</div><div class="stat-label" data-i18n="door.late">Se les pasó</div></div>
-          <div class="stat-card"><div class="stat-number" id="d-guests">—</div><div class="stat-label" data-i18n="door.guests">Personas</div></div>
+          <div class="stat-card"><div class="stat-number" id="d-late">—</div><div class="stat-label" data-i18n="door.late">Fuera de horario</div></div>
+          <div class="stat-card"><div class="stat-number" id="d-guests">—</div><div class="stat-label" data-i18n="door.guests">Personas adentro</div></div>
         </div>
 
         <!--
@@ -242,25 +240,23 @@
             <span class="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-white/40" data-i18n="idc.step">Paso 1 de 2</span>
           </div>
 
-          <p class="text-[11px] text-white/40" data-i18n="idc.which">¿Qué te enseñó?</p>
+          <p class="text-[11px] text-white/40" data-i18n="idc.which">Tipo de identificación presentada</p>
           <div id="idc-docs" class="flex flex-wrap gap-1"></div>
 
           <div class="grid grid-cols-2 gap-2">
             <button id="btn-idc-accept" class="ev2-button py-3 rounded-xl font-display text-sm" data-i18n="idc.accept">Es mayor: continuar</button>
-            <button id="btn-idc-reject" class="py-3 rounded-xl font-display text-sm card" data-i18n="idc.reject">No pasa</button>
+            <button id="btn-idc-reject" class="py-3 rounded-xl font-display text-sm card" data-i18n="idc.reject">Rechazar acceso</button>
           </div>
 
           <!-- Por qué no pasa. Aparece solo al tocar "No pasa": en el caso normal
                estorba, y lo que estorba en una puerta se toca por error. -->
           <div id="idc-reject-why" class="space-y-2" hidden>
-            <p class="text-[11px] text-white/40" data-i18n="idc.rejectWhy">¿Por qué no pasa?</p>
+            <p class="text-[11px] text-white/40" data-i18n="idc.rejectWhy">Motivo del rechazo</p>
             <div id="idc-reasons" class="flex flex-wrap gap-1"></div>
           </div>
 
           <p id="idc-state" class="text-xs rounded-lg p-2" hidden></p>
-          <p class="text-[10px] text-white/30 leading-snug" data-i18n="idc.noStore">
-            No se guarda el número de la identificación ni la fecha de nacimiento.
-          </p>
+          <p class="text-[10px] text-white/30 leading-snug" data-i18n="idc.noStore">No se guarda el número de la identificación ni la fecha de nacimiento.</p>
         </div>
 
         <!-- PASO 2: el código. Deshabilitado hasta que exista la revisión. -->
@@ -278,7 +274,7 @@
             <input id="scan-code" class="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none font-display tracking-widest uppercase"
                    maxlength="60" autocomplete="off" autocapitalize="characters" spellcheck="false"
                    placeholder="EV2-XXXX-XXXX" aria-label="Código del pase" disabled>
-            <button type="submit" id="btn-scan-code" class="ev2-button px-5 rounded-xl font-display" data-i18n="scan.check" disabled>Entrar</button>
+            <button type="submit" id="btn-scan-code" class="ev2-button px-5 rounded-xl font-display" data-i18n="scan.check" disabled>Validar pase</button>
           </form>
           <p id="scan-blocked" class="text-[11px] text-amber-200/80" data-i18n="scan.errNoIdCheck">Primero revisa la identificación.</p>
 
@@ -377,13 +373,13 @@
             mismo momento de la noche, y el turno ya no se cierra sin pasar por aquí.
           -->
           <button id="btn-cut" class="card w-full rounded-lg py-3 text-sm" data-i18n="cut.title">Mi corte del turno</button>
-          <p id="cut-hint" class="text-[11px] text-white/40" data-i18n="cut.hint">Lo que cobraste y lo que te toca entregar. Puedes entregar efectivo antes de cerrar.</p>
+          <p id="cut-hint" class="text-[11px] text-white/40" data-i18n="cut.hint">Lo que cobraste y lo que te toca entregar. Un gerente autoriza los retiros y el corte.</p>
         </div>
         <div class="card rounded-xl p-4 space-y-2">
           <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="floor.myTips">Mis propinas de hoy</p>
           <div class="flex justify-between"><span class="text-sm text-white/60" data-i18n="floor.tipsPaid">Confirmadas</span><span id="tips-paid" class="font-display text-xl" style="color:var(--ev2-lime)">—</span></div>
           <div class="flex justify-between"><span class="text-sm text-white/60" data-i18n="floor.tipsPending">Por confirmar</span><span id="tips-pending" class="text-sm">—</span></div>
-          <p class="text-[11px] text-white/40 pt-1" data-i18n="floor.tipsPendingNote">Las que están por confirmar todavía no son saldo tuyo.</p>
+          <p class="text-[11px] text-white/40 pt-1" data-i18n="floor.tipsPendingNote">Estas propinas todavía no forman parte de tu saldo disponible. El gerente debe confirmar que las recibió.</p>
         </div>
         <p id="tips-empty" class="text-sm text-white/40 text-center py-6" data-i18n="floor.noTips" hidden>Todavía no tienes propinas hoy.</p>
         <div id="tips-list" class="space-y-2"></div>
@@ -418,12 +414,12 @@
     </div>
 
     <div id="take-who" class="px-4 pt-3" hidden>
-      <label class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="take.forWhom">¿De quién es?</label>
+      <label class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="take.forWhom">¿A quién corresponde el pedido?</label>
       <select id="take-guest-select" class="w-full mt-1 px-4 py-2 rounded-xl bg-white/5 border border-white/10 outline-none"></select>
     </div>
 
     <div class="px-4 pt-3">
-      <input id="take-search" type="search" data-i18n-placeholder="take.search" placeholder="Buscar en la carta"
+      <input id="take-search" type="search" data-i18n-placeholder="take.search" placeholder="Buscar bebida"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
     </div>
 
@@ -445,7 +441,7 @@
         <p class="text-xs text-amber-300" data-i18n="take.mustCharge">El pedido no entra a la barra hasta que se cobre.</p>
         <select id="take-method" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 outline-none"></select>
         <input id="take-reference" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 outline-none uppercase"
-               maxlength="60" autocomplete="off" data-i18n-placeholder="take.voucher" placeholder="Folio del voucher" hidden>
+               maxlength="60" autocomplete="off" data-i18n-placeholder="take.voucher" placeholder="Folio del comprobante de tarjeta" hidden>
         <button id="btn-take-charge" class="ev2-button w-full py-4 rounded-xl font-display" data-i18n="take.charge">Cobrar</button>
       </div>
 

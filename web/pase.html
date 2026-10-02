@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es-MX">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -53,16 +53,12 @@
     </header>
 
     <!-- Mientras carga. Sin números ni textos inventados: solo que está trabajando. -->
-    <p id="pass-loading" class="text-center text-sm text-white/50 py-10" data-i18n="pass.loading">
-        Cargando tu pase…
-    </p>
+    <p id="pass-loading" class="text-center text-sm text-white/50 py-10" data-i18n="pass.loading">Cargando tu pase…</p>
 
     <!-- Si el enlace no sirve. Un enlace mal copiado de WhatsApp es el caso normal. -->
     <section id="pass-error" class="card rounded-xl p-5 text-center space-y-2" hidden>
-        <p class="font-display text-lg" data-i18n="pass.badLink">Este enlace no sirve</p>
-        <p class="text-sm text-white/60" data-i18n="pass.badLinkHelp">
-            Puede que se haya cortado al copiarlo. Pídele a quien te lo mandó que te lo reenvíe completo.
-        </p>
+        <p class="font-display text-lg" data-i18n="pass.badLink">El enlace no es válido</p>
+        <p class="text-sm text-white/60" data-i18n="pass.badLinkHelp">Puede que se haya cortado al copiarlo. Pídele a quien te lo mandó que te lo reenvíe completo.</p>
     </section>
 
     <section id="pass-card" class="card rounded-xl p-5 space-y-4" hidden>
@@ -74,7 +70,7 @@
         <div id="pass-qr" aria-live="polite"></div>
 
         <div class="text-center space-y-1">
-            <p class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="pass.code">Tu código</p>
+            <p class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="pass.code">Código</p>
             <p id="pass-code" class="font-display text-2xl tracking-widest select-all">—</p>
         </div>
 
@@ -99,7 +95,7 @@
             <ul class="space-y-1 text-white/70 list-disc pl-4">
                 <li data-i18n="pass.ruleId">Trae tu identificación. En la puerta la revisan antes de leer el código.</li>
                 <li data-i18n="pass.ruleOnce">Este pase es tuyo y sirve una sola vez.</li>
-                <li data-i18n="pass.ruleScreenshot">Guarda una captura: si se te acaba la batería, dicta el código.</li>
+                <li data-i18n="pass.ruleScreenshot">Guarda una captura del pase y anota el código. Si te quedas sin batería, proporciona el código al personal de entrada.</li>
             </ul>
         </div>
 

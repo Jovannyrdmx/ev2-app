@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es-MX">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -82,7 +82,7 @@
       <p class="text-white/50 text-sm" data-i18n="taxi.title">Salida segura</p>
     </div>
     <form id="form-login" class="space-y-3">
-      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo" data-i18n-placeholder="auth.email"
+      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo electrónico" data-i18n-placeholder="auth.email"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       <input id="login-password" type="password" autocomplete="current-password" required placeholder="Contraseña" data-i18n-placeholder="auth.password"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
@@ -100,15 +100,15 @@
   <!-- ====== CONTRASEÑA TEMPORAL: el servidor bloquea todo hasta cambiarla ====== -->
   <section id="screen-password" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto" hidden>
     <h2 class="font-display text-2xl ev2-gradient mb-1" data-i18n="gate.title">Cambia tu contraseña</h2>
-    <p class="text-sm text-white/60 mb-6" data-i18n="gate.note">Entraste con una contraseña temporal.</p>
+    <p class="text-sm text-white/60 mb-6" data-i18n="gate.note">Entraste con una contraseña temporal. Elige una tuya para poder trabajar.</p>
     <form id="form-password" class="space-y-3">
       <input id="pw-current" type="password" autocomplete="current-password" required placeholder="Contraseña temporal" data-i18n-placeholder="gate.current" class="field">
-      <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" placeholder="Contraseña nueva (mínimo 8)" data-i18n-placeholder="gate.new" class="field">
-      <input id="pw-repeat" type="password" autocomplete="new-password" required placeholder="Repite la nueva" data-i18n-placeholder="gate.repeat" class="field">
+      <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" placeholder="Nueva contraseña (mínimo 8 caracteres)" data-i18n-placeholder="gate.new" class="field">
+      <input id="pw-repeat" type="password" autocomplete="new-password" required placeholder="Confirma la nueva contraseña" data-i18n-placeholder="gate.repeat" class="field">
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="gate.save">Cambiar y entrar</button>
     </form>
     <p id="pw-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
-    <button id="btn-pw-logout" class="mt-6 text-sm text-white/50 underline" data-i18n="top.signOut">Salir</button>
+    <button id="btn-pw-logout" class="mt-6 text-sm text-white/50 underline" data-i18n="top.signOut">Cerrar sesión</button>
   </section>
 
   <!-- ============ ENTRÓ ALGUIEN QUE NO ES CONDUCTOR ============ -->
@@ -116,7 +116,7 @@
     <p class="text-xs uppercase tracking-widest text-white/40" data-i18n="staff.signedInAs">Entraste como</p>
     <h2 id="wrong-role" class="font-display text-2xl ev2-gradient mb-4">—</h2>
     <p id="wrong-role-note" class="text-sm text-white/60"></p>
-    <button id="btn-wrong-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Salir</button>
+    <button id="btn-wrong-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Cerrar sesión</button>
   </section>
 
   <!-- ============================ CONDUCTOR ============================ -->
@@ -131,7 +131,7 @@
           <span id="rt-dot" class="dot dot-off"></span><span id="rt-text">Conectando…</span>
         </span>
         <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
-        <button id="btn-logout" class="text-xs text-white/60 px-2" title="Salir" data-i18n-title="top.signOut"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
+        <button id="btn-logout" class="text-xs text-white/60 px-2" title="Cerrar sesión" data-i18n-title="top.signOut"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
       </div>
     </header>
 
@@ -170,15 +170,15 @@
         </div>
         <p id="ride-status" class="text-sm" style="color:var(--ev2-cyan)"></p>
         <button id="btn-ride-action" class="ev2-button w-full py-4 rounded-xl font-display text-lg">—</button>
-        <button id="btn-ride-cancel" class="w-full py-2 text-sm text-red-300 underline" data-i18n="taxi.cancel">Cancelar</button>
+        <button id="btn-ride-cancel" class="w-full py-2 text-sm text-red-300 underline" data-i18n="taxi.cancel">Cancelar solicitud</button>
       </div>
 
       <!-- Terminar el viaje: cuánto se cobró y cómo pagó. -->
       <div id="finish-box" class="card rounded-xl p-4 space-y-3" hidden>
-        <label class="block text-xs text-white/50" for="finish-amount" data-i18n="taxi.driverAmount">Cuánto se cobró</label>
+        <label class="block text-xs text-white/50" for="finish-amount" data-i18n="taxi.driverAmount">Importe cobrado</label>
         <input id="finish-amount" type="number" inputmode="decimal" min="0" step="1"
                class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
-        <label class="block text-xs text-white/50" for="finish-payment" data-i18n="taxi.driverPayment">Cómo pagó</label>
+        <label class="block text-xs text-white/50" for="finish-payment" data-i18n="taxi.driverPayment">Forma de pago</label>
         <select id="finish-payment" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
           <option value="cash" data-i18n="taxi.payCash">Efectivo</option>
           <option value="card" data-i18n="taxi.payCard">Tarjeta</option>

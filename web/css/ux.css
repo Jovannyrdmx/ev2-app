@@ -72,6 +72,11 @@ input::placeholder, textarea::placeholder { color: #9aa9bc; opacity: 1; }
 #menu-list [data-more], #menu-list [data-less] { min-width:44px; min-height:48px; }
 .ux-warehouse nav { overflow-x:auto; gap:4px; padding-inline:8px; }
 .ux-warehouse nav .tab { flex:none; min-width:96px; padding-inline:12px; white-space:nowrap; }
+.entry-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.entry-fields > input.field { width:100%; min-width:0; }
+@media(min-width:640px) {
+  .entry-fields { grid-template-columns:minmax(80px,1fr) auto minmax(150px,1fr) minmax(100px,1fr); }
+}
 .ux-manager-nav .tab:not(.active) { color:var(--ux-muted); }
 .ux-client-nav .tab-active { border-bottom:0; background:var(--ux-raised); border-radius:10px 10px 0 0; }
 #cart-bar { bottom:calc(78px + env(safe-area-inset-bottom)); }

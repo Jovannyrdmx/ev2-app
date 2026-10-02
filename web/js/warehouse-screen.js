@@ -359,7 +359,8 @@
     const list = suppliesForLocation();
     if (!state.search) return list;
     return list.filter((s) => s.name.toLowerCase().includes(state.search)
-      || String(s.category || '').toLowerCase().includes(state.search));
+      || String(s.category || '').toLowerCase().includes(state.search)
+      || EV2Format.categoryLabel(s.category).toLowerCase().includes(state.search));
   }
 
   function restock() {
@@ -391,7 +392,7 @@
     $('list').innerHTML = groups.map((group) => `
       <section class="mb-4">
         <h3 class="text-xs uppercase tracking-widest text-white/40 mb-1 px-1">
-          ${escape(group.category)}
+          ${escape(EV2Format.categoryLabel(group.category))}
           ${group.low ? `<span class="text-amber-300">· ${group.low} ${escape(t('wh.lowShort'))}</span>` : ''}
         </h3>
         <div class="space-y-2">
@@ -904,7 +905,7 @@
           <button type="button" class="text-white/40 px-2 shrink-0" data-entry="remove"
                   data-index="${index}" aria-label="${escape(t('wh.entryRemoveLine'))}">✕</button>
         </div>
-        <div class="flex gap-2">
+        <div class="entry-fields">
           <input type="number" step="0.001" min="0" inputmode="decimal" class="field"
                  placeholder="${escape(line.mode === 'packages' ? t('wh.inPackages') : unidad)}"
                  value="${escape(line.amount)}" data-entry="amount" data-index="${index}">

@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v32';
+const VERSION = 'ev2-v33';
 const SHELL = [
   'js/ux.js', 'css/ux.css', 'vendor/tailwind.css', 'vendor/fonts.css',
   'vendor/fontawesome/css/all.min.css',

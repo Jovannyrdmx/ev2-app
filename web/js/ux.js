@@ -85,7 +85,10 @@
       input.style.width = '100%';
     });
     doc.querySelectorAll('button[title],a[title]').forEach((el) => {
-      if (!el.getAttribute('aria-label') && !el.textContent.trim()) el.setAttribute('aria-label', el.title);
+      if (!el.getAttribute('aria-label') && !el.textContent.trim()) {
+        el.setAttribute('aria-label', el.title);
+        if (el.dataset.i18nTitle) el.setAttribute('data-i18n-aria-label', el.dataset.i18nTitle);
+      }
     });
     doc.querySelectorAll('[id$="-error"],#auth-error,#banner').forEach((el) => {
       el.setAttribute('role', 'alert');
@@ -121,6 +124,7 @@
     const network = doc.createElement('div');
     network.className = 'ux-connection';
     network.setAttribute('role', 'status');
+    network.setAttribute('data-i18n', 'ux.offline');
     network.textContent = text('ux.offline');
     network.hidden = root.navigator.onLine;
     doc.body.prepend(network);

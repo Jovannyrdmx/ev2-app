@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es-MX">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -156,7 +156,7 @@
     <div id="pin-pad" class="space-y-5" hidden>
       <div class="text-center">
         <p id="pin-title" class="font-display text-xl ev2-gradient" data-i18n="pin.title">Tu PIN</p>
-        <p id="pin-note" class="text-sm text-white/60 mt-1" data-i18n="pin.note">Teclea tus 6 dígitos.</p>
+        <p id="pin-note" class="text-sm text-white/60 mt-1" data-i18n="pin.note">Ingresa tu PIN de 6 dígitos.</p>
       </div>
       <div id="pin-dots" class="flex justify-center gap-3" aria-hidden="true"></div>
       <div id="pin-keys" class="grid grid-cols-3 gap-3"></div>
@@ -165,14 +165,14 @@
         <button type="button" id="btn-use-password" class="text-sm text-white/50 underline" data-i18n="pin.usePassword">Entrar con correo y contraseña</button>
         <p class="text-[11px] text-white/35 leading-snug" data-i18n="pin.managerNote">La gerencia entra con PIN dentro del club. Desde fuera, con su correo y contraseña.</p>
       </div>
-      <button type="button" id="btn-pin-cancel" class="w-full text-sm text-white/50 underline" data-i18n="top.signOut" hidden>Salir</button>
+      <button type="button" id="btn-pin-cancel" class="w-full text-sm text-white/50 underline" data-i18n="top.signOut" hidden>Cerrar sesión</button>
     </div>
 
     <!-- El regreso al teclado, para el gerente que entró a la pantalla de contraseña. -->
     <button type="button" id="btn-use-pin" class="mt-3 text-sm text-white/50 underline" data-i18n="pin.usePin" hidden>Entrar con PIN</button>
 
     <form id="form-login" class="space-y-3">
-      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo" data-i18n-placeholder="auth.email"
+      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo electrónico" data-i18n-placeholder="auth.email"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       <input id="login-password" type="password" autocomplete="current-password" required placeholder="Contraseña" data-i18n-placeholder="auth.password"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
@@ -184,16 +184,16 @@
         <input id="reg-first" required placeholder="Nombre" data-i18n-placeholder="auth.firstName" class="w-1/2 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
         <input id="reg-last" placeholder="Apellido" data-i18n-placeholder="auth.lastName" class="w-1/2 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       </div>
-      <input id="reg-email" type="email" autocomplete="email" required placeholder="Correo" data-i18n-placeholder="auth.email"
+      <input id="reg-email" type="email" autocomplete="email" required placeholder="Correo electrónico" data-i18n-placeholder="auth.email"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
-      <input id="reg-password" type="password" autocomplete="new-password" required minlength="8" placeholder="Contraseña (mínimo 8)" data-i18n-placeholder="auth.newPassword"
+      <input id="reg-password" type="password" autocomplete="new-password" required minlength="8" placeholder="Contraseña (mínimo 8 caracteres)" data-i18n-placeholder="auth.newPassword"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       <label class="block text-xs text-white/50 pt-1" data-i18n="auth.birthDate">Fecha de nacimiento</label>
       <input id="reg-birth" type="date" required
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       <label class="flex items-start gap-3 text-sm text-white/70 tap">
         <input id="reg-terms" type="checkbox" required class="mt-1 w-5 h-5 accent-cyan-400">
-        <span><span data-i18n="auth.terms">Tengo 18 años o más y acepto los términos y el código de conducta.</span> <a href="terminos.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.termsLink">Términos</a> <span class="text-white/30">·</span> <a href="privacidad.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.privacyLink">Privacidad</a></span>
+        <span><span data-i18n="auth.terms">Tengo 18 años o más y acepto los términos y el código de conducta.</span> <a href="terminos.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.termsLink">Términos y condiciones</a> <span class="text-white/30">·</span> <a href="privacidad.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.privacyLink">Aviso de privacidad</a></span>
       </label>
       <label class="flex items-start gap-3 text-sm text-white/70 tap">
         <input id="reg-flirts" type="checkbox" class="mt-1 w-5 h-5 accent-pink-400">
@@ -225,21 +225,21 @@
         <p class="font-display text-lg ev2-gradient" data-i18n="social.finishTitle">Falta un dato</p>
         <p id="social-finish-note" class="text-xs text-white/60 mt-1"></p>
       </div>
-      <input id="social-email" type="email" autocomplete="email" placeholder="Correo" data-i18n-placeholder="auth.email"
+      <input id="social-email" type="email" autocomplete="email" placeholder="Correo electrónico" data-i18n-placeholder="auth.email"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       <label class="block text-xs text-white/50 pt-1" data-i18n="auth.birthDate">Fecha de nacimiento</label>
       <input id="social-birth" type="date" required
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       <label class="flex items-start gap-3 text-sm text-white/70 tap">
         <input id="social-terms" type="checkbox" required class="mt-1 w-5 h-5 accent-cyan-400">
-        <span><span data-i18n="auth.terms">Tengo 18 años o más y acepto los términos y el código de conducta.</span> <a href="terminos.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.termsLink">Términos</a> <span class="text-white/30">·</span> <a href="privacidad.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.privacyLink">Privacidad</a></span>
+        <span><span data-i18n="auth.terms">Tengo 18 años o más y acepto los términos y el código de conducta.</span> <a href="terminos.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.termsLink">Términos y condiciones</a> <span class="text-white/30">·</span> <a href="privacidad.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.privacyLink">Aviso de privacidad</a></span>
       </label>
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="social.finish">Terminar y entrar</button>
       <button type="button" id="social-finish-cancel" class="w-full text-sm text-white/50 underline" data-i18n="social.cancel">Cancelar</button>
     </form>
 
     <p id="auth-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
-    <p class="mt-8 text-center text-xs text-white/30" data-i18n="auth.adults">Solo +18 · EV2 Clandestinoz</p>
+    <p class="mt-8 text-center text-xs text-white/30" data-i18n="auth.adults">Solo personas de 18 años o más · EV2 Clandestinoz</p>
   </section>
 
   <!-- ================== EMPLEADO SIN PANTALLA TODAVÍA ================== -->
@@ -258,7 +258,7 @@
       <p class="text-xs text-white/50 mt-3" id="staff-pending">—</p>
     </div>
 
-    <button id="btn-staff-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Salir</button>
+    <button id="btn-staff-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Cerrar sesión</button>
   </section>
 
   <!-- ============================ APP (INVITADO) ============================ -->
@@ -273,7 +273,7 @@
           <span id="rt-dot" class="dot dot-off"></span><span id="rt-text">Conectando…</span>
         </span>
         <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
-        <button id="btn-logout" class="text-xs text-white/60 px-2" title="Salir" data-i18n-title="top.signOut"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
+        <button id="btn-logout" class="text-xs text-white/60 px-2" title="Cerrar sesión" data-i18n-title="top.signOut"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
       </div>
     </header>
 
@@ -313,7 +313,7 @@
         <div id="floor-buttons" class="flex gap-2 justify-center overflow-x-auto pb-1"></div>
 
         <div class="canvas-wrapper">
-          <canvas id="floor-canvas" width="800" height="580" role="img" aria-label="Plano del club" data-i18n-aria-label="ux.floorPlan"></canvas>
+          <canvas id="floor-canvas" width="800" height="580" role="img" aria-label="Plano del club. También puedes consultar las mesas en la lista." data-i18n-aria-label="ux.floorPlan"></canvas>
         </div>
         <details class="ux-table-toolbar">
           <summary data-i18n="ux.tableList">Ver mesas en lista</summary>
@@ -361,7 +361,7 @@
             <select id="book-event" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"></select>
           </div>
           <div>
-            <label class="block text-xs text-white/50 mb-1" for="book-guests" data-i18n="book.guests">Cuántos van</label>
+            <label class="block text-xs text-white/50 mb-1" for="book-guests" data-i18n="book.guests">Número de personas</label>
             <select id="book-guests" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"></select>
           </div>
 
@@ -384,9 +384,9 @@
               <span data-i18n="book.deposit">Anticipo hoy</span><span id="book-deposit">—</span>
             </div>
             <div class="flex justify-between text-white/60">
-              <span data-i18n="book.rest">El resto esa noche</span><span id="book-rest">—</span>
+              <span data-i18n="book.rest">Resto por pagar esa noche</span><span id="book-rest">—</span>
             </div>
-            <p class="text-[11px] text-white/40 pt-1" data-i18n="book.depositNote">El cobro del anticipo con tarjeta se conecta en la fase de pagos. Por ahora la mesa queda apartada y el club confirma contigo.</p>
+            <p class="text-[11px] text-white/40 pt-1" data-i18n="book.depositNote">La reservación queda pendiente de confirmar el anticipo. El club debe verificar el pago; apartar la mesa no significa que ya esté pagada.</p>
           </div>
 
           <p id="book-error" class="text-sm text-red-300" hidden></p>
@@ -431,7 +431,7 @@
           <div id="staff-groups" class="space-y-4"></div>
 
           <div class="border-t border-white/10 pt-4">
-            <p class="text-xs uppercase tracking-wider text-white/40 mb-2" data-i18n="tip.myTips">Lo que has dado esta noche</p>
+            <p class="text-xs uppercase tracking-wider text-white/40 mb-2" data-i18n="tip.myTips">Tus propinas de esta noche</p>
             <p id="tips-given" class="font-display text-lg" hidden>—</p>
             <p id="tips-empty" class="text-sm text-white/40" data-i18n="tip.noTips" hidden>Todavía no has dado ninguna propina.</p>
             <div id="tips-list" class="space-y-2 mt-2"></div>
@@ -471,7 +471,7 @@
 
           <div>
             <p class="text-xs uppercase tracking-wider text-white/40 mb-2" data-i18n="song.queue">Lo que sigue</p>
-            <p id="song-empty" class="text-sm text-white/40" data-i18n="song.empty" hidden>Nadie ha pedido nada todavía. Estrénala tú.</p>
+            <p id="song-empty" class="text-sm text-white/40" data-i18n="song.empty" hidden>Todavía no hay canciones solicitadas. Puedes pedir la primera.</p>
             <div id="song-queue" class="space-y-2"></div>
           </div>
         </div>
@@ -482,7 +482,7 @@
             <button data-board-period="night" class="board-period flex-1 py-2 rounded-lg text-sm tab-active" data-i18n="tip.boardNight">Esta noche</button>
             <button data-board-period="month" class="board-period flex-1 py-2 rounded-lg text-sm text-white/50" data-i18n="tip.boardMonth">Este mes</button>
           </div>
-          <p id="board-empty" class="text-sm text-white/40" data-i18n="tip.boardEmpty" hidden>Todavía nadie en el reconocimiento.</p>
+          <p id="board-empty" class="text-sm text-white/40" data-i18n="tip.boardEmpty" hidden>Todavía no hay registros de reconocimiento.</p>
           <div id="board-list" class="space-y-2"></div>
         </div>
       </div>
@@ -496,10 +496,10 @@
       <div id="view-flirt" class="p-4 space-y-4" hidden>
         <div class="ux-section-nav"><button data-ux-view="show" data-i18n="nav.show">Show</button><button data-ux-view="flirt" aria-current="page" data-i18n="nav.flirt">Conecta</button></div>
         <div id="flirt-optout" class="card rounded-xl p-5 space-y-3" hidden>
-          <p class="font-display text-lg" data-i18n="flirt.offTitle">Conecta está apagado</p>
-          <p class="text-sm text-white/60" data-i18n="flirt.offBody">Nadie puede mandarte nada y no apareces en ninguna lista. Si lo enciendes, la gente que esté sentada esta noche puede mandarte un saludo, y tú a ellos.</p>
+          <p class="font-display text-lg" data-i18n="flirt.offTitle">Conecta está desactivado</p>
+          <p class="text-sm text-white/60" data-i18n="flirt.offBody">No apareces en la lista ni recibes invitaciones. Al activarlo podrás intercambiar saludos con otras personas que tengan mesa asignada y hayan activado Conecta.</p>
           <button id="btn-flirt-optin" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="flirt.turnOn">Activar</button>
-          <p class="text-[11px] text-white/40" data-i18n="flirt.offNote">Se apaga cuando quieras desde tu perfil. Bloquear a alguien lo esconde de ti y a ti de esa persona, para siempre.</p>
+          <p class="text-[11px] text-white/40" data-i18n="flirt.offNote">Se apaga cuando quieras desde tu perfil. Bloquear a alguien lo esconde de ti y a ti de esa persona.</p>
         </div>
 
         <div id="flirt-main" class="space-y-4" hidden>
@@ -511,7 +511,7 @@
 
           <!-- --------- quién está esta noche --------- -->
           <div id="flirt-people" class="space-y-4">
-            <p id="flirt-need-table" class="card rounded-xl p-4 text-sm text-white/60" data-i18n="flirt.needTable" hidden>Siéntate en una mesa para ver quién está esta noche. Es a propósito: esto es el club, no una app de citas.</p>
+            <p id="flirt-need-table" class="card rounded-xl p-4 text-sm text-white/60" data-i18n="flirt.needTable" hidden>Necesitas una mesa asignada para usar Conecta. Pide ayuda al personal de entrada.</p>
             <div id="flirt-sections" class="flex gap-2 overflow-x-auto pb-1"></div>
             <p id="flirt-people-empty" class="text-sm text-white/50" data-i18n="flirt.nobody" hidden>Ahora mismo no hay nadie más en la lista.</p>
             <div id="flirt-people-groups" class="space-y-4"></div>
@@ -605,15 +605,15 @@
             <select id="taxi-zone" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"></select>
           </div>
           <div>
-            <label class="block text-xs text-white/50 mb-1" for="taxi-destination" data-i18n="taxi.destination">A dónde vas</label>
+            <label class="block text-xs text-white/50 mb-1" for="taxi-destination" data-i18n="taxi.destination">Destino</label>
             <input id="taxi-destination" maxlength="300" placeholder="Colonia o referencia" data-i18n-placeholder="taxi.destinationHint"
                    class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
           </div>
           <div>
-            <label class="block text-xs text-white/50 mb-1" for="taxi-passengers" data-i18n="taxi.passengers">Cuántos van</label>
+            <label class="block text-xs text-white/50 mb-1" for="taxi-passengers" data-i18n="taxi.passengers">Número de pasajeros</label>
             <select id="taxi-passengers" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"></select>
           </div>
-          <input id="taxi-notes" maxlength="280" placeholder="Algo que el conductor deba saber" data-i18n-placeholder="taxi.notes"
+          <input id="taxi-notes" maxlength="280" placeholder="Indicaciones para el conductor" data-i18n-placeholder="taxi.notes"
                  class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
           <button type="submit" id="btn-taxi-request" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="taxi.request">Solicitar taxi</button>
         </form>
@@ -665,12 +665,12 @@
             <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="lf.title">Objetos perdidos</p>
             <button id="btn-lf-open" class="card rounded-lg px-3 py-2 text-xs" data-i18n="lf.open">Abrir</button>
           </div>
-          <p class="text-[11px] text-white/40" data-i18n="lf.why">Reporta algo que perdiste, o entrega algo que encontraste. Lo que escribas de sus señas solo lo ve el personal.</p>
+          <p class="text-[11px] text-white/40" data-i18n="lf.why">Reporta un objeto que perdiste o avisa que encontraste uno. Solo el personal puede ver la descripción.</p>
 
           <div id="lf-panel" class="space-y-3" hidden>
             <!-- Lo que hay guardado, sin señas: categoría, zona y día. -->
             <div class="space-y-2">
-              <p class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="lf.catalogue">Lo que está guardado</p>
+              <p class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="lf.catalogue">Objetos en resguardo</p>
               <p id="lf-found-empty" class="text-sm text-white/40" data-i18n="lf.foundNone" hidden>No hay nada en resguardo ahora mismo.</p>
               <div id="lf-found" class="space-y-2"></div>
             </div>
@@ -678,7 +678,7 @@
             <!-- Mis reportes, con mis señas y mi código de entrega. -->
             <div class="space-y-2 border-t border-white/10 pt-3">
               <p class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="lf.mine">Mis reportes</p>
-              <p id="lf-mine-empty" class="text-sm text-white/40" data-i18n="lf.mineNone" hidden>Todavía no has levantado ninguno.</p>
+              <p id="lf-mine-empty" class="text-sm text-white/40" data-i18n="lf.mineNone" hidden>Todavía no tienes reportes.</p>
               <div id="lf-mine" class="space-y-2"></div>
             </div>
 
@@ -690,10 +690,10 @@
               </div>
               <select id="lf-category" class="field"></select>
               <input id="lf-place" class="field" placeholder="¿Dónde?" data-i18n-placeholder="lf.place">
-              <textarea id="lf-details" class="field" rows="3" placeholder="Cómo es" data-i18n-placeholder="lf.details"></textarea>
-              <p class="text-[11px] text-white/40" data-i18n="lf.detailsNote">Mientras más señas, más fácil comprobar que es tuyo: marca, color, funda, qué traía adentro. Esto no se le enseña a otros clientes.</p>
+              <textarea id="lf-details" class="field" rows="3" placeholder="Descripción del objeto" data-i18n-placeholder="lf.details"></textarea>
+              <p class="text-[11px] text-white/40" data-i18n="lf.detailsNote">Incluye detalles que ayuden a identificarlo: marca, color, funda o contenido. Los demás clientes no pueden ver esta información.</p>
               <p id="lf-error" class="text-sm text-red-300" hidden></p>
-              <button id="btn-lf-send" class="ev2-button w-full rounded-lg py-3 font-display" data-i18n="lf.send">Levantar el reporte</button>
+              <button id="btn-lf-send" class="ev2-button w-full rounded-lg py-3 font-display" data-i18n="lf.send">Enviar reporte</button>
             </div>
           </div>
         </div>
@@ -707,7 +707,7 @@
           <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="privacy.title">Privacidad</p>
           <label class="flex items-start gap-3 text-sm cursor-pointer">
             <input id="pref-accept" type="checkbox" class="w-5 h-5 mt-0.5 shrink-0">
-            <span><span data-i18n="privacy.accept">Aceptar invitaciones</span><br><span class="text-[11px] text-white/40" data-i18n="privacy.acceptNote">Sin esto no recibes nada de nadie.</span></span>
+            <span><span data-i18n="privacy.accept">Aceptar invitaciones</span><br><span class="text-[11px] text-white/40" data-i18n="privacy.acceptNote">Permite que otras personas te envíen saludos e invitaciones.</span></span>
           </label>
           <label class="flex items-start gap-3 text-sm cursor-pointer">
             <input id="pref-discoverable" type="checkbox" class="w-5 h-5 mt-0.5 shrink-0">
@@ -731,8 +731,8 @@
              de entrar: dejar a alguien sin contraseña y sin cuenta ligada es dejarlo
              fuera de su propia cuenta, con sus reservaciones adentro. -->
         <div id="social-panel" class="card rounded-xl p-4 space-y-3" hidden>
-          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="social.linkedAccounts">Cuentas ligadas</p>
-          <p id="social-panel-empty" class="text-sm text-white/40" data-i18n="social.none" hidden>No tienes ninguna cuenta ligada.</p>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="social.linkedAccounts">Cuentas vinculadas</p>
+          <p id="social-panel-empty" class="text-sm text-white/40" data-i18n="social.none" hidden>No tienes cuentas vinculadas.</p>
           <div id="social-panel-list" class="space-y-2"></div>
           <div id="social-panel-add" class="space-y-2"></div>
           <p id="social-panel-note" class="text-[11px] text-white/40" hidden></p>
@@ -759,7 +759,7 @@
           </div>
 
           <div id="del-panel" class="space-y-3" hidden>
-            <p class="text-[11px] text-white/50" data-i18n="del.what">Se borran tu nombre, correo, teléfono, fecha de nacimiento, sesiones, cuentas ligadas y métodos de pago. Los montos de lo que consumiste se quedan en la contabilidad, sin tu nombre.</p>
+            <p class="text-[11px] text-white/50" data-i18n="del.what">Se eliminan tu nombre, correo, teléfono, fecha de nacimiento, sesiones, cuentas vinculadas y métodos de pago. Los importes de tus consumos se conservan en la contabilidad sin tu nombre.</p>
 
             <!-- Los motivos que lo impiden, cada uno en su renglón. -->
             <div id="del-blockers" class="space-y-1" hidden></div>
@@ -813,7 +813,7 @@
       </div>
 
       <div id="tip-mode-amount" class="space-y-3">
-        <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tip.amount">Cuánto</p>
+        <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tip.amount">Importe</p>
         <div id="tip-presets" class="grid grid-cols-2 gap-2"></div>
         <input id="tip-amount" type="number" inputmode="decimal" min="0" step="10" placeholder="Otra cantidad" data-i18n-placeholder="tip.other"
                class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
@@ -823,7 +823,7 @@
         <label class="flex items-center gap-2 text-sm text-white/70">
           <input id="tip-anonymous" type="checkbox" class="w-5 h-5"><span data-i18n="tip.anonymous">Sin decir quién soy</span>
         </label>
-        <p class="text-[11px] text-white/40" data-i18n="tip.payNote">El cobro con tarjeta se conecta en la fase de pagos. Por ahora queda registrada y el gerente la confirma.</p>
+        <p class="text-[11px] text-white/40" data-i18n="tip.payNote">La propina queda pendiente hasta que el gerente confirme el pago. Registrarla no significa que ya se haya cobrado.</p>
         <p id="tip-error" class="text-sm text-red-300" hidden></p>
         <button id="btn-tip-send" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="tip.send">Enviar propina</button>
       </div>
@@ -861,7 +861,7 @@
       </div>
 
       <div id="flirt-mode-emoji" class="space-y-2">
-        <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="flirt.pickEmoji">Qué le mandas</p>
+        <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="flirt.pickEmoji">Elige una reacción</p>
         <div id="flirt-emojis" class="grid grid-cols-4 gap-2"></div>
       </div>
 
@@ -875,10 +875,10 @@
         <p id="flirt-warn" class="text-[12px] text-amber-300 leading-snug"></p>
       </div>
 
-      <input id="flirt-message" maxlength="140" placeholder="Una línea, si quieres" data-i18n-placeholder="flirt.messageHint"
+      <input id="flirt-message" maxlength="140" placeholder="Mensaje breve (opcional)" data-i18n-placeholder="flirt.messageHint"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       <p id="flirt-error" class="text-sm text-red-300" hidden></p>
-      <button id="btn-flirt-send" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="flirt.send">Mandar</button>
+      <button id="btn-flirt-send" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="flirt.send">Enviar</button>
       <p id="flirt-limits" class="text-[11px] text-white/40 text-center">—</p>
     </div>
   </div>
@@ -949,9 +949,7 @@
           <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="gp.title">Los pases de tu mesa</p>
           <p id="gp-summary" class="text-[11px] text-white/50">—</p>
         </div>
-        <p class="text-[11px] text-white/40 leading-snug" data-i18n="gp.note">
-          Un pase por persona. Cada uno sirve una sola vez y solo para quien lo lleva.
-        </p>
+        <p class="text-[11px] text-white/40 leading-snug" data-i18n="gp.note">Un pase por persona. Cada uno sirve una sola vez y solo para quien lo lleva.</p>
         <div id="gp-list" class="space-y-2 max-h-64 overflow-y-auto"></div>
         <p id="gp-error" class="text-sm text-red-300" hidden></p>
       </div>

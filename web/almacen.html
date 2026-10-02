@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es-MX">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -91,7 +91,7 @@
       <p class="text-sm text-white/50" data-i18n="wh.subtitle">Entradas, surtido, mermas y conteo</p>
     </div>
     <form id="form-login" class="space-y-3">
-      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo" data-i18n-placeholder="auth.email" class="field">
+      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo electrónico" data-i18n-placeholder="auth.email" class="field">
       <input id="login-password" type="password" autocomplete="current-password" required placeholder="Contraseña" data-i18n-placeholder="auth.password" class="field">
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.signin">Entrar</button>
     </form>
@@ -106,15 +106,15 @@
   <!-- ====== CONTRASEÑA TEMPORAL: el servidor bloquea todo hasta cambiarla ====== -->
   <section id="screen-password" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto" hidden>
     <h2 class="font-display text-2xl ev2-gradient mb-1" data-i18n="gate.title">Cambia tu contraseña</h2>
-    <p class="text-sm text-white/60 mb-6" data-i18n="gate.note">Entraste con una contraseña temporal.</p>
+    <p class="text-sm text-white/60 mb-6" data-i18n="gate.note">Entraste con una contraseña temporal. Elige una tuya para poder trabajar.</p>
     <form id="form-password" class="space-y-3">
       <input id="pw-current" type="password" autocomplete="current-password" required placeholder="Contraseña temporal" data-i18n-placeholder="gate.current" class="field">
-      <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" placeholder="Contraseña nueva (mínimo 8)" data-i18n-placeholder="gate.new" class="field">
-      <input id="pw-repeat" type="password" autocomplete="new-password" required placeholder="Repite la nueva" data-i18n-placeholder="gate.repeat" class="field">
+      <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" placeholder="Nueva contraseña (mínimo 8 caracteres)" data-i18n-placeholder="gate.new" class="field">
+      <input id="pw-repeat" type="password" autocomplete="new-password" required placeholder="Confirma la nueva contraseña" data-i18n-placeholder="gate.repeat" class="field">
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="gate.save">Cambiar y entrar</button>
     </form>
     <p id="pw-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
-    <button id="btn-pw-logout" class="mt-6 text-sm text-white/50 underline" data-i18n="top.signOut">Salir</button>
+    <button id="btn-pw-logout" class="mt-6 text-sm text-white/50 underline" data-i18n="top.signOut">Cerrar sesión</button>
   </section>
 
   <!-- ============ ENTRÓ ALGUIEN QUE NO ES DE ALMACÉN ============ -->
@@ -122,7 +122,7 @@
     <p class="text-xs uppercase tracking-widest text-white/40" data-i18n="staff.signedInAs">Entraste como</p>
     <h2 id="wrong-role" class="font-display text-2xl ev2-gradient mb-4">—</h2>
     <p id="wrong-role-note" class="text-sm text-white/60"></p>
-    <button id="btn-wrong-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Salir</button>
+    <button id="btn-wrong-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Cerrar sesión</button>
   </section>
 
   <!-- ============================ ALMACÉN ============================ -->
@@ -135,10 +135,10 @@
       <div class="flex items-center gap-2">
         <!-- La vuelta al panel. Solo la ve quien vino de ahí (gerente o administrador):
              a un almacenista no se le ofrece una puerta que el servidor le va a cerrar. -->
-        <a id="btn-back-manager" href="manager.html" class="text-xs text-white/60 px-2 flex items-center gap-1" title="Panel del gerente" data-i18n-title="wh.backManager" hidden><i class="fa-solid fa-chevron-left"></i><span data-i18n="wh.back">Panel</span></a>
+        <a id="btn-back-manager" href="manager.html" class="text-xs text-white/60 px-2 flex items-center gap-1" title="Volver al panel del gerente" data-i18n-title="wh.backManager" hidden><i class="fa-solid fa-chevron-left"></i><span data-i18n="wh.back">Panel</span></a>
         <button id="btn-refresh" class="text-xs text-white/60 px-2" title="Actualizar" data-i18n-title="wh.refresh"><i class="fa-solid fa-rotate"></i></button>
         <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
-        <button id="btn-logout" class="text-xs text-white/60 px-2" title="Salir" data-i18n-title="top.signOut"><i class="fa-solid fa-right-from-bracket"></i></button>
+        <button id="btn-logout" class="text-xs text-white/60 px-2" title="Cerrar sesión" data-i18n-title="top.signOut"><i class="fa-solid fa-right-from-bracket"></i></button>
       </div>
     </header>
 
@@ -199,7 +199,7 @@
 
     <div class="space-y-3">
       <div>
-        <label class="text-xs text-white/50" data-i18n="wh.from">Lugar</label>
+        <label class="text-xs text-white/50" data-i18n="wh.from">Ubicación</label>
         <select id="sheet-from" class="field"></select>
       </div>
       <div id="sheet-to-wrap" hidden>
@@ -212,7 +212,7 @@
           <input id="sheet-amount" type="number" step="0.001" min="0" class="field" inputmode="decimal">
           <div class="flex gap-1">
             <button type="button" class="chip on tap px-3" id="mode-packages" data-i18n="wh.inPackages">Cajas</button>
-            <button type="button" class="chip tap px-3" id="mode-base" data-i18n="wh.inBase">ml</button>
+            <button type="button" class="chip tap px-3" id="mode-base" data-i18n="wh.inBase">Unidad</button>
           </div>
         </div>
       </div>
@@ -222,7 +222,7 @@
       </div>
       <div id="sheet-reason-wrap">
         <label class="text-xs text-white/50"><span data-i18n="wh.reason">Motivo</span> <span id="sheet-reason-required" class="text-pink-300">*</span></label>
-        <input id="sheet-reason" type="text" maxlength="200" class="field" placeholder="Por qué" data-i18n-placeholder="wh.reasonHint">
+        <input id="sheet-reason" type="text" maxlength="200" class="field" placeholder="Explica el motivo" data-i18n-placeholder="wh.reasonHint">
       </div>
 
       <div id="sheet-preview" class="text-sm text-white/70 card rounded-xl px-3 py-2"></div>

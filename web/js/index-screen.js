@@ -1012,7 +1012,7 @@
     cats.innerHTML = [null, ...state.categories].map((c) => `
       <button data-cat="${c === null ? '' : escape(c)}"
               class="px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${state.category === c ? 'ev2-button' : 'card'}">
-        ${c === null ? escape(t('menu.all')) : escape(c)}
+        ${c === null ? escape(t('menu.all')) : escape(EV2Format.categoryLabel(c))}
       </button>`).join('');
     cats.querySelectorAll('[data-cat]').forEach((b) => {
       b.onclick = () => { state.category = b.dataset.cat || null; renderMenu(); };
@@ -1029,7 +1029,7 @@
         ${thumb(d)}
         <div class="flex-1 min-w-0">
           <p class="font-semibold">${escape(d.name)}</p>
-          <p class="text-xs text-white/50">${escape(d.category || '')}${out ? ` · ${escape(t('menu.soldOut'))}` : ''}</p>
+          <p class="text-xs text-white/50">${escape(EV2Format.categoryLabel(d.category))}${out ? ` · ${escape(t('menu.soldOut'))}` : ''}</p>
           <p class="text-sm mt-1">${money(d.price, d.currency)}</p>
         </div>
         ${out ? '' : `
