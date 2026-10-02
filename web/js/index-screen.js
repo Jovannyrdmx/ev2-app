@@ -851,7 +851,9 @@
     const title = $('ux-home-title');
     if (!title) return;
     const active = state.orders.filter((order) => !['delivered', 'cancelled'].includes(order.status));
-    title.textContent = active.length ? t('ux.activeOrders', { count: active.length }) : t('ux.enjoy');
+    title.textContent = active.length
+      ? t(active.length === 1 ? 'ux.oneActiveOrder' : 'ux.activeOrders', { count: active.length })
+      : t('ux.enjoy');
     $('ux-home-note').textContent = state.myTable
       ? `${t('top.table')} ${state.myTable.table_number || state.myTable.code} · ${t('ux.paymentNote')}`
       : t('ux.visitNote');
