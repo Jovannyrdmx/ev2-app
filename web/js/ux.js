@@ -77,8 +77,9 @@
       // Keep grid placement intact: the field and its label occupy the original cell.
       const wrapper = doc.createElement('div');
       wrapper.className = 'ux-field-wrap';
-      ['w-1/2', 'col-span-2', 'flex-1'].forEach((c) => {
-        if (input.classList.contains(c)) { wrapper.classList.add(c); input.classList.remove(c); }
+      [...input.classList].filter((c) => /^(?:(?:sm|md|lg|xl|2xl):)?(?:col-span-\d+|col-start-\d+|row-span-\d+|w-1\/2|flex-1)$/.test(c)).forEach((c) => {
+        wrapper.classList.add(c);
+        input.classList.remove(c);
       });
       input.before(wrapper);
       wrapper.append(label, input);
@@ -134,6 +135,19 @@
     };
     root.addEventListener('online', update);
     root.addEventListener('offline', update);
+    // Sticky tabs must follow the actual header height, including wrapped names
+    // and controls on a narrow screen. No viewport or device assumptions.
+    const headers = [...doc.querySelectorAll('[id^="screen-"] > header.sticky')];
+    const measureHeaders = () => headers.forEach((header) => {
+      if (header.getClientRects().length) {
+        header.parentElement.style.setProperty('--ux-header-height', `${header.getBoundingClientRect().height}px`);
+      }
+    });
+    if (root.ResizeObserver) {
+      const observer = new root.ResizeObserver(measureHeaders);
+      headers.forEach((header) => observer.observe(header));
+    } else root.addEventListener('resize', measureHeaders);
+    measureHeaders();
     let scheduled = false;
     const observer = new MutationObserver((records) => {
       if (!records.some((r) => [...r.addedNodes].some((n) => n.nodeType === 1))) return;
