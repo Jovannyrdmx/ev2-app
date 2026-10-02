@@ -2,6 +2,8 @@
 
 Esta entrega implementa mejoras de presentación y navegación sobre la base `96facf89b1e9267d66f7db195f93b12cafa26428`, rama `fase7/piezas-por-caja`. El trabajo se conserva en `fase5/ux-integral`; no modifica rutas, servicios, migraciones, permisos ni reglas monetarias del servidor.
 
+La versión de aplicación `4a6236be22d8200b0c429666594accc3f21a52d1` quedó desplegada en [EV2 Systems](https://ev2.systems/) el 1 de octubre de 2026 a las 19:56, hora de Phoenix. Esta es una entrega web/PWA, no una declaración de que todas las propuestas futuras o las aplicaciones nativas estén terminadas.
+
 ## Cambios incluidos
 
 - Cliente: inicio contextual, cinco destinos principales, menú con búsqueda tolerante a acentos, acceso secundario a mapa, reservas, transporte y coqueteo. Lista de mesas como alternativa al canvas.
@@ -14,7 +16,7 @@ Esta entrega implementa mejoras de presentación y navegación sobre la base `96
 
 ## Validación efectuada en entorno aislado
 
-- 36 suites web, 1219 pruebas aprobadas en la ejecución registrada; incluye 16 nuevas comprobaciones de diálogos, recursos, navegación y espera de confirmación.
+- 36 suites web, 1220 pruebas aprobadas en la ejecución final; incluye 17 nuevas comprobaciones de diálogos, recursos, navegación, espera de confirmación y datos de ubicación ausentes.
 - Build local de estilos, fuentes e iconos completado. ESLint del servidor sin errores, con siete advertencias previas; contrato OpenAPI válido.
 - Recorrido real en Chromium con API y PostgreSQL locales: entrada del cliente, mesa asignada, búsqueda con acentos, carrito y creación de pedido. La pantalla conserva el aviso de pago pendiente.
 - Gerencia: primera carga observada con login y una consulta de dashboard, sin consultas bancarias. Diez pestañas recorridas sin excepciones JavaScript. Un fallo HTTP 500 muestra el aviso de datos anteriores y elimina la marca de actualización.
@@ -29,13 +31,17 @@ No se publicaron builds nativas firmadas iOS/Android ni se rediseñó su código
 
 El documento de revisión contiene además propuestas de producto de mayor alcance. Esta entrega no agrega un motor nuevo de saldos prepagados, una cola unificada de excepciones, permisos nuevos, telemetría analítica ni un rediseño completo de cada formulario. La estructura y las reglas de negocio existentes se conservan.
 
-## Puerta de despliegue
+## Despliegue efectuado
 
-El propietario autorizó revisar, respaldar, actualizar y verificar el VPS `45.93.100.244`. El usuario SSH `ev2` de la documentación histórica resultó inexistente según la consola del propietario; se debe confirmar el usuario real antes de conectar. No se debe crear una cuenta por suposición.
+El propietario autorizó revisar, respaldar, actualizar y verificar el VPS `45.93.100.244`. Confirmó el usuario real de la consola y agregó una llave temporal. No se crearon usuarios, no se cambiaron contraseñas ni se modificó la configuración de acceso SSH.
 
-Antes de desplegar: comprobar versión y cambios locales del servidor, identificar el directorio y el servicio web, respaldar imagen y archivos, y validar compatibilidad con esta base. No ejecutar seed, reset, migraciones, ni reiniciar API/PostgreSQL/Redis para esta entrega.
+La instalación anterior estaba en `703d641`. Se comprobó que API, migraciones y configuración de los contenedores no tienen diferencias funcionales con la base de esta entrega. Se preservó el archivo privado no versionado `deploy/Caddyfile.privado`. Se respaldaron imagen y archivos web en `/root/respaldos/ux-20261002-0252/`, y la imagen anterior conserva la etiqueta `ev2-web:before-ux-20261002`.
 
-Desplegar únicamente la web después de esas comprobaciones. Conservar la imagen previa y el respaldo para reversión. Verificar HTTPS, `/api/health`, acceso con roles, carga de los recursos locales y actualización del service worker. Si hay divergencia de código o API no verificada, detener el despliegue y conciliar primero.
+Se probó una candidata en un puerto accesible solo desde el VPS antes de sustituir `ev2-web`. Solo ese contenedor se recreó. La API, WebSocket, Caddy, PostgreSQL y Redis conservaron sus identificadores; no se ejecutaron seed, reset, migraciones ni operaciones sobre datos del club.
+
+Se verificaron HTTPS, `/api/health`, estado `healthy`, 12 páginas/recursos con respuesta 200, fuentes locales, service worker activo, pantalla móvil a 375 px sin desbordamiento y ausencia de errores de carga en el navegador. Los hashes de `index-screen.js` y `ux.css` del contenedor coinciden con el código probado. Un 502 transitorio durante la sustitución fue superado por la comprobación con reintento; el resultado final fue 200 y API sana.
+
+No se inició sesión con cuentas reales ni se hicieron pedidos, pagos o cambios financieros en producción. La aceptación por roles con cuentas del club y la prueba de impresoras, terminales y demás dispositivos quedan pendientes del propietario. El aviso de ciudad `null` detectado en el dominio público fue corregido sin inventar ni alterar el dato de ciudad.
 
 ## Reproducir
 

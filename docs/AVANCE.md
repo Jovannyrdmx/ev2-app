@@ -4,7 +4,7 @@ Cada fila se agrega al terminar y verificar un paso del manual. Formato: fecha �
 
 ## Actualización UX del 1 de octubre de 2026
 
-Implementación web/PWA en `fase5/ux-integral`, sobre `96facf8`: inicio y navegación del cliente, carga por panel en gerencia, estilos compartidos, diálogos accesibles y recursos locales. Ver alcance, pruebas y límites en [UX_RELEASE_2026-10-01.md](UX_RELEASE_2026-10-01.md). Verificación web: 36 suites y 1219 pruebas aprobadas; despliegue VPS pendiente de acceso y comprobación de la versión instalada. No se declara listo en producción.
+Implementación web/PWA en `fase5/ux-integral`, sobre `96facf8`: inicio y navegación del cliente, carga por panel en gerencia, estilos compartidos, diálogos accesibles y recursos locales. Ver alcance, pruebas y límites en [UX_RELEASE_2026-10-01.md](UX_RELEASE_2026-10-01.md). Verificación final: 36 suites y 1220 pruebas aprobadas. Código `4a6236b` desplegado en el VPS el 1 de octubre a las 19:56 de Phoenix, con respaldo previo y solo recreación del contenedor web. HTTPS/API/recursos verificados; aceptación con cuentas y dispositivos reales aún pendiente.
 
 | Fecha | Paso | Qué se hizo | Verificación | Commit / PR |
 |---|---|---|---|---|
