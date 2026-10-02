@@ -40,4 +40,10 @@ Pruebas de regresión: 38 suites web, 1,244 pruebas aprobadas. Se añadió una s
 
 ## Despliegue
 
-Actualización exclusiva de la imagen web sobre `9c51c47`, con respaldo previo, prueba de imagen candidata y reversión si falla la comprobación. El resultado de producción se registra al finalizar la publicación.
+Publicado en [EV2 Systems](https://ev2.systems/) el 1 de octubre de 2026 a las 20:40, hora de Arizona. Código de aplicación `12e7c13`, sobre `9c51c47`; nueva caché `ev2-v34`.
+
+Se actualizó exclusivamente el contenedor web. Respaldo de imagen y archivos en `/root/respaldos/responsive-20261002/`, con imagen anterior `ev2-web:before-responsive-20261002`. La imagen candidata se probó antes del cambio y quedó preparada la reversión. Durante la recreación se observó una respuesta transitoria 502; las verificaciones posteriores respondieron correctamente.
+
+El contenedor web terminó saludable. Los identificadores de API, WebSocket, PostgreSQL, Redis y Caddy no cambiaron. Las sumas SHA-256 de CSS, JavaScript compartido y service worker coincidieron entre el código local probado y el VPS.
+
+La pantalla pública se revisó además en producción a 320, 768, 1440 y 844 px, sin incidencias de geometría ni errores de JavaScript observados. No se iniciaron sesiones con cuentas productivas para esta validación. Se retiró la llave temporal y se confirmó que ya no permite conectarse.
