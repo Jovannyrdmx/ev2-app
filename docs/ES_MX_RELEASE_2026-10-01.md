@@ -26,4 +26,8 @@ Los nombres, categorías y avisos de reconexión de las capturas pertenecen a da
 
 ## Despliegue
 
-Preparado para actualización exclusiva del contenedor web sobre la versión `4a6236b`, con respaldo de imagen y archivos, prueba previa de la imagen candidata y reversión ante fallas. La verificación final de producción se registra por separado tras completar el despliegue.
+Desplegado en [EV2 Systems](https://ev2.systems/) el 1 de octubre de 2026 a las 20:15, hora de Arizona, con código `9c51c47` sobre la versión `4a6236b`. Se actualizó exclusivamente el contenedor web, con respaldo de imagen y archivos en `/root/respaldos/esmx-20261002-0315/`, prueba previa de la imagen candidata y reversión automática ante fallas de verificación.
+
+Se verificaron `es-MX`, los textos nuevos y la versión `ev2-v33` en producción. El endpoint de salud devolvió `ok` y la pantalla pública de acceso no produjo errores de JavaScript en la prueba. El contenedor web terminó saludable; los identificadores de API, WebSocket, PostgreSQL, Redis y Caddy permanecieron iguales. Durante la recreación hubo una respuesta transitoria 502, seguida de una comprobación exitosa.
+
+Las pruebas con sesión iniciada se hicieron en el laboratorio, no con cuentas productivas. La llave temporal de despliegue se retiró y se confirmó que ya no permite conectarse; el acceso permanente al VPS no forma parte de esta entrega.
