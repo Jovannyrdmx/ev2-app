@@ -125,6 +125,7 @@ describe('El cuadro se arma solo', () => {
       expect(win.document.getElementById(id)).not.toBeNull();
     }
     expect(sheet.chargeId).toBe(null);
+    expect(caja.getAttribute('role')).toBe('dialog');
   });
 
   it('al abrirlo enseña el monto, la terminal y el estado; cancelar sigue disponible', () => {
@@ -148,8 +149,17 @@ describe('El cuadro se arma solo', () => {
     expect(doc.getElementById('term-headline').textContent).toBe('pay.termWaiting');
     expect(doc.getElementById('term-cancel').hidden).toBe(false);
     expect(doc.getElementById('term-close').hidden).toBe(true);
+    cajaKeyboardCheck(win, doc);
     sheet.close();
   });
+  function cajaKeyboardCheck(win, doc) {
+    doc.getElementById('term-sheet').dispatchEvent(
+      new win.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    expect(doc.activeElement.id).toBe('term-cancel');
+    doc.activeElement.dispatchEvent(
+      new win.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    expect(doc.activeElement.id).toBe('term-cancel');
+  }
 });
 
 describe('El panel del gerente y sus terminales', () => {
@@ -379,5 +389,105 @@ describe('Salir del cobro cuando la terminal no contesta (D65)', () => {
   it('una sola consulta fallida no abre la salida: puede ser el internet del club', () => {
     // La constante es la regla: tres seguidas, no una.
     expect(T.FALLOS_PARA_SALIR).toBe(3);
+  });
+});
+
+describe('Notification races and honest payment states', () => {
+  let dom;
+  let sheet;
+  const charge = (id = 'one', status = 'waiting') => ({
+    id, status, amount: '450.00', currency: 'MXN',
+    terminal: { label: 'Barra' }, expires_at: null,
+  });
+  const flush = async () => { for (let i = 0; i < 8; i += 1) await Promise.resolve(); };
+  function mount(api, onPaid = jest.fn()) {
+    dom = new JSDOM('<!doctype html><html><body></body></html>');
+    sheet = T.createSheet({
+      document: dom.window.document, api, onPaid,
+      clubId: () => 'club', t: (key) => key, money: String,
+      errorMessage: () => 'Connection interrupted', confirm: () => true,
+    });
+    return { onPaid, el: (id) => dom.window.document.getElementById(id) };
+  }
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => { sheet?.close(); dom?.window.close(); jest.useRealTimers(); });
+
+  it('coalesces simultaneous notifications and notifies an approval exactly once', async () => {
+    let resolve;
+    const get = jest.fn(() => new Promise((r) => { resolve = r; }));
+    const { onPaid, el } = mount({ get });
+    sheet.watch(charge());
+    sheet.onEvent({ payload: { charge_id: 'one' } });
+    sheet.onEvent({ payload: { charge_id: 'one' } });
+    expect(get).toHaveBeenCalledTimes(1);
+    resolve({ charge: charge('one', 'processed') });
+    await flush();
+    sheet.onEvent({ payload: { charge_id: 'one' } });
+    sheet.watch(charge('one', 'processed'));
+    await flush();
+    expect(onPaid).toHaveBeenCalledTimes(1);
+    expect(el('term-headline').textContent).toBe('pay.termPaid');
+  });
+
+  it('ignores a response from the previously displayed charge', async () => {
+    let resolve;
+    const { onPaid, el } = mount({ get: () => new Promise((r) => { resolve = r; }) });
+    sheet.watch(charge('old'));
+    sheet.onEvent({ payload: { charge_id: 'old' } });
+    sheet.watch(charge('new'));
+    resolve({ charge: charge('old', 'processed') });
+    await flush();
+    expect(sheet.chargeId).toBe('new');
+    expect(el('term-headline').textContent).toBe('pay.termWaiting');
+    expect(onPaid).not.toHaveBeenCalled();
+  });
+
+  it('does not repaint or trigger callbacks after closing an in-flight request', async () => {
+    let resolve;
+    const { onPaid, el } = mount({ get: () => new Promise((r) => { resolve = r; }) });
+    sheet.watch(charge());
+    sheet.onEvent({ payload: { charge_id: 'one' } });
+    sheet.close();
+    resolve({ charge: charge('one', 'processed') });
+    await flush();
+    expect(el('term-sheet').hidden).toBe(true);
+    expect(onPaid).not.toHaveBeenCalled();
+  });
+
+  it('labels elapsed time as pending, keeps a slow fallback and later shows approval', async () => {
+    let latest = { ...charge(), expires_at: new Date(Date.now() - 1000).toISOString() };
+    const get = jest.fn(async () => ({ charge: latest }));
+    const { el, onPaid } = mount({ get });
+    sheet.watch(latest);
+    await jest.advanceTimersByTimeAsync(1500);
+    expect(el('term-headline').textContent).toBe('pay.termPending');
+    expect(el('term-headline').textContent).not.toBe('pay.termExpired');
+    latest = charge('one', 'processed');
+    await jest.advanceTimersByTimeAsync(15000);
+    expect(onPaid).toHaveBeenCalledTimes(1);
+    expect(el('term-headline').textContent).toBe('pay.termPaid');
+  });
+
+  it('shows a specific decline reason and never calls the paid callback', async () => {
+    const { el, onPaid } = mount({ get: async () => ({
+      charge: { ...charge('one', 'failed'), status_detail: 'insufficient_amount' },
+    }) });
+    sheet.watch(charge());
+    await jest.advanceTimersByTimeAsync(1500);
+    expect(el('term-headline').textContent).toBe('pay.termFailed');
+    expect(el('term-detail').textContent).toBe('pay.detInsufficient');
+    expect(onPaid).not.toHaveBeenCalled();
+    expect(el('term-headline').getAttribute('aria-live')).toBe('polite');
+  });
+
+  it('does not turn an approved payment into an error when refreshing the parent fails', async () => {
+    const { el, onPaid } = mount(
+      { get: async () => ({ charge: charge('one', 'processed') }) },
+      jest.fn(async () => { throw new Error('refresh failed'); }),
+    );
+    sheet.watch(charge());
+    await jest.advanceTimersByTimeAsync(1500);
+    expect(el('term-headline').textContent).toBe('pay.termPaid');
+    expect(onPaid).toHaveBeenCalledTimes(1);
   });
 });

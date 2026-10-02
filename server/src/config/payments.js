@@ -72,22 +72,19 @@ function mercadoPagoConfig() {
   const mode = mercadoPagoMode(accessToken);
   const missing = [];
   if (!accessToken) missing.push('MERCADOPAGO_ACCESS_TOKEN');
-  if (!publicKey) missing.push('MERCADOPAGO_PUBLIC_KEY');
+  if (!webhookSecret) missing.push('MERCADOPAGO_WEBHOOK_SECRET');
   if (accessToken && mode === 'undeclared') missing.push('MERCADOPAGO_ENV');
   return {
     provider: 'mercadopago',
-    // The webhook secret is NOT required to charge. It is required to trust an incoming
-    // notification -- and this integration never trusts one anyway: when a webhook
-    // arrives, the order is fetched again with our own token and the answer to that is
-    // what moves money. So a club without the secret can still take payments; it just
-    // gets no signature to check. `webhook_verified` says which of the two it is.
+    // Point is server-to-server: it needs the access token and webhook signing secret,
+    // not a browser public key. Never report online-only methods as implemented.
     configured: missing.length === 0,
     webhook_verified: Boolean(webhookSecret),
     mode,
     missing,
     public_key: publicKey || null,
     currencies: ['MXN'],
-    methods: ['card', 'oxxo', 'spei'],
+    methods: ['card_terminal'],
     // The terminal is the only Mercado Pago method wired today (D47). The rest of the
     // list above is what the account can do, not what this system does.
     in_person: true,

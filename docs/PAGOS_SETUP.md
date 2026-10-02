@@ -1,9 +1,44 @@
 # Cómo conectar Stripe y Mercado Pago
 
-Esta hoja es para Erick. El código ya está preparado: **el hueco existe y está probado**;
-falta pegar las llaves. Mientras estén vacías, el club cobra con **pagos manuales**
-(efectivo en la puerta y transferencia con revisión del gerente, paso 3.6), que ya
-funciona, y las rutas de tarjeta responden `501 no implementado` en vez de fingir.
+Esta hoja distingue configuración, pruebas y operación real. Mercado Pago Point cuenta
+con envío de órdenes, consulta del resultado, webhook firmado y notificaciones internas.
+Eso no certifica una terminal física ni significa que las credenciales de un VPS ya
+estén verificadas. Los pagos manuales existentes se conservan.
+
+## Revisión Point del 1 de octubre de 2026
+
+Rama de desarrollo: `fase7/mercadopago-notificaciones`. No activar cobros reales ni
+considerar este bloque desplegado hasta completar la verificación del VPS y la cuenta.
+
+- Un cobro aprobado se registra junto con sus avisos en una sola transacción SQL.
+- Un rechazo muestra el motivo de la tarjeta cuando está disponible.
+- Un timeout, error 5xx o respuesta ambigua deja el intento pendiente; no libera la cuenta
+  para volver a cobrar. Repetir la petición de la misma cuenta y terminal recupera ese intento.
+- La recuperación reutiliza la solicitud original y su llave, guardadas antes del envío.
+  El sistema no reconstruye solicitudes antiguas ni reenvía creaciones después de su límite
+  conservador de 23 horas; esos casos requieren conciliación con el proveedor.
+- Sin ID de Mercado Pago no se confirma una cancelación local. Tampoco se permite
+  liquidar manualmente una cuenta mientras exista un intento pendiente.
+- Un resultado aprobado con importe faltante, referencia incorrecta, moneda diferente o
+  varios pagos inesperados no liquida la cuenta. Queda bloqueado para revisión.
+- La pantalla distingue **Pago aprobado**, **Pago rechazado**, **Pago pendiente de
+  confirmación** y **Pago pendiente de revisión**. El reloj del navegador no declara
+  que una transacción venció.
+
+Pruebas aisladas: 185 pruebas en cinco suites de pagos/eventos/componente, 1,250 pruebas
+web en 38 suites y 135 pruebas adicionales de pedidos, propinas, cortes y recibos.
+Estos conjuntos se superponen; no deben sumarse como pruebas distintas.
+Compilación web correcta; ESLint sin errores y con seis advertencias en archivos no
+modificados. No se realizaron cargos reales ni se certificó hardware físico.
+
+La credencial guardada en el formulario seguro no pudo verificarse desde el entorno
+de trabajo: devolvió HTTP 502 sin respuesta JSON. No se copió al VPS ni al código.
+Una consulta independiente desde el VPS, usando sus variables ya existentes, sí
+devolvió HTTP 200: cuenta de prueba (`test_user`), país `MX`, sitio `MLM`, sin terminales
+físicas asociadas. Esto valida la configuración preexistente del servidor, no demuestra
+que corresponda a la credencial recién compartida ni verifica la entrega del webhook.
+En EV2 solo estaba registrada la terminal virtual **Prueba**; no había cobros Point
+ni devoluciones pendientes y las 37 migraciones existentes ya estaban aplicadas.
 
 ## Dónde van las llaves
 
@@ -36,7 +71,7 @@ tu `.env` y pega los valores.
 
 1. Crear la cuenta en **mercadopago.com.mx** con los datos fiscales.
 2. **Tus integraciones → crear aplicación → Credenciales de prueba**. Copiar:
-   - `Public Key` → `MERCADOPAGO_PUBLIC_KEY`
+   - `Public Key` → `MERCADOPAGO_PUBLIC_KEY` (opcional para este flujo Point)
    - `Access Token` → `MERCADOPAGO_ACCESS_TOKEN`. **Secreto.**
 3. **`MERCADOPAGO_ENV=test` o `MERCADOPAGO_ENV=live`, y no se adivina.**
 
@@ -45,25 +80,33 @@ tu `.env` y pega los valores.
    con `TEST-`; era cierto hace años y ya no. Quien se fíe de eso acaba cobrándole a una
    tarjeta real creyendo que está ensayando.
 
-   Por eso el modo se **declara** en el `.env` y el servidor lo **contrasta** con el
-   `live_mode` que contesta la cuenta en cada orden: si el archivo dice prueba y la cuenta
-   contesta real, se detiene con un 503 y lo dice, antes de despertar la terminal.
+   El modo se declara y se contrasta con `live_mode` cuando el proveedor lo devuelve.
+   Esa validación ocurre después de la llamada, por lo que una discrepancia mantiene
+   el cobro pendiente de revisión y no se presenta como prueba de que no hubo cargo.
+   Como protección adicional, este sistema solo permite la terminal virtual en modo
+   `test`, y solo terminales físicas en modo `live`.
 
 4. Configurar la notificación (**Webhooks**) hacia:
 
    ```
-   https://<tu-dominio>/api/payments/mercadopago/webhook
+   https://ev2.systems/api/payments/mercadopago/webhook
    ```
 
    y guardar la **clave secreta** que da esa misma pantalla en
    `MERCADOPAGO_WEBHOOK_SECRET`. Tiene que ser esa, copiada de ahí: una generada por
    nuestra cuenta no valida nada.
 
-   Sin la firma correcta **el cobro sigue funcionando**, y eso es a propósito: la firma se
-   anota pero no decide. La verdad de si se cobró sale de consultar la orden
-   (`GET /v1/orders/{id}`) con nuestro propio token, porque la validación de firma de la
-   Orders API tiene un defecto abierto en los SDK del propio Mercado Pago. Lo que se pierde
-   sin ella es la marca `webhook_verified`, no el cobro.
+   Seleccionar el evento **Order (Mercado Pago)** en Webhooks. Para una cuenta de
+   prueba, la configuración de notificaciones se realiza entrando con esa cuenta
+   y usando su sección de producción, según la [guía oficial de Point](https://www.mercadopago.com.mx/developers/en/docs/mp-point/notifications).
+
+   **La firma ahora es obligatoria.** El servidor devuelve 401 ante una firma inválida,
+   y no inicia cobros nuevos si falta `MERCADOPAGO_WEBHOOK_SECRET`. La firma usa el
+   `data.id` de la URL en minúsculas y omite los campos ausentes; después se consulta
+   `GET /v1/orders/{id}` para decidir el resultado, conforme a la
+   [documentación de notificaciones](https://www.mercadopago.com.mx/developers/en/docs/mp-point/notifications).
+   Un fallo de consulta devuelve 503 para permitir reintentos, en lugar de confirmar
+   falsamente que el aviso ya fue procesado. Los avisos repetidos no liquidan dos veces.
 
 5. **La terminal Point.** Se da de alta desde la app: gerente → pestaña **Pagos** →
    *Buscar en Mercado Pago* → *Dar de alta*. El alta la pasa a modo **PDV**, que es el
@@ -76,9 +119,9 @@ tu `.env` y pega los valores.
    así que con `MERCADOPAGO_ENV=test` el sistema la ofrece solo en *Buscar en Mercado
    Pago*, ya con nombre puesto. Se da de alta como cualquier otra.
 
-   Con credenciales de **prueba**, la Point física del club normalmente **no aparece**: solo
-   aparece si tiene la sesión iniciada con la cuenta de prueba, y aun así Mercado Pago no
-   deja cobrar tarjetas reales con ella. Para ensayar, la virtual.
+   Para ensayar este sistema se usa exclusivamente la terminal virtual. La prueba con
+   una terminal física requiere confirmar el modelo, la cuenta vinculada y el alcance
+   de la prueba por separado; no se autoriza implícitamente al configurar credenciales.
 
    El ensayo completo:
 
@@ -87,8 +130,9 @@ tu `.env` y pega los valores.
    2. En el panel del gerente, Pagos → **Cobros con terminal**: el cobro aparece con dos
       botones, *Simular: pagó* y *Simular: rechazada*. Solo existen para la terminal
       virtual y con credenciales de prueba.
-   3. Al simular, la pantalla del mesero se cierra sola con el resultado y el pedido queda
-      pagado (o no). Desde ahí mismo se puede probar *Devolver*.
+   3. La pantalla del mesero muestra el resultado confirmado. Solo si el proveedor reporta
+      aprobación válida queda pagado el pedido. El empleado cierra el aviso con **Listo**
+      o **Volver**; no se presupone que el resultado haya sido visto.
 
    Lo mismo por API, si se prefiere:
 
@@ -113,19 +157,39 @@ tu `.env` y pega los valores.
    - Si la terminal cobró **propina**, se ve en el cobro y en su lista, pero no entra al
      ingreso del club.
 
-Mercado Pago es el que habilita **OXXO y SPEI**, que en México es lo que más se va a usar.
+Este bloque implementa **tarjeta en terminal Point**. No habilita OXXO, SPEI ni cobro
+de tarjeta dentro de la app del cliente.
 
 7. **Para cobrar de verdad (producción)** — esto no se hace antes de la Fase 7 (CLAUDE.md,
    regla 5):
 
-   - En *Tus integraciones → tu app → Credenciales de producción*, las dos llaves van al
-     `.env` **del VPS** (nunca a un chat ni al repositorio), con `MERCADOPAGO_ENV=live`.
+   - El Access Token y el secreto del webhook se configuran en el `.env` del VPS, nunca
+     en chat ni en Git. La Public Key es opcional para Point. Declarar
+     `MERCADOPAGO_ENV=live` únicamente después de verificar la cuenta.
    - La Point Smart 2 tiene que estar vinculada a **esa misma cuenta**: en la terminal se
      inicia sesión, se escanea su QR con la app de Mercado Pago y se eligen la **sucursal**
      y la **caja** (cada caja admite una sola terminal en modo PDV). Si la cuenta todavía
      no tiene sucursal y caja, se crean ahí mismo o en el panel de Mercado Pago.
    - Después, *Buscar en Mercado Pago* la encuentra; al darla de alta se pasa a PDV y
      hay que **reiniciarla**.
+
+## Lista de aceptación antes de habilitar la terminal real
+
+- Confirmar modelo compatible y cuenta mexicana; no deducirlo del prefijo del token.
+- Renovar cualquier token o contraseña compartidos por chat y usar almacenamiento seguro.
+- Consultar cuenta y terminales sin cargos. Verificar la asociación del dispositivo y el
+  modo PDV, como describe el [flujo oficial de procesamiento](https://www.mercadopago.com.mx/developers/es/docs/mp-point/payment-processing).
+- Configurar el webhook HTTPS y su secreto en la misma cuenta/aplicación.
+- Revisar intentos pendientes antes de actualizar. Los intentos antiguos sin solicitud
+  original guardada no se reenvían automáticamente.
+- Respaldar imágenes, código y configuración del VPS sin copiar secretos al repositorio.
+  Verificar migraciones pendientes antes de reiniciar: el Compose ejecuta migraciones al
+  iniciar la API, aunque este cambio no agrega ninguna.
+- Publicar únicamente con autorización. Probar primero con la cuenta virtual aislada;
+  no simular pedidos dentro de la caja activa.
+- Acordar por separado una prueba física con importe explícito. Verificar importe,
+  aprobación/rechazo, folio, actualización del sistema, corte y devolución si procede.
+- Retirar la llave SSH temporal al terminar y conservar un procedimiento de reversión.
 
 ## Cómo saber si quedó
 

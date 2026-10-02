@@ -143,6 +143,16 @@ async function settle(client, {
   if (!OPEN_TX_STATUSES.includes(tx.status)) {
     throw ApiError.conflict(`El cobro está '${tx.status}' y ya no admite pago`);
   }
+  if (provider !== 'mercadopago') {
+    const pending = await client.query(
+      `SELECT id FROM terminal_charges WHERE transaction_id = $1
+       AND status IN ('creating','waiting','action_required','error') LIMIT 1`, [tx.id]);
+    if (pending.rowCount) {
+      throw ApiError.conflict('Hay un cobro pendiente de confirmar en la terminal. '
+        + 'No se puede confirmar otro pago hasta resolverlo.',
+      { terminal_charge_id: pending.rows[0].id });
+    }
+  }
   // The ledger amount cannot be edited -- it is immutable by design -- so a payment for
   // a different amount is not something to reconcile silently. The manager rejects it
   // and asks for the difference.
@@ -191,8 +201,9 @@ async function settle(client, {
   return { tx, reservation, order, receipt };
 }
 
-async function publishConfirmed({ nightclubId, payment, tx, reservation, order }) {
+async function publishConfirmed({ nightclubId, payment, tx, reservation, order, client }) {
   await events.publish({
+    client,
     nightclubId,
     type: 'payment_confirmed',
     audience: {
@@ -210,6 +221,7 @@ async function publishConfirmed({ nightclubId, payment, tx, reservation, order }
   });
   if (reservation) {
     await events.publish({
+      client,
       nightclubId,
       type: 'reservation_confirmed',
       audience: { userIds: [reservation.user_id], roles: ['hostess', 'manager'] },
@@ -220,6 +232,7 @@ async function publishConfirmed({ nightclubId, payment, tx, reservation, order }
   // for and does not care whether a waiter took cash or a manager cleared a transfer.
   if (order) {
     await events.publish({
+      client,
       nightclubId,
       type: 'order_confirmed',
       audience: { roles: ['bartender', 'waiter', 'manager'], userIds: [order.sender_id] },

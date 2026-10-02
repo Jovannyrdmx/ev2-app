@@ -234,9 +234,9 @@ const empezar = async (tx, terminal, quien = waiter) => api()
 /** La notificación, firmada como la firma Mercado Pago. */
 async function notificar(orderId, { requestId = crypto.randomUUID(), secret = 'secreto-de-prueba', action = 'order.processed' } = {}) {
   const ts = Date.now();
-  const manifest = `id:${orderId};request-id:${requestId};ts:${ts};`;
+  const manifest = `id:${orderId.toLowerCase()};request-id:${requestId};ts:${ts};`;
   const v1 = crypto.createHmac('sha256', secret).update(manifest).digest('hex');
-  return api().post('/api/payments/mercadopago/webhook')
+  return api().post(`/api/payments/mercadopago/webhook?data.id=${encodeURIComponent(orderId)}`)
     .set('x-signature', `ts=${ts},v1=${v1}`)
     .set('x-request-id', requestId)
     .send({ action, type: 'order', data: { id: orderId } });
@@ -325,7 +325,8 @@ describe('Cobrar', () => {
     const tx = await cobroPendiente();
     expect((await empezar(tx, t)).status).toBe(201);
     const segundo = await empezar(tx, t, manager);
-    expect(segundo.status).toBe(409);
+    expect(segundo.status).toBe(200);
+    expect(segundo.body.resumed).toBe(true);
     expect(mpFake.calls.filter((c) => c.path === '/v1/orders')).toHaveLength(1);
   });
 
@@ -410,24 +411,21 @@ describe('Cuando la tarjeta pasa', () => {
     expect((await estadoDe(tx.id)).status).toBe('pending');
     const { rows } = await pool.query(
       'SELECT status, status_detail FROM terminal_charges WHERE transaction_id = $1', [tx.id]);
-    expect(rows[0].status).toBe('error');
-    expect(rows[0].status_detail).toMatch(/400/);
+    expect(rows[0].status).toBe('action_required');
+    expect(rows[0].status_detail).toBe('reconciliation_required');
   });
 
-  it('una firma falsa se anota, pero no decide', async () => {
-    // La firma es una señal. La verdad es el GET con nuestro token — entre otras cosas
-    // porque hoy la validación de firma de la Orders API tiene un defecto abierto en los
-    // propios SDK de Mercado Pago, y colgar el cobro de ella sería dejar que un defecto
-    // ajeno le diga al club que un pago real no ocurrió.
+  it('una firma falsa se rechaza sin consultar al proveedor ni mover el libro', async () => {
     const { tx, orderId, charge } = await cobroEsperando();
     resolverOrden(orderId, 'processed');
-    expect((await notificar(orderId, { secret: 'el-secreto-equivocado' })).status).toBe(200);
-
-    expect((await estadoDe(tx.id)).status).toBe('paid');
+    const calls = mpFake.calls.length;
+    expect((await notificar(orderId, { secret: 'el-secreto-equivocado' })).status).toBe(401);
+    expect(mpFake.calls.length).toBe(calls);
+    expect((await estadoDe(tx.id)).status).toBe('pending');
     const { rows } = await pool.query(
       `SELECT payload->>'signature' AS firma FROM terminal_charge_events
         WHERE charge_id = $1 AND source = 'webhook' ORDER BY id LIMIT 1`, [charge.id]);
-    expect(rows[0].firma).toBe('invalid');
+    expect(rows).toHaveLength(0);
   });
 
   it('una firma buena se anota como buena', async () => {
@@ -468,7 +466,9 @@ describe('Cuando algo falla', () => {
     mpFake.failNext = 'abort';
     const res = await empezar(tx, t);
 
-    expect(res.status).toBe(504);
+    expect(res.status).toBe(202);
+    expect(res.body.pending_confirmation).toBe(true);
+    expect(res.body.charge.id).toBeTruthy();
     const { rows } = await pool.query(
       'SELECT status, external_order_id FROM terminal_charges WHERE transaction_id = $1', [tx.id]);
     expect(rows[0].status).toBe('creating');
@@ -547,10 +547,9 @@ describe('Las credenciales', () => {
     const tx = await cobroPendiente();
     mpFake.failNext = { status: 201, body: { id: ORDER_ID(), status: 'created', live_mode: true } };
     const res = await empezar(tx, t);
-    // 503 y no 500 a propósito: un 500 se contesta sin el motivo, y el motivo es lo
-    // único útil aquí.
-    expect(res.status).toBe(503);
-    expect(res.body.error.message).toMatch(/PRODUCCIÓN/);
+    // The provider already received the request: retain the unresolved attempt.
+    expect(res.status).toBe(202);
+    expect(res.body.charge.status).toBe('creating');
     expect((await estadoDe(tx.id)).status).toBe('pending');
   });
 
@@ -630,8 +629,8 @@ describe('Que no se cobre dos veces', () => {
 
     const cobro = (await pool.query(
       'SELECT status, status_detail FROM terminal_charges WHERE id = $1', [chargeId])).rows[0];
-    expect(cobro.status).toBe('error');
-    expect(cobro.status_detail).toMatch(/cobrado pero no se pudo asentar/);
+    expect(cobro.status).toBe('action_required');
+    expect(cobro.status_detail).toBe('reconciliation_required');
 
     const evidencia = await pool.query(
       `SELECT action FROM terminal_charge_events
@@ -647,7 +646,7 @@ describe('Que no se cobre dos veces', () => {
     const tx = await cobroPendiente('450.00');
     mpFake.failNext = 'abort';
     const res = await empezar(tx, t);
-    expect(res.status).toBe(504);
+    expect(res.status).toBe(202);
 
     const { rows } = await pool.query(
       `SELECT id, status, external_order_id, idempotency_key
@@ -728,7 +727,10 @@ describe('Dar de alta una terminal nunca deja al gerente atorado', () => {
     const ahora = await api().patch(url).set(await tokenDe(manager)).send({ set_pdv: true });
     expect(ahora.status).toBe(200);
     expect(ahora.body.terminal.operating_mode).toBe('PDV');
-    expect((await empezar(await cobroPendiente(), t)).status).toBe(201);
+    // PDV is ready, but test mode must never send an order to physical hardware.
+    const charge = await empezar(await cobroPendiente(), t);
+    expect(charge.status).toBe(422);
+    expect(charge.body.error.message).toMatch(/terminal virtual/);
   });
 
   it('un nombre repetido se rechaza ANTES de tocar la terminal', async () => {
@@ -1004,6 +1006,185 @@ describe('Lo que la guía de Point dice y faltaba', () => {
 });
 
 // ---------------------------------------------------------------- sin terminal física
+
+describe('Point: notification and recovery safety', () => {
+  async function pending() {
+    const terminal = await altaTerminal();
+    const tx = await cobroPendiente();
+    const started = await empezar(tx, terminal);
+    const charge = started.body.charge;
+    const row = (await pool.query('SELECT * FROM terminal_charges WHERE id = $1', [charge.id])).rows[0];
+    return { terminal, tx, charge, row, orderId: row.external_order_id };
+  }
+
+  it('rejects unsigned notifications before making provider requests', async () => {
+    const { orderId } = await pending();
+    const calls = mpFake.calls.length;
+    const result = await api().post('/api/payments/mercadopago/webhook')
+      .send({ type: 'order', data: { id: orderId } });
+    expect(result.status).toBe(401);
+    expect(mpFake.calls.length).toBe(calls);
+  });
+
+  it('validates the signed query ID and rejects a substituted body ID', async () => {
+    const { orderId } = await pending();
+    const ts = Date.now();
+    const requestId = crypto.randomUUID();
+    const signature = crypto.createHmac('sha256', 'secreto-de-prueba')
+      .update(`id:${orderId.toLowerCase()};request-id:${requestId};ts:${ts};`).digest('hex');
+    const result = await api().post(`/api/payments/mercadopago/webhook?data.id=${orderId}`)
+      .set('x-request-id', requestId).set('x-signature', `ts=${ts},v1=${signature}`)
+      .send({ data: { id: 'ORDOTHER' }, type: 'order' });
+    expect(result.status).toBe(400);
+  });
+
+  it('omits absent fields in the official signature manifest', () => {
+    const mp = require('../src/services/mercadopago');
+    const ts = '1742505638683';
+    const v1 = crypto.createHmac('sha256', 'secret').update(`ts:${ts};`).digest('hex');
+    expect(mp.verifySignature({ signatureHeader: `ts=${ts},v1=${v1}`, secret: 'secret' })).toBe('valid');
+    expect(mp.verifySignature({ signatureHeader: `ts=no,v1=${v1}`, secret: 'secret' })).toBe('invalid');
+  });
+
+  it('returns 503 when verification cannot complete, allowing provider retry', async () => {
+    const { tx, orderId } = await pending();
+    resolverOrden(orderId, 'processed');
+    mpFake.failNext = 'abort';
+    expect((await notificar(orderId)).status).toBe(503);
+    expect((await estadoDe(tx.id)).status).toBe('pending');
+    expect((await notificar(orderId)).status).toBe(200);
+    expect((await estadoDe(tx.id)).status).toBe('paid');
+  });
+
+  it('stores one payment confirmation and one approved event despite repeated webhooks', async () => {
+    const { charge, orderId } = await pending();
+    resolverOrden(orderId, 'processed');
+    await notificar(orderId);
+    await notificar(orderId);
+    const results = await pool.query(
+      `SELECT type FROM events WHERE (payload->>'charge_id' = $1 AND type = 'terminal_charge_updated')
+         OR (payload->>'manual_payment_id' = $1 AND type = 'payment_confirmed')`, [charge.id]);
+    expect(results.rows.map((r) => r.type).sort()).toEqual(['payment_confirmed', 'terminal_charge_updated']);
+  });
+
+  it('rolls back settlement when its durable notification fails, then recovers', async () => {
+    const { tx, charge, orderId } = await pending();
+    const events = require('../src/services/events');
+    const publish = events.publish;
+    const spy = jest.spyOn(events, 'publish').mockImplementation((opts) => {
+      if (opts.type === 'payment_confirmed') throw new Error('outbox unavailable');
+      return publish(opts);
+    });
+    resolverOrden(orderId, 'processed');
+    try {
+      expect((await notificar(orderId)).status).toBe(503);
+      expect((await estadoDe(tx.id)).status).toBe('pending');
+      expect((await pool.query(
+        `SELECT 1 FROM events WHERE payload->>'charge_id' = $1 AND type = 'terminal_charge_updated'`,
+        [charge.id])).rowCount).toBe(0);
+    } finally { spy.mockRestore(); }
+    expect((await notificar(orderId)).status).toBe(200);
+    expect((await estadoDe(tx.id)).status).toBe('paid');
+  });
+
+  it.each(['missing_paid', 'wrong_reference', 'wrong_order', 'wrong_currency', 'multiple_payments'])(
+    'does not settle invalid approved evidence: %s', async (fault) => {
+      const { tx, charge, terminal, orderId } = await pending();
+      const order = resolverOrden(orderId, 'processed');
+      if (fault === 'missing_paid') delete order.total_paid_amount;
+      if (fault === 'wrong_reference') order.external_reference = crypto.randomUUID();
+      if (fault === 'wrong_order') order.id = 'ORDOTHER';
+      if (fault === 'wrong_currency') order.currency_id = 'USD';
+      if (fault === 'multiple_payments') order.transactions.payments.push({ ...order.transactions.payments[0] });
+      await notificar(orderId);
+      expect((await estadoDe(tx.id)).status).toBe('pending');
+      const retried = await empezar(tx, terminal);
+      expect(retried.body.charge.id).toBe(charge.id);
+      expect(mpFake.calls.filter((c) => c.method === 'POST' && c.path === '/v1/orders')).toHaveLength(1);
+      const cash = await api().post(`/api/nightclubs/${club.id}/manual-payments/register`)
+        .set(await tokenDe(waiter)).send({ transaction_id: tx.id, method: 'cash', amount: 450, currency: 'MXN' });
+      expect(cash.status).toBe(409);
+    },
+  );
+
+  it('uses the specific card rejection reason instead of generic order failure', async () => {
+    const { tx, charge, orderId } = await pending();
+    const order = resolverOrden(orderId, 'failed');
+    order.transactions.payments[0].status_detail = 'insufficient_amount';
+    await notificar(orderId, { action: 'order.failed' });
+    const row = (await pool.query('SELECT status, status_detail FROM terminal_charges WHERE id=$1', [charge.id])).rows[0];
+    expect(row).toEqual({ status: 'failed', status_detail: 'insufficient_amount' });
+    expect((await estadoDe(tx.id)).status).toBe('pending');
+    const event = await pool.query(
+      `SELECT audience,payload FROM events WHERE payload->>'charge_id'=$1
+         AND type='terminal_charge_updated'`, [charge.id]);
+    expect(event.rows[0].payload.status).toBe('failed');
+    expect(event.rows[0].audience.roles).toContain('admin');
+  });
+
+  it('holds unknown provider statuses for review rather than failing the database CHECK', async () => {
+    const { tx, charge, orderId } = await pending();
+    resolverOrden(orderId, 'new_provider_state');
+    expect((await notificar(orderId)).status).toBe(200);
+    expect((await estadoDe(tx.id)).status).toBe('pending');
+    const row = (await pool.query('SELECT status FROM terminal_charges WHERE id=$1', [charge.id])).rows[0];
+    expect(row.status).toBe('action_required');
+  });
+
+  it.each(['abort', { status: 502, body: { message: 'upstream failure' } }])(
+    'keeps an ambiguous creation blocked and does not cancel it locally: %j', async (failure) => {
+      const terminal = await altaTerminal();
+      const tx = await cobroPendiente();
+      mpFake.failNext = failure;
+      const started = await empezar(tx, terminal);
+      expect(started.status).toBe(202);
+      const chargeId = started.body.charge.id;
+      const cancel = await api().post(`/api/nightclubs/${club.id}/terminal-charges/${chargeId}/cancel`)
+        .set(await tokenDe(waiter)).send({});
+      expect(cancel.status).toBe(409);
+      expect((await empezar(tx, terminal)).body.charge.id).toBe(chargeId);
+      await pool.query(
+        `UPDATE terminal_charges SET created_at=now()-interval '10 minutes',last_polled_at=NULL WHERE id=$1`, [chargeId]);
+      mpFake.failNext = 'abort';
+      await terminalCharges.sweep(pool);
+      const row = (await pool.query('SELECT status FROM terminal_charges WHERE id=$1', [chargeId])).rows[0];
+      expect(row.status).toBe('creating');
+      const original = mpFake.calls.filter((c) => c.method === 'POST' && c.path === '/v1/orders');
+      expect(original).toHaveLength(2);
+      expect(original[1].body).toEqual(original[0].body);
+      expect(original[1].idempotency).toBe(original[0].idempotency);
+    },
+  );
+
+  it('does not replay a creation after its safe idempotency window', async () => {
+    const terminal = await altaTerminal();
+    const tx = await cobroPendiente();
+    mpFake.failNext = 'abort';
+    const started = await empezar(tx, terminal);
+    await pool.query(`UPDATE terminal_charges SET created_at=now()-interval '25 hours' WHERE id=$1`,
+      [started.body.charge.id]);
+    const calls = mpFake.calls.length;
+    await terminalCharges.sweep(pool);
+    expect(mpFake.calls.length).toBe(calls);
+    expect((await empezar(tx, terminal)).body.charge.id).toBe(started.body.charge.id);
+  });
+
+  it('cannot charge a physical terminal in test mode', async () => {
+    const terminal = await altaTerminal('Physical', 'NEWLAND_N950__REALDEVICE');
+    const tx = await cobroPendiente();
+    expect((await empezar(tx, terminal)).status).toBe(422);
+    expect(mpFake.calls.filter((c) => c.method === 'POST' && c.path === '/v1/orders')).toHaveLength(0);
+  });
+
+  it('does not allow another club to inspect a charge', async () => {
+    const { charge } = await pending();
+    const otherClub = await f.createNightclub({ slug: 'other-point' });
+    const otherWaiter = await f.createUser(otherClub.id, { role: 'waiter' });
+    const result = await api().get(`/api/nightclubs/${otherClub.id}/terminal-charges/${charge.id}`)
+      .set(await tokenDe(otherWaiter));
+    expect(result.status).toBe(404);
+  });
+});
 
 describe('Una cuenta de prueba sin ninguna Point vinculada', () => {
   const buscar = async () => api().post(`/api/nightclubs/${club.id}/payment-terminals/discover`)

@@ -45,11 +45,8 @@ const OPEN_TX_STATUSES = payments.OPEN_TX_STATUSES;
 const EXPIRATION_SECONDS = Number(process.env.MERCADOPAGO_ORDER_TTL_S || 180);
 
 /**
- * Cuánto esperamos antes de dar por perdido un cobro que nunca llegó a tener id.
- *
- * Corto: pasado ese rato la persona ya se cansó y el mesero va a cobrar de otra forma.
- * Lo que NO se hace es marcarlo como fallido —no lo sabemos— sino como `error`, que en
- * esta tabla significa exactamente "hay que mirarlo en el panel de Mercado Pago".
+ * Wait before recovering a request whose response was lost. Elapsed time never
+ * means rejected or cancelled, and never releases the bill for another payment.
  */
 const RECOVERY_WINDOW_MS = Number(process.env.MERCADOPAGO_RECOVERY_MS || 60000);
 
@@ -138,6 +135,20 @@ async function reserve(client, { nightclubId, transactionId, terminalId, userId 
   if (!OPEN_TX_STATUSES.includes(tx.status)) {
     throw ApiError.conflict(`El cobro está '${tx.status}' y ya no admite pago`);
   }
+  if (tx.currency !== 'MXN') {
+    throw ApiError.unprocessable('La terminal Mercado Pago de México requiere un cobro en MXN.');
+  }
+  const existing = await client.query(
+    `SELECT id, terminal_id, status FROM terminal_charges WHERE transaction_id = $1
+       AND status IN ('creating','waiting','action_required','error')
+       ORDER BY created_at DESC LIMIT 1`, [tx.id]);
+  if (existing.rowCount) {
+    if (existing.rows[0].terminal_id !== terminalId) {
+      throw ApiError.conflict('Ese cobro sigue pendiente en otra terminal. Revísalo antes de cambiarla.',
+        { terminal_charge_id: existing.rows[0].id });
+    }
+    return { charge: existing.rows[0], resumed: true };
+  }
 
   const termRes = await client.query(
     `SELECT id, external_id, label, operating_mode, active
@@ -174,7 +185,19 @@ async function reserve(client, { nightclubId, transactionId, terminalId, userId 
        RETURNING id, idempotency_key, amount::text AS amount, currency, expires_at`,
       [nightclubId, tx.id, terminal.id, crypto.randomUUID(), tx.amount, tx.currency,
         userId, EXPIRATION_SECONDS]);
-    return { charge: rows[0], tx, terminal };
+    // Persist the exact request before contacting the provider. A retry must not
+    // change its description, expiration or terminal after configuration changes.
+    const request = {
+      terminalExternalId: terminal.external_id, amount: rows[0].amount,
+      currency: rows[0].currency, externalReference: rows[0].id,
+      description: `EV2 ${tx.type}`, idempotencyKey: rows[0].idempotency_key,
+      expirationSeconds: EXPIRATION_SECONDS,
+    };
+    await client.query(
+      `INSERT INTO terminal_charge_events (charge_id, source, action, payload)
+       VALUES ($1, 'api', 'create_request', $2::jsonb)`,
+      [rows[0].id, JSON.stringify(request)]);
+    return { charge: rows[0], tx, terminal, request };
   } catch (err) {
     // El índice parcial. Dos meseros tocaron cobrar en el mismo renglón: el segundo se
     // entera aquí y no despertando una segunda terminal.
@@ -196,27 +219,23 @@ async function reserve(client, { nightclubId, transactionId, terminalId, userId 
 async function push(pool, { charge, tx, terminal, nightclubId }) {
   let order;
   try {
-    order = await mp.createPointOrder({
-      terminalExternalId: terminal.external_id,
-      amount: charge.amount,
-      currency: charge.currency,
-      externalReference: charge.id,
-      description: `EV2 ${tx.type}`,
-      idempotencyKey: charge.idempotency_key,
-      expirationSeconds: EXPIRATION_SECONDS,
-    });
+    const saved = await pool.query(
+      `SELECT payload FROM terminal_charge_events
+       WHERE charge_id = $1 AND action = 'create_request' ORDER BY id LIMIT 1`, [charge.id]);
+    if (!saved.rowCount) throw ApiError.conflict('Falta la solicitud original; revisa el cobro antes de reintentar.');
+    order = await mp.createPointOrder(saved.rows[0].payload);
   } catch (err) {
     await record(pool, {
       chargeId: charge.id, source: 'api', action: 'create_failed',
       payload: { message: err.message, code: err.code || null },
     });
-    // 504 es "no sabemos": se deja en creating para que el repaso lo reintente con la
-    // misma llave. Cualquier otro error sí es una negativa clara de Mercado Pago.
-    if (err.status !== 504) {
+    // An upstream 5xx, timeout, 409 or malformed success is not proof of rejection.
+    const upstream = err.details && err.details.status;
+    if ([400, 401, 403, 404, 422].includes(upstream) || err.status === 422) {
       await pool.query(
-        `UPDATE terminal_charges SET status = 'error', status_detail = $2::text, updated_at = now()
+        `UPDATE terminal_charges SET status = 'failed', status_detail = $2::text, updated_at = now()
           WHERE id = $1 AND status = 'creating'`,
-        [charge.id, String(err.message).slice(0, 80)]);
+        [charge.id, 'create_rejected']);
     }
     throw err;
   }
@@ -286,6 +305,15 @@ async function apply(pool, { chargeId, read, source, requestId = null, rawPayloa
       [chargeId]);
     if (found.rowCount === 0) throw ApiError.notFound('Ese cobro no existe');
     const charge = found.rows[0];
+    // Bind the authoritative response to this attempt before accepting any state,
+    // including refunds. Never let a mismatched response settle a different bill.
+    if ((read.external_order_id && charge.external_order_id
+          && read.external_order_id !== charge.external_order_id)
+      || (read.external_reference && read.external_reference !== charge.id)
+      || (read.currency && read.currency !== charge.currency)
+      || (read.order_type && read.order_type !== 'point')) {
+      throw ApiError.conflict('La respuesta de Mercado Pago no corresponde a este cobro.');
+    }
 
     // Ya terminó. Un webhook repetido, o el repaso llegando tarde: no se toca nada...
     // salvo una devolución. Un cobro pagado SÍ puede cambiar después: `order.refunded`
@@ -297,12 +325,17 @@ async function apply(pool, { chargeId, read, source, requestId = null, rawPayloa
       if (['processed', 'refunded'].includes(charge.status)) {
         refund = await bookRefunds(client, { charge, read, source });
       }
+      if (refund && refund.booked) {
+        await announce({ nightclubId: charge.nightclub_id, chargeId, status: refund.status,
+          startedBy: charge.started_by, client });
+      }
       await client.query('COMMIT');
       return {
         charge,
         changed: Boolean(refund && refund.booked),
         status: (refund && refund.status) || charge.status,
         refund,
+        announced: true,
       };
     }
 
@@ -340,22 +373,28 @@ async function apply(pool, { chargeId, read, source, requestId = null, rawPayloa
       // dos lecturas — pero SOLO esas dos: lo cobrado es exactamente lo esperado, o es
       // exactamente lo esperado más la propina que el propio Mercado Pago reporta.
       // Cualquier otra diferencia sigue siendo un descuadre que mira una persona.
-      const cobrado = read.paid_amount == null ? Number(charge.amount) : Number(read.paid_amount);
+      const cobrado = read.paid_amount == null ? NaN : Number(read.paid_amount);
       const propina = Number(read.tip_amount || 0);
       const esperado = Number(Number(charge.amount).toFixed(2));
-      const cuadra = Number(cobrado.toFixed(2)) === esperado
-        || (propina > 0 && Number((cobrado - propina).toFixed(2)) === esperado);
+      const cuadra = Number.isFinite(cobrado) && Number.isFinite(propina) && propina >= 0
+        && read.external_order_id === charge.external_order_id
+        && read.external_reference === charge.id && read.payment_count === 1
+        && Number(read.amount) === esperado
+        && (Number(cobrado.toFixed(2)) === esperado
+          || (propina > 0 && Number((cobrado - propina).toFixed(2)) === esperado));
       if (!cuadra) {
         await client.query(
-          `UPDATE terminal_charges SET status = 'error',
-                  status_detail = $2::text, updated_at = now() WHERE id = $1`,
-          [charge.id, `cobrado ${cobrado} != esperado ${charge.amount}`]);
+          `UPDATE terminal_charges SET status = 'action_required',
+                  status_detail = 'reconciliation_required', settled_at = NULL,
+                  updated_at = now() WHERE id = $1`, [charge.id]);
         await record(client, {
-          chargeId: charge.id, source, action: 'amount_mismatch', status: 'error',
+          chargeId: charge.id, source, action: 'amount_mismatch', status: 'action_required',
           payload: { charged: cobrado, expected: charge.amount, tip: read.tip_amount || null },
         });
+        await announce({ nightclubId: charge.nightclub_id, chargeId,
+          status: 'action_required', startedBy: charge.started_by, client });
         await client.query('COMMIT');
-        return { charge, changed: true, mismatch: true };
+        return { charge, changed: true, status: 'action_required', mismatch: true, announced: true };
       }
 
       const settled = await payments.settle(client, {
@@ -374,8 +413,10 @@ async function apply(pool, { chargeId, read, source, requestId = null, rawPayloa
       outcome = settled;
     }
 
+    await announce({ nightclubId: charge.nightclub_id, chargeId, status, outcome,
+      startedBy: charge.started_by, client });
     await client.query('COMMIT');
-    return { charge, changed: true, status, outcome };
+    return { charge, changed: true, status, outcome, announced: true };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     // La tarjeta SÍ cobró y no pudimos asentarlo. El caso típico es que el renglón ya
@@ -386,9 +427,9 @@ async function apply(pool, { chargeId, read, source, requestId = null, rawPayloa
     if (read && read.status === 'processed') {
       await pool.query(
         `UPDATE terminal_charges
-            SET status = 'error', status_detail = $2::text, updated_at = now()
+            SET status = 'action_required', status_detail = $2::text, updated_at = now()
           WHERE id = $1 AND status NOT IN ('processed','refunded')`,
-        [chargeId, `cobrado pero no se pudo asentar: ${String(err.message).slice(0, 50)}`],
+        [chargeId, 'reconciliation_required'],
       ).catch(() => {});
       await record(pool, {
         chargeId, source, action: 'settle_failed', status: 'error',
@@ -684,18 +725,20 @@ async function refundsOf(runner, chargeIds) {
 }
 
 /** El aviso a las pantallas, después de que la base ya quedó consistente. */
-async function announce({ nightclubId, chargeId, status, outcome, startedBy }) {
+async function announce({ nightclubId, chargeId, status, outcome, startedBy, client }) {
   await events.publish({
+    client,
     nightclubId,
     type: 'terminal_charge_updated',
     audience: {
-      roles: ['manager', 'bartender', 'waiter', 'hostess'],
+      roles: ['admin', 'manager', 'bartender', 'waiter', 'hostess'],
       userIds: [startedBy, outcome && outcome.tx ? outcome.tx.payer_user_id : null].filter(Boolean),
     },
     payload: { charge_id: chargeId, status },
   });
   if (outcome && outcome.tx) {
     await payments.publishConfirmed({
+      client,
       nightclubId,
       payment: {
         id: chargeId,
@@ -728,7 +771,7 @@ async function sweep(pool, { limit = 20 } = {}) {
             t.external_id AS terminal_external_id
        FROM terminal_charges c
        JOIN payment_terminals t ON t.id = c.terminal_id
-      WHERE c.status IN ('creating','waiting','action_required')
+      WHERE c.status IN ('creating','waiting','action_required','error')
         AND (c.last_polled_at IS NULL OR c.last_polled_at < now() - interval '10 seconds')
       ORDER BY c.created_at
       LIMIT $1`,
@@ -758,14 +801,13 @@ async function sweep(pool, { limit = 20 } = {}) {
         // con la primera orden todavía viva en la terminal. Mercado Pago devuelve la
         // orden que ya existe en vez de crear otra, que es justo para lo que sirve.
         try {
-          const order = await mp.createPointOrder({
-            terminalExternalId: charge.terminal_external_id,
-            amount: charge.amount,
-            currency: charge.currency,
-            externalReference: charge.id,
-            idempotencyKey: charge.idempotency_key,
-            expirationSeconds: EXPIRATION_SECONDS,
-          });
+          const saved = await pool.query(
+            `SELECT payload FROM terminal_charge_events
+             WHERE charge_id = $1 AND action = 'create_request' ORDER BY id LIMIT 1`, [charge.id]);
+          // Do not reconstruct a legacy request or retry past the provider's
+          // idempotency retention window. Keep the attempt blocked for reconciliation.
+          if (!saved.rowCount || edad >= 23 * 60 * 60 * 1000) continue;
+          const order = await mp.createPointOrder(saved.rows[0].payload);
           const leida = mp.readOrder(order);
           await pool.query(
             `UPDATE terminal_charges
@@ -779,21 +821,11 @@ async function sweep(pool, { limit = 20 } = {}) {
           results.push({ id: charge.id, status: 'waiting', recovered: true });
           continue;
         } catch (err) {
-          // Sigue sin contestar. Solo se da por perdido cuando la orden ya no puede
-          // estar viva en la terminal: mientras pueda estarlo, soltar el índice sería
-          // permitir un segundo cobro encima del primero.
-          const vencida = edad > (EXPIRATION_SECONDS * 1000) + RECOVERY_WINDOW_MS;
+          // Time passing is never proof that a card was not charged.
           await record(pool, {
             chargeId: charge.id, source: 'poll', action: 'recover_failed',
-            payload: { message: err.message, expired: vencida },
+            payload: { message: err.message },
           });
-          if (!vencida) continue;
-          await pool.query(
-            `UPDATE terminal_charges SET status = 'error', status_detail = $2::text,
-                    updated_at = now()
-              WHERE id = $1 AND status = 'creating'`,
-            [charge.id, 'sin respuesta de Mercado Pago al crearlo']);
-          results.push({ id: charge.id, status: 'error' });
           continue;
         }
       }
@@ -809,7 +841,7 @@ async function sweep(pool, { limit = 20 } = {}) {
       const applied = await apply(pool, {
         chargeId: charge.id, read, source: 'poll', rawPayload: order,
       });
-      if (applied.changed) {
+      if (applied.changed && !applied.announced) {
         await announce({
           nightclubId: charge.nightclub_id,
           chargeId: charge.id,

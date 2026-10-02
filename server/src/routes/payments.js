@@ -194,7 +194,7 @@ async function loadPayableTransaction(client, { transactionId, nightclubId, user
     `SELECT c.id, t.label FROM terminal_charges c
        JOIN payment_terminals t ON t.id = c.terminal_id
       WHERE c.transaction_id = $1
-        AND c.status IN ('creating','waiting','action_required')`,
+        AND c.status IN ('creating','waiting','action_required','error')`,
     [tx.id]);
   if (enTerminal.rowCount > 0) {
     throw ApiError.conflict(
@@ -780,7 +780,7 @@ router.post('/nightclubs/:nightclubId/terminal-charges',
     body: z.object({ transaction_id: uuid, terminal_id: uuid }),
   }),
   asyncHandler(async (req, res) => {
-    mercadopago.assertUsable();
+    mercadopago.assertUsable({ forCharge: true });
     const { nightclubId } = req.params;
 
     const client = await pool.connect();
@@ -802,16 +802,28 @@ router.post('/nightclubs/:nightclubId/terminal-charges',
     }
 
     // Fuera de la transacción: la red no puede tener bloqueado un renglón del libro.
-    await terminalCharges.push(pool, {
-      charge: { ...apartado.charge, started_by: req.user.id },
-      tx: apartado.tx,
-      terminal: apartado.terminal,
-      nightclubId,
-    });
+    let uncertain = false;
+    if (!apartado.resumed) {
+      try {
+        await terminalCharges.push(pool, {
+          charge: { ...apartado.charge, started_by: req.user.id },
+          tx: apartado.tx, terminal: apartado.terminal, nightclubId,
+        });
+      } catch (err) {
+        const saved = await pool.query('SELECT status FROM terminal_charges WHERE id = $1',
+          [apartado.charge.id]);
+        if (saved.rows[0]?.status !== 'creating') throw err;
+        // Return the durable attempt so the UI can follow it instead of inviting a
+        // second charge. A provider error is not a card rejection.
+        uncertain = true;
+      }
+    }
 
     const { rows } = await pool.query(`${terminalCharges.CHARGE_SELECT} WHERE c.id = $1`,
       [apartado.charge.id]);
-    res.status(201).json({ charge: terminalCharges.present(rows[0]) });
+    res.status(uncertain ? 202 : apartado.resumed ? 200 : 201)
+      .json({ charge: terminalCharges.present(rows[0]), resumed: Boolean(apartado.resumed),
+        pending_confirmation: uncertain });
   }));
 
 /**
@@ -832,7 +844,7 @@ router.get('/nightclubs/:nightclubId/terminal-charges/:chargeId',
     if (first.rowCount === 0) throw ApiError.notFound('Ese cobro no existe');
     let row = first.rows[0];
 
-    if (!terminalCharges.present(row).is_final && row.external_order_id) {
+    if ((!terminalCharges.present(row).is_final || row.status === 'error') && row.external_order_id) {
       try {
         const order = await mercadopago.getOrder(row.external_order_id);
         const read = mercadopago.readOrder(order);
@@ -844,7 +856,7 @@ router.get('/nightclubs/:nightclubId/terminal-charges/:chargeId',
           const applied = await terminalCharges.apply(pool, {
             chargeId, read, source: 'poll', rawPayload: order,
           });
-          if (applied.changed) {
+          if (applied.changed && !applied.announced) {
             await terminalCharges.announce({
               nightclubId, chargeId, status: applied.status,
               outcome: applied.outcome, startedBy: row.started_by,
@@ -878,6 +890,10 @@ router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/cancel',
     if (mercadopago.FINAL_STATUSES.includes(charge.status)) {
       throw ApiError.conflict(`Ese cobro ya está '${charge.status}' y no se puede cancelar`);
     }
+    if (!charge.external_order_id) {
+      throw ApiError.conflict('Todavía no se conoce el resultado de envío a Mercado Pago. '
+        + 'No se puede confirmar la cancelación ni iniciar otro cobro; revisa la terminal.');
+    }
 
     if (charge.external_order_id) {
       // Se cancela PRIMERO del lado de Mercado Pago. Al revés, la terminal se quedaría
@@ -897,7 +913,7 @@ router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/cancel',
             const applied = await terminalCharges.apply(pool, {
               chargeId, read, source: 'staff', rawPayload: order,
             });
-            if (applied.changed) {
+            if (applied.changed && !applied.announced) {
               await terminalCharges.announce({
                 nightclubId, chargeId, status: applied.status,
                 outcome: applied.outcome, startedBy: charge.started_by,
@@ -906,7 +922,10 @@ router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/cancel',
           }
         } catch { /* si tampoco contesta la consulta, vale el error original */ }
         if (read && read.status === 'processed') {
-          throw ApiError.conflict('No se canceló: la tarjeta YA pasó. El cobro quedó pagado.');
+          const current = await pool.query('SELECT status FROM terminal_charges WHERE id = $1', [chargeId]);
+          throw ApiError.conflict(current.rows[0].status === 'processed'
+            ? 'No se canceló: la tarjeta YA pasó. El cobro quedó pagado.'
+            : 'La tarjeta reporta un cargo, pero falta conciliarlo. No vuelvas a cobrar.');
         }
         if (read && read.is_final) {
           const { rows } = await pool.query(
@@ -918,12 +937,10 @@ router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/cancel',
           + `botón rojo): el sistema se entera solo. (Mercado Pago: ${err.message})`);
       }
     }
+    const order = await mercadopago.getOrder(charge.external_order_id);
+    if (!order) throw ApiError.conflict('No fue posible confirmar la cancelación. Revisa la terminal.');
     const applied = await terminalCharges.apply(pool, {
-      chargeId, read: { status: 'canceled', status_detail: 'cancelado desde el sistema' },
-      source: 'staff',
-    });
-    await terminalCharges.announce({
-      nightclubId, chargeId, status: 'canceled', outcome: null, startedBy: charge.started_by,
+      chargeId, read: mercadopago.readOrder(order), source: 'staff', rawPayload: order,
     });
     const { rows } = await pool.query(`${terminalCharges.CHARGE_SELECT} WHERE c.id = $1`, [chargeId]);
     res.json({ charge: terminalCharges.present(rows[0]), changed: applied.changed });
@@ -1043,60 +1060,55 @@ router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/simulate',
 /**
  * Lo que Mercado Pago nos avisa.
  *
- * PÚBLICA: no lleva sesión, porque quien la llama es un servidor de Mercado Pago. Dos
- * cosas la hacen segura, y ninguna es la firma:
- *
- *   1. El cuerpo de la notificación NO se cree. Solo se lee de él el id de la orden,
- *      y con ese id se vuelve a preguntar `GET /v1/orders/{id}` con NUESTRO token.
- *      Cualquiera puede mandar un JSON que diga "pagado"; nadie puede hacer que la API
- *      de Mercado Pago lo confirme.
- *   2. Ese id tiene que corresponder a un cobro que ESTE club empezó. Uno que no
- *      conocemos se contesta 200 y se tira: contestar otra cosa haría que Mercado Pago
- *      reintentara toda la noche.
- *
- * La firma se comprueba igual y se anota, pero no decide. Hay un motivo concreto: hoy
- * la validación de firma de la Orders API tiene un desacuerdo abierto en los propios SDK
- * de Mercado Pago. Colgar el cobro de ella sería dejar que un defecto ajeno le diga al
- * club que un pago real no ocurrió.
- *
- * Siempre 200. Un 500 aquí es Mercado Pago reintentando cada pocos minutos, y un
- * problema nuestro convertido en tormenta.
+ * Public but authenticated by Mercado Pago's HMAC. The signed URL identifier is
+ * canonical; the body cannot substitute another order. Authoritative GET still
+ * decides the result. Failed lookups return 503 so Mercado Pago can retry.
  */
 router.post('/payments/mercadopago/webhook', express.json({ limit: '64kb' }),
   asyncHandler(async (req, res) => {
     const body = req.body || {};
-    const orderId = String(
-      (body.data && body.data.id) || req.query['data.id'] || body.id || '').trim();
+    const queryId = req.query['data.id'];
+    const bodyId = body.data && body.data.id;
+    if ((queryId != null && typeof queryId !== 'string')
+      || (bodyId != null && typeof bodyId !== 'string')) {
+      return res.status(400).json({ error: 'invalid_order_id' });
+    }
+    const orderId = String(queryId || bodyId || '').trim();
     const requestId = req.get('x-request-id') || null;
-
-    // Se contesta rápido pase lo que pase; lo que sigue decide si había algo que hacer.
-    if (!orderId) return res.status(200).json({ ignored: 'sin id' });
-
-    const found = await pool.query(
-      `SELECT id, nightclub_id, status, started_by FROM terminal_charges
-        WHERE provider = 'mercadopago' AND external_order_id = $1`, [orderId]);
-    if (found.rowCount === 0) return res.status(200).json({ ignored: 'desconocido' });
-    const charge = found.rows[0];
 
     const firma = mercadopago.verifySignature({
       signatureHeader: req.get('x-signature'),
       requestId,
-      dataId: orderId,
+      dataId: queryId,
       secret: process.env.MERCADOPAGO_WEBHOOK_SECRET || '',
     });
+    if (firma !== 'valid') return res.status(firma === 'unverifiable' ? 503 : 401)
+      .json({ error: 'invalid_webhook_signature' });
+    if (queryId && bodyId && queryId.toLowerCase() !== bodyId.toLowerCase()) {
+      return res.status(400).json({ error: 'order_id_mismatch' });
+    }
+    if (body.type && body.type !== 'order') return res.status(200).json({ ignored: 'tipo' });
+    if (!orderId || !/^[a-z0-9_-]{1,120}$/i.test(orderId)) {
+      return res.status(400).json({ error: 'invalid_order_id' });
+    }
+    const found = await pool.query(
+      `SELECT id, nightclub_id, status, started_by, external_order_id FROM terminal_charges
+        WHERE provider = 'mercadopago' AND lower(external_order_id) = lower($1)`, [orderId]);
+    if (found.rowCount === 0) return res.status(200).json({ ignored: 'desconocido' });
+    const charge = found.rows[0];
     await terminalCharges.record(pool, {
-      chargeId: charge.id, source: 'webhook', action: `notify_${body.action || 'unknown'}`,
+      chargeId: charge.id, source: 'webhook', action: `notify_${body.action || 'unknown'}`.slice(0, 40),
       requestId, payload: { signature: firma, body },
     });
 
     try {
-      const order = await mercadopago.getOrder(orderId);
-      if (!order) return res.status(200).json({ ignored: 'la orden ya no existe' });
+      const order = await mercadopago.getOrder(charge.external_order_id);
+      if (!order) return res.status(503).json({ deferred: true });
       const read = mercadopago.readOrder(order);
       const applied = await terminalCharges.apply(pool, {
         chargeId: charge.id, read, source: 'webhook', requestId, rawPayload: order,
       });
-      if (applied.changed) {
+      if (applied.changed && !applied.announced) {
         await terminalCharges.announce({
           nightclubId: charge.nightclub_id,
           chargeId: charge.id,
@@ -1107,13 +1119,13 @@ router.post('/payments/mercadopago/webhook', express.json({ limit: '64kb' }),
       }
       return res.status(200).json({ applied: applied.changed });
     } catch (err) {
-      // No se pudo consultar. 200 igual: el repaso de respaldo lo recoge, y un error
-      // aquí solo conseguiría que Mercado Pago repita la misma notificación fallida.
+      // Do not acknowledge work that was not committed. Polling is an additional
+      // fallback, not a replacement for provider retries (especially for refunds).
       await terminalCharges.record(pool, {
         chargeId: charge.id, source: 'webhook', action: 'lookup_failed',
         payload: { message: err.message },
       });
-      return res.status(200).json({ deferred: true });
+      return res.status(503).json({ deferred: true });
     }
   }));
 

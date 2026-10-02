@@ -1457,6 +1457,7 @@
 
   async function chargeTake() {
     const take = state.take;
+    if (!take || take.sending) return;
     const method = $('take-method').value;
     const reference = $('take-reference').value;
     const blocker = EV2OrderTaking.chargeBlocker({

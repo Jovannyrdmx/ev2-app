@@ -2,6 +2,22 @@
 
 Cada fila se agrega al terminar y verificar un paso del manual. Formato: fecha · paso · qué se hizo · verificación · commit/PR.
 
+## Mercado Pago Point: confirmación segura, 1 de octubre de 2026
+
+Desarrollo autorizado en `fase7/mercadopago-notificaciones`, sin cargos reales y sin
+publicación en el VPS todavía. Firma de webhook obligatoria, resultado consultado al
+proveedor, importe/referencia verificados, notificación de aprobación guardada con el
+pago en una transacción SQL, recuperación con solicitud idéntica, bloqueo ante
+resultados ambiguos y avisos en español mexicano. Sin migraciones nuevas.
+
+Verificación: 185 pruebas de pagos/eventos/componente, 1,250 pruebas web y 135 pruebas
+adicionales de pedidos, propinas, cortes y recibos; compilación web correcta y lint sin
+errores. Los conjuntos se superponen. Revisión del VPS autorizada: cuenta preexistente
+de prueba de México verificada por GET, sin terminales físicas, sin cobros/devoluciones
+pendientes y sin migraciones pendientes (37 aplicadas). Pendientes: modelo y cuenta
+receptora de la terminal física, validación del webhook y publicación verificada.
+Detalles y aceptación en [PAGOS_SETUP.md](PAGOS_SETUP.md).
+
 ## Actualización UX del 1 de octubre de 2026
 
 Implementación web/PWA en `fase5/ux-integral`, sobre `96facf8`: inicio y navegación del cliente, carga por panel en gerencia, estilos compartidos, diálogos accesibles y recursos locales. Ver alcance, pruebas y límites en [UX_RELEASE_2026-10-01.md](UX_RELEASE_2026-10-01.md). Verificación final: 36 suites y 1220 pruebas aprobadas. Código `4a6236b` desplegado en el VPS el 1 de octubre a las 19:56 de Phoenix, con respaldo previo y solo recreación del contenedor web. HTTPS/API/recursos verificados; aceptación con cuentas y dispositivos reales aún pendiente.
