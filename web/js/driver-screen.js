@@ -10,6 +10,7 @@
 /* global EV2, EV2Format, EV2Taxi, EV2Roles, EV2PasswordGate */
 (function () {
   'use strict';
+  const askConfirm = (...args) => window.EV2UX ? window.EV2UX.confirm(...args) : window.confirm(...args);
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -414,7 +415,7 @@
 
   $('btn-ride-cancel').onclick = async () => {
     const ride = state.ride;
-    if (!ride || !window.confirm(t('taxi.confirmCancel'))) return;
+    if (!ride || !await askConfirm(t('taxi.confirmCancel'))) return;
     try {
       await api.post(`/nightclubs/${clubId()}/taxi/rides/${ride.id}/cancel`, {});
       state.ride = null;

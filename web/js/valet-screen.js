@@ -7,6 +7,7 @@
 /* global EV2, EV2Format, EV2Valet, EV2Roles, EV2PasswordGate */
 (function () {
   'use strict';
+  const askPrompt = (...args) => window.EV2UX ? window.EV2UX.prompt(...args) : window.prompt(...args);
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -299,7 +300,7 @@
   async function act(ticketId, action) {
     if (action === 'deliver') { openDeliver(ticketId); return; }
     if (action === 'cancel') {
-      const reason = window.prompt(t('valet.cancelReason'));
+      const reason = await askPrompt(t('valet.cancelReason'));
       if (!reason || reason.trim().length < 3) return;
       await call(ticketId, 'cancel', { reason: reason.trim() });
       return;

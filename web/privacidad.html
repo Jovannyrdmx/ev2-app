@@ -17,9 +17,9 @@
       cita y se archiva entero, y una clave sin traducir en la mitad de una frase no es
       un detalle cosmético como en el resto de la aplicación.
     -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
+    <link rel="stylesheet" href="vendor/tailwind.css">
+    <link rel="stylesheet" href="vendor/fonts.css">
+    <style>400;500;600&family=Poppins:wght@500;600;700&display=swap');
         :root { --ev2-cyan: #00BFFF; --ev2-pink: #FF1493; --ev2-lime: #00FF00; --ev2-gold: #FFD700; }
         body {
             font-family: 'Inter', system-ui, sans-serif;
@@ -44,6 +44,7 @@
             border-left: 3px solid var(--ev2-gold); padding-left: 1rem;
         }
     </style>
+    <link rel="stylesheet" href="css/ux.css">
 </head>
 <body class="text-white">
 <main class="max-w-2xl mx-auto px-5 py-10">
@@ -181,10 +182,8 @@
                 en el momento de entrar.</li>
             <li><strong>El personal del club</strong>, en lo que su trabajo necesita: el
                 cantinero ve el pedido, el valet ve las placas, la gerencia ve la operación.</li>
-            <li>Las páginas del sitio cargan hojas de estilo y tipografías desde
-                <strong>cdn.tailwindcss.com</strong> y <strong>fonts.googleapis.com</strong>.
-                Esas peticiones las hace tu navegador y esos servicios ven tu dirección IP,
-                como con cualquier sitio web.</li>
+            <li>Las hojas de estilo, iconos y tipografías de la interfaz se sirven desde
+                este mismo sitio. No requieren solicitudes a proveedores externos de diseño.</li>
             <li><strong>Autoridades</strong>, únicamente cuando exista una orden que nos
                 obligue.</li>
         </ul>
@@ -403,10 +402,8 @@
             <li><strong>The club's staff</strong>, limited to what their job needs: the
                 bartender sees the order, the valet sees the plate, management sees the
                 operation.</li>
-            <li>The site's pages load stylesheets and fonts from
-                <strong>cdn.tailwindcss.com</strong> and <strong>fonts.googleapis.com</strong>.
-                Your browser makes those requests, and those services see your IP address, as
-                with any website.</li>
+            <li>Interface stylesheets, icons and fonts are served from this site.
+                They do not require requests to external design providers.</li>
             <li><strong>Authorities</strong>, only where a binding order requires it.</li>
         </ul>
         <p><strong>We do not sell your data. To anyone. Ever.</strong></p>

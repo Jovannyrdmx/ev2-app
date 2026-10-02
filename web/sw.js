@@ -15,8 +15,22 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v31';
+const VERSION = 'ev2-v32';
 const SHELL = [
+  'js/ux.js', 'css/ux.css', 'vendor/tailwind.css', 'vendor/fonts.css',
+  'vendor/fontawesome/css/all.min.css',
+  'vendor/fontawesome/webfonts/fa-brands-400.woff2',
+  'vendor/fontawesome/webfonts/fa-regular-400.woff2',
+  'vendor/fontawesome/webfonts/fa-solid-900.woff2',
+  'vendor/fontawesome/webfonts/fa-v4compatibility.woff2',
+  'vendor/fonts/inter-latin-300-normal.woff2',
+  'vendor/fonts/inter-latin-400-normal.woff2',
+  'vendor/fonts/inter-latin-500-normal.woff2',
+  'vendor/fonts/inter-latin-600-normal.woff2',
+  'vendor/fonts/inter-latin-700-normal.woff2',
+  'vendor/fonts/poppins-latin-500-normal.woff2',
+  'vendor/fonts/poppins-latin-600-normal.woff2',
+  'vendor/fonts/poppins-latin-700-normal.woff2',
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
   // La página pública de verificación: la abre alguien SIN cuenta, en la calle,

@@ -17,9 +17,9 @@
       Por eso tampoco se indexa: el folio es de quien lo trae, no de un buscador.
     -->
     <meta name="robots" content="noindex, nofollow">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
+    <link rel="stylesheet" href="vendor/tailwind.css">
+    <link rel="stylesheet" href="vendor/fonts.css">
+    <style>400;500;600&family=Poppins:wght@500;600;700&display=swap');
         :root { --ev2-cyan: #00BFFF; --ev2-pink: #FF1493; --ev2-lime: #00FF00; }
         body {
             font-family: 'Inter', system-ui, sans-serif;
@@ -41,6 +41,7 @@
         }
         .field:focus { border-color: var(--ev2-cyan); }
     </style>
+    <link rel="stylesheet" href="css/ux.css">
 </head>
 <body class="text-white">
 <main class="max-w-md mx-auto px-5 py-10 space-y-5">
@@ -89,6 +90,7 @@
 </main>
 
 <script src="js/format.js"></script>
+<script src="js/ux.js"></script>
 <script src="js/taxi-ride.js"></script>
 <script src="js/verify-screen.js"></script>
 </body>

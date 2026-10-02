@@ -337,6 +337,25 @@ describe('Salir del cobro cuando la terminal no contesta (D65)', () => {
     h.close();
   }, 15000);
 
+  it('waits for an asynchronous dialog and cancel keeps an unresolved charge visible', async () => {
+    let answer;
+    let closed = false;
+    const { hoja: h, $ } = hoja({
+      confirm: () => new Promise((resolve) => { answer = resolve; }),
+      onClose: () => { closed = true; },
+    });
+    h.watch(vencido);
+    await esperar(1900);
+    $('term-close').click();
+    expect(closed).toBe(false);
+    answer(false);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(closed).toBe(false);
+    expect($('term-sheet').hidden).toBe(false);
+    h.close();
+  }, 15000);
+
   it('un cobro PAGADO se cierra sin preguntar nada', async () => {
     // El arreglo no puede volver molesto el camino bueno.
     let preguntas = 0;

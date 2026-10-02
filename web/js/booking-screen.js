@@ -9,6 +9,7 @@
 /* global EV2Screen, EV2Booking */
 (function () {
   'use strict';
+  const askConfirm = (...args) => window.EV2UX ? window.EV2UX.confirm(...args) : window.confirm(...args);
 
   if (!window.EV2Screen) return;
 
@@ -521,7 +522,7 @@
   }
 
   async function cancelReservation(reservation) {
-    if (!window.confirm(t('book.confirmCancel'))) return;
+    if (!await askConfirm(t('book.confirmCancel'))) return;
     try {
       await ctx.api.post(
         `/nightclubs/${ctx.clubId()}/reservations/${reservation.id}/cancel`, {});

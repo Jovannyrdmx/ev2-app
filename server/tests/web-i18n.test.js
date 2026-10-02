@@ -111,7 +111,7 @@ describe('El HTML marcado y el catálogo van juntos', () => {
 
   it('las pestañas de abajo están marcadas', () => {
     const used = new Set(keysIn('data-i18n'));
-    for (const key of ['nav.map', 'nav.menu', 'nav.orders', 'nav.profile']) {
+    for (const key of ['ux.home', 'nav.menu', 'ux.myConsumption', 'ux.experiences', 'ux.myVisit']) {
       expect(used.has(key)).toBe(true);
     }
   });

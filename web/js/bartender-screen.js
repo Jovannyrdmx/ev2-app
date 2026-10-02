@@ -8,6 +8,7 @@
 /* global EV2TerminalCharge, EV2ShiftCut, EV2, EV2Format, EV2Bar, EV2Client, EV2OrderTaking, EV2Receiving, EV2Roles, EV2PasswordGate */
 (function () {
   'use strict';
+  const askConfirm = (...args) => window.EV2UX ? window.EV2UX.confirm(...args) : window.confirm(...args);
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -245,7 +246,7 @@
         t,
         money: (a, c) => EV2Format.money(a, c || 'MXN'),
         errorMessage: (err) => EV2Format.errorMessage(err),
-        confirm: (texto) => window.confirm(texto),
+        confirm: async (texto) => await askConfirm(texto),
         onPaid: async () => { closeSale(); await loadQueue(); },
         onClose: async () => { await loadQueue(); },
       });
@@ -428,7 +429,7 @@
    */
   async function advance(orderId, status) {
     if (state.busy.has(orderId)) return;
-    if (status === 'cancelled' && !window.confirm(t('bar.confirmCancel'))) return;
+    if (status === 'cancelled' && !await askConfirm(t('bar.confirmCancel'))) return;
 
     state.busy.add(orderId);
     renderAll();

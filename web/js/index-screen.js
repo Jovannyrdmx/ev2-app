@@ -9,6 +9,7 @@
    EV2PinPad */
 (function () {
   'use strict';
+  const askConfirm = (...args) => window.EV2UX ? window.EV2UX.confirm(...args) : window.confirm(...args);
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -23,7 +24,7 @@
   const CLUB_SLUG = meta('ev2:club', 'ev2');
 
   const state = {
-    club: null, drinks: [], categories: [], category: null,
+    club: null, drinks: [], categories: [], category: null, menuSearch: '',
     tables: [], landmarks: [], canvas: null, floors: [], floor: null,
     selectedId: null, myTable: null, orders: [], realtime: null,
     taxi: { availability: null, ride: null, rides: [], fares: [], pickup: null,
@@ -721,8 +722,12 @@
     $('profile-email').textContent = user.email || '';
     $('profile-role').textContent = EV2Roles.describe(user.role, lang()).label;
     $('profile-club').textContent = (state.club && state.club.name) || 'EV2 Clandestinoz';
-    await Promise.all([loadFloor(), loadMenu(), loadOrders(), loadTaxi()]);
+    // Show the task surface immediately; secondary transport must not delay orders.
+    showView('home');
     connectRealtime();
+    await Promise.all([loadFloor(), loadMenu(), loadOrders()]);
+    renderHome();
+    loadTaxi();
     // El panel de cuentas ligadas no bloquea la entrada al club: si falla, el perfil
     // se queda sin ese recuadro y todo lo demás funciona.
     loadSocialPanel();
@@ -814,6 +819,46 @@
       ? `${t('top.table')} ${table.table_number || table.code}` : t('top.noTable');
     $('profile-table').textContent = table
       ? `${table.section || ''} ${table.table_number || table.code}`.trim() : t('top.noTable');
+    renderTableList();
+    renderHome();
+  }
+
+  function renderTableList() {
+    const list = $('ux-table-list');
+    if (!list) return;
+    list.replaceChildren();
+    const statusKeys = { occupied: 'map.occupied', available: 'map.free' };
+    for (const table of tablesOnFloor()) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.setAttribute('aria-pressed', String(table.id === state.selectedId));
+      const title = document.createElement('span');
+      title.textContent = `${t('top.table')} ${table.table_number || table.code || ''}`;
+      const detail = document.createElement('small');
+      detail.textContent = `${table.section || ''} · ${t('map.capacity')}: ${table.capacity || 0} · ${statusKeys[table.status] ? t(statusKeys[table.status]) : (table.status || '')}`;
+      button.append(title, detail);
+      button.onclick = () => {
+        state.selectedId = table.id;
+        drawMap();
+        renderSelection();
+        renderTableList();
+      };
+      list.append(button);
+    }
+  }
+
+  function renderHome() {
+    const title = $('ux-home-title');
+    if (!title) return;
+    const active = state.orders.filter((order) => !['delivered', 'cancelled'].includes(order.status));
+    title.textContent = active.length ? t('ux.activeOrders', { count: active.length }) : t('ux.enjoy');
+    $('ux-home-note').textContent = state.myTable
+      ? `${t('top.table')} ${state.myTable.table_number || state.myTable.code} · ${t('ux.paymentNote')}`
+      : t('ux.visitNote');
+    const primary = $('ux-home-primary');
+    primary.dataset.uxView = active.length ? 'orders' : 'menu';
+    primary.textContent = t(active.length ? 'ux.viewOrders' : 'ux.openMenu');
+    primary.removeAttribute('data-i18n');
   }
 
   function renderFloorButtons() {
@@ -971,7 +1016,9 @@
       b.onclick = () => { state.category = b.dataset.cat || null; renderMenu(); };
     });
 
-    const list = state.drinks.filter((d) => !state.category || d.category === state.category);
+    const normalize = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const list = state.drinks.filter((d) => (!state.category || d.category === state.category)
+      && normalize(d.name).includes(normalize(state.menuSearch)));
     $('menu-list').innerHTML = list.map((d) => {
       const qty = cart.quantityOf(d.id);
       const out = d.available === false || Number(d.stock) <= 0;
@@ -985,12 +1032,12 @@
         </div>
         ${out ? '' : `
         <div class="flex items-center gap-2">
-          ${qty > 0 ? `<button data-less="${d.id}" class="w-9 h-9 rounded-full card">−</button>
+          ${qty > 0 ? `<button data-less="${d.id}" aria-label="${escape(t('ux.removeDrink', { name: d.name }))}" class="w-9 h-9 rounded-full card">−</button>
                        <span class="w-5 text-center">${qty}</span>` : ''}
-          <button data-more="${d.id}" class="w-9 h-9 rounded-full ev2-button">+</button>
+          <button data-more="${d.id}" aria-label="${escape(t('ux.addDrink', { name: d.name }))}" class="w-9 h-9 rounded-full ev2-button">+</button>
         </div>`}
       </div>`;
-    }).join('') || `<p class="text-white/40 text-sm text-center py-10">${escape(t('menu.empty'))}</p>`;
+    }).join('') || `<p class="text-white/40 text-sm text-center py-10">${escape(t(state.menuSearch ? 'ux.noResults' : 'menu.empty'))}</p>`;
 
     $('menu-list').querySelectorAll('[data-more]').forEach((b) => {
       b.onclick = () => {
@@ -1012,6 +1059,11 @@
     $('cart-count').textContent = cart.count;
     $('cart-total').textContent = money(cart.total, cart.currency);
   }
+
+  if ($('ux-menu-search')) $('ux-menu-search').oninput = (event) => {
+    state.menuSearch = event.target.value;
+    renderMenu();
+  };
 
   $('btn-order').onclick = async () => {
     if (!state.myTable) {
@@ -1045,6 +1097,7 @@
   // ---------------------------------------------------------------- pedidos
 
   function renderOrders() {
+    renderHome();
     const lang = EV2Format.getLanguage();
     const open = state.orders.filter((o) => EV2Client.isOpenOrder(o.status)).length;
     $('orders-badge').hidden = open === 0;
@@ -1354,7 +1407,7 @@
 
   $('btn-taxi-cancel').onclick = async () => {
     const ride = state.taxi.ride;
-    if (!ride || !window.confirm(t('taxi.confirmCancel'))) return;
+    if (!ride || !await askConfirm(t('taxi.confirmCancel'))) return;
     try {
       await api.post(`/nightclubs/${clubId()}/taxi/rides/${ride.id}/cancel`, {});
       await loadTaxi();
@@ -1363,18 +1416,24 @@
 
   // ---------------------------------------------------------------- navegación
 
-  const VIEWS = ['map', 'menu', 'orders', 'show', 'flirt', 'taxi', 'profile'];
+  const VIEWS = ['home', 'map', 'menu', 'orders', 'show', 'flirt', 'taxi', 'profile'];
 
   function showView(name) {
+    if (!VIEWS.includes(name)) return;
     for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
+    const parent = { map: 'profile', taxi: 'profile', flirt: 'show' }[name] || name;
     document.querySelectorAll('.nav-tab').forEach((b) => {
-      b.className = `nav-tab py-3 text-[10px] ${b.dataset.view === name ? 'tab-active' : 'text-white/50'}`;
+      const active = b.dataset.view === parent;
+      b.className = `nav-tab py-3 text-[10px] ${active ? 'tab-active' : 'text-white/50'}`;
+      if (active) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     });
     // El lienzo se mide al mostrarse: dibujarlo mientras estaba oculto lo deja en blanco.
     if (name === 'map') drawMap();
+    if (name === 'home') renderHome();
     hub.emit('view', name);
   }
   document.querySelectorAll('.nav-tab').forEach((b) => { b.onclick = () => showView(b.dataset.view); });
+  document.querySelectorAll('[data-ux-view]').forEach((b) => { b.onclick = () => showView(b.dataset.uxView); });
 
   // ---------------------------------------------------------------- tiempo real
 

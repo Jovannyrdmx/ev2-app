@@ -9,6 +9,8 @@
    EV2Payouts, EV2NightReport, EV2Roster */
 (function () {
   'use strict';
+  const askPrompt = (...args) => window.EV2UX ? window.EV2UX.prompt(...args) : window.prompt(...args);
+  const askConfirm = (...args) => window.EV2UX ? window.EV2UX.confirm(...args) : window.confirm(...args);
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -214,57 +216,84 @@
    * Cada panel se pide por separado y ninguno tumba a los demás: si el club todavía no
    * tiene valet configurado, eso no debe dejar sin números al resumen del turno.
    */
+  let panelRequest = null;
   async function loadAll() {
+    if (panelRequest) {
+      await panelRequest;
+      return loadAll();
+    }
+    const panel = state.tab;
+    panelRequest = loadPanel(panel);
+    try { await panelRequest; } finally { panelRequest = null; }
+  }
+
+  async function loadPanel(panel) {
     const club = clubId();
+    const notice = $('ux-load-status');
+    let failed = false;
+    if (notice) { notice.hidden = false; notice.textContent = t('ux.loading'); }
+    if ($('ux-last-update')) $('ux-last-update').textContent = '';
+    const content = $(`tab-${panel}`);
+    if (content) content.setAttribute('aria-busy', 'true');
     const get = async (path, apply) => {
-      try { apply(await api.get(path)); } catch (err) { showError(err); }
+      try { apply(await api.get(path)); } catch (err) { failed = true; showError(err); }
     };
-    await Promise.all([
-      get(`/nightclubs/${club}/dashboard`, (d) => {
+    const requests = [];
+    if (panel === 'summary') {
+      requests.push(get(`/nightclubs/${club}/dashboard`, (d) => {
         state.dashboard = d;
         const found = EV2Manager.currenciesIn(d.revenue_today);
         if (found.length && !found.includes(state.currency)) [state.currency] = found;
-      }),
-      get(`/nightclubs/${club}/drivers?include_inactive=true&limit=200`, (d) => { state.drivers = d.drivers || []; }),
-      loadTerminals(),
-      loadTerminalCharges(),
-      loadTips(),
-      loadLostFound(),
-      loadShiftCuts(),
-      loadPrinting(),
-      loadCovers(),
+      }));
+    }
+    if (['drivers', 'taxi'].includes(panel)) requests.push(
+      get(`/nightclubs/${club}/drivers?include_inactive=true&limit=200`, (d) => { state.drivers = d.drivers || []; }));
+    if (panel === 'taxi') requests.push(
       get(`/nightclubs/${club}/taxi-settings`, (d) => { state.taxiSettings = d.settings; }),
-      get(`/nightclubs/${club}/taxi-fares?include_inactive=false`, (d) => { state.fares = d.fares || []; }),
+      get(`/nightclubs/${club}/taxi-fares?include_inactive=false`, (d) => { state.fares = d.fares || []; }));
+    if (panel === 'parking') requests.push(
       get(`/nightclubs/${club}/valet-settings`, (d) => { state.valetSettings = d.settings; }),
       get(`/nightclubs/${club}/parking-spots`, (d) => {
         state.spots = d.spots || [];
         state.occupancy = d.occupancy || null;
-      }),
-      // Sin filtro de estado: el gerente TIENE que ver sus borradores, que son
-      // justamente las noches que todavía nadie puede reservar.
-      get(`/nightclubs/${club}/events?limit=60`, (d) => { state.nights = d.events || []; }),
+      }));
+    if (['staff', 'payouts', 'nights'].includes(panel)) requests.push(
       get(`/nightclubs/${club}/employees?include_inactive=true&limit=200`,
-        (d) => { state.staff = d.employees || []; }),
+        (d) => { state.staff = d.employees || []; }));
+    if (panel === 'nights') requests.push(
+      get(`/nightclubs/${club}/events?limit=60`, (d) => { state.nights = d.events || []; }),
+      get(`/nightclubs/${club}/nights/closings?limit=30`, (d) => { state.closings = d.closings || []; }),
+      loadCovers());
+    if (panel === 'payouts') requests.push(
       get(`/nightclubs/${club}/withdrawals?limit=100`, (d) => { state.withdrawals = d.withdrawals || []; }),
-      loadReports(),
-      // Inventario. Va en el mismo lote: son tres consultas y el gerente abre la
-      // pestana sin esperar, que es la diferencia entre revisar margenes y no hacerlo.
+      loadTerminals(), loadTerminalCharges(), loadTips(), loadLostFound(), loadShiftCuts());
+    if (panel === 'printing') requests.push(loadPrinting());
+    if (panel === 'reports') requests.push(loadReports());
+    if (panel === 'inventory') requests.push(
       get(`/nightclubs/${club}/supply-locations`, (d) => { state.locations = d.locations || []; }),
       get(`/nightclubs/${club}/supplies`, (d) => { state.supplies = d.supplies || []; }),
       get(`/nightclubs/${club}/recipes`, (d) => { state.recipes = d.recipes || []; }),
-      // La carta completa, incluidos los tragos apagados: apagar uno es lo que lo
-      // quita del menú del cliente, así que hay que poder verlo para volver a prenderlo.
       get(`/nightclubs/${club}/drinks`, (d) => { state.drinks = d.drinks || []; }),
-      get(`/nightclubs/${club}/supply-movements?limit=60`, (d) => { state.movements = d.movements || []; }),
-      // Los cortes guardados. Van en el mismo lote porque el comparador vive en la
-      // pestana de noches y tiene que estar listo cuando el gerente la abre.
-      get(`/nightclubs/${club}/nights/closings?limit=30`, (d) => { state.closings = d.closings || []; }),
-    ]);
-    state.invLoaded = true;
-    // Las cuentas por verificar se piden por empleado: no hay un listado del club, y
-    // sin verificar una cuenta esa persona no puede cobrar nunca.
-    await loadAccounts();
-    renderAll();
+      get(`/nightclubs/${club}/supply-movements?limit=60`, (d) => { state.movements = d.movements || []; }));
+    try {
+      const results = await Promise.all(requests);
+      if (results.includes(false)) failed = true;
+      if (panel === 'inventory' && !failed) state.invLoaded = true;
+      // Sensitive per-employee requests stay scoped to the payments workspace.
+      if (panel === 'payouts' && !failed && await loadAccounts() === false) failed = true;
+      renderAll();
+      if (!failed && $('ux-last-update')) {
+        const stamp = new Date();
+        $('ux-last-update').dateTime = stamp.toISOString();
+        $('ux-last-update').textContent = `${t('ux.updated')} ${stamp.toLocaleTimeString(lang() === 'es' ? 'es-MX' : 'en-US', { hour: '2-digit', minute: '2-digit' })}`;
+      }
+    } finally {
+      if (content) content.removeAttribute('aria-busy');
+      if (notice) {
+        notice.hidden = !failed;
+        notice.textContent = failed ? t('ux.loadFailed') : '';
+      }
+    }
   }
 
   /**
@@ -276,18 +305,21 @@
    */
   async function loadAccounts() {
     const club = clubId();
+    let failed = false;
     const activos = (state.staff || []).filter((p) => p.active !== false);
     const results = await Promise.all(activos.map(async (person) => {
       try {
         const d = await api.get(`/nightclubs/${club}/employees/${person.id}/bank-accounts`);
         return (d.bank_accounts || []).map((a) => ({ ...a, employee: person }));
       } catch {
+        failed = true;
         // Un empleado sin cuentas contesta vacío; cualquier otro fallo no debe tumbar
         // la pestaña entera de pagos.
         return [];
       }
     }));
     state.accounts = results.flat();
+    return !failed;
   }
 
   // ---------------------------------------------------------------- pintar
@@ -299,18 +331,14 @@
     for (const tab of TABS) $(`tab-${tab}`).hidden = tab !== state.tab;
     document.querySelectorAll('[data-tab]').forEach((b) => {
       b.classList.toggle('active', b.dataset.tab === state.tab);
+      if (b.dataset.tab === state.tab) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
     });
-    renderSummary();
-    renderNights();
-    renderStaff();
-    renderPayouts();
-    renderReports();
-    renderCoverQuick();
-    renderDrivers();
-    renderTaxi();
-    renderParking();
-    renderInventory();
-    renderPrinting();
+    const renders = { summary: renderSummary, nights: renderNights, staff: renderStaff,
+      payouts: renderPayouts, reports: renderReports, drivers: renderDrivers,
+      taxi: renderTaxi, parking: renderParking, inventory: renderInventory, printing: renderPrinting };
+    if (renders[state.tab]) renders[state.tab]();
+    if (state.tab === 'nights') renderCoverQuick();
     renderSecret();
   }
 
@@ -329,8 +357,9 @@
     try {
       const data = await api.get(`/nightclubs/${clubId()}/cover-prices`);
       state.covers = data.cover_prices || [];
-    } catch {
-      state.covers = [];
+    } catch (err) {
+      showError(err);
+      return false;
     }
     renderCovers();
   }
@@ -359,9 +388,9 @@
       const cambiar = document.createElement('button');
       cambiar.className = 'card rounded-lg px-3 py-2 text-xs';
       cambiar.textContent = t('cover.change');
-      cambiar.onclick = () => {
+      cambiar.onclick = async () => {
         // Cambiar el precio NO toca lo ya vendido: cada entrada guarda el suyo.
-        const dicho = window.prompt(t('cover.newAmount', { name: cover.name }), cover.amount);
+        const dicho = await askPrompt(t('cover.newAmount', { name: cover.name }), cover.amount);
         if (dicho === null) return;
         const monto = Number(dicho);
         if (!(monto >= 0)) { showError(new Error(t('cover.errAmount')), $('cover-error')); return; }
@@ -525,7 +554,7 @@
     try {
       const data = await api.get(`/nightclubs/${club}/reports${q}`);
       state.reports = data.reports || [];
-    } catch (err) { showError(err); }
+    } catch (err) { showError(err); return false; }
   }
 
   /**
@@ -540,7 +569,7 @@
       errorEl.hidden = false;
       return;
     }
-    if (status === 'actioned' && !window.confirm(t('mod.confirmActioned'))) return;
+    if (status === 'actioned' && !await askConfirm(t('mod.confirmActioned'))) return;
     button.disabled = true;
     try {
       await api.patch(`/nightclubs/${clubId()}/reports/${reportId}`,
@@ -607,8 +636,8 @@
         row.appendChild(b);
       };
       if (actions.canResetPassword) {
-        add('staff.resetPassword', 'card rounded-lg px-3 py-2 text-sm flex-1', (b) => {
-          if (!window.confirm(t('staff.confirmReset'))) return;
+        add('staff.resetPassword', 'card rounded-lg px-3 py-2 text-sm flex-1', async (b) => {
+          if (!await askConfirm(t('staff.confirmReset'))) return;
           patchEmployee(person, { reset_password: true }, 'staff.tempPassword', b);
         });
       }
@@ -618,14 +647,14 @@
         // cambian con eso.
         const clave = actions.hasPin ? 'staff.resetPin' : 'staff.assignPin';
         const pregunta = actions.hasPin ? 'staff.confirmResetPin' : 'staff.confirmAssignPin';
-        add(clave, 'card rounded-lg px-3 py-2 text-sm flex-1', (b) => {
-          if (!window.confirm(t(pregunta))) return;
+        add(clave, 'card rounded-lg px-3 py-2 text-sm flex-1', async (b) => {
+          if (!await askConfirm(t(pregunta))) return;
           patchEmployee(person, { reset_pin: true }, 'staff.tempPin', b);
         });
       }
       if (actions.canDeactivate) {
-        add('staff.deactivate', 'card rounded-lg px-3 py-2 text-sm text-red-300', (b) => {
-          if (!window.confirm(t('staff.confirmDeactivate'))) return;
+        add('staff.deactivate', 'card rounded-lg px-3 py-2 text-sm text-red-300', async (b) => {
+          if (!await askConfirm(t('staff.confirmDeactivate'))) return;
           patchEmployee(person, { active: false }, 'staff.deactivated', b);
         });
       }
@@ -756,8 +785,9 @@
       const data = await api.get(`/nightclubs/${clubId()}/payment-terminals`);
       terminals.mine = data.terminals || [];
       terminals.provider = data.provider || null;
-    } catch {
-      terminals.mine = [];
+    } catch (err) {
+      showError(err);
+      return false;
     }
     renderTerminals();
   }
@@ -996,8 +1026,9 @@
     try {
       const data = await api.get(`/nightclubs/${clubId()}/terminal-charges?hours=24`);
       terminals.charges = data.charges || [];
-    } catch {
-      terminals.charges = [];
+    } catch (err) {
+      showError(err);
+      return false;
     }
     renderTerminalCharges();
   }
@@ -1077,11 +1108,11 @@
   async function refundCharge(c, button, nota) {
     nota.hidden = true;
     const total = money(Number(c.amount) + Number(c.tip_amount || 0), c.currency);
-    const motivo = window.prompt(t('tch.reason', { amount: total }), '');
+    const motivo = await askPrompt(t('tch.reason', { amount: total }), '');
     if (motivo === null) return;
     if (motivo.trim().length < 5) { avisar(nota, t('tch.errReason')); return; }
     const tarjeta = c.card ? c.card.brand : '';
-    if (!window.confirm(t('tch.confirm', { amount: total, card: tarjeta }))) return;
+    if (!await askConfirm(t('tch.confirm', { amount: total, card: tarjeta }))) return;
 
     const listo = ocupado(button, 'tch.refunding');
     try {
@@ -1144,6 +1175,7 @@
       state.lostFound = [];
       $('lfm-error').hidden = false;
       $('lfm-error').textContent = EV2Format.errorMessage(err);
+      return false;
     }
     renderLostFound();
   }
@@ -1191,7 +1223,7 @@
         recibir.className = 'card rounded-lg px-3 py-2 text-xs';
         recibir.textContent = t('lfm.receive');
         recibir.onclick = async () => {
-          const donde2 = window.prompt(t('lfm.whereAsk'));
+          const donde2 = await askPrompt(t('lfm.whereAsk'));
           if (donde2 === null) return;
           const listo = ocupado(recibir, 'prn.saving');
           try {
@@ -1221,7 +1253,7 @@
         }
         sel.onchange = async () => {
           if (!sel.value) return;
-          if (!window.confirm(t('lfm.matchAsk'))) { sel.value = ''; return; }
+          if (!await askConfirm(t('lfm.matchAsk'))) { sel.value = ''; return; }
           sel.disabled = true;
           try {
             await api.post(`/nightclubs/${clubId()}/lost-items/${item.id}/match`,
@@ -1239,7 +1271,7 @@
         entregar.className = 'ev2-button rounded-lg px-3 py-2 text-xs font-display';
         entregar.textContent = t('lfm.handOver', { hint: item.handover_hint || '' });
         entregar.onclick = async () => {
-          const code = window.prompt(t('lfm.codeAsk'));
+          const code = await askPrompt(t('lfm.codeAsk'));
           if (!code) return;
           const listo = ocupado(entregar, 'prn.saving');
           try {
@@ -1256,7 +1288,7 @@
       cerrar.className = 'card rounded-lg px-3 py-2 text-xs text-red-300';
       cerrar.textContent = t('lfm.closeIt');
       cerrar.onclick = async () => {
-        const motivo = window.prompt(t('lfm.closeAsk'));
+        const motivo = await askPrompt(t('lfm.closeAsk'));
         if (!motivo || motivo.trim().length < 3) return;
         const listo = ocupado(cerrar, 'prn.saving');
         try {
@@ -1299,6 +1331,7 @@
       state.tips = [];
       $('tip-error').hidden = false;
       $('tip-error').textContent = EV2Format.errorMessage(err);
+      return false;
     }
     renderTips();
   }
@@ -1331,7 +1364,7 @@
       confirmar.onclick = async () => {
         // Se pregunta con el monto y el nombre: confirmar mueve dinero al saldo de una
         // persona, y deshacerlo después es una cancelación con motivo.
-        if (!window.confirm(t('tip.confirmAsk', {
+        if (!await askConfirm(t('tip.confirmAsk', {
           amount: money(tip.amount, tip.currency), name: tip.to_name || '—',
         }))) return;
         const listo = ocupado(confirmar, 'tip.confirming');
@@ -1406,9 +1439,9 @@
       ]);
       state.cashDrops = retiros.drops || [];
       state.shiftCuts = cierres.closings || [];
-    } catch {
-      state.cashDrops = [];
-      state.shiftCuts = [];
+    } catch (err) {
+      showError(err);
+      return false;
     }
     renderShiftCuts();
   }
@@ -1539,8 +1572,9 @@
    */
   async function loadPrinting() {
     const club = clubId();
+    let failed = false;
     const pedir = async (ruta, aplicar) => {
-      try { aplicar(await api.get(ruta)); } catch { /* cada tarjeta se cuida sola */ }
+      try { aplicar(await api.get(ruta)); } catch (err) { failed = true; showError(err); }
     };
     await Promise.all([
       pedir(`/nightclubs/${club}/printers?include_inactive=true`, (d) => {
@@ -1556,6 +1590,7 @@
       pedir(`/nightclubs/${club}/zone-bars`, (d) => { printing.zones = d.zones || []; }),
     ]);
     renderPrinting();
+    return !failed;
   }
 
   /**
@@ -2333,7 +2368,7 @@
       verify.className = 'ev2-button w-full rounded-lg py-2 text-sm';
       verify.textContent = t('pay.verify');
       verify.onclick = async () => {
-        if (!window.confirm(t('pay.confirmVerify'))) return;
+        if (!await askConfirm(t('pay.confirmVerify'))) return;
         verify.disabled = true;
         try {
           await api.post(
@@ -2396,8 +2431,8 @@
         const b = document.createElement('button');
         b.className = 'card rounded-lg px-3 py-2 text-sm text-red-300';
         b.textContent = t('pay.reject');
-        b.onclick = () => {
-          const reason = window.prompt(t('pay.reason'));
+        b.onclick = async () => {
+          const reason = await askPrompt(t('pay.reason'));
           if (reason === null) return;
           const problem = EV2Payouts.validateRejection(reason);
           if (problem) { toast(t(problem), 'error'); return; }
@@ -2409,12 +2444,13 @@
         const b = document.createElement('button');
         b.className = 'ev2-button rounded-lg px-3 py-2 text-sm flex-1';
         b.textContent = t('pay.markPaid');
-        b.onclick = () => {
-          const reference = window.prompt(t('pay.reference')) || '';
+        b.onclick = async () => {
+          const reference = await askPrompt(t('pay.reference'));
+          if (reference === null) return;
           // Sin referencia no se puede conciliar tres semanas después, cuando el
           // empleado dice que nunca le llegó. Se advierte, no se impone.
           const warn = EV2Payouts.payWarning(w, reference);
-          if (warn && !window.confirm(t(warn))) return;
+          if (warn && !await askConfirm(t(warn))) return;
           withdrawalAction(w, 'paid', { reference: reference.trim() || undefined }, 'pay.paid1', b);
         };
         row.appendChild(b);
@@ -2494,8 +2530,8 @@
           (b) => setNightStatus(night, 'draft', 'night.created', b));
       }
       if (actions.canCancel) {
-        add('night.cancelNight', 'card rounded-lg px-3 py-2 text-sm text-red-300 flex-1', (b) => {
-          if (!window.confirm(t('night.confirmCancel'))) return;
+        add('night.cancelNight', 'card rounded-lg px-3 py-2 text-sm text-red-300 flex-1', async (b) => {
+          if (!await askConfirm(t('night.confirmCancel'))) return;
           setNightStatus(night, 'cancelled', 'night.cancelled', b);
         });
       }
@@ -2676,7 +2712,7 @@
   $('btn-cut-save').onclick = async () => {
     const c = state.cut;
     if (!c || state.busy) return;
-    if (!window.confirm(t('cut.confirmClose'))) return;
+    if (!await askConfirm(t('cut.confirmClose'))) return;
     state.busy = true;
     $('btn-cut-save').disabled = true;
     $('cut-error').hidden = true;
@@ -2955,7 +2991,7 @@
   }
 
   async function deleteNight(night, button) {
-    if (!window.confirm(t('night.confirmDelete'))) return;
+    if (!await askConfirm(t('night.confirmDelete'))) return;
     button.disabled = true;
     try {
       await api.del(`/nightclubs/${clubId()}/events/${night.id}`);
@@ -3034,11 +3070,27 @@
     } catch (err) { showError(err); }
   };
 
+  function selectPanel(tab) {
+    if (!TABS.includes(tab)) return;
+    state.tab = tab;
+    renderAll();
+    if ($('ux-manager-nav')) $('ux-manager-nav').classList.remove('ux-open');
+    if ($('ux-manager-menu')) $('ux-manager-menu').setAttribute('aria-expanded', 'false');
+    loadAll();
+  }
   document.querySelectorAll('[data-tab]').forEach((b) => {
-    b.onclick = () => { state.tab = b.dataset.tab; renderAll(); };
+    b.onclick = () => selectPanel(b.dataset.tab);
   });
+  document.querySelectorAll('[data-ux-tab]').forEach((b) => {
+    b.onclick = () => selectPanel(b.dataset.uxTab);
+  });
+  if ($('ux-manager-menu')) $('ux-manager-menu').onclick = () => {
+    const open = $('ux-manager-nav').classList.toggle('ux-open');
+    $('ux-manager-menu').setAttribute('aria-expanded', String(open));
+  };
 
   function renderSummary() {
+    if (!state.dashboard) return;
     const s = EV2Manager.summary(state.dashboard, state.currency);
     $('s-occupancy').textContent = `${s.occupancy.occupied}/${s.occupancy.total}`;
     $('s-orders').textContent = s.orders.inProgress + s.orders.ready;
@@ -3416,12 +3468,12 @@
     const bars = state.locations.filter((l) => l.kind === 'bar' || l.kind === 'warehouse');
     if (bars.length === 0) return;
     const nombres = bars.map((b, i) => `${i + 1}) ${b.name}`).join('  ');
-    const cual = window.prompt(t('inv.askPlace', { list: nombres }), '1');
+    const cual = await askPrompt(t('inv.askPlace', { list: nombres }), '1');
     const place = bars[Number(cual) - 1];
     if (!place) return;
     const actual = (supply.locations || []).find((l) => l.location_id === place.id);
     const previo = actual ? EV2Warehouse.packagesOf(actual.min_stock, supply.package_size) : 0;
-    const raw = window.prompt(t('inv.askMin', { name: supply.name, place: place.name }), String(previo));
+    const raw = await askPrompt(t('inv.askMin', { name: supply.name, place: place.name }), String(previo));
     if (raw === null) return;
     const packages = Number(raw);
     if (!Number.isFinite(packages) || packages < 0) { toast(t('inv.badMin'), 'error'); return; }
@@ -3481,7 +3533,7 @@
         if (nuevo === Number(trago.price)) return;
         // Se pregunta con el precio viejo y el nuevo: este número se le cobra al
         // cliente en la siguiente ronda, y un dedazo aquí no avisa de ninguna otra forma.
-        if (!window.confirm(t('inv.menuPriceAsk', {
+        if (!await askConfirm(t('inv.menuPriceAsk', {
           name: trago.name, from: money(trago.price, 'MXN'), to: money(nuevo, 'MXN'),
         }))) { precio.value = Number(trago.price); return; }
         precio.disabled = true;

@@ -81,7 +81,9 @@ describe('Lo que NO se deja hacer', () => {
     // O el número está mal tecleado, o ese dinero no es del club. Las dos cosas se
     // paran antes de que alguien suelte los billetes.
     expect(Cut.dropBlocker(3500, corteAbierto())).toBe('cut.errTooMuch');
-    expect(Cut.dropBlocker(3000, corteAbierto())).toBeNull();
+    expect(Cut.dropBlocker(3000, corteAbierto(), { reason: 'Entrega parcial', pin: '123456' })).toBeNull();
+    expect(Cut.dropBlocker(3000, corteAbierto())).toBe('cut.errReason');
+    expect(Cut.dropBlocker(3000, corteAbierto(), { reason: 'Entrega parcial' })).toBe('cut.errPin');
   });
 
   it('ni cero, ni letras, ni negativos', () => {
@@ -97,9 +99,12 @@ describe('Lo que NO se deja hacer', () => {
   });
 
   it('el corte no se declara dos veces', () => {
-    expect(Cut.closeBlocker(3000, corteAbierto())).toBeNull();
+    expect(Cut.closeBlocker(3000, corteAbierto(), { pin: '123456' })).toBeNull();
+    expect(Cut.closeBlocker(3000, corteAbierto())).toBe('cut.errPin');
     // Cero SÍ es válido al cerrar: alguien que solo cobró con tarjeta no entrega nada.
-    expect(Cut.closeBlocker(0, corteAbierto())).toBeNull();
+    expect(Cut.closeBlocker(0, corteAbierto({ cash_to_hand: '0.00' }), { pin: '123456' })).toBeNull();
+    expect(Cut.closeBlocker(0, corteAbierto(), { pin: '123456' })).toBe('cut.errDiffReason');
+    expect(Cut.closeBlocker(0, corteAbierto(), { pin: '123456', reason: 'Faltante explicado' })).toBeNull();
     expect(Cut.closeBlocker(3000, corteAbierto({ closing: { status: 'declared' } })))
       .toBe('cut.errAlready');
   });

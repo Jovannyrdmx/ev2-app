@@ -20,6 +20,7 @@
 
   const STRINGS = {
     es: {
+      'cut.waitingManager': 'Corte anterior pendiente de revisión de gerencia',
       'error.network': 'No se pudo contactar al servidor. Revisa tu conexión; si tienes internet, el servidor no está respondiendo.',
       'error.unauthorized': 'Tu sesión terminó. Vuelve a entrar.',
       // Un 401 al ENTRAR no es una sesión vencida: no había sesión. Decirle a alguien
@@ -1765,6 +1766,7 @@
       'manager.conductNote': 'Si escribes algo aquí, el cliente TIENE que aceptarlo para poder pedir un viaje, y queda registrada la hora en que lo aceptó. Si lo dejas vacío, no se le pide nada.',
     },
     en: {
+      'cut.waitingManager': 'Previous closing requires management review',
       'error.network': 'Could not reach the server. Check your connection; if you have internet, the server is not responding.',
       'error.unauthorized': 'Your session ended. Please sign in again.',
       'error.badLogin': 'Wrong email or password.',
@@ -3480,6 +3482,58 @@
       'manager.conductNote': 'If you write anything here, the guest MUST accept it before requesting a ride, and the time they accepted is recorded. Leave it empty and nothing is asked of them.',
     },
   };
+
+  const UX = {
+    es: {
+      'ux.enterValue': 'Completar información', 'ux.reviewAction': 'Revisar antes de continuar',
+      'ux.cancel': 'Cancelar', 'ux.continue': 'Confirmar', 'ux.skip': 'Ir al contenido',
+      'ux.offline': 'Sin conexión. No se pueden confirmar pedidos, cobros ni cambios. Revisa la conexión antes de volver a intentar.',
+      'ux.tonight': 'Tu visita', 'ux.home': 'Inicio', 'ux.nextAction': 'Tu siguiente paso',
+      'ux.enjoy': 'Todo para tu noche', 'ux.visitNote': 'Consulta tu pase, explora el menú o revisa tus pedidos.',
+      'ux.openMenu': 'Ver el menú', 'ux.myVisit': 'Mi visita', 'ux.myConsumption': 'Mi consumo',
+      'ux.paymentNote': 'Tus pedidos se preparan cuando el pago queda confirmado. Mi consumo no es una cuenta a crédito.',
+      'ux.backHome': 'Volver al inicio', 'ux.floorPlan': 'Plano del club. También puedes consultar las mesas en la lista.',
+      'ux.tableList': 'Ver mesas en lista', 'ux.navigation': 'Navegación principal',
+      'ux.experiences': 'Experiencias', 'ux.searchMenu': 'Buscar en el menú', 'ux.searchHint': 'Nombre de la bebida',
+      'ux.noResults': 'No encontramos esa bebida. Prueba otro nombre o cambia de categoría.',
+      'ux.addDrink': 'Agregar {name}', 'ux.removeDrink': 'Quitar una unidad de {name}',
+      'ux.tablesReservations': 'Mesas y reservas', 'ux.safeExit': 'Salida y transporte',
+      'ux.activeOrders': '{count} pedidos en curso', 'ux.viewOrders': 'Ver mis pedidos',
+      'ux.openNavigation': 'Navegación y módulos', 'ux.operation': 'Operación', 'ux.today': 'Hoy',
+      'ux.incidents': 'Incidencias', 'ux.finance': 'Dinero', 'ux.paymentsCuts': 'Pagos y cortes',
+      'ux.services': 'Servicios y configuración', 'ux.openWarehouse': 'Abrir almacén',
+      'ux.managerNote': 'Primero tu turno. Los demás módulos se cargan cuando los abres.',
+      'ux.reviewIncidents': 'Revisar reportes de clientes', 'ux.reviewPayments': 'Cobros, propinas y cortes',
+      'ux.warehouse': 'Almacén', 'ux.reviewStock': 'Recepciones y abastecimiento',
+      'ux.loading': 'Consultando información…', 'ux.updated': 'Última consulta:',
+      'ux.loadFailed': 'No se pudo actualizar toda la información. Puede haber datos anteriores. Pulsa Actualizar para volver a consultar.',
+    },
+    en: {
+      'ux.enterValue': 'Complete the information', 'ux.reviewAction': 'Review before continuing',
+      'ux.cancel': 'Cancel', 'ux.continue': 'Confirm', 'ux.skip': 'Skip to content',
+      'ux.offline': 'Offline. Orders, payments and changes cannot be confirmed. Check your connection before trying again.',
+      'ux.tonight': 'Your visit', 'ux.home': 'Home', 'ux.nextAction': 'Your next step',
+      'ux.enjoy': 'Your night, in one place', 'ux.visitNote': 'Find your pass, explore the menu or check your orders.',
+      'ux.openMenu': 'Explore the menu', 'ux.myVisit': 'My visit', 'ux.myConsumption': 'My orders',
+      'ux.paymentNote': 'Orders are prepared after payment is confirmed. This is not an open credit tab.',
+      'ux.backHome': 'Back to home', 'ux.floorPlan': 'Club floor plan. You can also use the table list.',
+      'ux.tableList': 'View tables as a list', 'ux.navigation': 'Main navigation',
+      'ux.experiences': 'Experiences', 'ux.searchMenu': 'Search the menu', 'ux.searchHint': 'Drink name',
+      'ux.noResults': 'No matching drinks. Try another name or change the category.',
+      'ux.addDrink': 'Add {name}', 'ux.removeDrink': 'Remove one {name}',
+      'ux.tablesReservations': 'Tables and bookings', 'ux.safeExit': 'Departure and transport',
+      'ux.activeOrders': '{count} active orders', 'ux.viewOrders': 'View my orders',
+      'ux.openNavigation': 'Navigation and modules', 'ux.operation': 'Operations', 'ux.today': 'Today',
+      'ux.incidents': 'Incidents', 'ux.finance': 'Money', 'ux.paymentsCuts': 'Payments and closings',
+      'ux.services': 'Services and settings', 'ux.openWarehouse': 'Open warehouse',
+      'ux.managerNote': 'Your shift first. Other workspaces load when you open them.',
+      'ux.reviewIncidents': 'Review guest reports', 'ux.reviewPayments': 'Payments, tips and closings',
+      'ux.warehouse': 'Warehouse', 'ux.reviewStock': 'Receiving and replenishment',
+      'ux.loading': 'Loading information…', 'ux.updated': 'Last checked:',
+      'ux.loadFailed': 'Some information could not be refreshed and may be out of date. Select Refresh to try again.',
+    },
+  };
+  for (const language of ['es', 'en']) Object.assign(STRINGS[language], UX[language]);
 
   /**
    * Mensajes que el servidor todavía manda en inglés. Mostrarlos tal cual a un usuario

@@ -2,6 +2,10 @@
 
 Cada fila se agrega al terminar y verificar un paso del manual. Formato: fecha · paso · qué se hizo · verificación · commit/PR.
 
+## Actualización UX del 1 de octubre de 2026
+
+Implementación web/PWA en `fase5/ux-integral`, sobre `96facf8`: inicio y navegación del cliente, carga por panel en gerencia, estilos compartidos, diálogos accesibles y recursos locales. Ver alcance, pruebas y límites en [UX_RELEASE_2026-10-01.md](UX_RELEASE_2026-10-01.md). Verificación web: 36 suites y 1219 pruebas aprobadas; despliegue VPS pendiente de acceso y comprobación de la versión instalada. No se declara listo en producción.
+
 | Fecha | Paso | Qué se hizo | Verificación | Commit / PR |
 |---|---|---|---|---|
 | 2026-09-03 | — | Plan (`PLAN_IMPLEMENTACION_Y_DESARROLLO.md`) y manual (`MANUAL_IMPLEMENTACION_EV2.pdf`) creados. `CLAUDE.md` y esta bitácora creados. | Archivos presentes en la carpeta. | (sin git aún) |

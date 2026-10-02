@@ -13,8 +13,8 @@
  * de verdad cobró, y es justo el número que no puede salir de aquí: un corte donde
  * quien entrega también dice cuánto debía entregar no es un corte.
  *
- * Tampoco confirma nada. El empleado declara; contar el dinero y cerrar es del
- * gerente, en su panel. Esa separación es el punto entero de la función.
+ * Desde D54 el gerente cuenta y autoriza con su PIN en el aparato del empleado.
+ * El servidor valida esa autorización; esta pantalla nunca la sustituye.
  */
 /* global module */
 (function (root, factory) {
@@ -24,6 +24,7 @@
   root.EV2ShiftCut = lib;
 }(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
+  const askConfirm = (...args) => window.EV2UX ? window.EV2UX.confirm(...args) : window.confirm(...args);
 
   /** Cada método de pago con su nombre; el club los lee, no los códigos. */
   const METHOD_KEY = {
@@ -107,9 +108,9 @@
   /** El estado del corte, dicho en una línea. */
   function statusKey(cut) {
     if (!cut || !cut.shift) return 'cut.noShift';
-    // Desde D54 no existe el estado intermedio: el corte se hace en un acto, con el
-    // gerente presente, o no se ha hecho.
-    return cut.closing ? 'cut.confirmed' : 'cut.open';
+    // D54 closes in one act. Historical declarations must never be called confirmed.
+    if (!cut.closing) return 'cut.open';
+    return cut.closing.status === 'confirmed' ? 'cut.confirmed' : 'cut.waitingManager';
   }
 
   // ---------------------------------------------------------------- el cuadro
@@ -257,7 +258,7 @@
         return;
       }
       if (tipo === 'declare'
-        && !window.confirm(t('cut.confirmDeclare', { amount: dinero(monto) }))) return;
+        && !await askConfirm(t('cut.confirmDeclare', { amount: dinero(monto) }))) return;
 
       estado.busy = true;
       const boton = $(tipo === 'drop' ? 'cut-drop' : 'cut-declare');

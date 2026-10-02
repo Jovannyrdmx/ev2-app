@@ -8,6 +8,7 @@
 /* global EV2, EV2Format, EV2Earnings, EV2Roles, EV2PasswordGate, EV2Songs, EV2Shift, EV2Roster */
 (function () {
   'use strict';
+  const askConfirm = (...args) => window.EV2UX ? window.EV2UX.confirm(...args) : window.confirm(...args);
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -337,10 +338,10 @@
       const decline = document.createElement('button');
       decline.className = 'card rounded-lg py-2 text-sm text-red-300';
       decline.textContent = t('drink.decline');
-      decline.onclick = () => {
+      decline.onclick = async () => {
         // Rechazar NO lo cancela: ya se le cobró al cliente y vuelve a su mesa (D20).
         // Quien rechaza tiene derecho a hacerlo, pero debe saber qué pasa del otro lado.
-        if (!window.confirm(`${t('drink.declineNote')}\n\n${t('drink.confirmDecline')}`)) return;
+        if (!await askConfirm(`${t('drink.declineNote')}\n\n${t('drink.confirmDecline')}`)) return;
         answerDrink(drink, 'decline', 'drink.declined', decline);
       };
       row.appendChild(decline);
@@ -588,7 +589,7 @@
   };
 
   async function removeAccount(accountId) {
-    if (!window.confirm(t('earn.confirmDeleteAccount'))) return;
+    if (!await askConfirm(t('earn.confirmDeleteAccount'))) return;
     try {
       await api.del(`/employees/me/bank-accounts/${accountId}`);
       await loadAll();

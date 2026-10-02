@@ -10,10 +10,10 @@
     <meta name="ev2:api" content="/api">
     <meta name="ev2:ws" content="">
     <meta name="ev2:club" content="ev2">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
+    <link rel="stylesheet" href="vendor/tailwind.css">
+    <link rel="stylesheet" href="vendor/fonts.css">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
+    <style>400;500;600&family=Poppins:wght@500;600;700&display=swap');
 
         :root {
             --ev2-cyan: #00BFFF;
@@ -80,9 +80,10 @@
 
         [hidden] { display: none !important; }
     </style>
+    <link rel="stylesheet" href="css/ux.css">
 </head>
 <body class="text-white">
-<div class="max-w-2xl mx-auto min-h-screen flex flex-col">
+<div class="ux-manager-shell max-w-2xl mx-auto min-h-screen flex flex-col">
 
   <!-- ============================ ENTRAR ============================ -->
   <section id="screen-auth" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto">
@@ -167,23 +168,37 @@
       <button id="btn-secret-ok" class="ev2-button rounded-lg px-4 py-2 mt-3 text-sm" data-i18n="manager.gotIt">Ya la anoté</button>
     </div>
 
-    <nav class="flex px-2 border-b border-white/10 overflow-x-auto">
-      <button data-tab="summary" class="tab active flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabSummary">Turno</button>
+    <button id="ux-manager-menu" class="ux-manager-menu" aria-expanded="false" aria-controls="ux-manager-nav" data-i18n="ux.openNavigation">Abrir navegación</button>
+    <nav id="ux-manager-nav" class="ux-manager-nav flex px-2 border-b border-white/10 overflow-x-auto" aria-label="Navegación de gestión" data-i18n-aria-label="ux.navigation">
+      <span class="ux-group" data-i18n="ux.operation">Operación</span>
+      <button data-tab="summary" class="tab active flex-1 py-3 text-sm whitespace-nowrap" data-i18n="ux.today">Hoy</button>
       <button data-tab="nights" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="night.tab">Noches</button>
       <button data-tab="staff" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="staff.tab">Personal</button>
-      <button data-tab="payouts" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="pay.tab">Pagos</button>
-      <button data-tab="reports" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="mod.tab">Reportes</button>
+      <button data-tab="reports" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="ux.incidents">Incidencias</button>
+      <span class="ux-group" data-i18n="ux.finance">Dinero</span>
+      <button data-tab="payouts" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="ux.paymentsCuts">Pagos y cortes</button>
+      <span class="ux-group" data-i18n="ux.services">Servicios</span>
       <button data-tab="drivers" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabDrivers">Conductores</button>
       <button data-tab="taxi" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabTaxi">Taxi</button>
       <button data-tab="inventory" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="inv.tab">Inventario</button>
       <button data-tab="parking" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabParking">Cajones</button>
       <button data-tab="printing" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="prn.tab">Impresoras</button>
+      <a href="almacen.html" data-i18n="ux.openWarehouse">Abrir almacén</a>
     </nav>
 
+    <p id="ux-load-status" class="ux-loading" role="status" hidden></p>
+    <time id="ux-last-update" class="ux-timestamp"></time>
     <main class="flex-1 overflow-y-auto p-4 space-y-4">
 
       <!-- ---------------------------- TURNO ---------------------------- -->
       <div id="tab-summary" class="space-y-4">
+        <div class="ux-heading"><div><p class="ux-eyebrow" data-i18n="ux.operation">Operación</p><h2 data-i18n="ux.today">Hoy</h2></div></div>
+        <p class="ux-role-note" data-i18n="ux.managerNote">Primero tu turno. Los demás módulos se cargan cuando los abres.</p>
+        <div class="ux-attention">
+          <button data-ux-tab="reports"><strong data-i18n="ux.incidents">Incidencias</strong><span data-i18n="ux.reviewIncidents">Revisar reportes de clientes</span></button>
+          <button data-ux-tab="payouts"><strong data-i18n="ux.finance">Dinero</strong><span data-i18n="ux.reviewPayments">Cobros, propinas y cortes</span></button>
+          <a href="almacen.html"><strong data-i18n="ux.warehouse">Almacén</strong><span data-i18n="ux.reviewStock">Recepciones y abastecimiento</span></a>
+        </div>
         <div class="grid grid-cols-3 gap-2">
           <div class="stat-card"><div class="stat-number" id="s-occupancy">—</div><div class="stat-label" data-i18n="manager.occupancy">Mesas ocupadas</div></div>
           <div class="stat-card"><div class="stat-number" id="s-orders">—</div><div class="stat-label" data-i18n="manager.ordersOpen">Pedidos abiertos</div></div>
@@ -990,6 +1005,7 @@
 
 <script src="js/api.js"></script>
 <script src="js/format.js"></script>
+<script src="js/ux.js"></script>
 <script src="js/roles.js"></script>
 <script src="js/password-gate.js"></script>
 <script src="js/warehouse.js"></script>

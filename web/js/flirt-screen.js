@@ -12,6 +12,7 @@
 /* global EV2Screen, EV2Flirt, EV2Format */
 (function () {
   'use strict';
+  const askConfirm = (...args) => window.EV2UX ? window.EV2UX.confirm(...args) : window.confirm(...args);
 
   if (!window.EV2Screen) return;
 
@@ -342,7 +343,7 @@
       if (gift) { showError('flirt-error', t(gift)); return; }
       // Un trago invitado se cobra al mandarlo y no se devuelve. Preguntar una vez es
       // molesto; cobrar sin preguntar es peor.
-      if (!window.confirm(t('flirt.confirmGift'))) return;
+      if (!await askConfirm(t('flirt.confirmGift'))) return;
     }
 
     const body = EV2Flirt.sendPayload(person, state.mode, {
@@ -477,7 +478,7 @@
   }
 
   async function blockPerson(userId, name) {
-    if (!userId || !window.confirm(t('flirt.confirmBlock', { name: name || '' }))) return;
+    if (!userId || !await askConfirm(t('flirt.confirmBlock', { name: name || '' }))) return;
     try {
       await ctx.api.post(`/me/blocks/${userId}`, {});
       ctx.toast(t('flirt.blocked'), 'ok');
