@@ -1,0 +1,16 @@
+{
+  "name": "ev2-web",
+  "private": true,
+  "description": "EV2 web screens. The browser loads plain files; this package only compiles the stylesheet, fonts and icons that are committed in css/ and fonts/.",
+  "scripts": {
+    "build:css": "node scripts/build-assets.js && tailwindcss -c tailwind.config.js -i css/src/ev2.css -o css/ev2.css --minify",
+    "check:css": "npm run build:css && git diff --exit-code -- css/ev2.css css/src/icons.css fonts/"
+  },
+  "devDependencies": {
+    "@fontsource/inter": "5.3.0",
+    "@fontsource/poppins": "5.3.0",
+    "@fortawesome/fontawesome-free": "7.3.1",
+    "tailwindcss": "3.4.19"
+  },
+  "engines": { "node": ">=18" }
+}

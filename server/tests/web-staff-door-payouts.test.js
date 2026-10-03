@@ -52,6 +52,39 @@ describe('El personal, visto por el gerente', () => {
     expect(alta).toMatchObject({ canReactivate: false, canDeactivate: true, canEdit: true });
   });
 
+  it('a quien NO tiene PIN se le puede asignar uno — es el punto (D64)', () => {
+    // Aquí vivía un defecto de copia: la condición del PIN se calcó de la de la
+    // contraseña (`has_password !== false`), donde sí es correcta —reiniciar algo que
+    // no existe no significa nada—. En el PIN dice lo contrario de lo que hace falta:
+    // quien NO tiene es justo a quien hay que asignarle uno, y el botón desaparecía
+    // precisamente ahí. Un gerente sin PIN no tenía forma de recibir uno del panel.
+    const sinPin = Admin.actionsFor({ active: true, has_pin: false });
+    expect(sinPin.canResetPin).toBe(true);
+    expect(sinPin.hasPin).toBe(false);
+  });
+
+  it('y a quien ya tiene, también — pero la pantalla sabe que es otra cosa', () => {
+    // Asignar el primero no le quita nada a nadie; reiniciar el que ya existe deja a
+    // esa persona fuera hasta que teclee el nuevo. `hasPin` es lo que deja que el
+    // botón diga cuál de los dos es.
+    const conPin = Admin.actionsFor({ active: true, has_pin: true });
+    expect(conPin).toMatchObject({ canResetPin: true, hasPin: true });
+  });
+
+  it('a alguien dado de baja no se le asigna ningún PIN', () => {
+    // Darle acceso a quien ya no trabaja aquí es lo único que este botón no debe hacer.
+    expect(Admin.actionsFor({ active: false, has_pin: false }).canResetPin).toBe(false);
+    expect(Admin.actionsFor({ active: false, has_pin: true }).canResetPin).toBe(false);
+  });
+
+  it('la contraseña SÍ conserva su regla, que es la que se copió mal', () => {
+    // El piso nace sin contraseña (D46): ofrecerle "reiniciar contraseña" es ofrecerle
+    // reiniciar algo que no existe. Esta prueba fija que el arreglo del PIN no se
+    // llevó por delante la regla de al lado.
+    expect(Admin.actionsFor({ active: true, has_password: false }).canResetPassword).toBe(false);
+    expect(Admin.actionsFor({ active: true, has_password: true }).canResetPassword).toBe(true);
+  });
+
   it('el estado dice lo más urgente primero', () => {
     // Una cuenta que nunca se ha usado importa más que si está en turno: significa que
     // esa persona todavía no puede trabajar.
@@ -104,6 +137,35 @@ describe('El personal, visto por el gerente', () => {
   it('el teléfono es opcional', () => {
     const { phone, ...sinTelefono } = good;
     expect(Admin.validateEmployee(sinTelefono, NOW)).toEqual({});
+  });
+
+  // Un gerente que puede nombrar gerentes puede nombrarse un cómplice, y desde ese
+  // momento el permiso de gerente —caja, precios, retiros, nómina— ya no protege nada.
+  it('solo el administrador puede ofrecer el alta de un gerente', () => {
+    expect(Admin.creatableRoles('manager')).not.toContain('manager');
+    expect(Admin.creatableRoles('admin')).toContain('manager');
+    // `admin` no se da por ninguna pantalla: solo desde la consola del servidor.
+    expect(Admin.creatableRoles('admin')).not.toContain('admin');
+    // Sin saber quién mira, la lista es la de piso: equivocarse hacia el lado que da
+    // menos permiso es lo correcto.
+    expect(Admin.creatableRoles(undefined)).toEqual(Admin.EMPLOYEE_ROLES);
+  });
+
+  it('el alta de un gerente se rechaza si quien la captura no es administrador', () => {
+    const gerente = { ...good, role: 'manager' };
+    expect(Admin.validateEmployee(gerente, NOW, 'manager')).toMatchObject({ role: 'staff.errRole' });
+    expect(Admin.validateEmployee(gerente, NOW, 'admin')).toEqual({});
+    // Y `admin` no se captura nunca, ni siendo administrador.
+    expect(Admin.validateEmployee({ ...good, role: 'admin' }, NOW, 'admin'))
+      .toMatchObject({ role: 'staff.errRole' });
+  });
+
+  it('la gerencia sale primero en la lista de personal', () => {
+    const orden = Admin.sortStaff([
+      { id: 1, role: 'waiter', display_name: 'Luis', active: true },
+      { id: 2, role: 'manager', display_name: 'Ana', active: true },
+    ]).map((p) => p.id);
+    expect(orden).toEqual([2, 1]);
   });
 
   it('el cuerpo del alta NO lleva contraseña: la genera el servidor', () => {

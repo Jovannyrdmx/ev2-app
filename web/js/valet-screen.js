@@ -8,6 +8,11 @@
 (function () {
   'use strict';
 
+  // Preguntas con el cuadro de la app (js/ui.js), no con el prompt() del navegador.
+  const askText = (text, value) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.prompt(text, { value }) : Promise.resolve(window.prompt(text, value == null ? '' : value)));
+
+
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
     const el = document.querySelector(`meta[name="${name}"]`);
@@ -113,6 +118,12 @@
   };
 
   async function afterSignIn() {
+    // El PIN se cambia donde está el teclado, no aquí (D46): mientras no lo cambie, el
+    // servidor le bloquea todas las rutas y esta pantalla solo sabría dar errores.
+    if (EV2PasswordGate.mustChangePin(api.session.user)) {
+      location.href = EV2PasswordGate.PIN_PAGE;
+      return;
+    }
     if (EV2PasswordGate.isRequired(api.session.user)) { showPasswordGate(); return; }
     const role = api.session.user && api.session.user.role;
     if (!STAND_ROLES.includes(role)) {
@@ -293,7 +304,7 @@
   async function act(ticketId, action) {
     if (action === 'deliver') { openDeliver(ticketId); return; }
     if (action === 'cancel') {
-      const reason = window.prompt(t('valet.cancelReason'));
+      const reason = (await askText(t('valet.cancelReason')));
       if (!reason || reason.trim().length < 3) return;
       await call(ticketId, 'cancel', { reason: reason.trim() });
       return;

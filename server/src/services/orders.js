@@ -7,11 +7,15 @@
 'use strict';
 
 const { ApiError } = require('../middleware/errors');
+const inventory = require('./inventory');
 
 const ORDER_SELECT = `
   SELECT o.id, o.status, o.subtotal, o.currency, o.message, o.created_at, o.confirmed_at,
          o.ready_at, o.delivered_at, o.cancelled_at, o.pos_order_id, o.pos_error,
-         o.table_id, t.code AS table_code,
+         o.prep_started_at, o.bar_position,
+         o.table_id, t.code AS table_code, t.section AS table_section, t.floor AS table_floor,
+         o.bar_location_id, bar.name AS bar_name, bar.code AS bar_code,
+         o.delivery_point_id, dp.name AS delivery_point_name, dp.kind AS delivery_point_kind,
          o.sender_id, su.display_name AS sender_name,
          o.recipient_id, ru.display_name AS recipient_name,
          o.taken_by, wu.display_name AS taken_by_name,
@@ -23,6 +27,8 @@ const ORDER_SELECT = `
          COALESCE(items.items, '[]'::json) AS items
     FROM drink_orders o
     LEFT JOIN tables t ON t.id = o.table_id
+    LEFT JOIN supply_locations bar ON bar.id = o.bar_location_id
+    LEFT JOIN delivery_points dp ON dp.id = o.delivery_point_id
     LEFT JOIN users su ON su.id = o.sender_id
     LEFT JOIN users ru ON ru.id = o.recipient_id
     LEFT JOIN users wu ON wu.id = o.taken_by
@@ -54,41 +60,56 @@ const ORDER_SELECT = `
  * @returns {{ id, subtotal: number, currency: string, transactionId: string|null }}
  */
 async function createOrder({ client, nightclubId, senderId, recipientId, tableId, takenBy,
-  message, items, clientRequestId, chargeType, chargeMetadata }) {
+  message, items, clientRequestId, chargeType, chargeMetadata, deliveryPointId, barLocationId }) {
   if (tableId) {
     const t = await client.query('SELECT id FROM tables WHERE id = $1 AND nightclub_id = $2 AND active',
       [tableId, nightclubId]);
     if (t.rowCount === 0) throw ApiError.notFound('Table not found');
   }
 
-  // Lock inventory rows first, in a stable order, to avoid deadlocks between
-  // concurrent orders. (FOR UPDATE cannot be used on the nullable side of a LEFT JOIN.)
+  // El punto de entrega: la mesa, o un lugar de la pista con su QR pegado. Cuando el
+  // punto ES una mesa, el pedido se cuelga de la mesa de verdad y no de una copia con
+  // su nombre, para que el mesero y el mapa hablen de lo mismo.
+  let resolvedTableId = tableId || null;
+  if (deliveryPointId) {
+    const point = await client.query(
+      `SELECT id, table_id, kind FROM delivery_points
+        WHERE id = $1 AND nightclub_id = $2 AND active`,
+      [deliveryPointId, nightclubId]);
+    if (point.rowCount === 0) throw ApiError.notFound('Punto de entrega no encontrado');
+    if (point.rows[0].table_id) resolvedTableId = point.rows[0].table_id;
+  }
+
+  // De que barra sale. La de la zona de la mesa; si el pedido no tiene mesa (venta en
+  // la barra), la que indique quien lo levanta; y si no hay barras dadas de alta,
+  // ninguna -- entonces no se descuenta nada y el pedido lo dice, en vez de fingir
+  // que salio de algun lado.
+  let bar = barLocationId || null;
+  if (!bar && resolvedTableId) {
+    bar = await inventory.barForTable(client, { nightclubId, tableId: resolvedTableId });
+  }
+  if (!bar) bar = await inventory.defaultBar(client, { nightclubId });
+
   const drinkIds = [...new Set(items.map((i) => i.drink_id))].sort();
-  const locked = await client.query(
-    `SELECT drink_id, quantity FROM inventory
-      WHERE drink_id = ANY($1::uuid[]) ORDER BY drink_id FOR UPDATE`,
-    [drinkIds],
-  );
-  const stockById = new Map(locked.rows.map((r) => [r.drink_id, Number(r.quantity)]));
 
   const drinks = await client.query(
     `SELECT id, name, price, currency, available FROM drinks
       WHERE id = ANY($1::uuid[]) AND nightclub_id = $2 AND active`,
     [drinkIds, nightclubId],
   );
-  const byId = new Map(drinks.rows.map((d) => [d.id, { ...d, stock: stockById.get(d.id) ?? 0 }]));
+  const byId = new Map(drinks.rows.map((d) => [d.id, d]));
   if (byId.size !== drinkIds.length) throw ApiError.notFound('One or more drinks do not exist');
 
   const wanted = new Map();
   for (const item of items) wanted.set(item.drink_id, (wanted.get(item.drink_id) || 0) + item.quantity);
 
+  // `available` es el interruptor de la barra ("esto se acabo hoy") y es distinto de
+  // la existencia: lo apaga una persona, no un calculo. Se revisa aqui; de las
+  // cantidades se encarga el inventario, que sabe de insumos y no de productos.
   const unavailable = [];
-  for (const [id, qty] of wanted) {
+  for (const [id] of wanted) {
     const d = byId.get(id);
     if (!d.available) unavailable.push({ drink_id: id, name: d.name, reason: 'unavailable' });
-    else if (Number(d.stock) < qty) {
-      unavailable.push({ drink_id: id, name: d.name, reason: 'out_of_stock', stock: Number(d.stock) });
-    }
   }
   if (unavailable.length > 0) throw ApiError.conflict('Some drinks are not available', unavailable);
 
@@ -102,10 +123,11 @@ async function createOrder({ client, nightclubId, senderId, recipientId, tableId
 
   const created = await client.query(
     `INSERT INTO drink_orders (nightclub_id, sender_id, recipient_id, table_id, taken_by, message,
-                               subtotal, currency, client_request_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-    [nightclubId, senderId, recipientId || null, tableId || null, takenBy || null, message || null,
-      subtotal.toFixed(2), currency, clientRequestId],
+                               subtotal, currency, client_request_id,
+                               delivery_point_id, bar_location_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+    [nightclubId, senderId, recipientId || null, resolvedTableId, takenBy || null, message || null,
+      subtotal.toFixed(2), currency, clientRequestId, deliveryPointId || null, bar],
   );
   const order = created.rows[0];
 
@@ -116,10 +138,18 @@ async function createOrder({ client, nightclubId, senderId, recipientId, tableId
       [order.id, item.drink_id, item.quantity, byId.get(item.drink_id).price, item.notes || null],
     );
   }
-  for (const [id, qty] of wanted) {
-    await client.query('UPDATE inventory SET quantity = quantity - $2, updated_at = now() WHERE drink_id = $1',
-      [id, qty]);
-  }
+  // Y aqui se descuenta lo que de verdad sale del estante: no "un BUCHANANS 12 -
+  // SPRITE" -que no es una cosa que exista en una bodega- sino los mililitros de esa
+  // botella y los del refresco. Un producto sin receta no descuenta nada y no
+  // bloquea la venta: el sistema no sabe cuanto hay, y decirlo es mejor que
+  // inventarlo.
+  await inventory.consume(client, {
+    nightclubId,
+    locationId: bar,
+    items: [...wanted.entries()].map(([drink_id, quantity]) => ({ drink_id, quantity })),
+    orderId: order.id,
+    userId: takenBy || senderId,
+  });
 
   // The charge. An order that nobody has paid for is not a ticket for the bar: it is a
   // debt, and it stays one until someone hands over money. Creating it here, inside the

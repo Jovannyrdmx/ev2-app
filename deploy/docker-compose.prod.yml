@@ -82,8 +82,10 @@ services:
 
   api:
     build:
-      context: ../server
-      dockerfile: ../deploy/Dockerfile.api
+      # La raíz del repositorio, no `server/`: la imagen también lleva `agent/`, que es
+      # lo que baja una PC de barra para instalarse (D57). Ver deploy/Dockerfile.api.
+      context: ..
+      dockerfile: deploy/Dockerfile.api
     container_name: ev2-api
     command: ["sh", "-c", "node src/db/migrate.js && node src/index.js"]
     environment:
@@ -102,15 +104,109 @@ services:
       # pantalla como "Sin conexión", no como un error de configuración.
       # Entre comillas: el mensaje lleva dos puntos y sin comillas rompe el YAML.
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:?ALLOWED_ORIGINS es obligatorio: pon https://tudominio.com}"
-      # Caddy es el único salto delante de la API.
-      TRUST_PROXY_HOPS: 1
+      # DOS saltos delante de la API, no uno: Caddy termina el TLS y reenvía al
+      # contenedor `web`, y el nginx de `web` reenvía /api aquí. Cada uno agrega su
+      # entrada en `X-Forwarded-For`, así que con 1 Express se quedaba con la IP de
+      # Caddy en vez de la del cliente — y entonces TODAS las peticiones del mundo
+      # parecían venir de la misma IP. Consecuencia real: el límite de 10 intentos de
+      # acceso por minuto se compartía entre todos, así que diez contraseñas
+      # equivocadas de cualquiera dejaban a TODO el club sin poder entrar durante un
+      # minuto. Si algún día se quita el salto de nginx, esto vuelve a 1.
+      #
+      # TRES desde D60, porque Cloudflare va delante: Cloudflare → Caddy → nginx → API.
+      # Cloudflare está ahí por una razón concreta y no por gusto: la IPv4 de este
+      # servidor no recibe conexiones entrantes (Hostinger la filtra en su red), y
+      # Cloudflare habla con el origen por IPv6 —que sí funciona— y atiende a los
+      # visitantes por IPv4. Sin eso, el club entero queda invisible para cualquier red
+      # sin IPv6, que es casi todas.
+      #
+      # Sale del `.env` para poder corregirlo sin reconstruir nada: si algún día se
+      # apaga el proxy de Cloudflare (nube gris), esto vuelve a 2 en una línea.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-3}
+      # El dominio con el que el servidor arma los enlaces que salen de él (el pase
+      # que el titular manda por WhatsApp). Se toma de aquí y NUNCA de la cabecera
+      # `Host` de quien pide: un enlace armado con lo que manda el cliente es un
+      # enlace a donde ese cliente quiera, saliendo con la cara del club.
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-https://${EV2_DOMAIN}}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # ---------------------------------------------------------------- acceso
+      # La llave con la que se busca un PIN por indice (D46). SIN ESTO NO HAY PINES:
+      # no se le puede generar uno a un empleado nuevo y nadie del piso puede entrar.
+      #
+      # Faltaba aqui, y ese es un defecto con una forma muy fea: la variable esta en el
+      # .env, el gerente la ve puesta, y el servidor insiste en que falta. No se ve en
+      # desarrollo -- ahi `dotenv` lee el .env entero -- solo en el servidor.
+      PIN_LOOKUP_KEY: ${PIN_LOOKUP_KEY:-}
+      # La red del club, para que la gerencia entre con PIN estando adentro. Vacia = la
+      # gerencia entra solo con correo y contrasena. El piso no depende de esto.
+      CLUB_NETWORKS: ${CLUB_NETWORKS:-}
+      TERMS_VERSION: ${TERMS_VERSION:-}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-}
+      JWT_REFRESH_TTL_DAYS: ${JWT_REFRESH_TTL_DAYS:-}
+      # ---------------------------------------------------------------- limites
+      # Todos tienen un valor por omision en el codigo. Viajan igual para que se puedan
+      # ajustar desde el .env sin reconstruir la imagen -- que es justo lo que alguien
+      # va a intentar la noche que un limite estorbe.
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-}
+      AUTH_RATE_LIMIT_PER_MIN: ${AUTH_RATE_LIMIT_PER_MIN:-}
+      PIN_RATE_LIMIT_PER_MIN: ${PIN_RATE_LIMIT_PER_MIN:-}
+      PASS_RATE_LIMIT_PER_MIN: ${PASS_RATE_LIMIT_PER_MIN:-}
+      POS_AGENT_RATE_LIMIT_PER_MIN: ${POS_AGENT_RATE_LIMIT_PER_MIN:-}
+      TAXI_VERIFY_RATE_LIMIT_PER_MIN: ${TAXI_VERIFY_RATE_LIMIT_PER_MIN:-}
+      MERCADOPAGO_WEBHOOK_RATE_LIMIT_PER_MIN: ${MERCADOPAGO_WEBHOOK_RATE_LIMIT_PER_MIN:-}
+      PAIRING_RATE_LIMIT_PER_MIN: ${PAIRING_RATE_LIMIT_PER_MIN:-}
+      AGENT_DOWNLOAD_RATE_LIMIT_PER_MIN: ${AGENT_DOWNLOAD_RATE_LIMIT_PER_MIN:-}
+      DB_POOL_MAX: ${DB_POOL_MAX:-}
+      # Apagada por omisión desde D65: encenderla publica el mapa de los 310 endpoints.
+      SERVE_API_DOCS: ${SERVE_API_DOCS:-false}
+      # ---------------------------------------------------------------- lectura de tickets
+      OCR_TIMEOUT_MS: ${OCR_TIMEOUT_MS:-}
+      TESSERACT_BIN: ${TESSERACT_BIN:-}
+      TESSERACT_LANGS: ${TESSERACT_LANGS:-}
+      RECEIPT_MAX_BYTES: ${RECEIPT_MAX_BYTES:-}
       # SEED_PASSWORD NO se pasa: el seed de desarrollo crea cuentas con contraseña
       # conocida y aquí no debe poder correr ni por accidente.
+      # Las llaves de las pasarelas. Vacias = la pasarela se reporta "no configurada" y
+      # las rutas de cobro contestan 501 diciendo QUE falta; el cobro manual y el
+      # efectivo siguen funcionando igual.
+      #
+      # Los nombres tienen que ser EXACTAMENTE los que lee `config/payments.js`. Aqui
+      # decia `STRIPE_PUBLIC_KEY` y el codigo lee `STRIPE_PUBLISHABLE_KEY`, asi que
+      # Stripe nunca se habria dado por configurado en produccion por mucho que la
+      # llave estuviera en el .env -- y el sintoma habria sido "falta
+      # STRIPE_PUBLISHABLE_KEY" con la llave puesta delante.
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
-      STRIPE_PUBLIC_KEY: ${STRIPE_PUBLIC_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       MERCADOPAGO_ACCESS_TOKEN: ${MERCADOPAGO_ACCESS_TOKEN:-}
       MERCADOPAGO_PUBLIC_KEY: ${MERCADOPAGO_PUBLIC_KEY:-}
+      # Cual de las dos cuentas es, test o live. Sin esto el servidor NO cobra: hoy el
+      # token de prueba y el de produccion empiezan igual (APP_USR) y adivinar mal es
+      # cobrarle a una tarjeta real creyendo que es un ensayo. Faltaba aqui, asi que
+      # las llaves habrian llegado al contenedor y el cobro habria contestado "falta
+      # MERCADOPAGO_ENV" sin que nadie entendiera por que.
+      MERCADOPAGO_ENV: ${MERCADOPAGO_ENV:-}
+      MERCADOPAGO_WEBHOOK_SECRET: ${MERCADOPAGO_WEBHOOK_SECRET:-}
+      # Cuanto vive una orden en la terminal, y cada cuanto se repasan los cobros sin
+      # noticias. Los valores por omision estan en el codigo; esto es para poder
+      # ajustarlos sin reconstruir la imagen.
+      MERCADOPAGO_ORDER_TTL_S: ${MERCADOPAGO_ORDER_TTL_S:-}
+      MERCADOPAGO_SWEEP_MS: ${MERCADOPAGO_SWEEP_MS:-}
+      # Entrar con Facebook. Vacías = el botón no se pinta y la ruta contesta 501
+      # diciendo qué falta; correo y contraseña siguen funcionando igual.
+      FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
+      FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-}
+      # Donde se guardan las fotos de los tickets y las facturas. Es un volumen, no la
+      # base: un club que recibe tres veces por semana junta cientos de fotos de dos
+      # megas, y metidas en Postgres hacen que cada respaldo tarde el triple y que
+      # restaurar la base de un viernes por la noche sea imposible.
+      #
+      # ESTE VOLUMEN VA EN EL RESPALDO. Son comprobantes de compra: sin ellos no hay
+      # con que reclamarle a un proveedor ni con que comprobar a que precio entro una
+      # botella. `docs/DESPLIEGUE.md` lo incluye en el respaldo junto con la base.
+      RECEIPTS_DIR: /app/var/receipts
+    volumes:
+      - receipt_photos:/app/var/receipts
     depends_on:
       postgres:
         condition: service_healthy
@@ -121,7 +217,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512m
+          # 512m con Tesseract adentro: el reconocimiento de una foto grande puede
+          # pedir ~150 MB por unos segundos, y el proceso corre aparte del de Node.
+          memory: 768m
     networks: [ev2]
 
   ws:
@@ -136,6 +234,11 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET es obligatorio en .env}
+      # Los ajustes del socket. Con valor por omision en el codigo; viajan para poder
+      # subirlos desde el .env la noche que hagan falta.
+      WS_HEARTBEAT_MS: ${WS_HEARTBEAT_MS:-}
+      WS_MAX_CONNECTIONS_PER_USER: ${WS_MAX_CONNECTIONS_PER_USER:-}
+      WS_RESUME_MAX_EVENTS: ${WS_RESUME_MAX_EVENTS:-}
       # ws.js valida cada conexión contra la tabla users, así que necesita la base
       # igual que la API. Sin esto arranca, falla el SELECT 1 y se reinicia en bucle.
       DB_USER: ${DB_USER:-postgres}
@@ -173,6 +276,39 @@ services:
     logging: *logging
     networks: [ev2]
 
+  # Panel para VER las tablas desde el navegador (Adminer). Decisión D69.
+  #
+  # Se publica SOLO en el loopback del servidor (127.0.0.1): desde internet no existe.
+  # Docker se salta `ufw` (ver deploy/firewall.sh), así que lo que protege al panel no es
+  # el cortafuegos sino ese `127.0.0.1:` del principio. Sin él, `8081:8080` publicaría la
+  # pantalla de acceso a la base a todo internet. Una prueba (compose-ports.test.js)
+  # falla si alguien lo quita.
+  #
+  # Para entrar: túnel SSH desde tu PC (deploy/Abrir-Panel-BD.bat lo hace solo) y
+  # http://localhost:8081. Para consultar se usa el usuario de solo lectura
+  # `ev2_lectura` (deploy/panel-bd-lectura.sh), no `postgres`.
+  #
+  # Versión fija a propósito: una imagen `latest` cambia sola el día que alguien hace
+  # `pull`, y el panel que ve la base no es lugar para sorpresas.
+  adminer:
+    image: adminer:5.5.1
+    container_name: ev2-adminer
+    ports:
+      - "127.0.0.1:8081:8080"
+    environment:
+      # El nombre del contenedor de la base dentro de la red de Docker.
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+    networks: [ev2]
+
   caddy:
     image: caddy:2-alpine
     container_name: ev2-caddy
@@ -208,5 +344,7 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  # Los comprobantes de las entradas de mercancia. Va en el respaldo (ver arriba).
+  receipt_photos:
   caddy_data:
   caddy_config:

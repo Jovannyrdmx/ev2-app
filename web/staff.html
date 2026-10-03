@@ -10,79 +10,10 @@
     <meta name="ev2:api" content="/api">
     <meta name="ev2:ws" content="">
     <meta name="ev2:club" content="ev2">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
-
-        :root {
-            --ev2-cyan: #00BFFF;
-            --ev2-pink: #FF1493;
-            --ev2-lime: #00FF00;
-            --ev2-gold: #FFD700;
-            --ev2-red: #FF4444;
-        }
-        body { font-family: 'Inter', system-ui, sans-serif; background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%); }
-        .font-display { font-family: 'Poppins', sans-serif; font-weight: 700; }
-        .ev2-gradient {
-            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
-            -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-        }
-        .ev2-button {
-            background: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink));
-            color: #000; font-weight: 700;
-            transition: filter .15s ease, transform .1s ease;
-        }
-        .ev2-button:active { transform: scale(.98); }
-        .ev2-button:disabled { filter: grayscale(1) brightness(.55); cursor: not-allowed; }
-
-        button, select, input, textarea, .tap { min-height: 48px; }
-
-        .card { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10); }
-        .wait-ok { border-left: 5px solid var(--ev2-cyan); }
-        .wait-warn { border-left: 5px solid var(--ev2-gold); }
-        .wait-late { border-left: 5px solid var(--ev2-red); box-shadow: 0 0 16px rgba(255,68,68,.25); }
-
-        .tab { border-bottom: 3px solid transparent; color: rgba(255,255,255,.5); font-weight: 600; }
-        .tab.active { color: var(--ev2-cyan); border-bottom-color: var(--ev2-cyan); }
-        .tab-count {
-            display: inline-block; min-width: 1.4rem; padding: 0 .35rem; margin-left: .35rem;
-            border-radius: 9999px; background: rgba(255,255,255,.12); font-size: .7rem; font-weight: 700;
-        }
-        .tab.active .tab-count { background: var(--ev2-cyan); color: #000; }
-
-        .stat-card {
-            background: rgba(0,191,255,.10); border: 1px solid var(--ev2-pink);
-            border-radius: 10px; padding: 10px 6px; text-align: center;
-        }
-        .stat-number { font-size: 1.5rem; font-weight: 700; color: var(--ev2-lime); line-height: 1.1; }
-        .stat-label { font-size: .6rem; color: var(--ev2-cyan); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
-
-        .pill { font-size: .65rem; padding: .15rem .5rem; border-radius: 9999px; font-weight: 700; white-space: nowrap; }
-        .pill-ok { background: rgba(0,255,0,.18); color: var(--ev2-lime); }
-        .pill-wait { background: rgba(255,215,0,.18); color: var(--ev2-gold); }
-        .pill-off { background: rgba(255,255,255,.12); color: rgba(255,255,255,.6); }
-        .pill-bad { background: rgba(255,68,68,.18); color: var(--ev2-red); }
-
-        .field { width: 100%; padding: .6rem 1rem; border-radius: .6rem; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); outline: none; }
-        .field:focus { border-color: var(--ev2-cyan); }
-        .field.bad { border-color: var(--ev2-red); }
-        .field-error { font-size: .7rem; color: var(--ev2-red); margin-top: .15rem; }
-        .label { font-size: .68rem; color: rgba(255,255,255,.5); display: block; margin-bottom: .2rem; }
-
-        .dot { width: .5rem; height: .5rem; border-radius: 9999px; display: inline-block; }
-        .dot-on { background: var(--ev2-lime); }
-        .dot-off { background: var(--ev2-red); }
-        .dot-wait { background: var(--ev2-gold); }
-
-        @keyframes flash-in { from { background: rgba(0,255,0,.3); } to { background: rgba(255,255,255,.05); } }
-        .just-arrived { animation: flash-in 1.6s ease-out; }
-
-        [hidden] { display: none !important; }
-    </style>
+    <link rel="stylesheet" href="css/ev2.css">
 </head>
-<body class="text-white">
-<div class="max-w-2xl mx-auto min-h-screen flex flex-col">
+<body class="text-white page-staff">
+<div class="max-w-2xl lg:max-w-4xl mx-auto min-h-screen flex flex-col">
 
   <!-- ============================ ENTRAR ============================ -->
   <section id="screen-auth" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto">
@@ -95,6 +26,11 @@
       <input id="login-password" type="password" autocomplete="current-password" required placeholder="Contraseña" data-i18n-placeholder="auth.password" class="field">
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.enter">Entrar al club</button>
     </form>
+    <!-- El personal de piso ya no tiene contraseña: entra con su PIN, y el teclado
+         está en la pantalla de acceso. Sin este enlace, quien abre esta página
+         directamente se queda mirando un formulario que no puede llenar. -->
+    <a href="index.html" class="block mt-4 text-center text-sm text-white/50 underline"
+       data-i18n="pin.usePin">Entrar con PIN</a>
     <p id="auth-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
   </section>
 
@@ -138,7 +74,7 @@
     </header>
     <div id="banner" class="px-4 py-2 text-sm text-center bg-amber-500/20 text-amber-100" hidden></div>
 
-    <div class="grid grid-cols-4 gap-2 px-4 pt-3">
+    <div id="floor-stats" class="grid grid-cols-4 gap-2 px-4 pt-3">
       <div class="stat-card"><div class="stat-number" id="s-trays">—</div><div class="stat-label" data-i18n="floor.trays">Charolas</div></div>
       <div class="stat-card"><div class="stat-number" id="s-items">—</div><div class="stat-label" data-i18n="floor.items">Tragos</div></div>
       <div class="stat-card"><div class="stat-number" id="s-coming">—</div><div class="stat-label" data-i18n="floor.coming">En la barra</div></div>
@@ -177,6 +113,20 @@
           <div id="unpaid-list" class="space-y-2"></div>
         </div>
 
+        <!--
+          Lo que la barra ya tiene listo. Va arriba de las mesas a proposito: un trago
+          listo que nadie levanta se calienta, y es la queja mas comun de una noche.
+        -->
+        <div id="ready-block" class="card rounded-xl p-3 space-y-2 border border-emerald-400/30" hidden>
+          <p class="text-xs uppercase tracking-wider text-emerald-300" data-i18n="take.readyTitle">Listos para llevar</p>
+          <div id="ready-list" class="space-y-2"></div>
+        </div>
+
+        <!-- En la pista no hay mesa: el pedido se levanta contra un punto de entrega. -->
+        <button id="btn-take-floor" class="w-full card rounded-xl py-3 text-sm" data-i18n="take.onFloor">
+          Levantar un pedido en la pista
+        </button>
+
         <div id="tables-list" class="space-y-2"></div>
       </div>
 
@@ -203,6 +153,47 @@
           código NO es un respaldo escondido: está siempre a la vista. La fila no
           se puede detener porque un lector no enfocó.
         -->
+        <!--
+          PASO 1: la identificación.
+
+          Va primero en la pantalla porque va primero en la vida, y porque el
+          servidor no acepta el escaneo sin ella. No es un formulario de trámite:
+          son dos toques —qué documento, y "es mayor"— y el campo del código se
+          desbloquea. El rechazo también es un botón, porque un menor de edad o una
+          identificación falsa tienen que quedar registrados igual que una entrada.
+
+          Lo que NO hay aquí, y es deliberado: ningún campo para el número de la
+          identificación ni para la fecha de nacimiento. El club no los necesita
+          para dejar entrar a alguien, y guardarlos lo obligaría a custodiarlos.
+        -->
+        <div class="card rounded-xl p-4 space-y-3" id="idc-panel">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="idc.title">Revisar identificación</p>
+            <span class="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-white/40" data-i18n="idc.step">Paso 1 de 2</span>
+          </div>
+
+          <p class="text-[11px] text-white/40" data-i18n="idc.which">¿Qué te enseñó?</p>
+          <div id="idc-docs" class="flex flex-wrap gap-1"></div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <button id="btn-idc-accept" class="ev2-button py-3 rounded-xl font-display text-sm" data-i18n="idc.accept">Es mayor: continuar</button>
+            <button id="btn-idc-reject" class="py-3 rounded-xl font-display text-sm card" data-i18n="idc.reject">No pasa</button>
+          </div>
+
+          <!-- Por qué no pasa. Aparece solo al tocar "No pasa": en el caso normal
+               estorba, y lo que estorba en una puerta se toca por error. -->
+          <div id="idc-reject-why" class="space-y-2" hidden>
+            <p class="text-[11px] text-white/40" data-i18n="idc.rejectWhy">¿Por qué no pasa?</p>
+            <div id="idc-reasons" class="flex flex-wrap gap-1"></div>
+          </div>
+
+          <p id="idc-state" class="text-xs rounded-lg p-2" hidden></p>
+          <p class="text-[10px] text-white/30 leading-snug" data-i18n="idc.noStore">
+            No se guarda el número de la identificación ni la fecha de nacimiento.
+          </p>
+        </div>
+
+        <!-- PASO 2: el código. Deshabilitado hasta que exista la revisión. -->
         <div class="card rounded-xl p-4 space-y-3">
           <div class="flex items-center justify-between gap-2">
             <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="scan.title">Leer un pase</p>
@@ -215,16 +206,57 @@
 
           <form id="scan-form" class="flex gap-2">
             <input id="scan-code" class="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none font-display tracking-widest uppercase"
-                   maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false"
-                   placeholder="EV2-XXXX-XXXX" aria-label="Código del pase">
-            <button type="submit" id="btn-scan-code" class="ev2-button px-5 rounded-xl font-display" data-i18n="scan.check">Entrar</button>
+                   maxlength="60" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                   placeholder="EV2-XXXX-XXXX" aria-label="Código del pase" disabled>
+            <button type="submit" id="btn-scan-code" class="ev2-button px-5 rounded-xl font-display" data-i18n="scan.check" disabled>Entrar</button>
           </form>
+          <p id="scan-blocked" class="text-[11px] text-amber-200/80" data-i18n="scan.errNoIdCheck">Primero revisa la identificación.</p>
 
           <!-- El resultado del último pase. Grande: se lee de reojo, con la fila enfrente. -->
           <div id="scan-result" class="rounded-xl p-3 space-y-1" hidden>
             <p id="scan-headline" class="font-display text-lg">—</p>
             <p id="scan-who" class="text-sm">—</p>
             <p id="scan-detail" class="text-xs text-white/60">—</p>
+          </div>
+        </div>
+
+        <!--
+          Llegó sin su código: teléfono muerto, pantalla rota, nunca le llegó el
+          mensaje. Existe porque la alternativa real es que el de la puerta lo deje
+          pasar de palabra y no quede registro de nada.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="look.title">Llegó sin su código</p>
+          <form id="look-form" class="flex gap-2">
+            <input id="look-q" class="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none"
+                   maxlength="60" autocomplete="off" spellcheck="false"
+                   placeholder="Folio, nombre o teléfono" data-i18n-placeholder="look.search" aria-label="Buscar reservación">
+            <button type="submit" id="btn-look" class="px-5 rounded-xl font-display card text-sm" data-i18n="look.go">Buscar</button>
+          </form>
+          <p id="look-error" class="text-sm text-red-300" hidden></p>
+          <div id="look-list" class="space-y-2"></div>
+
+          <!-- El pase temporal. Solo aparece cuando ya se eligió una reservación. -->
+          <div id="cont-box" class="rounded-xl p-3 space-y-2" style="background:rgba(255,193,7,.06);border:1px solid rgba(255,193,7,.25)" hidden>
+            <p class="text-xs font-display" data-i18n="cont.title">Pase de contingencia</p>
+            <p id="cont-note" class="text-[11px] text-white/50">—</p>
+            <p id="cont-for" class="text-xs">—</p>
+            <input id="cont-label" class="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 outline-none text-sm"
+                   maxlength="60" autocomplete="off" placeholder="¿A nombre de quién?" data-i18n-placeholder="cont.forWhom" aria-label="A nombre de quién">
+            <input id="cont-reason" class="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 outline-none text-sm"
+                   maxlength="200" autocomplete="off" placeholder="¿Por qué se emite?" data-i18n-placeholder="cont.why" aria-label="Motivo">
+            <button id="btn-cont" class="ev2-button w-full py-3 rounded-xl font-display text-sm" data-i18n="cont.issue">Emitir pase</button>
+            <p id="cont-error" class="text-sm text-red-300" hidden></p>
+            <!--
+              El código recién emitido, grande. No se dibuja un QR a propósito:
+              esta persona llegó SIN teléfono, así que un QR en la pantalla del
+              guardia no le sirve de nada. El guardia teclea el código él mismo, y
+              el botón lo pone en el campo de arriba para que no lo copie a mano.
+            -->
+            <div id="cont-result" class="text-center space-y-2" hidden>
+              <p id="cont-code" class="font-display text-2xl tracking-widest">—</p>
+              <button id="btn-cont-use" class="w-full py-2 rounded-xl card text-xs" data-i18n="cont.use">Usar este código</button>
+            </div>
           </div>
         </div>
 
@@ -270,6 +302,12 @@
         <div class="card rounded-xl p-4 space-y-3">
           <p id="shift-state" class="text-sm">—</p>
           <button id="btn-shift" class="ev2-button w-full rounded-lg py-3 font-display">—</button>
+          <!--
+            El corte del turno (D51). Va junto al botón del turno a propósito: son el
+            mismo momento de la noche, y el turno ya no se cierra sin pasar por aquí.
+          -->
+          <button id="btn-cut" class="card w-full rounded-lg py-3 text-sm" data-i18n="cut.title">Mi corte del turno</button>
+          <p id="cut-hint" class="text-[11px] text-white/40" data-i18n="cut.hint">Lo que cobraste y lo que te toca entregar. Puedes entregar efectivo antes de cerrar.</p>
         </div>
         <div class="card rounded-xl p-4 space-y-2">
           <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="floor.myTips">Mis propinas de hoy</p>
@@ -303,6 +341,12 @@
     </header>
 
     <!-- A nombre de quién. Solo aparece si hay alguien registrado en esa mesa. -->
+    <!-- A donde se lleva, cuando no es una mesa. -->
+    <div id="take-point-wrap" class="px-4 pt-3" hidden>
+      <label class="text-xs text-white/50" data-i18n="take.point">Punto de entrega</label>
+      <select id="take-point" class="w-full mt-1 px-4 py-2 rounded-xl bg-white/5 border border-white/10 outline-none"></select>
+    </div>
+
     <div id="take-who" class="px-4 pt-3" hidden>
       <label class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="take.forWhom">¿De quién es?</label>
       <select id="take-guest-select" class="w-full mt-1 px-4 py-2 rounded-xl bg-white/5 border border-white/10 outline-none"></select>
@@ -342,6 +386,7 @@
 
 <script src="js/api.js"></script>
 <script src="js/format.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/roles.js"></script>
 <script src="js/password-gate.js"></script>
 <script src="js/staff-floor.js"></script>
@@ -350,6 +395,8 @@
 <script src="js/client.js"></script>
 <script src="js/drink-art.js"></script>
 <script src="js/order-taking.js"></script>
+<script src="js/terminal-charge.js"></script>
+<script src="js/shift-cut.js"></script>
 <script src="js/staff-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

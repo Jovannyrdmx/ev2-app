@@ -7,6 +7,9 @@ const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const events = require('../services/events');
+const inventory = require('../services/inventory');
+const tickets = require('../services/tickets');
+const consent = require('../services/consent');
 
 const router = express.Router({ mergeParams: true });
 
@@ -15,7 +18,10 @@ router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
 // Allowed state transitions. 'pos_error' is set by the POS sync (phase 4).
 const TRANSITIONS = {
   pending: ['confirmed', 'cancelled'],
-  confirmed: ['preparing', 'cancelled'],
+  // Ready straight from confirmed is the bar's one-tap path (D73): a beer or a shot is
+  // poured in seconds, and making the bartender press "start" first only slowed the
+  // queue down. "preparing" stays for what really takes time (a round, a bucket).
+  confirmed: ['preparing', 'ready', 'cancelled'],
   preparing: ['ready', 'cancelled'],
   ready: ['delivered'],
   delivered: [],
@@ -31,6 +37,13 @@ const TAKING_ROLES = ['waiter', 'bartender', 'manager', 'admin'];
 const createSchema = z.object({
   client_request_id: uuid,
   table_id: uuid.optional(),
+  // A donde se lleva: la mesa, o un punto de la pista con su QR pegado ("Pista A",
+  // "Terraza"). Sin esto, un pedido levantado en la pista no tiene direccion y el
+  // mesero sale a buscar a alguien con una charola en la mano.
+  delivery_point_id: uuid.optional(),
+  // De que barra sale, cuando no hay mesa que lo diga: es la venta en la barra, y la
+  // manda el cantinero desde su propia pantalla.
+  bar_location_id: uuid.optional(),
   recipient_id: uuid.optional(),
   // Only staff may send this: the waiter standing at the table says who he is serving,
   // so the charge lands on the guest and not on the waiter's own name.
@@ -102,15 +115,32 @@ router.post('/nightclubs/:nightclubId/orders',
     try {
       await client.query('BEGIN');
 
+      // ---------------------------------------------------------------- regalar
+      //
+      // Un pedido con `recipient_id` no es un pedido: es **alcanzar a una persona
+      // concreta** con un trago y un mensaje libre de 280 caracteres. Es exactamente
+      // lo mismo que un flirt de tipo regalo, y por eso pasa por la misma puerta
+      // (D65).
+      //
+      // Aquí antes solo se comprobaba que existiera y que no hubiera bloqueo. El
+      // bloqueo es reactivo —solo sirve DESPUÉS de que ya la contactaron la primera
+      // vez—, así que una persona que apagó el consentimiento seguía recibiendo
+      // mensajes, uno por trago, sin límite por hora. Las otras siete comprobaciones
+      // que el módulo de flirteo hace con cuidado no se hacían aquí.
+      //
+      // El personal tiene su propia puerta y sus propias reglas, así que no entra por
+      // ésta: ver `services/consent.js`.
       if (b.recipient_id) {
-        const r = await client.query(
-          `SELECT u.id FROM users u WHERE u.id = $1 AND u.nightclub_id = $2 AND u.status = 'active'`,
+        const quien = await client.query(
+          'SELECT role FROM users WHERE id = $1 AND nightclub_id = $2',
           [b.recipient_id, nightclubId]);
-        if (r.rowCount === 0) throw ApiError.notFound('Recipient not found');
-        const blocked = await client.query(
-          'SELECT 1 FROM user_blocks WHERE blocker_id = $1 AND blocked_id = $2',
-          [b.recipient_id, req.user.id]);
-        if (blocked.rowCount > 0) throw ApiError.forbidden('You cannot send drinks to this user');
+        if (quien.rowCount === 0) throw ApiError.notFound('Esa persona no está disponible');
+        if (quien.rows[0].role !== 'guest') {
+          throw ApiError.unprocessable(consent.STAFF_GIFT_PATH);
+        }
+        await consent.assertCanSend({
+          nightclubId, sender: req.user, recipientId: b.recipient_id, runner: client,
+        });
       }
 
       const parties = await resolveParties(client, { req, nightclubId, tableId: b.table_id });
@@ -121,6 +151,10 @@ router.post('/nightclubs/:nightclubId/orders',
           client, nightclubId, senderId: parties.senderId, recipientId: b.recipient_id,
           tableId: b.table_id, takenBy: parties.takenBy, message: b.message, items: b.items,
           clientRequestId: b.client_request_id,
+          deliveryPointId: b.delivery_point_id,
+          // Solo el personal elige de que barra sale un pedido. Un cliente que lo
+          // mandara elegiria la barra con existencia, no la que le toca.
+          barLocationId: STAFF_ROLES.includes(req.user.role) ? b.bar_location_id : undefined,
         });
       } catch (err) {
         // Concurrent request with the same idempotency key.
@@ -163,6 +197,14 @@ router.post('/nightclubs/:nightclubId/orders',
   }));
 
 // Bartender/manager queue.
+//
+// `bar_id` es lo que separa las dos barras: la de arriba no tiene por que ver -ni
+// preparar- los tragos de la de abajo. `paid_only` es la cola real del cantinero:
+// lo pagado, y nada mas.
+//
+// El orden es por hora de PAGO, no por hora de pedido: entre dos pedidos, el que
+// lleva mas tiempo pagado es el que mas tiempo lleva esperando de verdad. Un
+// pedido sin pagar no tiene hora de pago y cae al final, que es donde debe estar.
 router.get('/nightclubs/:nightclubId/orders',
   requireRole('bartender', 'waiter', 'manager'),
   validate({
@@ -170,18 +212,30 @@ router.get('/nightclubs/:nightclubId/orders',
     query: pagination.extend({
       status: z.enum(['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'cancelled', 'pos_error']).optional(),
       active: z.coerce.boolean().default(false),
+      bar_id: uuid.optional(),
+      paid_only: z.coerce.boolean().default(false),
+      mine: z.coerce.boolean().default(false),
     }),
   }),
   asyncHandler(async (req, res) => {
-    const { status, active, limit, offset } = req.query;
+    const q = req.query;
     const { rows } = await pool.query(
       `${ORDER_SELECT}
         WHERE o.nightclub_id = $1
-          AND ($2::text IS NULL OR o.status = $2)
+          AND ($2::text IS NULL OR o.status = $2::text)
           AND ($3::boolean IS FALSE OR o.status IN ('pending','confirmed','preparing','ready','pos_error'))
-        ORDER BY o.created_at ASC
-        LIMIT $4 OFFSET $5`,
-      [req.params.nightclubId, status || null, active, limit, offset],
+          AND ($4::uuid IS NULL OR o.bar_location_id = $4::uuid)
+          AND ($5::boolean IS FALSE OR COALESCE(tx.status, 'not_required') IN ('paid', 'not_required'))
+          AND ($6::boolean IS FALSE OR o.taken_by = $7::uuid)
+        ORDER BY
+          -- El cantinero puede reacomodar sus tarjetas; lo que reacomoda es esto y
+          -- solo esto, porque la hora de creacion y la de pago son la auditoria.
+          o.bar_position NULLS LAST,
+          COALESCE(tx.confirmed_at, o.created_at) ASC,
+          o.created_at ASC
+        LIMIT $8 OFFSET $9`,
+      [req.params.nightclubId, q.status || null, q.active, q.bar_id || null,
+        q.paid_only, q.mine, req.user.id, q.limit, q.offset],
     );
     res.json({ orders: rows });
   }));
@@ -214,6 +268,10 @@ router.get('/nightclubs/:nightclubId/orders/:orderId',
 
 const TIMESTAMP_FOR = {
   confirmed: 'confirmed_at',
+  // Cuando la barra se puso a prepararlo de verdad. Es lo que permite saber, al
+  // cierre, cuanto tardo cada trago desde que se pago hasta que salio -- y si el
+  // cuello de botella fue la barra o el mesero.
+  preparing: 'prep_started_at',
   ready: 'ready_at',
   delivered: 'delivered_at',
   cancelled: 'cancelled_at',
@@ -277,7 +335,7 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
       }
 
       const stamp = TIMESTAMP_FOR[next];
-      const setBartender = ['confirmed', 'preparing'].includes(next) && isStaff;
+      const setBartender = ['confirmed', 'preparing', 'ready'].includes(next) && isStaff;
       const { rows } = await client.query(
         `UPDATE drink_orders
             SET status = $3
@@ -288,15 +346,14 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
         setBartender ? [orderId, nightclubId, next, req.user.id] : [orderId, nightclubId, next],
       );
 
-      // Cancelling returns the stock.
+      // Cancelling returns the stock -- lo que de verdad salio por este pedido, leido
+      // del kardex. Recalcular la receta devolveria otra cantidad si alguien la
+      // corrigio entremedio, y el estante no sabe de correcciones.
       if (next === 'cancelled') {
-        await client.query(
-          `UPDATE inventory i SET quantity = i.quantity + s.qty, updated_at = now()
-             FROM (SELECT drink_id, sum(quantity) AS qty FROM drink_order_items
-                    WHERE order_id = $1 GROUP BY drink_id) s
-            WHERE i.drink_id = s.drink_id`,
-          [orderId],
-        );
+        await inventory.restore(client, {
+          nightclubId, orderId, userId: req.user.id,
+          reason: req.body.reason || 'Pedido cancelado',
+        });
         // ...and closes the charge, but only while it is still unpaid. Money already
         // received is never erased from the ledger: that is a refund, with its own
         // entry and its own signature (step 3.7), not a row quietly turned off.
@@ -312,6 +369,15 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
             [order.transaction_id]);
         }
         refundDue = order.payment_status === 'paid';
+      }
+
+      // La comanda del pedido que se confirma a mano (D53). El camino normal es el
+      // otro: un pedido se confirma al PAGARSE, y ahí la comanda sale pegada al
+      // renglón que lo confirma (`payments.applySideEffects`). Este es el de los
+      // pedidos que no tienen nada que cobrar —un trago de cortesía, una cuenta de
+      // casa—, que llegan a la barra por aquí y también necesitan su papel.
+      if (next === 'confirmed') {
+        await tickets.printOrder(client, { nightclubId, orderId, userId: req.user.id });
       }
 
       await events.publish({
@@ -331,6 +397,90 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
     } finally {
       client.release();
     }
+  }));
+
+/**
+ * Volver a sacar la comanda de un pedido (D62).
+ *
+ * El caso es de todas las noches: el papel se atascó, salió cortado, se cayó atrás de
+ * la barra, o el bartender simplemente no lo vio. Hasta hoy la única salida era ir a
+ * buscar al gerente para que reimprimiera desde su panel, y mientras tanto la mesa
+ * espera un trago que nadie está preparando.
+ *
+ * Lo pueden pedir los cuatro roles que están en el piso —mesero, bartender, gerente y
+ * admin—, porque cualquiera de ellos puede ser el que note que falta el papel.
+ *
+ * El papel sale marcado como REIMPRESIÓN. Esa marca es lo que separa esta función de
+ * un botón que sirve tragos gratis: sin ella, lo que llega a la barra es idéntico a
+ * un pedido nuevo y la barra prepara otra ronda.
+ */
+router.post('/nightclubs/:nightclubId/orders/:orderId/reprint',
+  requireRole('waiter', 'bartender', 'manager', 'admin'),
+  validate({ params: z.object({ nightclubId: uuid, orderId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const out = await tickets.reprintOrder(pool, {
+      nightclubId: req.params.nightclubId,
+      orderId: req.params.orderId,
+      userId: req.user.id,
+    });
+    // Falla con voz, a diferencia de la comanda automática: quien picó el botón está
+    // parado esperando el papel, y un 202 mentiroso lo deja esperando para siempre.
+    if (out.error) throw ApiError.badRequest(out.error);
+    res.status(202).json({ job: out.job, printer: out.printer });
+  }));
+
+/**
+ * El cantinero reacomoda su cola.
+ *
+ * Tres tragos del mismo whisky se preparan juntos, y obligar a la barra a seguir el
+ * orden de llegada es hacerla mas lenta a proposito. Lo que se mueve es
+ * `bar_position` -- una preferencia de pantalla -- y nada mas: `created_at`, la hora
+ * de pago y el kardex no se tocan, asi que el reporte del cierre sigue diciendo
+ * cuanto espero de verdad cada cliente aunque su tarjeta se haya movido de lugar.
+ *
+ * Solo se reordena lo que todavia no sale: un pedido entregado no vuelve a la fila.
+ */
+router.put('/nightclubs/:nightclubId/orders/queue-order',
+  requireRole('bartender', 'manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({ order_ids: z.array(uuid).min(1).max(100) }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const ids = req.body.order_ids;
+    if (new Set(ids).size !== ids.length) {
+      throw ApiError.unprocessable('Un pedido no puede ir dos veces en la cola');
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const found = await client.query(
+        `SELECT id FROM drink_orders
+          WHERE id = ANY($1::uuid[]) AND nightclub_id = $2
+            AND status IN ('pending','confirmed','preparing','ready')`,
+        [ids, nightclubId]);
+      if (found.rowCount !== ids.length) {
+        throw ApiError.conflict('Alguno de esos pedidos ya no esta en la cola');
+      }
+      for (let i = 0; i < ids.length; i += 1) {
+        await client.query(
+          'UPDATE drink_orders SET bar_position = $3, updated_at = now() WHERE id = $1 AND nightclub_id = $2',
+          [ids[i], nightclubId, i + 1]);
+      }
+      await events.publish({
+        nightclubId, type: 'bar_queue_reordered', client,
+        audience: { roles: ['bartender', 'manager'] },
+        payload: { order_ids: ids, by: req.user.id },
+      });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    res.json({ order_ids: ids });
   }));
 
 module.exports = router;

@@ -17,16 +17,20 @@
   'use strict';
 
   /**
-   * Tres carriles, no seis. El bartender no piensa en "confirmed" y "preparing" como
-   * cosas distintas: piensa en "me acaba de entrar", "lo estoy haciendo" y "ya está,
-   * que lo recojan".
+   * Tres carriles, no seis. El bartender no piensa en "pending", "confirmed" y
+   * "preparing": piensa en "lo tengo que hacer", "lo estoy haciendo" y "ya esta, que
+   * lo recojan".
+   *
+   * Un pedido pagado entra CONFIRMADO, y antes caia en "En preparacion" aunque nadie lo
+   * hubiera tocado: la pantalla abria en "Nuevos" vacio mientras la cola real esperaba
+   * en la otra pestana (D73). Ahora todo lo que falta por hacer esta en el primero.
    */
   const LANES = ['new', 'prep', 'ready'];
 
   const LANE_OF = {
     pending: 'new',
     pos_error: 'new',
-    confirmed: 'prep',
+    confirmed: 'new',
     preparing: 'prep',
     ready: 'ready',
   };
@@ -38,17 +42,27 @@
   const isClosed = (status) => CLOSED.includes(status);
 
   /**
-   * El botón principal de un pedido. Cada uno es UNA transición del servidor; no se
+   * El boton principal de un pedido. Cada uno es UNA transicion del servidor; no se
    * encadenan dos llamadas en un toque, porque si la segunda falla el pedido queda en
    * un estado que la pantalla no muestra y nadie se entera.
+   *
+   * Un pedido pagado se marca LISTO de un solo toque (D73): el servidor acepta
+   * confirmed -> ready. "Empezar" queda como boton secundario para lo que de verdad
+   * tarda (una ronda, una cubeta) y el mesero quiere saber que ya va.
    */
   const NEXT_ACTION = {
     pending: { status: 'confirmed', key: 'bar.accept' },
     pos_error: { status: 'confirmed', key: 'bar.retry' },
-    confirmed: { status: 'preparing', key: 'bar.start' },
+    confirmed: { status: 'ready', key: 'bar.markReady' },
     preparing: { status: 'ready', key: 'bar.markReady' },
     ready: { status: 'delivered', key: 'bar.markDelivered' },
   };
+
+  /** El boton chico, junto al principal. Solo existe donde hay dos caminos. */
+  const SECOND_ACTION = {
+    confirmed: { status: 'preparing', key: 'bar.start' },
+  };
+  const secondAction = (status) => SECOND_ACTION[status] || null;
 
   const nextAction = (status) => NEXT_ACTION[status] || null;
 
@@ -94,16 +108,76 @@
       const lane = laneOf(order.status);
       if (lane) lanes[lane].push(order);
     }
-    for (const lane of LANES) {
-      lanes[lane].sort((a, b) => {
-        const ta = toTime(a.created_at);
-        const tb = toTime(b.created_at);
-        if (ta === null) return 1;
-        if (tb === null) return -1;
-        return ta - tb;
-      });
-    }
+    for (const lane of LANES) lanes[lane].sort(queueOrder);
+    // Lo que no esta pagado no se puede preparar: se queda visible, pero debajo de lo
+    // que si se puede hacer ya, para que no tape la cola real (D73).
+    lanes.new = lanes.new.filter((o) => isPaid(o)).concat(lanes.new.filter((o) => !isPaid(o)));
     return lanes;
+  }
+
+  /**
+   * El orden de la cola.
+   *
+   * Primero lo que el cantinero movio a mano (`bar_position`): tres tragos del mismo
+   * whisky se preparan juntos, y obligarlo a seguir el orden de llegada es hacer la
+   * barra mas lenta a proposito. Lo que NO se mueve es la hora: `created_at` sigue
+   * siendo la auditoria, asi que el reporte del cierre dice cuanto espero de verdad
+   * cada cliente aunque su tarjeta cambiara de lugar.
+   *
+   * Sin posicion puesta, el mas viejo primero. Ese orden no es estetico: si se
+   * ordenara por el ultimo cambio, un pedido que nadie toco se hunde y el cliente
+   * espera media hora.
+   */
+  function queueOrder(a, b) {
+    const pa = Number.isFinite(Number(a.bar_position)) ? Number(a.bar_position) : null;
+    const pb = Number.isFinite(Number(b.bar_position)) ? Number(b.bar_position) : null;
+    if (pa !== null && pb !== null && pa !== pb) return pa - pb;
+    if (pa !== null && pb === null) return -1;
+    if (pa === null && pb !== null) return 1;
+    const ta = toTime(a.created_at);
+    const tb = toTime(b.created_at);
+    if (ta === null) return 1;
+    if (tb === null) return -1;
+    return ta - tb;
+  }
+
+  /**
+   * Solo los pedidos de UNA barra.
+   *
+   * La barra de arriba no tiene por que ver -ni preparar- los tragos de la de abajo:
+   * dos colas mezcladas es como un trago se queda media hora esperando a que alguien
+   * decida que le toca.
+   */
+  function filterByBar(orders, barId) {
+    if (!barId) return (orders || []).slice();
+    return (orders || []).filter((o) => o.bar_location_id === barId);
+  }
+
+  /**
+   * La barra no sirve a credito: un pedido sin pagar se ve, pero no se prepara.
+   *
+   * `not_required` es un pedido que no cuesta nada (un producto de precio cero), que no
+   * tiene cobro que esperar. Distinto de `pending`, que es dinero que nadie entrego.
+   */
+  const isPaid = (order) => ['paid', 'not_required'].includes(
+    (order && order.payment_status) || 'not_required');
+
+  /**
+   * Mover una tarjeta de lugar dentro de su carril.
+   *
+   * Devuelve la lista COMPLETA de ids del carril en el orden nuevo, que es lo que
+   * espera el servidor: mandar solo el id movido dejaria al resto sin posicion y el
+   * siguiente reacomodo empezaria de cero.
+   */
+  function reorder(orders, lane, orderId, direction) {
+    const list = groupByLane(orders)[lane] || [];
+    const ids = list.map((o) => o.id);
+    const from = ids.indexOf(orderId);
+    if (from === -1) return null;
+    const to = direction === 'up' ? from - 1 : from + 1;
+    if (to < 0 || to >= ids.length) return null;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    return ids;
   }
 
   /** "2× Corona, 1× Margarita". Lo que el bartender tiene que preparar, de un vistazo. */
@@ -121,7 +195,14 @@
   /** A dónde va: la mesa es lo único que el mesero necesita. */
   function destination(order) {
     if (!order) return null;
+    // El punto de entrega manda sobre la mesa: en la pista no hay mesa, y "Pista A" es
+    // una direccion a la que el mesero puede llegar. Un pedido sin ninguno de los dos
+    // es la venta en la barra, que se entrega ahi mismo.
+    if (order.delivery_point_name && order.delivery_point_kind !== 'table') {
+      return order.delivery_point_name;
+    }
     if (order.table_code) return order.table_code;
+    if (order.delivery_point_name) return order.delivery_point_name;
     return null;
   }
 
@@ -205,10 +286,15 @@
     laneOf,
     isClosed,
     nextAction,
+    secondAction,
     canCancel,
     waitMinutes,
     urgency,
     groupByLane,
+    queueOrder,
+    filterByBar,
+    isPaid,
+    reorder,
     itemsSummary,
     itemCount,
     destination,

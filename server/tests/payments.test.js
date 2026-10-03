@@ -385,8 +385,49 @@ describe('El hueco para Stripe y Mercado Pago', () => {
 
     process.env.STRIPE_SECRET_KEY = 'sk_live_abc';
     expect(config.stripeConfig().mode).toBe('live');
+  });
+
+  it('el modo de Mercado Pago se DECLARA: ya no se puede deducir del prefijo', () => {
+    // Esta prueba afirmaba lo contrario, y afirmaba algo falso: daba por hecho que un
+    // token `APP_USR` era de produccion. Hoy Mercado Pago entrega el token de PRUEBA
+    // empezando igual, y lo unico que los distingue es de que pestana del panel se
+    // copiaron. Deducirlo del prefijo llamaria 'live' a un token de prueba -- molesto --
+    // y, el dia que el formato cambie otra vez, podria llamar 'test' a uno real, que es
+    // el error que cobra una tarjeta de verdad durante un ensayo.
+    process.env.MERCADOPAGO_PUBLIC_KEY = 'APP_USR-pub';
     process.env.MERCADOPAGO_ACCESS_TOKEN = 'APP_USR-123';
-    expect(config.mercadoPagoConfig().mode).toBe('live');
+
+    process.env.MERCADOPAGO_ENV = 'test';
+    expect(config.mercadoPagoConfig()).toMatchObject({ mode: 'test', configured: true });
+    process.env.MERCADOPAGO_ENV = 'live';
+    expect(config.mercadoPagoConfig()).toMatchObject({ mode: 'live', configured: true });
+
+    // Sin declarar: no se adivina, y no se puede cobrar hasta que alguien lo diga.
+    delete process.env.MERCADOPAGO_ENV;
+    const sinDeclarar = config.mercadoPagoConfig();
+    expect(sinDeclarar.mode).toBe('undeclared');
+    expect(sinDeclarar.configured).toBe(false);
+    expect(sinDeclarar.missing).toContain('MERCADOPAGO_ENV');
+
+    // Un token antiguo con el prefijo viejo sigue diciendo lo que es por si solo.
+    process.env.MERCADOPAGO_ACCESS_TOKEN = 'TEST-123';
+    expect(config.mercadoPagoConfig().mode).toBe('test');
+    process.env.MERCADOPAGO_ENV = 'test';
+  });
+
+  it('la firma del webhook no hace falta para cobrar, y se dice cual de las dos es', () => {
+    // No es un descuido: la notificacion nunca se cree por si misma. Cuando llega, el
+    // servidor vuelve a pedir la orden con su propio token y actua sobre ESA respuesta.
+    process.env.MERCADOPAGO_ACCESS_TOKEN = 'APP_USR-123';
+    process.env.MERCADOPAGO_PUBLIC_KEY = 'APP_USR-pub';
+    process.env.MERCADOPAGO_ENV = 'test';
+
+    delete process.env.MERCADOPAGO_WEBHOOK_SECRET;
+    expect(config.mercadoPagoConfig()).toMatchObject({
+      configured: true, webhook_verified: false,
+    });
+    process.env.MERCADOPAGO_WEBHOOK_SECRET = 'firma';
+    expect(config.mercadoPagoConfig().webhook_verified).toBe(true);
   });
 
   it('la llave secreta nunca sale por la API; la pública sí, porque la usa el navegador', async () => {

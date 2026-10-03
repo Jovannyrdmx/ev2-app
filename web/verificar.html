@@ -17,32 +17,9 @@
       Por eso tampoco se indexa: el folio es de quien lo trae, no de un buscador.
     -->
     <meta name="robots" content="noindex, nofollow">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
-        :root { --ev2-cyan: #00BFFF; --ev2-pink: #FF1493; --ev2-lime: #00FF00; }
-        body {
-            font-family: 'Inter', system-ui, sans-serif;
-            background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%);
-            min-height: 100vh;
-        }
-        .font-display { font-family: 'Poppins', sans-serif; font-weight: 700; }
-        .ev2-button {
-            background: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink));
-            color: #000; font-weight: 600;
-        }
-        .ev2-button:disabled { filter: grayscale(1) brightness(.55); cursor: not-allowed; }
-        button, .tap { min-height: 44px; }
-        .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
-        .field {
-            width: 100%; padding: .75rem 1rem; border-radius: .75rem;
-            background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
-            color: #fff; outline: none;
-        }
-        .field:focus { border-color: var(--ev2-cyan); }
-    </style>
+    <link rel="stylesheet" href="css/ev2.css">
 </head>
-<body class="text-white">
+<body class="text-white page-verificar">
 <main class="max-w-md mx-auto px-5 py-10 space-y-5">
 
     <header class="text-center space-y-1">
@@ -89,6 +66,7 @@
 </main>
 
 <script src="js/format.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/taxi-ride.js"></script>
 <script src="js/verify-screen.js"></script>
 </body>

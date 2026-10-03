@@ -205,7 +205,57 @@
     return null;
   }
 
+  // ---------------------------------------------------------------- la carta (D74)
+
+  /**
+   * El orden de las categorias es el de la barra, no el del abecedario: lo que mas se
+   * pide va primero y las botellas -lo mas caro y lo que menos se pide por telefono-
+   * despues. Lo que el club agregue y no este en la lista va al final, en orden.
+   */
+  const CATEGORY_ORDER = ['Drinks', 'Cervezas', 'Shots', 'Botellas', 'Sin alcohol'];
+  function orderCategories(categories) {
+    const unique = [...new Set((categories || []).filter(Boolean))];
+    const rank = (c) => {
+      const i = CATEGORY_ORDER.findIndex((k) => k.toLowerCase() === String(c).toLowerCase());
+      return i === -1 ? CATEGORY_ORDER.length : i;
+    };
+    return unique.sort((a, b) => (rank(a) - rank(b)) || a.localeCompare(b, 'es'));
+  }
+
+  /** Quita acentos y mayusculas: "anejo" encuentra "AÑEJO", "pina" encuentra "PIÑA". */
+  const fold = (text) => String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+  /**
+   * Lo que se ve de la carta. Con busqueda se ignora la categoria elegida: quien escribe
+   * "tecate" quiere la Tecate, este en la categoria que este.
+   */
+  function filterMenu(drinks, opts) {
+    const o = opts || {};
+    const words = fold(o.search).split(/\s+/).filter(Boolean);
+    // "Todo" sigue el orden de las pestanas: los drinks arriba, las botellas despues.
+    const order = orderCategories((drinks || []).map((d) => d.category));
+    const rank = new Map(order.map((c, i) => [c, i]));
+    const pos = (d) => (rank.has(d.category) ? rank.get(d.category) : order.length);
+    return (drinks || []).map((d, i) => [d, i])
+      .sort((a, b) => (pos(a[0]) - pos(b[0])) || (a[1] - b[1]))
+      .map(([d]) => d)
+      .filter((d) => {
+      if (words.length) {
+        const hay = fold(`${d.name} ${d.category || ''}`);
+        return words.every((w) => hay.includes(w));
+      }
+      return !o.category || d.category === o.category;
+    });
+  }
+
+  /** El ultimo pedido que vale la pena repetir: con renglones y que no se cancelo. */
+  function lastRepeatable(orders) {
+    return (orders || []).find((o) => o && o.status !== 'cancelled'
+      && Array.isArray(o.items) && o.items.some((i) => i.drink_id && Number(i.quantity) > 0)) || null;
+  }
+
   return {
+    orderCategories, filterMenu, lastRepeatable, CATEGORY_ORDER,
     createCart, orderLabel, orderProgress, isOpenOrder, groupFloorPlan,
     tableIsFull, tableIsSelectable, seatedCount, myTable, floorLabel, applyEvent,
     toCents, fromCents,

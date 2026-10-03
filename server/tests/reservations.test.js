@@ -166,11 +166,12 @@ describe('Disponibilidad y cotización', () => {
     }
   });
 
-  it('exige la anticipación mínima', async () => {
+  it('ya no exige anticipación: una hora antes de abrir hay disponibilidad', async () => {
+    // Regla quitada el 2026-09-21: solo una noche que terminó deja de ofrecer mesas.
     const soon = (await makeEvent({ hoursAhead: 1, name: 'Hoy mismo' })).body.event;
     const res = await api().get(url(`/reservations/availability?event_id=${soon.id}&guests=10`))
       .set(auth(guest));
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(200);
   });
 });
 
@@ -233,10 +234,10 @@ describe('Reserva', () => {
     expect(res.status).toBe(422);
   });
 
-  it('rechaza sin la anticipación mínima', async () => {
+  it('ya no rechaza por anticipación: una hora antes de abrir se reserva', async () => {
     const soon = (await makeEvent({ hoursAhead: 1, name: 'Hoy mismo' })).body.event;
     const res = await book({ event_id: soon.id });
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(201);
   });
 
   it('cuenta el uso del código de descuento', async () => {
@@ -450,5 +451,92 @@ describe('Métodos de pago', () => {
     const res = await api().delete(`/api/me/payment-methods/${create.body.payment_method.id}`)
       .set(auth(other));
     expect(res.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------- reservar con el evento en curso
+
+describe('Las reservaciones ya no cierran antes de abrir', () => {
+  // Hasta el 2026-09-21 cerraban 2 horas antes de abrir. El dueño quitó esa regla:
+  // se reserva siempre, incluso con el evento en curso, mientras nadie más tenga la
+  // mesa. Las reglas del club de estas pruebas siguen diciendo 2 horas a propósito:
+  // la columna ya no manda.
+
+  /** Una noche que abrió hace `hace` horas y cierra en `cierra` horas. */
+  async function nocheEnCurso({ hace = 3, cierra = 3 } = {}) {
+    const doors = new Date(Date.now() - hace * 3_600_000);
+    const closes = new Date(Date.now() + cierra * 3_600_000);
+    const { rows } = await pool.query(
+      `INSERT INTO events_calendar (nightclub_id, name, slug, event_date, doors_open_at, closes_at,
+                                    ticket_price, currency, status, arrival_deadline_minutes)
+       VALUES ($1,'Noche en curso',$2,$3::date,$4,$5,250,'MXN','published',120)
+       RETURNING *`,
+      [club.id, `en-curso-${randomUUID().slice(0, 8)}`, doors.toISOString().slice(0, 10),
+        doors.toISOString(), closes.toISOString()]);
+    return rows[0];
+  }
+
+  it('una hora antes de abrir ya NO está cerrado', async () => {
+    const pronto = (await makeEvent({ hoursAhead: 1, name: 'En una hora' })).body.event;
+    const res = await book({ event_id: pronto.id });
+    expect(res.status).toBe(201);
+  });
+
+  it('con el evento en curso se ve la disponibilidad y se reserva', async () => {
+    const noche = await nocheEnCurso();
+    const disp = await api().get(url(`/reservations/availability?event_id=${noche.id}&guests=10`))
+      .set(auth(guest));
+    expect(disp.status).toBe(200);
+    expect(disp.body.tables.map((t) => t.id)).toContain(azul.id);
+    expect((await book({ event_id: noche.id })).status).toBe(201);
+  });
+
+  it('pero la mesa que ya reservó alguien más no se ofrece ni se puede tomar', async () => {
+    const noche = await nocheEnCurso();
+    expect((await book({ event_id: noche.id }, other)).status).toBe(201);
+    const disp = await api().get(url(`/reservations/availability?event_id=${noche.id}&guests=10`))
+      .set(auth(guest));
+    expect(disp.body.tables.map((t) => t.id)).not.toContain(azul.id);
+    expect((await book({ event_id: noche.id })).status).toBe(409);
+  });
+
+  it('quien reserva con el evento en curso NO nace vencido', async () => {
+    // Con la hora límite fija de la noche (abrir + 2 h, ya pasada), el repaso de "no
+    // llegó" lo marcaba no_show en el acto y se quedaba con su anticipo.
+    const noche = await nocheEnCurso({ hace: 3, cierra: 4 });
+    const res = await book({ event_id: noche.id });
+    expect(res.status).toBe(201);
+    const limite = new Date(res.body.reservation.arrival_deadline);
+    expect(limite.getTime()).toBeGreaterThan(Date.now() + 100 * 60_000);
+
+    const repaso = await api().post(url('/reservations/release-no-shows')).set(auth(hostess))
+      .send({ event_id: noche.id });
+    expect(repaso.body.released).toBe(0);
+  });
+
+  it('la hora límite nunca pasa del cierre de la noche', async () => {
+    const noche = await nocheEnCurso({ hace: 5, cierra: 1 });
+    const res = await book({ event_id: noche.id });
+    expect(new Date(res.body.reservation.arrival_deadline).getTime())
+      .toBeLessThanOrEqual(new Date(noche.closes_at).getTime());
+  });
+
+  it('una noche que ya terminó sí cierra, y lo dice', async () => {
+    const acabada = await nocheEnCurso({ hace: 9, cierra: -1 });
+    const res = await book({ event_id: acabada.id });
+    expect(res.status).toBe(422);
+    expect(res.body.error.message).toMatch(/ya terminó/);
+  });
+
+  it('la lista de próximas noches incluye la que está en curso', async () => {
+    const noche = await nocheEnCurso();
+    const res = await api().get(url('/events?upcoming=true')).set(auth(guest));
+    expect(res.body.events.map((e) => e.id)).toContain(noche.id);
+  });
+
+  it('el gerente ya no puede poner la regla vieja: se ignora', async () => {
+    await api().put(url('/reservations/rules')).set(auth(manager)).send({ min_advance_hours: 48 });
+    const pronto = (await makeEvent({ hoursAhead: 1, name: 'En una hora' })).body.event;
+    expect((await book({ event_id: pronto.id })).status).toBe(201);
   });
 });

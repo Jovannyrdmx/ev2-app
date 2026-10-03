@@ -34,5 +34,19 @@
   /** Si a este usuario hay que pedirle el cambio antes de dejarlo trabajar. */
   const isRequired = (user) => Boolean(user && user.must_change_password);
 
-  return { MIN_LENGTH, validate, isRequired };
+  /**
+   * Lo mismo, pero del PIN (D46).
+   *
+   * El cambio de PIN NO se hace aquí: el teclado de seis dígitos vive en la pantalla de
+   * acceso y repetirlo en las siete pantallas de personal sería repetir siete veces algo
+   * que hay que arreglar en un solo sitio. Lo que hacen estas pantallas es reconocerlo y
+   * mandar a la persona a donde está el teclado — si no, el servidor le bloquea todas
+   * las rutas y ve errores sin explicación en cada llamada.
+   */
+  const mustChangePin = (user) => Boolean(user && user.must_change_pin);
+
+  /** Dónde está el teclado. Es una constante para que las siete pantallas no la inventen. */
+  const PIN_PAGE = 'index.html';
+
+  return { MIN_LENGTH, validate, isRequired, mustChangePin, PIN_PAGE };
 }));

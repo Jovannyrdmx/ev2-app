@@ -43,7 +43,10 @@ describe('Menú', () => {
   });
 
   it('con available_only oculta lo agotado y lo no disponible', async () => {
-    await pool.query('UPDATE inventory SET quantity = 0 WHERE drink_id = $1', [cocktail.id]);
+    // Agotar de verdad: se vacía el insumo del que sale, no un contador del producto.
+    await pool.query(
+      `UPDATE supply_stock SET stock = 0 WHERE supply_id = (
+         SELECT supply_id FROM drink_supplies WHERE drink_id = $1)`, [cocktail.id]);
     const res = await api().get(url('/drinks?available_only=true')).set(auth(guest));
     expect(res.body.drinks.map((d) => d.name)).toEqual(['Cerveza nacional']);
   });
@@ -68,16 +71,20 @@ describe('Menú', () => {
 });
 
 describe('Alta y edición de bebidas', () => {
-  it('el gerente crea una bebida con existencias iniciales', async () => {
+  it('el gerente crea una bebida, y nace SIN existencia inventada', async () => {
     const res = await api().post(url('/drinks')).set(auth(manager)).send({
-      name: 'Mezcal', category: 'shot', price: 85, initial_stock: 30,
+      name: 'Mezcal', category: 'shot', price: 85,
     });
     expect(res.status).toBe(201);
     expect(res.body.drink.name).toBe('Mezcal');
 
-    const { rows } = await pool.query(
-      'SELECT quantity FROM inventory WHERE drink_id = $1', [res.body.drink.id]);
-    expect(Number(rows[0].quantity)).toBe(30);
+    // Un producto recién creado no tiene receta, así que no se le lleva existencia.
+    // Teclear un saldo inicial al darlo de alta era la forma de meter un número sin
+    // respaldo al sistema.
+    const list = await api().get(url('/drinks?category=shot')).set(auth(manager));
+    const mezcal = list.body.drinks.find((d) => d.id === res.body.drink.id);
+    expect(mezcal.stock).toBeNull();
+    expect(mezcal.stock_tracked).toBe(false);
   });
 
   it('un bartender no puede crear bebidas', async () => {
@@ -114,34 +121,25 @@ describe('Alta y edición de bebidas', () => {
 });
 
 describe('Inventario', () => {
-  it('el bartender lo consulta y ve primero lo que está bajo mínimo', async () => {
-    const res = await api().get(url('/inventory')).set(auth(bartender));
-    expect(res.status).toBe(200);
-    expect(res.body.inventory[0].name).toBe('Margarita'); // stock 2 < umbral 5
+  // El inventario por producto se fue en la migración 018: la existencia vive en el
+  // insumo y estas rutas ya no existen. Lo que queda aquí es que el catálogo siga
+  // diciendo la verdad sobre lo que alcanza; el inventario en sí se prueba entero en
+  // `inventory.test.js`.
+  it('la carta dice cuántos alcanzan según la receta', async () => {
+    const res = await api().get(url('/drinks?category=beer')).set(auth(guest));
+    const cerveza = res.body.drinks.find((d) => d.id === beer.id);
+    expect(cerveza.stock_tracked).toBe(true);
+    expect(cerveza.stock).toBe(20);
   });
 
-  it('un cliente no puede verlo', async () => {
-    expect((await api().get(url('/inventory')).set(auth(guest))).status).toBe(403);
+  it('lo que está bajo mínimo viene marcado', async () => {
+    const res = await api().get(url('/drinks')).set(auth(guest));
+    const margarita = res.body.drinks.find((d) => d.name === 'Margarita');
+    expect(margarita.low_stock).toBe(true); // 2 en existencia, mínimo 5
   });
 
-  it('el gerente ajusta existencias', async () => {
-    const res = await api().put(url(`/inventory/${beer.id}`)).set(auth(manager))
-      .send({ quantity: 5, low_stock_threshold: 10 });
-    expect(res.status).toBe(200);
-    expect(Number(res.body.inventory.quantity)).toBe(5);
-
-    const list = await api().get(url('/drinks?category=beer')).set(auth(guest));
-    expect(list.body.drinks[0].low_stock).toBe(true);
-  });
-
-  it('el bartender no puede ajustar existencias', async () => {
-    const res = await api().put(url(`/inventory/${beer.id}`)).set(auth(bartender)).send({ quantity: 0 });
-    expect(res.status).toBe(403);
-  });
-
-  it('rechaza cantidades negativas', async () => {
-    const res = await api().put(url(`/inventory/${beer.id}`)).set(auth(manager)).send({ quantity: -1 });
-    expect(res.status).toBe(400);
+  it('las rutas viejas de inventario por producto ya no existen', async () => {
+    expect((await api().get(url('/inventory')).set(auth(bartender))).status).toBe(404);
   });
 });
 
@@ -233,5 +231,41 @@ describe('Club', () => {
 
     const barra = await api().get(url('/sync/events?since_id=0')).set(auth(bartender));
     expect(barra.body.events.filter((e) => e.type === 'order_created')).toHaveLength(1);
+  });
+});
+
+describe('Vitrina pública (D74)', () => {
+  const showcase = (slug) => api().get(`/api/nightclubs/by-slug/${slug}/showcase`);
+
+  it('enseña la carta y las noches publicadas sin pedir cuenta', async () => {
+    await pool.query(
+      `INSERT INTO events_calendar (nightclub_id, name, event_date, doors_open_at, ticket_price, status)
+       VALUES ($1,'Viernes',CURRENT_DATE + 2, now() + interval '2 days',150,'published'),
+              ($1,'Borrador',CURRENT_DATE + 3, now() + interval '3 days',150,'draft')`, [club.id]);
+    const res = await showcase('ev2-cat');
+    expect(res.status).toBe(200);
+    expect(res.body.nightclub.slug).toBe('ev2-cat');
+    expect(res.body.drinks.map((d) => d.name).sort()).toEqual(['Cerveza nacional', 'Margarita']);
+    expect(res.body.events.map((e) => e.name)).toEqual(['Viernes']);
+  });
+
+  it('no dice cuánto queda: la existencia no es pública', async () => {
+    const res = await showcase('ev2-cat');
+    for (const d of res.body.drinks) {
+      expect(d).not.toHaveProperty('stock');
+      expect(d).not.toHaveProperty('low_stock');
+    }
+    expect(res.body.events.every((e) => !('reservations_count' in e))).toBe(true);
+  });
+
+  it('lo dado de baja o no disponible no se anuncia', async () => {
+    await pool.query('UPDATE drinks SET active = false WHERE id = $1', [beer.id]);
+    await pool.query('UPDATE drinks SET available = false WHERE id = $1', [cocktail.id]);
+    const res = await showcase('ev2-cat');
+    expect(res.body.drinks).toEqual([]);
+  });
+
+  it('un club que no existe es 404', async () => {
+    expect((await showcase('no-existe')).status).toBe(404);
   });
 });

@@ -36,9 +36,6 @@ function parseArgs(argv) {
   return { slug: i >= 0 ? argv[i + 1] : 'ev2' };
 }
 
-/** How much stock a brand-new product starts with, so the first night can be sold. */
-const STARTING_STOCK = (category) => (category === 'Botellas' ? 12 : 100);
-
 async function loadMenu({ slug = 'ev2', menuPath = MENU_PATH } = {}) {
   const menu = JSON.parse(fs.readFileSync(menuPath, 'utf8'));
   const currency = menu.currency || 'MXN';
@@ -67,14 +64,13 @@ async function loadMenu({ slug = 'ev2', menuPath = MENU_PATH } = {}) {
       );
       // `available` is the bar's switch for "we ran out tonight" and belongs to whoever
       // is behind the bar: re-running this file must not silently put back on the menu
-      // something they just marked as finished. Only a brand-new product gets stock.
-      if (rows[0].inserted) {
-        await client.query(
-          `INSERT INTO inventory (drink_id, quantity, unit, low_stock_threshold)
-           VALUES ($1,$2,'unit',5) ON CONFLICT (drink_id) DO NOTHING`,
-          [rows[0].id, STARTING_STOCK(item.category)],
-        );
-      }
+      // something they just marked as finished.
+      //
+      // No stock is created here. This used to give every new product 12 (bottles) or
+      // 100 (everything else) so the first night could be sold, and those numbers then
+      // sat on screen looking measured. Since migration 018 stock belongs to supplies
+      // and arrives only through a goods receipt or a physical count; a product with no
+      // recipe simply has no stock control, which is the truth.
     }
 
     const posIds = menu.items.map((i) => i.pos_id);

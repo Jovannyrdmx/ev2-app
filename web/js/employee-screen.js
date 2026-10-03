@@ -5,9 +5,13 @@
  * `EV2Roles`. Aquí un error se paga en confianza: enseñar como disponible un dinero
  * que todavía no lo está, o dejar pedir un retiro que el servidor va a rechazar.
  */
-/* global EV2, EV2Format, EV2Earnings, EV2Roles, EV2PasswordGate, EV2Songs, EV2Shift */
+/* global EV2, EV2Format, EV2Earnings, EV2Roles, EV2PasswordGate, EV2Songs, EV2Shift, EV2Roster */
 (function () {
   'use strict';
+  // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
+  const ask = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.confirm(text, opts) : Promise.resolve(window.confirm(text)));
+
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -29,6 +33,8 @@
     employee: null, balances: [], movements: [], byType: [],
     accounts: [], withdrawals: [], openWithdrawal: null,
     songs: [], shifts: [], drinks: [], realtime: null,
+    // El lugar que le toca esta noche, puesto por el gerente (migracion 023).
+    myAssignments: [],
   };
 
   const isDj = () => (api.session.user && api.session.user.role) === 'dj';
@@ -118,6 +124,12 @@
   };
 
   async function afterSignIn() {
+    // El PIN se cambia donde está el teclado, no aquí (D46): mientras no lo cambie, el
+    // servidor le bloquea todas las rutas y esta pantalla solo sabría dar errores.
+    if (EV2PasswordGate.mustChangePin(api.session.user)) {
+      location.href = EV2PasswordGate.PIN_PAGE;
+      return;
+    }
     if (EV2PasswordGate.isRequired(api.session.user)) { showPasswordGate(); return; }
     const role = api.session.user && api.session.user.role;
     if (!EMPLOYEE_ROLES.includes(role)) {
@@ -176,6 +188,9 @@
         : Promise.resolve(),
       get(`/nightclubs/${clubId()}/staff/me/drinks?limit=30`,
         (d) => { state.drinks = d.staff_drinks || []; }),
+      // El lugar de esta noche. Va en el mismo lote: es lo primero que la persona
+      // necesita al llegar, y pedirlo despues haria que la linea aparezca tarde.
+      loadMyAssignments(),
     ]);
     // El panel trae el retiro abierto, pero el historial es la fuente más fresca.
     state.openWithdrawal = EV2Earnings.openWithdrawal(state.withdrawals) || state.openWithdrawal;
@@ -229,6 +244,40 @@
     // por la que puede pasar una noche entera sin una sola propina.
     $('shift-note').textContent = head.vars ? t(head.key, head.vars) : t(head.key);
     $('shift-note').style.color = open ? 'rgba(255,255,255,.5)' : 'var(--ev2-gold)';
+
+    renderMySpot();
+  }
+
+  /**
+   * El lugar que le toca esta noche, puesto por el gerente.
+   *
+   * Se enseña al llegar, antes de abrir turno: antes de esto la persona teclaba su
+   * zona de memoria, y así es como alguien acaba cobrando las propinas de otra
+   * sección. Si no hay asignación, la línea no aparece -- no todos los puestos se
+   * acomodan por noche, y una raya permanente sería ruido.
+   */
+  function renderMySpot() {
+    const el = $('mine-spot');
+    if (!el) return;
+    const mio = EV2Roster.describeMine(state.myAssignments, { lang: lang() });
+    if (!mio) { el.hidden = true; return; }
+    el.textContent = t('mine.assigned', { targets: mio.text });
+    el.style.color = 'var(--ev2-cyan)';
+    el.hidden = false;
+  }
+
+  /** A qué quedó asignada esta persona. Solo lo suyo: la ruta no devuelve más. */
+  async function loadMyAssignments() {
+    const club = api.session.user && api.session.user.nightclub_id;
+    if (!club) return;
+    try {
+      const data = await api.get(`/nightclubs/${club}/roster/mine`);
+      state.myAssignments = data.assignments || [];
+    } catch {
+      // Sin asignación el portal funciona igual: es una línea de más, no la
+      // pantalla.
+      state.myAssignments = [];
+    }
   }
 
   $('btn-shift').onclick = async () => {
@@ -292,10 +341,10 @@
       const decline = document.createElement('button');
       decline.className = 'card rounded-lg py-2 text-sm text-red-300';
       decline.textContent = t('drink.decline');
-      decline.onclick = () => {
+      decline.onclick = async () => {
         // Rechazar NO lo cancela: ya se le cobró al cliente y vuelve a su mesa (D20).
         // Quien rechaza tiene derecho a hacerlo, pero debe saber qué pasa del otro lado.
-        if (!window.confirm(`${t('drink.declineNote')}\n\n${t('drink.confirmDecline')}`)) return;
+        if (!(await ask(`${t('drink.declineNote')}\n\n${t('drink.confirmDecline')}`))) return;
         answerDrink(drink, 'decline', 'drink.declined', decline);
       };
       row.appendChild(decline);
@@ -543,7 +592,7 @@
   };
 
   async function removeAccount(accountId) {
-    if (!window.confirm(t('earn.confirmDeleteAccount'))) return;
+    if (!(await ask(t('earn.confirmDeleteAccount'), { danger: true }))) return;
     try {
       await api.del(`/employees/me/bank-accounts/${accountId}`);
       await loadAll();

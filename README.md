@@ -61,16 +61,122 @@ docker compose --env-file .env -f deploy/docker-compose.yml up --build -d
 docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed
 docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed:floor
 docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed:prices
+docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed:menu
+docker compose --env-file .env -f deploy/docker-compose.yml exec api npm run seed:supplies
 ```
 
 > `seed:prices` no es opcional: carga el precio de cada zona. Sin el, la pantalla de
 > reservacion no encuentra ninguna mesa con precio y no se puede reservar nada.
+>
+> `seed:menu` carga la carta real del club (129 productos) y `seed:supplies` el almacen:
+> los 3 lugares (almacen y las dos barras), los 88 insumos, las 129 recetas y un punto de
+> entrega con QR por cada mesa, mas la pista y la terraza. **No carga ninguna
+> existencia**: el saldo entra por una recepcion de mercancia o por un conteo fisico
+> desde `almacen.html`, nunca de una semilla. Un inventario que arranca con numeros
+> inventados miente desde el primer dia.
+
+### Volver a exportar el catalogo desde la caja
+
+Cuando el club cambie precios o recetas en SoftRestaurant11, se exportan las tablas
+`productos` y `recetas` a `.xls` y se regeneran los tres archivos de semilla:
+
+```bash
+pip install xlrd
+python3 server/scripts/import-sr11-catalog.py productos.xls recetas.xls
+npm --prefix server run seed:menu && npm --prefix server run seed:supplies
+```
+
+El script imprime que precios se unificaron entre barras (se toma **el mayor**) y que
+presentaciones quedaron **por confirmar**. Las reglas de conversion -entre ellas que
+**una onza son 30 ml**, que es como sirve la barra- estan explicadas en la cabecera del
+propio script.
 
 Abre **http://localhost:8080**. El contenedor `web` sirve la pagina y reenvia `/api` a la
 API y `/ws` al servidor de tiempo real, asi que todo va por un solo origen.
 
 Entra con `guest@ev2.local` y la contrasena que pusiste en `SEED_PASSWORD`. Para ver el
 pedido avanzar solo, abre otra ventana con `bartender@ev2.local` (paso 5.7).
+
+### Pantallas por rol
+
+| Rol | Pantalla | Que hace ahi |
+|---|---|---|
+| Cliente | `index.html` | Mapa, carta, pedidos, reservacion, propinas, pase de entrada. |
+| Mesero | `staff.html` | Levanta el pedido en la mesa o en la pista, cobra en efectivo o terminal, recibe los listos y confirma la entrega. |
+| Barra | `bartender.html` | La cola **de su barra**, ordenada por hora de pago; puede reacomodarla por eficiencia sin tocar la auditoria. |
+| Almacen | `almacen.html` | Entradas, surtido a las barras, mermas, cortesias, salidas y conteo fisico, con kardex. |
+| Gerente | `manager.html` | Precios, plano, empleados, caja del turno, reportes y moderacion. |
+| Puerta | `staff.html` | Revisa la identificacion, escanea el pase de cada invitado, vende acceso general y extras, emite pases de contingencia y lleva el aforo. |
+| Invitado sin cuenta | `pase.html` | El pase que le llego por WhatsApp: su QR, su codigo y la mesa. Publico, sin sesion. |
+| Verificar constancia | `verificar.html` | Comprueba un folio de salida segura. Publico, sin sesion. |
+
+### Probar el flujo completo del inventario
+
+Con la app arriba y el almacen cargado:
+
+1. Entra como **almacen** o gerente en `almacen.html`, elige un insumo y registra una
+   **entrada** en cajas con el costo de la factura.
+2. **Surte** la barra que corresponda (pestana *Surtir*: lista lo que esta bajo minimo y
+   si alcanza con lo que hay en el almacen).
+3. Entra como **mesero** en `staff.html`, levanta un pedido en una mesa y cobralo.
+4. Entra como **barra** en `bartender.html`: el pedido aparece en la cola **de esa barra**
+   y no en la otra.
+5. Vuelve a `almacen.html`: el kardex muestra el consumo, con el saldo que quedo en ese
+   estante y contra que pedido salio.
+
+### Probar el flujo completo de la entrada
+
+1. Reserva una mesa para 4 desde `index.html`. La reservacion nace con **4 pases**: el
+   tuyo y tres de invitado.
+2. Abre tu pase (boton *Ver mi pase*) y baja al bloque **Los pases de tu mesa**. Ponle
+   nombre a uno y toca **Mandar por WhatsApp**: se abre tu propia app con el mensaje y
+   el enlace ya escritos.
+3. Abre ese enlace (en otro navegador, o en modo incognito, **sin sesion**): es
+   `pase.html`, y ahi esta el QR del invitado.
+4. Entra como **puerta** en `staff.html`, pestana *Puerta*. El campo del codigo nace
+   **deshabilitado**: primero elige el documento y toca *Es mayor: continuar*. Entonces
+   se abre, con una cuenta atras de 5 minutos.
+5. Escanea o teclea el codigo del invitado. Entra **una** persona; el mismo codigo una
+   segunda vez dice *ese pase ya se uso*, y los otros tres siguen sirviendo.
+6. Prueba el rechazo: toca *No pasa* -> *Menor de edad*. Queda registrado y el pase
+   **sigue vivo**; desde el telefono del titular se puede **reasignar** a otra persona,
+   lo que mata el codigo viejo y emite uno nuevo.
+7. Prueba la contingencia: en *Llego sin su codigo*, busca por nombre, escribe un motivo
+   y emite el pase. Vale una vez y vence a los 45 minutos.
+8. En `manager.html` -> *Inventario* y en el historial de cada pase queda quien reviso la
+   identificacion, quien dejo entrar y a que hora.
+
+> El QR **no lleva ningun dato de la persona**: un codigo aleatorio y una firma. Y la
+> revision de identificacion **no guarda** el numero del documento ni la fecha de
+> nacimiento; solo que se enseño una INE y que era mayor de edad.
+
+### Subirlo al servidor
+
+`docs/PONER-EN-LINEA.md` es la lista de una sola pasada para dejarlo en linea: que
+subir, que correr, que hay que ver en cada paso, y **las dos cosas que estan fuera del
+servidor** (el cortafuegos del proveedor, que no es `ufw`, y la copia que guarda el
+navegador). `docs/DESPLIEGUE.md` es la referencia completa.
+
+### Cuando algo no funciona en el servidor
+
+Dos herramientas, y conviene usarlas en este orden:
+
+```bash
+# 1. Que eslabon esta roto. Recorre configuracion, contenedores, la API, el proxy
+#    interno, Caddy, los puertos y las cuentas, y se detiene a explicar el primero
+#    que falla. No cambia nada.
+bash docs/api/diagnostico-vps.sh
+
+# 2. Que la ENTRADA funciona de verdad, de punta a punta, contra la API viva.
+SEED_PASSWORD=... bash docs/api/smoke-test-puerta.sh
+
+# 3. Lo mismo para el inventario.
+SEED_PASSWORD=... bash docs/api/smoke-test-inventario.sh
+```
+
+El chequeo de salud responde en **`/health`** (lo que mira Docker desde adentro) y en
+**`/api/health`** (lo unico que el proxy reenvia desde fuera, y por lo tanto la unica
+direccion que sirve para vigilar el servidor o para comprobarlo con `curl`).
 
 > `ALLOWED_ORIGINS` **tiene que incluir el origen desde el que abres la pagina**, aunque
 > la API vaya detras del mismo proxy: el navegador manda la cabecera `Origin` tambien en

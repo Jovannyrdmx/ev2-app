@@ -30,10 +30,26 @@
    * `requiresReference` es lo que hace auditable el corte: sin el folio del voucher, un
    * cobro con terminal es la palabra del mesero contra el estado de cuenta del banco.
    */
+  /**
+   * Cómo se cobra en la mesa.
+   *
+   * `mercadopago_point` no es un pago manual como los otros dos: no registra dinero que
+   * ya cambió de manos, sino que le dice a la terminal del club que cobre (D47). Por eso
+   * no pide folio — no hay nada que teclear — y por eso `isTerminal` existe: la pantalla
+   * tiene que mandarlo por otra ruta y quedarse esperando la tarjeta.
+   *
+   * Vive en la MISMA lista que efectivo y terminal-del-banco a propósito. Para el mesero
+   * es la misma pregunta de siempre —¿con qué me paga?— y partirla en dos botones en
+   * pantallas distintas sería inventar una diferencia que al cliente no le importa.
+   */
   const METHODS = [
-    { key: 'cash', requiresReference: false },
-    { key: 'card_terminal', requiresReference: true },
+    { key: 'cash', requiresReference: false, isTerminal: false },
+    { key: 'mercadopago_point', requiresReference: false, isTerminal: true },
+    { key: 'card_terminal', requiresReference: true, isTerminal: false },
   ];
+
+  /** Si ese método lo cobra la terminal por su cuenta en vez de registrarse a mano. */
+  const isTerminalMethod = (key) => Boolean((METHODS.find((m) => m.key === key) || {}).isTerminal);
 
   const methodKeys = () => METHODS.map((m) => m.key);
   const methodFor = (key) => METHODS.find((m) => m.key === key) || null;
@@ -67,16 +83,43 @@
         || String(a.code).localeCompare(String(b.code), 'es', { numeric: true }));
   }
 
-  /** Lo que se manda al crear el pedido. `on_behalf_of` solo si hay cliente identificado. */
-  function orderPayload({ tableId, guestId, cart, requestId }) {
+  /**
+   * A donde se lleva, cuando no es una mesa.
+   *
+   * En la pista nadie tiene mesa: el cliente esta bailando y el mesero necesita un
+   * lugar concreto al que llegar. Los puntos ("Pista A", "Terraza") los configura la
+   * gerencia y cada uno tiene su QR pegado en una columna.
+   *
+   * La barra queda fuera a proposito (`client_selectable: false`): en esta primera
+   * version el club no quiere gente amontonada en la barra esperando su trago. El
+   * mesero si puede usarla, porque la venta en barra se entrega ahi mismo.
+   */
+  function deliveryPoints(points, { forStaff = false } = {}) {
+    return (points || [])
+      .filter((p) => p && p.active !== false && p.kind !== 'table')
+      .filter((p) => forStaff || p.client_selectable !== false)
+      .map((p) => ({ id: p.id, name: p.name, kind: p.kind, floor: p.floor || null }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es', { numeric: true }));
+  }
+
+  /**
+   * Lo que se manda al crear el pedido. `on_behalf_of` solo si hay cliente
+   * identificado; `delivery_point_id` solo cuando no se entrega en una mesa.
+   *
+   * Nunca los dos: una mesa YA es un punto de entrega, y mandar los dos deja al mesero
+   * con dos direcciones distintas para la misma charola.
+   */
+  function orderPayload({ tableId, guestId, cart, requestId, deliveryPointId, barLocationId }) {
     const body = {
       client_request_id: requestId,
-      table_id: tableId,
       items: (cart || []).map((line) => ({
         drink_id: line.drink.id,
         quantity: line.quantity,
       })),
     };
+    if (tableId) body.table_id = tableId;
+    else if (deliveryPointId) body.delivery_point_id = deliveryPointId;
+    if (barLocationId) body.bar_location_id = barLocationId;
     if (guestId) body.on_behalf_of = guestId;
     return body;
   }
@@ -105,7 +148,7 @@
    *
    * `null` significa que se puede.
    */
-  function chargeBlocker({ order, method, reference }) {
+  function chargeBlocker({ order, method, reference, terminals }) {
     if (!order || !order.transaction_id) return 'no_charge';
     if (order.payment_status === 'paid') return 'already_paid';
     const found = methodFor(method);
@@ -113,14 +156,48 @@
     if (found.requiresReference && !String(reference == null ? '' : reference).trim()) {
       return 'no_reference';
     }
+    // Cobrar con una terminal que no existe deja al mesero tocando un botón que falla
+    // desde el servidor. Si no hay ninguna dada de alta, se dice aquí.
+    if (found.isTerminal && terminals !== undefined
+      && !(terminals || []).some((t) => t && t.active !== false)) {
+      return 'no_terminal';
+    }
     return null;
   }
 
-  /** Por qué todavía no se puede mandar el pedido. `null` significa que se puede. */
-  function orderBlocker({ tableId, cart }) {
-    if (!tableId) return 'no_table';
+  /**
+   * Por qué todavía no se puede mandar el pedido. `null` significa que se puede.
+   *
+   * Hace falta UNA direccion: una mesa, un punto de la pista, o la barra en la que el
+   * cantinero esta vendiendo. Un pedido sin direccion es una charola dando vueltas.
+   */
+  function orderBlocker({ tableId, cart, deliveryPointId, barLocationId }) {
+    if (!tableId && !deliveryPointId && !barLocationId) return 'no_table';
     if (!cart || cart.length === 0) return 'empty_cart';
     return null;
+  }
+
+  /**
+   * Los pedidos que el mesero tiene que ir a ENTREGAR: los que la barra ya marco
+   * listos.
+   *
+   * Ordenados por la hora en que quedaron listos, no por la hora en que se pidieron: el
+   * trago que lleva mas tiempo en la barra es el que se esta calentando, y es el que hay
+   * que levantar primero aunque se haya pedido despues.
+   */
+  function readyToDeliver(orders, { waiterId } = {}) {
+    return (orders || [])
+      .filter((o) => o && o.status === 'ready')
+      .filter((o) => !waiterId || !o.taken_by || o.taken_by === waiterId)
+      .sort((a, b) => Date.parse(a.ready_at || a.created_at || 0)
+        - Date.parse(b.ready_at || b.created_at || 0));
+  }
+
+  /** Cuantos minutos lleva listo, esperando a que alguien lo lleve. */
+  function waitingSince(order, now) {
+    const at = Date.parse((order && (order.ready_at || order.created_at)) || 0);
+    if (!Number.isFinite(at)) return null;
+    return Math.max(0, Math.floor(((now || Date.now()) - at) / 60000));
   }
 
   /**
@@ -145,6 +222,39 @@
   }
 
   /**
+   * La venta en la barra: el cliente que llega, pide y paga ahí mismo.
+   *
+   * Es la mitad de la clientela de una barra y hasta ahora no existía en el sistema:
+   * el cantinero la servía y el trago salía del inventario sin que nadie lo registrara,
+   * o no salía en absoluto. `null` significa que se puede cobrar.
+   *
+   * No pide mesa a propósito: una venta en barra se entrega en la barra. Lo que sí pide
+   * es LA BARRA, porque de ese estante van a salir los mililitros.
+   */
+  function barSaleBlocker({ barId, cart }) {
+    if (!barId) return 'no_bar';
+    if (!cart || cart.length === 0) return 'empty_cart';
+    return null;
+  }
+
+  /**
+   * Lo que la barra puede servir AHORA: disponible y con existencia en ese estante.
+   *
+   * Un producto sin receta (`stock: null`) se vende libre: el sistema no sabe cuánto
+   * hay y decirlo es mejor que inventarlo. Lo que se esconde es lo que está en cero de
+   * verdad, porque ofrecerlo es prometer un trago que no se puede servir.
+   */
+  function sellableDrinks(drinks, { search = '' } = {}) {
+    const needle = String(search || '').trim().toLowerCase();
+    return (drinks || [])
+      .filter((d) => d && d.available !== false)
+      .filter((d) => d.stock === null || d.stock === undefined || Number(d.stock) > 0)
+      .filter((d) => !needle || String(d.name || '').toLowerCase().includes(needle))
+      .sort((a, b) => String(a.category || '').localeCompare(String(b.category || ''), 'es')
+        || String(a.name).localeCompare(String(b.name), 'es'));
+  }
+
+  /**
    * Los pedidos que el mesero tiene que ir a cobrar: los que alguien pidió desde su
    * teléfono y siguen esperando dinero. No incluye los que él mismo acaba de levantar y
    * cobrar, porque esos ya están.
@@ -162,14 +272,20 @@
     METHODS,
     methodKeys,
     methodFor,
+    isTerminalMethod,
     servableTables,
+    deliveryPoints,
     orderPayload,
     chargePayload,
     chargeBlocker,
     orderBlocker,
+    barSaleBlocker,
+    sellableDrinks,
     totalCents,
     fromCents,
     priceDrift,
     awaitingPayment,
+    readyToDeliver,
+    waitingSince,
   };
 }));

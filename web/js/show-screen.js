@@ -74,8 +74,11 @@
     renderSongs();
   }
 
+  // Antes esto tragaba el error y las cuatro listas quedaban vacías, idénticas a "no
+  // hay nadie en turno": el cliente creía que no había DJ ni bailarinas y no dejaba
+  // propina. Ahora se dice, y de una sola vez aunque fallen las cuatro.
   const loadAll = () => Promise.all([loadStaff(), loadTips(), loadSongs(), loadBoard()])
-    .catch(() => {});
+    .catch((err) => { if (ctx) ctx.showError(err); });
 
   // ---------------------------------------------------------------- personal
 

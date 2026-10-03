@@ -8,6 +8,7 @@
 
 const { ApiError } = require('../middleware/errors');
 const events = require('./events');
+const tickets = require('./tickets');
 
 const METHODS = ['cash', 'card_terminal', 'zelle', 'cash_app', 'bank_transfer', 'spei'];
 // Cash is handed over in person; the rest leave a folio in a statement, which is the
@@ -98,6 +99,16 @@ async function applySideEffects(client, tx, nightclubId) {
         WHERE id = $1 AND nightclub_id = $2 AND status = 'pending'
         RETURNING id, sender_id, table_id`,
       [tx.reference_id, nightclubId]);
+    // Y con el pedido llega la comanda a la barra (D53). Va exactamente aquí, pegada
+    // al renglón que lo confirma, por la misma razón que dice el comentario de
+    // arriba: pagar es lo que manda el trago a la barra, así que el papel que la
+    // barra lee sale del mismo acto. Ponerlo en otro lado sería inventar un segundo
+    // paso que alguien tendría que acordarse de dar.
+    if (rows[0]) {
+      await tickets.printOrder(client, {
+        nightclubId, orderId: rows[0].id, userId: tx.payer_user_id || null,
+      });
+    }
     return { reservation: null, order: rows[0] || null };
   }
 
@@ -109,7 +120,17 @@ async function applySideEffects(client, tx, nightclubId) {
  * confirmation and by a staff member registering cash already in hand, so both leave
  * exactly the same trail.
  */
-async function settle(client, { payment, reviewerId, nightclubId }) {
+/**
+ * Marca pagado un cobro del libro y suelta lo que dependía de él.
+ *
+ * `provider`/`providerRef` son para el cobro con terminal (D47): ahí no hay un gerente
+ * revisando un estado de cuenta, hay una pasarela que ya contestó, y el libro tiene que
+ * decir cuál fue y con qué folio. Sin ellos se comporta como siempre — efectivo o
+ * manual—, que es lo que usan las tres rutas que ya existían.
+ */
+async function settle(client, {
+  payment, reviewerId, nightclubId, provider = null, providerRef = null,
+}) {
   const txRes = await client.query(
     `SELECT id, type, amount::text AS amount, currency, status, reference_type, reference_id,
             payer_user_id
@@ -138,13 +159,36 @@ async function settle(client, { payment, reviewerId, nightclubId }) {
 
   await client.query(
     `UPDATE transactions
-        SET status = 'paid', provider = $2, confirmed_by = $3, confirmed_at = now(),
-            updated_at = now()
+        SET status = 'paid', provider = $2::text, confirmed_by = $3,
+            provider_ref = COALESCE($4::text, provider_ref),
+            confirmed_at = now(), updated_at = now()
       WHERE id = $1`,
-    [tx.id, CASH_METHODS.includes(payment.method) ? 'cash' : 'manual', reviewerId]);
+    [tx.id,
+      provider || (CASH_METHODS.includes(payment.method) ? 'cash' : 'manual'),
+      reviewerId, providerRef]);
 
   const { reservation, order } = await applySideEffects(client, tx, nightclubId);
-  return { tx, reservation, order };
+
+  // El recibo del dinero que acaba de entrar (D53). Va aquí y no en cada ruta porque
+  // esta función es por donde pasan los TRES caminos de cobro: el mesero cobrando en
+  // la mesa, el gerente confirmando una transferencia, y la terminal cuando la
+  // tarjeta pasa. Engancharlo en un solo lugar es lo que hace imposible que mañana se
+  // agregue un cuarto camino y se quede sin comprobante.
+  //
+  // Nunca puede tumbar el cobro: `printReceipt` encola con salvaguarda y devuelve
+  // `null` si algo falla. Un club sin impresoras cobra exactamente como antes.
+  const receipt = await tickets.printReceipt(client, {
+    nightclubId,
+    transactionId: tx.id,
+    method: payment.method,
+    // El folio del voucher. De lo que capturó quien cobró, o —cuando cobró la
+    // terminal— del folio que devolvió la pasarela, que es el mismo papel que el
+    // cliente ya tiene en la mano.
+    reference: payment.reference || providerRef || null,
+    collectedBy: reviewerId,
+  });
+
+  return { tx, reservation, order, receipt };
 }
 
 async function publishConfirmed({ nightclubId, payment, tx, reservation, order }) {

@@ -16,8 +16,13 @@ const pinoHttp = require('pino-http');
 const { errorHandler, notFoundHandler, ApiError } = require('./middleware/errors');
 
 const authRoutes = require('./routes/auth');
+const accountRoutes = require('./routes/account');
 const nightclubRoutes = require('./routes/nightclubs');
 const drinkRoutes = require('./routes/drinks');
+const inventoryRoutes = require('./routes/inventory');
+const supplierRoutes = require('./routes/suppliers');
+const receiptPhotoRoutes = require('./routes/receipts');
+const nightRoutes = require('./routes/nights');
 const orderRoutes = require('./routes/orders');
 const tableRoutes = require('./routes/tables');
 const reservationRoutes = require('./routes/reservations');
@@ -25,11 +30,15 @@ const eventRoutes = require('./routes/events');
 const flirtRoutes = require('./routes/flirts');
 const employeeRoutes = require('./routes/employees');
 const tipRoutes = require('./routes/tips');
+const lostFoundRoutes = require('./routes/lost-found');
+const shiftRoutes = require('./routes/shifts');
 const taxiRoutes = require('./routes/taxi');
 const valetRoutes = require('./routes/valet');
 const posRoutes = require('./routes/pos');
 const paymentRoutes = require('./routes/payments');
 const doorRoutes = require('./routes/door');
+const passRoutes = require('./routes/passes');
+const printingRoutes = require('./routes/printing');
 
 // The OpenAPI contract is the agreement between backend, web and mobile.
 // It is served at /api/docs; a missing file must not stop the API from starting.
@@ -80,14 +89,25 @@ function createApp() {
   }));
 
   // Health check stays outside rate limiting so monitoring never trips it.
-  app.get('/health', (req, res) => {
+  //
+  // Served at BOTH paths, and that is not redundancy for its own sake. Docker's
+  // healthcheck talks to the container directly, so `/health` is what it needs.
+  // But the proxy in front (deploy/nginx-web.conf) only forwards `/api/`, so from
+  // outside the server `/health` does not exist at all — which meant the club had
+  // no way to check whether its own API was alive through its own domain, and the
+  // monitoring the plan calls for had nothing to point at. It also made every
+  // troubleshooting instruction of the form `curl https://dominio/api/health`
+  // answer 404 and send whoever was debugging down the wrong path.
+  const health = (req, res) => {
     const body = { status: 'ok', service: 'ev2-api', timestamp: new Date().toISOString() };
     // Set by src/index.js when the process is running the event relay (D26). Absent in
     // tests, which import the app without starting the relay.
     const relay = req.app.locals.relay;
     if (relay) body.relay = relay.status();
     res.json(body);
-  });
+  };
+  app.get('/health', health);
+  app.get('/api/health', health);
 
   const generalLimiter = rateLimit({
     windowMs: 60_000,
@@ -105,29 +125,128 @@ function createApp() {
     handler: (req, res, next) => next(ApiError.tooMany('Too many attempts, try again in a minute')),
   });
 
+  // El enlace del pase que llega por WhatsApp no lleva sesión: el invitado no
+  // tiene cuenta en el club y no la va a crear en la fila. Eso lo hace la única
+  // ruta abierta que devuelve algo del club, así que se limita aparte y fuerte.
+  //
+  // 20 por minuto y por IP: de sobra para una familia que abre su enlace varias
+  // veces en el estacionamiento, y muy poco para que sirva de ariete. Los aciertos
+  // también cuentan, al contrario que en el login: aquí la petición exitosa es
+  // precisamente la que se quiere frenar cuando alguien está probando enlaces.
+  const passLimiter = rateLimit({
+    windowMs: 60_000,
+    limit: Number(process.env.PASS_RATE_LIMIT_PER_MIN || 20),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    handler: (req, res, next) => next(ApiError.tooMany()),
+  });
+
   app.use('/api', generalLimiter);
+  app.use('/api/guest-passes', passLimiter);
+  // El PIN necesita un límite MUCHO más apretado que el de la contraseña, y la razón
+  // es aritmética: seis dígitos son un millón de combinaciones, y con 40 empleados
+  // cada intento a ciegas le atina a alguien con probabilidad 1 en 25,000. Con los 10
+  // por minuto del límite normal, un solo atacante tendría ~44% de probabilidad de
+  // entrar en un día. Con 5 por minuto y el freno por club de `services/pins.js`
+  // encima, baja a ~3% y sigue bajando mientras el ataque siga.
+  //
+  // Los dos límites hacen falta: este acota a UNA conexión, y el de `pins.js` acota el
+  // total del club, que es lo único que sirve contra alguien con diez conexiones.
+  const pinLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: Number(process.env.PIN_RATE_LIMIT_PER_MIN || 5),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  });
+  app.use('/api/auth/pin-login', pinLimiter);
+  // Cambiar el PIN también se limita, y no por comodidad: como los PIN son únicos en
+  // el club, un empleado con sesión podría averiguar los de los demás probando cuáles
+  // le rechazan. Con cinco intentos por minuto eso deja de ser practicable.
+  app.use('/api/auth/pin', pinLimiter);
   app.use('/api/auth/login', authLimiter);
   app.use('/api/auth/register', authLimiter);
   app.use('/api/auth/refresh', authLimiter);
+  // Canjear el pase de mano y completar el registro social entregan una sesión, así
+  // que cuentan como intentos de acceso. El `skipSuccessfulRequests` de este limitador
+  // es justo lo que hace falta: la vuelta legítima de Facebook acierta y no gasta
+  // cupo, y solo los fallos —alguien adivinando pases— se acumulan. No se limitan
+  // `providers` ni `callback`: el callback legítimo llega desde el navegador del
+  // cliente y en la puerta del club muchos comparten una sola IP.
+  app.use('/api/auth/oauth/handoff', authLimiter);
+  app.use('/api/auth/oauth/complete', authLimiter);
+
+  // El webhook de Mercado Pago (D47). Es público y lo llama un servidor ajeno, así que
+  // sí lleva límite — pero holgado, y por una razón: Mercado Pago REINTENTA hasta que
+  // le contestamos 200. Un límite apretado convertiría un pico de cobros en un montón
+  // de notificaciones rechazadas que vuelven a llegar, que es cómo un límite pensado
+  // para proteger acaba tirando los cobros de la noche.
+  app.use('/api/payments/mercadopago/webhook', rateLimit({
+    windowMs: 60 * 1000,
+    limit: Number(process.env.MERCADOPAGO_WEBHOOK_RATE_LIMIT_PER_MIN || 300),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  }));
+
+  // El canje del código de emparejamiento (D56). Es público —quien llama todavía no
+  // tiene token, es lo que viene a pedir— y el código es corto, así que aquí sí va
+  // apretado. El freno de verdad está en la base: un código muere a los ocho intentos
+  // fallidos del club. Esto es el de antes, para que ni siquiera lleguen a contarse.
+  app.use('/api/print-agent/pair', rateLimit({
+    windowMs: 60 * 1000,
+    limit: Number(process.env.PAIRING_RATE_LIMIT_PER_MIN || 10),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  }));
+
+  // Bajar el agente desde el navegador de la barra (D57). Es público —una PC que aún
+  // no está dada de alta no tiene con qué identificarse— y son archivos de texto que
+  // salen de disco, así que el límite es holgado: dar de alta una PC son tres
+  // descargas, y el par de veces al año que se instalan cuatro seguidas no debe
+  // toparse con un 429. Apretarlo no protegería nada que importe: lo que se sirve
+  // aquí no es secreto, y el gasto real de una descarga es leer 21 KB.
+  app.use(['/api/print-agent/install.ps1', '/api/print-agent/files'], rateLimit({
+    windowMs: 60 * 1000,
+    limit: Number(process.env.AGENT_DOWNLOAD_RATE_LIMIT_PER_MIN || 30),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  }));
 
   app.use('/api/auth', authRoutes);
+  app.use('/api/auth', accountRoutes);
   app.use('/api', nightclubRoutes);
   app.use('/api', drinkRoutes);
+  app.use('/api', inventoryRoutes);
+  app.use('/api', supplierRoutes);
+  app.use('/api', receiptPhotoRoutes);
+  app.use('/api', nightRoutes);
   app.use('/api', orderRoutes);
   app.use('/api', tableRoutes);
   app.use('/api', reservationRoutes);
   app.use('/api', doorRoutes);
+  app.use('/api', passRoutes);
   app.use('/api', eventRoutes);
   app.use('/api', flirtRoutes);
   app.use('/api', employeeRoutes);
   app.use('/api', tipRoutes);
+  app.use('/api', lostFoundRoutes);
+  app.use('/api', shiftRoutes);
   app.use('/api', taxiRoutes);
   app.use('/api', valetRoutes);
   app.use('/api', posRoutes);
   app.use('/api', paymentRoutes);
+  app.use('/api', printingRoutes);
+  // El agente de impresión va aparte porque no trae sesión de persona: se
+  // identifica con su propio token y solo puede tomar trabajos de su club. Va montado
+  // en su propio prefijo y no en `/api` porque su autenticación es un `use()` sin
+  // ruta: en `/api` correría también en las direcciones que no existen.
+  app.use('/api/print-agent', printingRoutes.agentRouter);
 
   // Interactive API documentation (disable in production with SERVE_API_DOCS=false).
-  if (process.env.SERVE_API_DOCS !== 'false') {
+  // Publicar el mapa completo de los 310 endpoints y sus esquemas tiene que ser una
+  // decisión, no un olvido (D65). Antes había que APAGARLO explícitamente: un servidor
+  // recién instalado, o uno donde alguien borró la variable, quedaba con Swagger UI
+  // abierto sin sesión. Ahora hay que encenderlo: `SERVE_API_DOCS=true`.
+  if (process.env.SERVE_API_DOCS === 'true') {
     const spec = loadOpenApi();
     if (spec) {
       const swaggerUi = require('swagger-ui-express');

@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Términos del servicio — EV2 Clandestinoz</title>
+    <meta name="theme-color" content="#0a0a14">
+    <link rel="icon" href="images/favicon-32x32.png" type="image/png" sizes="32x32">
+    <meta name="description" content="Las reglas de uso de la aplicación de EV2 Clandestinoz: quién puede usarla, qué se espera de cada quien y qué pasa si no se cumple.">
+    <!--
+      La casilla del registro dice "acepto los términos" desde la primera versión, y el
+      servidor guarda la versión aceptada en `users.terms_version`. Hasta hoy ese texto
+      no existía en ninguna parte: la casilla apuntaba a nada.
+
+      La versión de este documento tiene que coincidir con `TERMS_VERSION` del `.env`
+      del servidor. Si cambia el texto, sube la versión en los dos lados, o el sistema
+      registrará como aceptada una versión que nadie leyó.
+    -->
+    <link rel="stylesheet" href="css/ev2.css">
+</head>
+<body class="text-white page-legal">
+<main class="max-w-2xl mx-auto px-5 py-10">
+
+    <header class="flex items-start justify-between gap-4 mb-6">
+        <div>
+            <p class="font-display text-xl">EV2 Clandestinoz</p>
+            <p class="text-xs text-white/40 mt-1">
+                <span data-l="es">Versión 1.0 · 28 de septiembre de 2026</span>
+                <span data-l="en" hidden>Version 1.0 · September 28, 2026</span>
+            </p>
+        </div>
+        <div class="flex gap-1 shrink-0">
+            <button type="button" data-set-lang="es"
+                    class="lang-btn on text-xs px-3 rounded-lg text-white/60">ES</button>
+            <button type="button" data-set-lang="en"
+                    class="lang-btn text-xs px-3 rounded-lg text-white/60">EN</button>
+        </div>
+    </header>
+
+    <!-- ================================================================= -->
+    <article class="doc card rounded-xl p-5" data-l="es">
+        <h1 class="font-display text-lg mb-1">Términos del servicio</h1>
+        <p class="text-white/50 text-xs mb-4">
+            Las reglas de la aplicación. La cuenta que creas se rige por esto.
+        </p>
+
+        <h2>1. Qué es esto</h2>
+        <p>
+            Esta aplicación es el servicio de <strong>EV2 Clandestinoz</strong> para sus
+            clientes: reservar mesa, pedir en la mesa, pagar, usar el valet, pedir taxi,
+            reportar un objeto perdido y —si tú lo enciendes— saludar a alguien más del club.
+        </p>
+        <p>
+            La aplicación es una herramienta del club. <strong>No sustituye al club</strong>:
+            el acceso, el consumo y la estancia se rigen por las reglas del lugar y por lo que
+            indique el personal en la puerta.
+        </p>
+
+        <h2>2. Quién puede usarla</h2>
+        <p>
+            <strong>Solo personas de 18 años o más.</strong> Al crear tu cuenta declaras que
+            los tienes. Si resultara falso, la cuenta se cancela y no hay devolución de lo
+            consumido.
+        </p>
+        <p>
+            En la puerta se revisa tu identificación. Que tengas cuenta y reservación
+            <strong>no garantiza el acceso</strong>: si no puedes acreditar que eres mayor de
+            edad, no se te deja entrar.
+        </p>
+        <p>
+            Tu cuenta es <strong>tuya y personal</strong>. No la prestes ni la compartas: lo
+            que se pida desde tu cuenta se cobra a tu cuenta.
+        </p>
+
+        <h2>3. Reservaciones, consumo y pagos</h2>
+        <ul>
+            <li>Los precios son los que la aplicación muestra al momento de pedir, en la
+                moneda que elijas. Los precios de una noche de evento pueden ser distintos y
+                se indican antes de confirmar.</li>
+            <li>Una <strong>reservación con anticipo</strong> queda confirmada cuando el pago
+                se acredita. El anticipo se abona a tu consumo de esa noche.</li>
+            <li><strong>Cancelaciones y no presentarse</strong>: las condiciones se muestran en
+                la pantalla de la reservación antes de pagar. Son las que aplican.</li>
+            <li>Un pedido <strong>ya preparado</strong> no se cancela. Si hubo un error del
+                club, se corrige en el momento con el personal.</li>
+            <li>Los cobros con tarjeta los procesa el proveedor de pagos. Si un cobro falla o
+                se duplica, avísale al personal esa misma noche: se resuelve más rápido que
+                después.</li>
+        </ul>
+
+        <h2>4. Valet</h2>
+        <p>
+            El valet recibe el vehículo con su descripción y placas, y lo entrega
+            <strong>solo</strong> contra el ticket digital o, en su defecto, comprobando la
+            identidad de quien lo reclama. El club responde por el vehículo mientras está bajo
+            su resguardo, en los términos que el propio servicio de valet indique en el
+            estacionamiento.
+        </p>
+        <p>
+            No dejes objetos de valor dentro del vehículo. La aplicación no cambia lo que el
+            servicio de valet ofrece o limita.
+        </p>
+
+        <h2>5. Taxi</h2>
+        <p>
+            El club ayuda a <strong>solicitar</strong> un taxi con conductores de confianza.
+            El viaje es entre tú y el conductor: el club no lo presta ni responde por él, y su
+            papel se limita a llamarlo, dejar constancia y darte un código de conducta que
+            puedes enseñar o compartir.
+        </p>
+
+        <h2>6. Objetos perdidos</h2>
+        <p>
+            Lo que se entrega en el club se guarda mientras haya espacio y por un tiempo
+            razonable. Para reclamar algo hay que <strong>describirlo</strong>: por eso las
+            señas de un objeto encontrado nunca se muestran públicamente. La entrega se hace
+            con el código que aparece en tu cuenta cuando el personal empareja tu reporte.
+        </p>
+
+        <h2>7. Mensajes entre clientes</h2>
+        <p>
+            Esta función viene <strong>apagada</strong>. Nadie puede escribirte hasta que la
+            enciendas, y puedes apagarla o bloquear a quien sea en cualquier momento.
+        </p>
+        <p>Está prohibido, y se sanciona con la cancelación de la cuenta:</p>
+        <ul>
+            <li>Insistir con alguien que no contesta o que te bloqueó.</li>
+            <li>Mensajes sexuales no solicitados, amenazas, insultos o acoso de cualquier tipo.</li>
+            <li>Suplantar a otra persona.</li>
+            <li>Usar el club para vender, promocionar o reclutar.</li>
+        </ul>
+        <p>
+            Los reportes se revisan. <strong>Una denuncia de acoso se atiende esa misma
+            noche</strong>, y el club puede pedirle a alguien que se retire sin devolución.
+        </p>
+
+        <h2>8. Uso indebido de la aplicación</h2>
+        <p>Tampoco se permite:</p>
+        <ul>
+            <li>Intentar entrar a la cuenta de otra persona, o a partes del sistema que no te
+                corresponden.</li>
+            <li>Automatizar pedidos o reservaciones, o hacerlos para revenderlos.</li>
+            <li>Alterar, descompilar o interferir con el funcionamiento del servicio.</li>
+        </ul>
+
+        <h2>9. Suspensión y cancelación</h2>
+        <p>
+            El club puede <strong>suspender o cancelar</strong> una cuenta que incumpla estos
+            términos, que tenga adeudos, o cuando haya una investigación de seguridad en
+            curso. Se te avisa por la aplicación.
+        </p>
+        <p>
+            Tú puedes <strong>borrar tu cuenta cuando quieras</strong> desde
+            <strong>Perfil → Borrar mi cuenta</strong>. Qué se borra y qué no, y por qué, está
+            en el <a href="privacidad.html#eliminar-datos">aviso de privacidad</a>.
+        </p>
+
+        <h2>10. Disponibilidad</h2>
+        <p>
+            Hacemos lo posible por que el servicio funcione siempre, pero puede haber cortes
+            por mantenimiento, fallas de red o del proveedor de pagos. Si la aplicación no
+            funciona una noche, <strong>el club sigue operando a la antigua</strong>: el
+            personal te atiende igual.
+        </p>
+
+        <h2>11. Cambios a estos términos</h2>
+        <p>
+            Si cambian, se sube la versión y la fecha de arriba y se te pide aceptarlos de
+            nuevo la próxima vez que entres. Seguir usando la aplicación después de aceptar
+            significa que estos términos aplican.
+        </p>
+
+        <h2>12. Ley aplicable y contacto</h2>
+        <p>
+            Estos términos se rigen por las leyes de los <strong>Estados Unidos
+            Mexicanos</strong>, y cualquier controversia se ve ante los tribunales
+            competentes del domicilio del club.
+        </p>
+        <p>
+            Para cualquier aclaración:
+            <a href="mailto:info@ev2clandestinoz.com">info@ev2clandestinoz.com</a>.
+        </p>
+
+        <p class="text-white/40 text-xs mt-8">
+            <a href="privacidad.html">Aviso de privacidad</a> ·
+            <a href="index.html">Volver a la aplicación</a>
+        </p>
+    </article>
+
+    <!-- ================================================================= -->
+    <article class="doc card rounded-xl p-5" data-l="en" hidden>
+        <h1 class="font-display text-lg mb-1">Terms of service</h1>
+        <p class="text-white/50 text-xs mb-4">
+            The rules of the app. The account you create is governed by these.
+        </p>
+
+        <h2>1. What this is</h2>
+        <p>
+            This app is <strong>EV2 Clandestinoz</strong>'s service for its customers: booking
+            a table, ordering at the table, paying, using the valet, requesting a taxi,
+            reporting a lost item, and — if you switch it on — saying hello to someone else in
+            the club.
+        </p>
+        <p>
+            The app is a tool of the club. It <strong>does not replace the club</strong>:
+            entry, service and your stay are governed by the venue's rules and by what the
+            door staff decide.
+        </p>
+
+        <h2>2. Who may use it</h2>
+        <p>
+            <strong>People aged 18 or over, only.</strong> By creating an account you declare
+            that you are. If that turns out to be false, the account is cancelled and there is
+            no refund of what was consumed.
+        </p>
+        <p>
+            Your ID is checked at the door. Having an account and a reservation
+            <strong>does not guarantee entry</strong>: if you cannot prove you are of legal
+            age, you are not let in.
+        </p>
+        <p>
+            Your account is <strong>yours and personal</strong>. Do not lend or share it:
+            whatever is ordered from your account is charged to your account.
+        </p>
+
+        <h2>3. Reservations, orders and payments</h2>
+        <ul>
+            <li>Prices are those the app shows at the moment you order, in the currency you
+                pick. Event nights may be priced differently, and that is shown before you
+                confirm.</li>
+            <li>A <strong>reservation with a deposit</strong> is confirmed once the payment
+                clears. The deposit is credited against your spend that night.</li>
+            <li><strong>Cancellations and no-shows</strong>: the conditions are shown on the
+                reservation screen before you pay. Those are the ones that apply.</li>
+            <li>An order <strong>already prepared</strong> cannot be cancelled. If the club
+                made a mistake, it is put right on the spot with the staff.</li>
+            <li>Card charges are processed by the payment provider. If a charge fails or is
+                duplicated, tell the staff the same night: it is resolved faster then than
+                later.</li>
+        </ul>
+
+        <h2>4. Valet</h2>
+        <p>
+            The valet takes the vehicle with its description and plate, and returns it
+            <strong>only</strong> against the digital ticket or, failing that, by verifying the
+            identity of whoever claims it. The club is responsible for the vehicle while it is
+            in its care, on the terms the valet service itself states in the car park.
+        </p>
+        <p>
+            Do not leave valuables in the vehicle. The app does not change what the valet
+            service offers or limits.
+        </p>
+
+        <h2>5. Taxi</h2>
+        <p>
+            The club helps you <strong>request</strong> a taxi from trusted drivers. The ride
+            is between you and the driver: the club does not provide it and is not responsible
+            for it. Its role is limited to calling one, recording it, and giving you a conduct
+            code you can show or share.
+        </p>
+
+        <h2>6. Lost and found</h2>
+        <p>
+            Items handed in are kept while there is room and for a reasonable period. To claim
+            something you have to <strong>describe it</strong>: that is why the description of
+            a found item is never shown publicly. Handover is done with the code that appears
+            in your account once staff match your report.
+        </p>
+
+        <h2>7. Messages between customers</h2>
+        <p>
+            This feature is <strong>off by default</strong>. Nobody can write to you until you
+            turn it on, and you can turn it off or block anyone at any time.
+        </p>
+        <p>The following is prohibited, and is punished by cancelling the account:</p>
+        <ul>
+            <li>Persisting with someone who does not answer or who blocked you.</li>
+            <li>Unsolicited sexual messages, threats, insults, or harassment of any kind.</li>
+            <li>Impersonating another person.</li>
+            <li>Using the club to sell, promote or recruit.</li>
+        </ul>
+        <p>
+            Reports are reviewed. <strong>A harassment report is handled the same night</strong>,
+            and the club may ask someone to leave without a refund.
+        </p>
+
+        <h2>8. Misuse of the app</h2>
+        <p>Also not allowed:</p>
+        <ul>
+            <li>Attempting to get into someone else's account, or into parts of the system
+                that are not yours.</li>
+            <li>Automating orders or reservations, or making them to resell.</li>
+            <li>Altering, decompiling or interfering with the service.</li>
+        </ul>
+
+        <h2>9. Suspension and cancellation</h2>
+        <p>
+            The club may <strong>suspend or cancel</strong> an account that breaches these
+            terms, that owes money, or where a safety investigation is under way. You are told
+            through the app.
+        </p>
+        <p>
+            You may <strong>delete your account whenever you want</strong> from
+            <strong>Profile → Delete my account</strong>. What is deleted and what is not, and
+            why, is in the <a href="privacidad.html#delete-data">privacy notice</a>.
+        </p>
+
+        <h2>10. Availability</h2>
+        <p>
+            We do what we can to keep the service running, but there can be outages from
+            maintenance, network failures or the payment provider. If the app is down one
+            night, <strong>the club carries on the old way</strong>: the staff serve you just
+            the same.
+        </p>
+
+        <h2>11. Changes to these terms</h2>
+        <p>
+            If they change, the version and date above are raised and you are asked to accept
+            them again next time you sign in. Continuing to use the app after accepting means
+            these terms apply.
+        </p>
+
+        <h2>12. Governing law and contact</h2>
+        <p>
+            These terms are governed by the laws of the <strong>United Mexican States</strong>,
+            and any dispute goes before the competent courts of the club's domicile.
+        </p>
+        <p>
+            For anything else:
+            <a href="mailto:info@ev2clandestinoz.com">info@ev2clandestinoz.com</a>.
+        </p>
+
+        <p class="text-white/40 text-xs mt-8">
+            <a href="privacidad.html">Privacy notice</a> ·
+            <a href="index.html">Back to the app</a>
+        </p>
+    </article>
+</main>
+
+<script>
+/** El cambio de idioma. Sin dependencias: esta página tiene que abrir sola. */
+(function () {
+    'use strict';
+    function poner(lang) {
+        document.documentElement.lang = lang;
+        var nodos = document.querySelectorAll('[data-l]');
+        for (var i = 0; i < nodos.length; i++) {
+            nodos[i].hidden = nodos[i].getAttribute('data-l') !== lang;
+        }
+        var b = document.querySelectorAll('[data-set-lang]');
+        for (var j = 0; j < b.length; j++) {
+            b[j].classList.toggle('on', b[j].getAttribute('data-set-lang') === lang);
+        }
+    }
+    var botones = document.querySelectorAll('[data-set-lang]');
+    for (var k = 0; k < botones.length; k++) {
+        botones[k].addEventListener('click', function () {
+            poner(this.getAttribute('data-set-lang'));
+        });
+    }
+    poner((navigator.language || 'es').toLowerCase().indexOf('en') === 0 ? 'en' : 'es');
+}());
+</script>
+</body>
+</html>

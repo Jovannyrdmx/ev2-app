@@ -20,6 +20,28 @@
 
   const EMPLOYEE_ROLES = ['waiter', 'bartender', 'hostess', 'dancer', 'dj', 'light_tech', 'valet'];
 
+  const MANAGER_ROLE = 'manager';
+
+  /**
+   * Qué roles puede dar de alta quien está viendo la pantalla.
+   *
+   * El gerente da de alta piso. Al gerente lo nombra el administrador, y a nadie más:
+   * un gerente que puede crear gerentes puede crearse un cómplice, y desde ese momento
+   * el permiso de gerente —caja, precios, retiros, nómina— ya no protege nada. El
+   * servidor lo revisa otra vez; esto solo evita ofrecer una opción que va a fallar.
+   *
+   * `admin` no aparece nunca: ese rol solo se da desde la consola del servidor
+   * (`npm run promote`), que es lo que lo hace valer algo.
+   */
+  function creatableRoles(viewerRole) {
+    return viewerRole === 'admin'
+      ? EMPLOYEE_ROLES.concat(MANAGER_ROLE)
+      : EMPLOYEE_ROLES.slice();
+  }
+
+  // Para ordenar la lista: la gerencia primero, luego el piso en su orden de siempre.
+  const ROLE_ORDER = [MANAGER_ROLE].concat(EMPLOYEE_ROLES);
+
   const text = (v) => String(v === null || v === undefined ? '' : v).trim();
 
   /**
@@ -36,8 +58,8 @@
       return person.on_shift ? 0 : 1;
     };
     const roleRank = (role) => {
-      const i = EMPLOYEE_ROLES.indexOf(role);
-      return i === -1 ? EMPLOYEE_ROLES.length : i;
+      const i = ROLE_ORDER.indexOf(role);
+      return i === -1 ? ROLE_ORDER.length : i;
     };
     return (staff || [])
       .filter((p) => p && p.id)
@@ -70,12 +92,30 @@
     const active = p.active !== false;
     return {
       canEdit: active,
-      canResetPassword: active,
+      // El personal de piso ya no tiene contraseña (D46): su cuenta nace con
+      // `password_hash` en nulo y entra solo con PIN. Ofrecer "reiniciar contraseña"
+      // ahí es ofrecer reiniciar algo que no existe.
+      canResetPassword: active && p.has_password !== false,
+      // El PIN NO sigue la regla de la contraseña de arriba, aunque se le parezca.
+      //
+      // Aquí decía `active && p.has_pin !== false`, calcado del renglón anterior. En
+      // la contraseña esa regla es correcta —reiniciar algo que no existe no
+      // significa nada—, pero en el PIN dice exactamente lo contrario de lo que hace
+      // falta: quien NO tiene PIN es justo a quien hay que asignarle uno, y el botón
+      // desaparecía precisamente ahí. Un gerente sin PIN no tenía forma de recibir
+      // uno desde el panel.
+      canResetPin: active,
+      // Y por eso el botón tiene que poder decir dos cosas distintas: "asignar" la
+      // primera vez y "reiniciar" después. Con una sola palabra, o se le ofrece
+      // reiniciar a quien no tiene nada, o se le ofrece asignar a quien ya tiene —y
+      // esta segunda invita a regenerarle el PIN a alguien que está trabajando con él.
+      hasPin: p.has_pin !== false,
       canDeactivate: active,
       canReactivate: !active,
       // Reiniciar la contraseña de quien ya la tiene pendiente no aporta nada: ya está
       // esperando a cambiarla y le daríamos una temporal nueva por gusto.
       passwordPending: Boolean(p.must_change_password),
+      pinPending: Boolean(p.must_change_pin),
     };
   }
 
@@ -122,14 +162,16 @@
    * centro nocturno, y dar de alta a un menor como personal es el peor error que
    * puede cometer esta pantalla.
    */
-  function validateEmployee(form, now) {
+  function validateEmployee(form, now, viewerRole) {
     const errors = {};
     const f = form || {};
 
     if (!text(f.first_name)) errors.first_name = 'staff.errRequired';
     if (!text(f.last_name)) errors.last_name = 'staff.errRequired';
     if (!EMAIL.test(text(f.email))) errors.email = 'staff.errEmail';
-    if (!EMPLOYEE_ROLES.includes(f.role)) errors.role = 'staff.errRole';
+    // Sin `viewerRole` la lista es la de piso: quien no dijo que es administrador no
+    // lo es, y equivocarse hacia el lado que da menos permiso es lo correcto aquí.
+    if (!creatableRoles(viewerRole).includes(f.role)) errors.role = 'staff.errRole';
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(text(f.birth_date))) {
       errors.birth_date = 'staff.errBirthDate';
@@ -192,6 +234,8 @@
 
   return {
     EMPLOYEE_ROLES,
+    MANAGER_ROLE,
+    creatableRoles,
     MIN_AGE,
     yearsSince,
     sortStaff,

@@ -5,9 +5,13 @@
  * abrir esto). Las decisiones —qué carril, qué botón, qué hace un evento— viven en
  * `bar-queue.js` y están probadas ahí.
  */
-/* global EV2, EV2Format, EV2Bar, EV2Roles, EV2PasswordGate */
+/* global EV2TerminalCharge, EV2ShiftCut, EV2, EV2Format, EV2Bar, EV2Client, EV2OrderTaking, EV2Receiving, EV2Roles, EV2PasswordGate */
 (function () {
   'use strict';
+  // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
+  const ask = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.confirm(text, opts) : Promise.resolve(window.confirm(text)));
+
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -27,8 +31,18 @@
 
   const state = {
     orders: [], lane: 'new', realtime: null, busy: new Set(), arrived: new Set(),
+    // En la PC de la barra (pantalla ancha y tactil) se ven los tres carriles a la vez,
+    // como un tablero: nada se esconde detras de una pestana (D73).
+    board: false,
     alert: true,
+    // La barra en la que esta parado el cantinero. Se recuerda en el aparato, porque
+    // el telefono de la barra de arriba es siempre el de la barra de arriba.
+    bars: [], barId: null,
+    // La venta en la barra: la carta de ESA barra y el carrito de quien esta enfrente.
+    drinks: [], sale: { open: false, cart: null, search: '', sending: false },
+    terminals: [],
   };
+  const BAR_KEY = 'ev2.bar.location';
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
   const lang = () => EV2Format.getLanguage();
@@ -91,10 +105,11 @@
     $('btn-lang').textContent = EV2Format.otherLanguage().toUpperCase();
     renderAll();
     if (!$('screen-wrong-role').hidden) renderWrongRole();
+    if (state.sale && state.sale.open) { renderSaleMethods(); renderSale(); }
     setConnection(lastConnection.on, lastConnection.key, lastConnection.vars);
   }
 
-  const PASSWORD_GATE_HIDES = ['screen-auth', 'screen-wrong-role', 'screen-bar'];
+  const PASSWORD_GATE_HIDES = ['screen-auth', 'screen-wrong-role', 'screen-bar', 'sale-sheet'];
 
   // ---------------------------------------------------------------- contraseña temporal
 
@@ -142,6 +157,12 @@
    * Se le manda a su pantalla en vez de dejarlo con una lista vacía sin explicación.
    */
   async function afterSignIn() {
+    // El PIN se cambia donde está el teclado, no aquí (D46): mientras no lo cambie, el
+    // servidor le bloquea todas las rutas y esta pantalla solo sabría dar errores.
+    if (EV2PasswordGate.mustChangePin(api.session.user)) {
+      location.href = EV2PasswordGate.PIN_PAGE;
+      return;
+    }
     if (EV2PasswordGate.isRequired(api.session.user)) { showPasswordGate(); return; }
     const role = api.session.user && api.session.user.role;
     if (!BAR_ROLES.includes(role)) {
@@ -174,18 +195,135 @@
     $('screen-wrong-role').hidden = true;
     $('screen-bar').hidden = false;
     $('me-name').textContent = (api.session.user && api.session.user.display_name) || '';
+    await loadBars();
+    await loadTerminals();
     await loadQueue();
+    // Lo pedido y todavía no surtido, para que el número del botón avise en cuanto
+    // se abre la pantalla y nadie pida dos veces lo mismo.
+    await loadMyRequests();
     connectRealtime();
     // El reloj de espera avanza solo: sin esto, "hace 2 min" se queda en 2 min toda la
     // noche y el color deja de avisar.
     setInterval(renderAll, 30000);
   }
 
+  // Tablero de tres columnas cuando cabe. `matchMedia` no existe en las pruebas.
+  const wide = typeof window.matchMedia === 'function' ? window.matchMedia('(min-width: 1024px)') : null;
+  function syncBoard() {
+    state.board = Boolean(wide && wide.matches);
+    document.body.classList.toggle('bar-board', state.board);
+  }
+  syncBoard();
+  if (wide && typeof wide.addEventListener === 'function') {
+    wide.addEventListener('change', () => { syncBoard(); renderAll(); });
+  }
+
+  /**
+   * Las terminales del club, para poder cobrar con tarjeta desde la barra.
+   *
+   * Un fallo aquí NO tumba la pantalla: sin terminales el cantinero sigue cobrando en
+   * efectivo, que es como se cobra la mayoría de las noches.
+   */
+  async function loadTerminals() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/payment-terminals`);
+      state.terminals = data.terminals || [];
+    } catch { state.terminals = []; }
+  }
+
+  /**
+   * El cuadro de la espera de la terminal. Se arma la primera vez que hace falta.
+   */
+
+  // ---------------------------------------------------------------- el corte del turno (D51)
+
+  let cutSheet = null;
+  function corte() {
+    if (!cutSheet) {
+      cutSheet = EV2ShiftCut.createSheet({
+        api,
+        clubId,
+        t,
+        money: (a) => EV2Format.money(a, 'MXN'),
+        errorMessage: (err) => EV2Format.errorMessage(err),
+        toast,
+      });
+    }
+    return cutSheet;
+  }
+
+  $('btn-cut').onclick = () => corte().open();
+
+  let terminalSheet = null;
+  function sheet() {
+    if (!terminalSheet) {
+      terminalSheet = EV2TerminalCharge.createSheet({
+        api,
+        clubId,
+        t,
+        money: (a, c) => EV2Format.money(a, c || 'MXN'),
+        errorMessage: (err) => EV2Format.errorMessage(err),
+        confirm: (texto) => ask(texto),
+        onPaid: async () => { closeSale(); await loadQueue(); },
+        onClose: async () => { await loadQueue(); },
+      });
+    }
+    return terminalSheet;
+  }
+
+  /**
+   * Las barras del club.
+   *
+   * Sin esto la pantalla mezclaba las dos colas: el cantinero de arriba veia -y podia
+   * preparar- los tragos de abajo, que salen de un estante que no tiene enfrente.
+   */
+  async function loadBars() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/supply-locations`);
+      state.bars = (data.locations || []).filter((l) => l.kind === 'bar' && l.active);
+      let saved = null;
+      try { saved = localStorage.getItem(BAR_KEY); } catch { saved = null; }
+      const known = state.bars.some((b) => b.id === saved);
+      // Con una sola barra no hay nada que elegir; con varias, la recordada, y si no
+      // ninguna: "todas" es honesto mientras nadie diga en cual esta.
+      state.barId = known ? saved : (state.bars.length === 1 ? state.bars[0].id : null);
+    } catch (err) { showError(err); }
+  }
+
+  function chooseBar(barId) {
+    state.barId = barId;
+    try {
+      if (barId) localStorage.setItem(BAR_KEY, barId);
+      else localStorage.removeItem(BAR_KEY);
+    } catch { /* navegacion privada: la eleccion vive solo en memoria */ }
+    // La carta traia las existencias de la OTRA barra: se vuelve a pedir.
+    state.drinks = [];
+    loadQueue();
+    // Y los pedidos pendientes son de ESA barra, no de la anterior.
+    loadMyRequests();
+  }
+
+  function renderBars() {
+    const holder = $('bar-chips');
+    if (!holder) return;
+    holder.hidden = state.bars.length < 2;
+    if (state.bars.length < 2) return;
+    const chips = [{ id: null, name: t('bar.allBars') }]
+      .concat(state.bars.map((b) => ({ id: b.id, name: b.name })));
+    holder.innerHTML = chips.map((c) => `
+      <button class="chip tap px-3 whitespace-nowrap ${c.id === state.barId ? 'on' : ''}"
+              data-bar="${c.id === null ? '' : escape(c.id)}">${escape(c.name)}</button>`).join('');
+    for (const button of holder.querySelectorAll('[data-bar]')) {
+      button.onclick = () => chooseBar(button.dataset.bar || null);
+    }
+  }
+
   async function loadQueue() {
     try {
       // `active=true` trae solo lo que sigue vivo en la barra; el cliente de la API no
-      // arma la query, así que va en la ruta.
-      const data = await api.get(`/nightclubs/${clubId()}/orders?active=true&limit=100`);
+      // arma la query, así que va en la ruta. `bar_id` la separa de la otra barra.
+      const bar = state.barId ? `&bar_id=${state.barId}` : '';
+      const data = await api.get(`/nightclubs/${clubId()}/orders?active=true&limit=100${bar}`);
       state.orders = data.orders || [];
       renderAll();
     } catch (err) { showError(err); }
@@ -204,13 +342,32 @@
     const oldest = EV2Bar.oldestWait(state.orders, now);
     $('stat-oldest').textContent = oldest === null ? '—' : t('bar.minutes', { n: oldest });
 
+    renderBars();
+
     document.querySelectorAll('[data-lane]').forEach((b) => {
       b.classList.toggle('active', b.dataset.lane === state.lane);
     });
 
     const lanes = EV2Bar.groupByLane(state.orders);
-    const list = lanes[state.lane] || [];
     const empty = { new: 'bar.emptyNew', prep: 'bar.emptyPrep', ready: 'bar.emptyReady' };
+
+    if (state.board) {
+      // Las tres columnas a la vez. Cada una con su conteo, para que el cantinero sepa
+      // de un vistazo si se le esta juntando trabajo en "listos" sin recoger.
+      $('lane-empty').hidden = true;
+      const titles = { new: 'bar.laneNew', prep: 'bar.lanePrep', ready: 'bar.laneReady' };
+      $('lane-list').innerHTML = `<div class="bar-columns">${EV2Bar.LANES.map((lane) => `
+        <section class="bar-column" data-column="${lane}">
+          <h2 class="bar-column-title">${escape(t(titles[lane]))}<span class="lane-count">${lanes[lane].length}</span></h2>
+          ${lanes[lane].length
+    ? lanes[lane].map((order) => card(order, now)).join('')
+    : `<p class="text-center text-white/40 text-sm py-10">${escape(t(empty[lane]))}</p>`}
+        </section>`).join('')}</div>`;
+      wireCards();
+      return;
+    }
+
+    const list = lanes[state.lane] || [];
     $('lane-empty').textContent = t(empty[state.lane]);
     $('lane-empty').hidden = list.length > 0;
 
@@ -222,12 +379,14 @@
     const minutes = EV2Bar.waitMinutes(order, now);
     const level = EV2Bar.urgency(minutes, EV2Bar.DEFAULT_THRESHOLDS);
     const action = EV2Bar.nextAction(order.status);
+    const second = EV2Bar.secondAction(order.status);
     const table = EV2Bar.destination(order);
     const busy = state.busy.has(order.id);
     const flash = state.arrived.has(order.id) ? ' just-arrived' : '';
 
     const wait = minutes === null ? ''
       : (minutes < 1 ? t('bar.justNow') : t('bar.minutes', { n: minutes }));
+    const paid = EV2Bar.isPaid(order);
 
     const who = order.recipient_name
       ? `<span class="text-pink-300"><i class="fa-solid fa-gift mr-1"></i>${escape(t('bar.gift'))}: ${escape(order.recipient_name)}</span>`
@@ -245,6 +404,8 @@
           <p class="text-xs text-white/45 mt-1">${who}</p>
           ${order.message ? `<p class="text-xs text-amber-200/80 mt-1">${escape(t('bar.note'))}: ${escape(order.message)}</p>` : ''}
           ${order.status === 'pos_error' ? `<p class="text-xs text-red-300 mt-1">${escape(t('bar.posError'))}${order.pos_error ? ` ${escape(order.pos_error)}` : ''}</p>` : ''}
+          ${paid ? '' : `<p class="text-xs text-amber-300 mt-1"><i class="fa-solid fa-hand-holding-dollar mr-1"></i>${escape(t('bar.unpaid'))}</p>`}
+          ${!state.barId && order.bar_name ? `<p class="text-[11px] text-white/35 mt-1">${escape(order.bar_name)}</p>` : ''}
         </div>
         <div class="text-right flex-none">
           <p class="text-xs ${level === 'late' ? 'text-red-300' : level === 'warn' ? 'text-amber-300' : 'text-white/50'}">${escape(wait)}</p>
@@ -252,8 +413,11 @@
         </div>
       </div>
       <div class="flex gap-2 mt-3">
-        ${action ? `<button class="ev2-button flex-1 rounded-lg" data-do="${escape(action.status)}" ${busy ? 'disabled' : ''}>${escape(t(action.key))}</button>` : ''}
+        ${action ? `<button class="${action.status === 'ready' ? 'btn-ok' : 'ev2-button'} bar-main flex-1 rounded-lg" data-do="${escape(action.status)}" ${busy || !paid ? 'disabled' : ''}>${escape(t(action.key))}</button>` : ''}
+        ${second ? `<button class="btn-secondary rounded-lg px-4 text-sm" data-do="${escape(second.status)}" ${busy || !paid ? 'disabled' : ''}>${escape(t(second.key))}</button>` : ''}
         ${EV2Bar.canCancel(order.status) ? `<button class="card rounded-lg px-4 text-sm text-red-300" data-do="cancelled" ${busy ? 'disabled' : ''}>${escape(t('bar.cancel'))}</button>` : ''}
+        <button class="card rounded-lg px-3 text-sm bar-move" data-move="up" title="${escape(t('bar.moveUp'))}" ${busy ? 'disabled' : ''}>↑</button>
+        <button class="card rounded-lg px-3 text-sm bar-move" data-move="down" title="${escape(t('bar.moveDown'))}" ${busy ? 'disabled' : ''}>↓</button>
       </div>
     </article>`;
   }
@@ -263,7 +427,37 @@
       el.querySelectorAll('[data-do]').forEach((button) => {
         button.onclick = () => advance(el.dataset.order, button.dataset.do);
       });
+      el.querySelectorAll('[data-move]').forEach((button) => {
+        button.onclick = () => move(el.dataset.order, button.dataset.move);
+      });
     });
+  }
+
+  /**
+   * Reacomodar la cola por eficiencia, sin tocar la auditoria.
+   *
+   * Lo que se manda es el orden completo del carril; el servidor solo guarda una
+   * preferencia de pantalla. La hora en que entro cada pedido y la hora en que se pago
+   * siguen intactas, que es lo que el reporte del cierre usa para decir cuanto espero
+   * de verdad cada cliente.
+   */
+  async function move(orderId, direction) {
+    const order = state.orders.find((o) => o.id === orderId);
+    const lane = state.board && order ? EV2Bar.laneOf(order.status) : state.lane;
+    const ids = EV2Bar.reorder(state.orders, lane, orderId, direction);
+    if (!ids) return;
+    // Se pinta antes de que el servidor conteste: mover una tarjeta tiene que sentirse
+    // inmediato, y si falla se recarga la cola, que es la verdad.
+    const position = new Map(ids.map((id, i) => [id, i + 1]));
+    state.orders = state.orders.map((o) => (position.has(o.id)
+      ? Object.assign({}, o, { bar_position: position.get(o.id) }) : o));
+    renderAll();
+    try {
+      await api.put(`/nightclubs/${clubId()}/orders/queue-order`, { order_ids: ids });
+    } catch (err) {
+      showError(err);
+      await loadQueue();
+    }
   }
 
   /**
@@ -273,7 +467,7 @@
    */
   async function advance(orderId, status) {
     if (state.busy.has(orderId)) return;
-    if (status === 'cancelled' && !window.confirm(t('bar.confirmCancel'))) return;
+    if (status === 'cancelled' && !(await ask(t('bar.confirmCancel'), { danger: true }))) return;
 
     state.busy.add(orderId);
     renderAll();
@@ -328,6 +522,32 @@
    * `navigator.vibrate` no existe en escritorio ni en iOS, así que la tarjeta también
    * destella — el aviso no puede depender de una sola vía.
    */
+  /**
+   * Un tono corto. La PC de la barra no vibra, y su bocina, si la tiene, se oye a un
+   * metro aunque la musica este alta. Si el navegador no deja sonar (sin un toque
+   * previo en la pagina) no pasa nada: queda el destello y el aviso.
+   */
+  let audio = null;
+  function beep() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      audio = audio || new Ctx();
+      const now = audio.currentTime;
+      [0, 0.18].forEach((delay) => {
+        const osc = audio.createOscillator();
+        const gain = audio.createGain();
+        osc.frequency.value = 1320;
+        gain.gain.setValueAtTime(0.0001, now + delay);
+        gain.gain.exponentialRampToValueAtTime(0.25, now + delay + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 0.14);
+        osc.connect(gain).connect(audio.destination);
+        osc.start(now + delay);
+        osc.stop(now + delay + 0.15);
+      });
+    } catch { /* sin audio, queda el aviso visual */ }
+  }
+
   function alertNewOrder(orderId) {
     state.arrived.add(orderId);
     setTimeout(() => { state.arrived.delete(orderId); }, 3000);
@@ -335,6 +555,7 @@
     try {
       if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
     } catch { /* algunos navegadores lo bloquean sin interacción previa */ }
+    beep();
     toast(t('bar.newOrder'), 'ok');
   }
 
@@ -370,6 +591,7 @@
     });
 
     rt.on('event', async (message) => {
+      if (terminalSheet) terminalSheet.onEvent(message);
       const change = EV2Bar.applyEvent(state.orders, message);
       if (!change.changed) return;
       if (change.fetch) {
@@ -378,7 +600,7 @@
         try {
           const { order } = await api.get(`/nightclubs/${clubId()}/orders/${change.fetch}`);
           if (!state.orders.some((o) => o.id === order.id)) state.orders.push(order);
-          if (message.type === 'order_created') alertNewOrder(order.id);
+          if (['order_created', 'order_confirmed'].includes(message.type)) alertNewOrder(order.id);
         } catch (err) { showError(err); }
       }
       renderAll();
@@ -391,6 +613,428 @@
 
     rt.connect();
   }
+
+  // ---------------------------------------------------------------- venta en la barra
+  //
+  // El cliente que llega a la barra, pide y paga ahi mismo. Hasta ahora no existia en el
+  // sistema: el cantinero servia el trago y el inventario nunca se enteraba. Son dos
+  // pasos y en ESE orden -- primero existe el pedido con su cobro, despues se cobra --
+  // porque al reves un fallo de red dejaria dinero recibido sin nada que lo respalde.
+
+  const sale = () => state.sale;
+
+  async function loadDrinks() {
+    // La carta de ESTA barra: `stock` es cuantos alcanzan en este estante, no en el club.
+    const bar = state.barId ? `?bar_id=${state.barId}` : '';
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/drinks${bar}`);
+      state.drinks = data.drinks || [];
+    } catch (err) { showError(err); }
+  }
+
+  function openSale() {
+    if (!state.barId && state.bars.length > 1) { toast(t('sale.pickBar'), 'error'); return; }
+    const barId = state.barId || (state.bars[0] && state.bars[0].id) || null;
+    state.barId = barId;
+    state.sale = { open: true, cart: EV2Client.createCart(), search: '', sending: false };
+    $('sale-search').value = '';
+    $('sale-reference').value = '';
+    $('sale-error').hidden = true;
+    $('sale-bar').textContent = (state.bars.find((b) => b.id === barId) || {}).name || '';
+    renderSaleMethods();
+    renderSale();
+    $('sale-sheet').hidden = false;
+    loadDrinks().then(renderSale);
+  }
+
+  function closeSale() {
+    state.sale = { open: false, cart: null, search: '', sending: false };
+    $('sale-sheet').hidden = true;
+  }
+
+  function renderSaleMethods() {
+    $('sale-method').innerHTML = EV2OrderTaking.methodKeys()
+      .map((k) => `<option value="${escape(k)}">${escape(t(`take.method.${k}`))}</option>`).join('');
+    onSaleMethodChange();
+  }
+
+  function onSaleMethodChange() {
+    const method = EV2OrderTaking.methodFor($('sale-method').value);
+    // El folio solo lo pide la terminal: sin el, un cobro con tarjeta es la palabra del
+    // cantinero contra el estado de cuenta del banco.
+    $('sale-reference').hidden = !(method && method.requiresReference);
+    renderSale();
+  }
+
+  function renderSale() {
+    if (!sale().open) return;
+    const cart = sale().cart;
+    const lista = EV2OrderTaking.sellableDrinks(state.drinks, { search: sale().search });
+
+    $('sale-menu').innerHTML = lista.length === 0
+      ? `<p class="text-center text-white/40 text-sm py-10">${escape(t('sale.empty'))}</p>`
+      : lista.map((drink) => `
+        <div class="card rounded-xl p-3 flex items-center gap-3" data-drink="${escape(drink.id)}">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm truncate">${escape(drink.name)}</p>
+            <p class="text-xs text-white/50">
+              ${escape(EV2Format.money(drink.price, drink.currency))}
+              ${drink.stock === null || drink.stock === undefined ? ''
+                : `<span class="text-white/35">· ${escape(t('sale.left', { n: drink.stock }))}</span>`}
+            </p>
+          </div>
+          <div class="flex items-center gap-2 flex-none">
+            <button class="card rounded-lg w-9 h-9 text-lg" data-minus="1" aria-label="-">−</button>
+            <span class="w-5 text-center text-sm">${cart.quantityOf(drink.id)}</span>
+            <button class="ev2-button rounded-lg w-9 h-9 text-lg font-display" data-plus="1" aria-label="+">+</button>
+          </div>
+        </div>`).join('');
+
+    for (const el of $('sale-menu').querySelectorAll('[data-drink]')) {
+      const drink = state.drinks.find((d) => d.id === el.dataset.drink);
+      el.querySelector('[data-plus]').onclick = () => {
+        // `add` respeta la existencia del estante: no deja pedir lo que no hay.
+        if (!cart.add(drink)) toast(t('sale.noMore'), 'error');
+        renderSale();
+      };
+      el.querySelector('[data-minus]').onclick = () => { cart.remove(drink.id); renderSale(); };
+    }
+
+    $('sale-cart').innerHTML = cart.lines.map((l) => `
+      <div class="flex justify-between text-xs">
+        <span class="truncate">${l.quantity}× ${escape(l.drink.name)}</span>
+        <span class="text-white/60">${escape(EV2Format.money(l.subtotal, cart.currency))}</span>
+      </div>`).join('');
+    $('sale-total').textContent = EV2Format.money(cart.total, cart.currency);
+
+    const method = $('sale-method').value;
+    const reference = $('sale-reference').value;
+    const blocker = EV2OrderTaking.barSaleBlocker({ barId: state.barId, cart: cart.lines })
+      || (EV2OrderTaking.methodFor(method) && EV2OrderTaking.methodFor(method).requiresReference
+        && !String(reference).trim() ? 'no_reference' : null);
+    $('btn-sale-charge').disabled = sale().sending || blocker !== null;
+  }
+
+  function saleError(key, vars) {
+    const el = $('sale-error');
+    if (!key) { el.hidden = true; return; }
+    el.textContent = vars ? t(key, vars) : t(key);
+    el.hidden = false;
+  }
+
+  /**
+   * Cobrar y mandar a preparar.
+   *
+   * La clave de idempotencia se genera UNA vez y se reusa en el reintento: regenerarla
+   * en el catch es como se cobra dos veces la misma ronda.
+   */
+  async function chargeSale() {
+    const current = sale();
+    if (!current.open || current.sending) return;
+    const cart = current.cart;
+    const method = $('sale-method').value;
+    const reference = $('sale-reference').value;
+
+    const blocker = EV2OrderTaking.barSaleBlocker({ barId: state.barId, cart: cart.lines });
+    if (blocker) { saleError(`sale.blocked.${blocker}`); return; }
+
+    current.sending = true;
+    saleError(null);
+    renderSale();
+    try {
+      const body = EV2OrderTaking.orderPayload({
+        cart: cart.lines,
+        barLocationId: state.barId,
+        // `requestKey` guarda la clave en el carrito: el reintento manda la MISMA.
+        requestId: cart.requestKey(EV2.uuid),
+      });
+      const { order } = await api.post(`/nightclubs/${clubId()}/orders`, body);
+
+      // Un producto de precio cero no genera cobro: ya esta listo para preparar.
+      if (order.transaction_id) {
+        const chargeBlocker = EV2OrderTaking.chargeBlocker({
+          order, method, reference, terminals: state.terminals,
+        });
+        if (chargeBlocker) { saleError(`take.blocked.${chargeBlocker}`); return; }
+        if (EV2OrderTaking.isTerminalMethod(method)) {
+          // El pedido YA existe; lo que falta es que la tarjeta pase. La cola se recarga
+          // al cerrar el cuadro: si no pasa, el pedido queda ahí con su "sin pagar".
+          const terminal = EV2TerminalCharge.pickTerminal(
+            state.terminals, EV2TerminalCharge.recordada());
+          const res = await api.post(`/nightclubs/${clubId()}/terminal-charges`, {
+            transaction_id: order.transaction_id,
+            terminal_id: terminal.id,
+          });
+          EV2TerminalCharge.recordar(terminal.id);
+          sheet().watch(res.charge);
+          return;
+        }
+        await api.post(`/nightclubs/${clubId()}/manual-payments/register`,
+          EV2OrderTaking.chargePayload({ order, method, reference }));
+      }
+
+      toast(t('sale.done', { total: EV2Format.money(order.subtotal, order.currency) }), 'ok');
+      closeSale();
+      await loadQueue();
+    } catch (err) {
+      // El pedido pudo quedar creado y el cobro no: recargar la cola dice la verdad, y
+      // el pedido aparece ahi con su aviso de "sin pagar" para cobrarlo desde la tarjeta.
+      showError(err, $('sale-error'));
+      await loadQueue();
+    } finally {
+      const still = sale();
+      if (still) still.sending = false;
+      if (!$('sale-sheet').hidden) renderSale();
+    }
+  }
+
+  // ==================================================== pedir al almacén
+  //
+  // La barra pide, el almacén surte. Quien sabe qué falta es el cantinero mirando su
+  // estante a las once de la noche; antes de esto, surtir era una orden hacia abajo y
+  // lo que faltaba se resolvía de palabra — que es cómo acaba producto en la barra sin
+  // registro, y cómo un faltante deja de tener dueño.
+
+  const req = {
+    open: false,
+    tab: 'new',
+    suggested: [],
+    mine: [],
+    picked: new Map(),   // supply_id -> presentaciones a pedir
+    sending: false,
+  };
+
+  /** La barra en la que se está parado. Sin una elegida no hay a quién surtir. */
+  function myBar() {
+    if (state.barId) return state.bars.find((b) => b.id === state.barId) || null;
+    return state.bars.length === 1 ? state.bars[0] : null;
+  }
+
+  async function loadMyRequests() {
+    const bar = myBar();
+    if (!bar) { req.mine = []; return; }
+    try {
+      const data = await api.get(
+        `/nightclubs/${clubId()}/bar-requests?location_id=${bar.id}&status=all&limit=20`);
+      req.mine = data.requests || [];
+    } catch { req.mine = []; }
+    renderPendingBadge();
+  }
+
+  /** El número del botón: lo pedido que todavía no llega. Evita pedir dos veces. */
+  function renderPendingBadge() {
+    const pendientes = req.mine.filter((r) => EV2Receiving.statusOf(r.status).pending).length;
+    const badge = $('restock-pending');
+    if (!badge) return;
+    badge.textContent = pendientes;
+    badge.hidden = pendientes === 0;
+  }
+
+  async function openRestock() {
+    const bar = myBar();
+    if (!bar) { toast(t('req.pickBarFirst'), 'error'); return; }
+    req.open = true;
+    req.tab = 'new';
+    req.picked = new Map();
+    $('req-bar').textContent = bar.name;
+    $('req-sheet').hidden = false;
+    $('req-error').hidden = true;
+    $('req-note').value = '';
+
+    try {
+      const data = await api.get(
+        `/nightclubs/${clubId()}/bar-requests/suggested?location_id=${bar.id}`);
+      req.suggested = data.suggested || [];
+      // Lo que está bajo mínimo Y el almacén tiene se marca solo, con la cantidad
+      // sugerida: pedir tiene que ser un toque, no una captura.
+      for (const linea of EV2Receiving.requestFromSuggested(req.suggested)) {
+        req.picked.set(linea.supply_id, linea.amount);
+      }
+    } catch (err) {
+      req.suggested = [];
+      showError(err, $('req-error'));
+    }
+    await loadMyRequests();
+    renderRestock();
+  }
+
+  function closeRestock() {
+    req.open = false;
+    $('req-sheet').hidden = true;
+  }
+
+  function renderRestock() {
+    for (const tab of document.querySelectorAll('[data-req-tab]')) {
+      tab.classList.toggle('active', tab.dataset.reqTab === req.tab);
+    }
+    $('req-count-mine').textContent = req.mine
+      .filter((r) => EV2Receiving.statusOf(r.status).pending).length;
+    $('req-footer').hidden = req.tab !== 'new';
+    if (req.tab === 'mine') return renderMyRequests();
+    return renderSuggested();
+  }
+
+  function renderSuggested() {
+    const conStock = req.suggested.filter((s) => Number(s.warehouse_stock) > 0);
+    const sinStock = req.suggested.filter((s) => Number(s.warehouse_stock) <= 0);
+
+    if (req.suggested.length === 0) {
+      $('req-body').innerHTML = `<p class="text-center text-white/40 text-sm py-16">
+          ${escape(t('req.nothingLow'))}</p>`;
+      $('btn-req-send').disabled = true;
+      return;
+    }
+
+    const fila = (item) => {
+      const elegido = req.picked.has(item.supply_id);
+      return `
+        <article class="card rounded-xl px-3 py-2 ${elegido ? 'row-low' : ''}">
+          <div class="flex items-center justify-between gap-2">
+            <label class="flex items-center gap-2 min-w-0 flex-1 cursor-pointer">
+              <input type="checkbox" class="w-5 h-5 shrink-0 accent-cyan-400"
+                     data-req-pick="${escape(item.supply_id)}" ${elegido ? 'checked' : ''}>
+              <span class="min-w-0">
+                <span class="block text-sm font-semibold truncate">${escape(item.name)}</span>
+                <span class="block text-[11px] text-white/40">
+                  ${escape(t('req.lowHere', {
+    have: Math.round((item.stock / item.package_size) * 100) / 100,
+    min: Math.round((item.min_stock / item.package_size) * 100) / 100,
+  }))}
+                </span>
+              </span>
+            </label>
+            <input type="number" min="0.01" step="0.01" inputmode="decimal"
+                   class="field w-20 shrink-0"
+                   value="${escape(req.picked.get(item.supply_id) || item.suggested_packages)}"
+                   data-req-amount="${escape(item.supply_id)}" ${elegido ? '' : 'disabled'}>
+          </div>
+        </article>`;
+    };
+
+    $('req-body').innerHTML = `
+      ${conStock.length > 0 ? `<div class="space-y-2">${conStock.map(fila).join('')}</div>` : ''}
+      ${sinStock.length > 0 ? `
+        <section class="mt-4">
+          <h3 class="text-xs uppercase tracking-widest text-white/40 mb-1 px-1">
+            ${escape(t('req.toBuy'))}
+          </h3>
+          <p class="text-[11px] text-white/40 px-1 mb-2">${escape(t('req.toBuyNote'))}</p>
+          <div class="space-y-2">${sinStock.map(fila).join('')}</div>
+        </section>` : ''}`;
+
+    for (const box of $('req-body').querySelectorAll('[data-req-pick]')) {
+      box.onchange = () => {
+        const id = box.dataset.reqPick;
+        if (box.checked) {
+          const item = req.suggested.find((s) => s.supply_id === id);
+          req.picked.set(id, String(item ? item.suggested_packages : 1));
+        } else req.picked.delete(id);
+        renderRestock();
+      };
+    }
+    for (const input of $('req-body').querySelectorAll('[data-req-amount]')) {
+      input.onchange = () => {
+        if (req.picked.has(input.dataset.reqAmount)) {
+          req.picked.set(input.dataset.reqAmount, input.value);
+        }
+      };
+    }
+    $('btn-req-send').disabled = req.picked.size === 0 || req.sending;
+  }
+
+  function renderMyRequests() {
+    if (req.mine.length === 0) {
+      $('req-body').innerHTML = `<p class="text-center text-white/40 text-sm py-16">
+          ${escape(t('req.noneYet'))}</p>`;
+      return;
+    }
+    $('req-body').innerHTML = req.mine.map((request) => {
+      const estado = EV2Receiving.statusOf(request.status);
+      const lineas = (request.lines || []).map((l) => {
+        const falta = Number(l.pending);
+        const cuantas = Math.round((falta / Number(l.package_size)) * 100) / 100;
+        return `<li class="flex justify-between gap-2">
+            <span class="truncate">${escape(l.name)}</span>
+            <span class="shrink-0 ${falta > 0 ? 'text-amber-200' : 'text-emerald-300'}">
+              ${falta > 0 ? escape(t('req.stillMissing', { n: cuantas })) : escape(t('req.arrived'))}
+            </span>
+          </li>`;
+      }).join('');
+      return `
+        <article class="card rounded-xl px-3 py-2 ${estado.pending ? 'row-low' : ''}">
+          <div class="flex items-start justify-between gap-2">
+            <p class="text-[11px] text-white/40">${escape(EV2Format.dateTime(request.created_at))}</p>
+            <span class="chip shrink-0">${escape(t(`req.status.${request.status}`))}</span>
+          </div>
+          <ul class="text-xs text-white/70 mt-1 space-y-.5">${lineas}</ul>
+          ${estado.pending ? `
+            <button class="text-[11px] text-red-300 underline mt-2"
+                    data-req-cancel="${escape(request.id)}">${escape(t('req.cancel'))}</button>` : ''}
+        </article>`;
+    }).join('');
+
+    for (const button of $('req-body').querySelectorAll('[data-req-cancel]')) {
+      button.onclick = async () => {
+        // Cancelar exige motivo: un pedido que desaparece sin explicación es un
+        // pedido perdido, y el almacén se queda esperando surtirlo.
+        const motivo = prompt(t('req.cancelWhy'));
+        if (!motivo || !motivo.trim()) return;
+        try {
+          await api.post(
+            `/nightclubs/${clubId()}/bar-requests/${button.dataset.reqCancel}/cancel`,
+            { reason: motivo.trim() });
+          await loadMyRequests();
+          renderRestock();
+        } catch (err) { showError(err, $('req-error')); }
+      };
+    }
+  }
+
+  async function sendRestock() {
+    const bar = myBar();
+    if (!bar || req.sending || req.picked.size === 0) return;
+    req.sending = true;
+    $('btn-req-send').disabled = true;
+    $('req-error').hidden = true;
+    try {
+      const lines = [...req.picked.entries()].map(([supplyId, amount]) => ({
+        supply_id: supplyId, mode: 'packages', amount,
+      }));
+      await api.post(`/nightclubs/${clubId()}/bar-requests`,
+        EV2Receiving.requestBody({
+          locationId: bar.id, lines, note: $('req-note').value,
+        }));
+      toast(t('req.sent'), 'ok');
+      req.picked = new Map();
+      $('req-note').value = '';
+      req.tab = 'mine';
+      await loadMyRequests();
+      renderRestock();
+    } catch (err) {
+      showError(err, $('req-error'));
+    } finally {
+      req.sending = false;
+      renderRestock();
+    }
+  }
+
+  $('btn-restock').onclick = openRestock;
+  $('btn-req-close').onclick = closeRestock;
+  $('btn-req-send').onclick = sendRestock;
+  for (const tab of document.querySelectorAll('[data-req-tab]')) {
+    tab.onclick = async () => {
+      req.tab = tab.dataset.reqTab;
+      if (req.tab === 'mine') await loadMyRequests();
+      renderRestock();
+    };
+  }
+
+  $('btn-new-sale').onclick = openSale;
+  $('btn-sale-close').onclick = closeSale;
+  $('btn-sale-charge').onclick = chargeSale;
+  $('sale-method').onchange = onSaleMethodChange;
+  $('sale-reference').oninput = renderSale;
+  $('sale-search').oninput = (ev) => { state.sale.search = ev.target.value; renderSale(); };
 
   // ---------------------------------------------------------------- arranque
 

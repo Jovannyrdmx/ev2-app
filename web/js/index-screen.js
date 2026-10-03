@@ -5,9 +5,14 @@
  * `EV2Map` (plano) y `EV2Roles` (a dónde va cada rol). Ninguna decisión de negocio vive
  * aquí: si algo hay que probar, va en esos módulos.
  */
-/* global EV2, EV2Format, EV2Client, EV2Map, EV2Roles, EV2Taxi, EV2DrinkArt */
+/* global EV2, EV2Format, EV2Client, EV2Map, EV2Roles, EV2Taxi, EV2DrinkArt, EV2Social,
+   EV2PinPad */
 (function () {
   'use strict';
+  // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
+  const ask = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.confirm(text, opts) : Promise.resolve(window.confirm(text)));
+
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -22,7 +27,7 @@
   const CLUB_SLUG = meta('ev2:club', 'ev2');
 
   const state = {
-    club: null, drinks: [], categories: [], category: null,
+    club: null, drinks: [], categories: [], category: null, search: '',
     tables: [], landmarks: [], canvas: null, floors: [], floor: null,
     selectedId: null, myTable: null, orders: [], realtime: null,
     taxi: { availability: null, ride: null, rides: [], fares: [], pickup: null,
@@ -96,17 +101,265 @@
 
   // ---------------------------------------------------------------- entrar
 
-  function switchAuthTab(which) {
-    const login = which === 'login';
-    $('form-login').hidden = !login;
-    $('form-register').hidden = login;
-    $('tab-login').className = `flex-1 py-2 ${login ? 'tab-active font-semibold' : 'text-white/50'}`;
-    $('tab-register').className = `flex-1 py-2 ${login ? 'text-white/50' : 'tab-active font-semibold'}`;
+  /**
+   * Cuál de las dos puertas está abierta.
+   *
+   * `mode`   — quién dice ser: cliente (correo) o personal (PIN).
+   * `tab`    — dentro de cliente: entrar o crear cuenta.
+   * `staffPassword` — el gerente que está fuera del club y necesita su contraseña.
+   * `change` — el sistema está obligando a cambiar el PIN; manda sobre todo lo demás.
+   */
+  const access = { mode: 'client', tab: 'login', staffPassword: false, change: false };
+
+  const ACCESS_KEY = 'ev2.access';
+  /** Recordar cuál puerta se usó no es una decisión de seguridad: no guarda ni quién ni el PIN. */
+  function rememberedMode() {
+    try { return EV2PinPad.initialMode(localStorage.getItem(ACCESS_KEY)); } catch { return 'client'; }
+  }
+  function rememberMode(mode) {
+    try { localStorage.setItem(ACCESS_KEY, mode); } catch { /* modo privado: da igual */ }
+  }
+
+  const ON = 'flex-1 py-2 rounded-xl text-sm tab-active font-semibold';
+  const OFF = 'flex-1 py-2 rounded-xl text-sm text-white/50';
+
+  function renderAccess() {
+    const cambio = access.change;
+    const staff = access.mode === 'staff';
+    const cliente = !cambio && !staff;
+    const teclado = cambio || (staff && !access.staffPassword);
+    const conPassword = !cambio && (cliente ? access.tab === 'login' : access.staffPassword);
+
+    $('access-switch').hidden = cambio;
+    $('mode-client').className = staff ? OFF : ON;
+    $('mode-staff').className = staff ? ON : OFF;
+
+    $('auth-tabs').hidden = !cliente;
+    $('form-login').hidden = !conPassword;
+    $('form-register').hidden = !(cliente && access.tab === 'register');
+    $('tab-login').className = `flex-1 py-2 ${access.tab === 'login' ? 'tab-active font-semibold' : 'text-white/50'}`;
+    $('tab-register').className = `flex-1 py-2 ${access.tab === 'register' ? 'tab-active font-semibold' : 'text-white/50'}`;
+
+    $('pin-pad').hidden = !teclado;
+    $('pin-extra').hidden = cambio;
+    $('btn-pin-cancel').hidden = !cambio;
+    $('btn-use-pin').hidden = !(staff && access.staffPassword);
+
     $('auth-error').hidden = true;
+    // Ver la carta sin cuenta es cosa del cliente; en la tableta del personal estorba.
+    if ($('btn-preview')) $('btn-preview').hidden = !cliente;
+    renderSocialButtons();
+    if (teclado) renderPin();
+  }
+
+  function switchAuthTab(which) {
+    access.tab = which === 'register' ? 'register' : 'login';
+    renderAccess();
+  }
+
+  function switchMode(mode) {
+    access.mode = EV2PinPad.initialMode(mode);
+    access.staffPassword = false;
+    rememberMode(access.mode);
+    resetPin();
+    renderAccess();
   }
 
   $('tab-login').onclick = () => switchAuthTab('login');
   $('tab-register').onclick = () => switchAuthTab('register');
+  $('mode-client').onclick = () => switchMode('client');
+  $('mode-staff').onclick = () => switchMode('staff');
+  $('btn-use-password').onclick = () => { access.staffPassword = true; renderAccess(); };
+  $('btn-use-pin').onclick = () => { access.staffPassword = false; resetPin(); renderAccess(); };
+
+  // ---------------------------------------------------------------- el teclado del PIN
+
+  /**
+   * `step` es en qué va: 'login' (entrar), 'new' (escoge el suyo), 'repeat' (lo confirma).
+   * `first` guarda el primero mientras se teclea el segundo, y `busy` apaga las teclas
+   * mientras el servidor contesta — sin eso, dos toques nerviosos mandan dos intentos y
+   * el segundo cuenta como fallo en el freno del club.
+   */
+  const pin = { step: 'login', value: '', first: null, busy: false };
+
+  function resetPin() {
+    pin.step = access.change ? 'new' : 'login';
+    pin.value = '';
+    pin.first = null;
+    pin.busy = false;
+    $('pin-error').hidden = true;
+  }
+
+  const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'clear', '0', 'back'];
+
+  function buildKeys() {
+    const box = $('pin-keys');
+    box.innerHTML = '';
+    for (const key of KEYS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.key = key;
+      if (key === 'clear' || key === 'back') {
+        b.className = 'py-4 rounded-xl card text-sm text-white/60';
+        b.textContent = t(key === 'clear' ? 'pin.clear' : 'pin.back');
+      } else {
+        b.className = 'py-4 rounded-xl card font-display text-2xl';
+        b.textContent = key;
+      }
+      b.onclick = () => pressKey(key);
+      box.appendChild(b);
+    }
+  }
+
+  function renderPin() {
+    const titles = {
+      login: ['pin.title', 'pin.note'],
+      new: ['pin.changeTitle', 'pin.newStep'],
+      repeat: ['pin.changeTitle', 'pin.repeatStep'],
+    }[pin.step] || ['pin.title', 'pin.note'];
+    // Se les quita la marca de idioma: el texto ya no sale del HTML sino del paso en
+    // que va, y `applyTo` lo sobrescribiría al cambiar de idioma.
+    $('pin-title').removeAttribute('data-i18n');
+    $('pin-note').removeAttribute('data-i18n');
+    $('pin-title').textContent = t(titles[0]);
+    $('pin-note').textContent = pin.busy
+      ? t(pin.step === 'login' ? 'pin.signingIn' : 'pin.changing')
+      : t(titles[1]);
+
+    const dots = $('pin-dots');
+    dots.innerHTML = '';
+    for (const lleno of EV2PinPad.dots(pin.value)) {
+      const d = document.createElement('span');
+      d.className = 'w-3.5 h-3.5 rounded-full';
+      d.style.background = lleno ? 'var(--ev2-cyan)' : 'rgba(255,255,255,.15)';
+      dots.appendChild(d);
+    }
+    for (const b of $('pin-keys').querySelectorAll('button')) b.disabled = pin.busy;
+
+    if (access.change) {
+      $('pin-note').classList.add('text-white/60');
+      $('pin-extra').hidden = true;
+    }
+  }
+
+  function pinError(key) {
+    const el = $('pin-error');
+    el.textContent = t(key);
+    el.hidden = false;
+  }
+
+  function pressKey(key) {
+    if (pin.busy) return;
+    $('pin-error').hidden = true;
+    pin.value = EV2PinPad.press(pin.value, key);
+    renderPin();
+    // Se manda solo al sexto: un toque menos, y equivocarse solo cuesta empezar de nuevo.
+    if (EV2PinPad.isComplete(pin.value)) advance();
+  }
+
+  // El teclado físico de la tableta de la barra cuenta igual que los botones.
+  document.addEventListener('keydown', (ev) => {
+    if ($('pin-pad').hidden || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    if (/^\d$/.test(ev.key)) { ev.preventDefault(); pressKey(ev.key); return; }
+    if (ev.key === 'Backspace') { ev.preventDefault(); pressKey('back'); }
+    if (ev.key === 'Escape') { ev.preventDefault(); pressKey('clear'); }
+  });
+
+  function advance() {
+    if (pin.step === 'login') { pinLogin(); return; }
+    if (pin.step === 'new') {
+      // Las mismas reglas que el servidor. Aquí solo para no hacerle esperar un viaje
+      // completo a alguien que está de pie en la barra escogiendo su PIN.
+      const problema = EV2PinPad.validateNew(pin.value, null, {});
+      if (problema) { pinError(problema); pin.value = ''; renderPin(); return; }
+      pin.first = pin.value;
+      pin.value = '';
+      pin.step = 'repeat';
+      renderPin();
+      return;
+    }
+    if (pin.value !== pin.first) {
+      // Se vuelve al principio y no solo al segundo intento: si los dos no coinciden,
+      // no se sabe cuál de los dos era el que quería.
+      pinError('pin.errMismatch');
+      pin.first = null;
+      pin.value = '';
+      pin.step = 'new';
+      renderPin();
+      return;
+    }
+    savePin();
+  }
+
+  async function pinLogin() {
+    pin.busy = true;
+    renderPin();
+    const tecleado = pin.value;
+    try {
+      const data = await api.post('/auth/pin-login', {
+        nightclub_slug: CLUB_SLUG, pin: tecleado,
+      });
+      api.signInWith(data);
+      pin.value = '';
+      pin.busy = false;
+      if (api.session.user && api.session.user.must_change_pin) { startPinChange(); return; }
+      await afterSignIn();
+    } catch (err) {
+      // Se borra SIEMPRE: dejar en pantalla un PIN que no sirvió invita a mandarlo otra
+      // vez igual, y cada intento cuenta en el freno del club.
+      pin.value = '';
+      pin.busy = false;
+      renderPin();
+      const el = $('pin-error');
+      // `context: 'pin'` para que un 401 diga "PIN incorrecto" y no "tu sesión
+      // terminó": quien acaba de teclear mal no tenía ninguna sesión que terminar.
+      el.textContent = EV2Format.errorMessage(err, { context: 'pin' });
+      el.hidden = false;
+    }
+  }
+
+  function startPinChange() {
+    access.change = true;
+    resetPin();
+    renderAccess();
+    $('screen-auth').hidden = false;
+    $('screen-app').hidden = true;
+    $('screen-staff').hidden = true;
+  }
+
+  async function savePin() {
+    pin.busy = true;
+    renderPin();
+    try {
+      const data = await api.post('/auth/pin', { new_pin: pin.value });
+      // El servidor cierra todas las sesiones al cambiarlo y devuelve unas llaves
+      // nuevas. `must_change_pin` ya viene en falso dentro del token; se pone también
+      // en el usuario guardado para que la pantalla no vuelva a abrir esta puerta.
+      api.signInWith(Object.assign({}, data, {
+        user: Object.assign({}, api.session.user, { must_change_pin: false }),
+      }));
+      access.change = false;
+      resetPin();
+      renderAccess();
+      toast(t('pin.done'), 'ok');
+      await afterSignIn();
+    } catch (err) {
+      pin.busy = false;
+      pin.first = null;
+      pin.value = '';
+      pin.step = 'new';
+      renderPin();
+      const el = $('pin-error');
+      el.textContent = EV2Format.errorMessage(err);
+      el.hidden = false;
+    }
+  }
+
+  $('btn-pin-cancel').onclick = async () => {
+    access.change = false;
+    resetPin();
+    await signOut();
+  };
 
   $('form-login').onsubmit = async (ev) => {
     ev.preventDefault();
@@ -149,6 +402,242 @@
     }
   };
 
+  // ------------------------------------- entrar con una cuenta de otro (Facebook)
+
+  const API_BASE = meta('ev2:api', '/api');
+  // El proveedor de la última vuelta que dijo "ya quedó ligada". Se guarda porque el
+  // aviso tiene que salir DESPUÉS de que la pantalla del cliente esté montada.
+  let socialLinkedToast = null;
+  let socialCompletionToken = null;
+  let socialProviders = [];
+
+  function socialButton({ icon, color, text, onClick }) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'w-full py-3 rounded-xl text-sm font-semibold flex items-center '
+      + 'justify-center gap-3 bg-white/5 border border-white/10 tap';
+    const i = document.createElement('i');
+    i.className = icon;
+    i.style.color = color;
+    const s = document.createElement('span');
+    s.textContent = text;
+    b.append(i, s);
+    b.onclick = onClick;
+    return b;
+  }
+
+  /**
+   * Los botones de la pantalla de acceso.
+   *
+   * Si la lista no se puede pedir, no se pinta nada y no se avisa: correo y contraseña
+   * no dependen de ningún proveedor, así que la pantalla de acceso sigue sirviendo
+   * igual. Enseñar "no pudimos cargar los botones de Facebook" sobre el formulario que
+   * sí funciona solo asusta.
+   */
+  async function loadSocialButtons() {
+    try {
+      socialProviders = EV2Social.enabledProviders(await api.get('/auth/oauth/providers'));
+    } catch {
+      return;
+    }
+    renderSocialButtons();
+  }
+
+  function renderSocialButtons() {
+    const caja = $('social-buttons');
+    caja.innerHTML = '';
+    for (const p of socialProviders) {
+      caja.appendChild(socialButton({
+        icon: p.icon,
+        color: p.color,
+        text: t('social.with', { provider: p.label }),
+        // Navegación completa y no `fetch`: la respuesta es un 302 hacia Facebook, y
+        // un `fetch` lo seguiría en segundo plano en vez de llevarse a la persona.
+        onClick: () => {
+          location.href = EV2Social.startUrl({
+            baseUrl: API_BASE, provider: p.provider, clubSlug: CLUB_SLUG,
+          });
+        },
+      }));
+    }
+    // Los botones de Facebook son del cliente: no tienen nada que hacer sobre el
+    // teclado del personal ni encima de un cambio de PIN obligado.
+    $('social-block').hidden = socialProviders.length === 0 || !$('social-finish').hidden
+      || access.mode !== 'client' || access.change;
+  }
+
+  /**
+   * La vuelta del proveedor.
+   *
+   * Devuelve `true` cuando ya se hizo cargo de la pantalla, para que el arranque no
+   * siga con la sesión guardada por encima.
+   */
+  async function handleSocialReturn() {
+    const vuelta = EV2Social.takeFromLocation(location, window.history);
+    if (!vuelta) return false;
+
+    if (vuelta.kind === 'error') {
+      const el = $('auth-error');
+      el.textContent = t(EV2Social.errorKey(vuelta.value));
+      el.hidden = false;
+      return false;
+    }
+    if (vuelta.kind === 'linked') {
+      // La persona venía de su perfil: su sesión sigue guardada, así que el arranque
+      // la retoma solo. Aquí únicamente se recuerda el aviso.
+      socialLinkedToast = vuelta.value;
+      return false;
+    }
+    if (vuelta.kind === 'signup') {
+      showSocialFinish(vuelta.value);
+      return true;
+    }
+    try {
+      api.signInWith(await api.post('/auth/oauth/handoff', { handoff: vuelta.value }));
+      await afterSignIn();
+      return true;
+    } catch (err) {
+      showError(err, $('auth-error'));
+      return false;
+    }
+  }
+
+  function showSocialFinish(token) {
+    socialCompletionToken = token;
+    const falta = EV2Social.signupNeeds(token, EV2Social.peekToken);
+    const etiqueta = falta.provider
+      ? falta.provider.charAt(0).toUpperCase() + falta.provider.slice(1)
+      : null;
+    $('social-finish-note').textContent = etiqueta
+      ? t('social.finishNote', { provider: etiqueta })
+      : t('social.finishNoteGeneric');
+    // El correo se enseña siempre, ya escrito si el proveedor lo dio: así la persona
+    // ve con qué cuenta va a entrar y lo puede corregir antes de que exista.
+    $('social-email').value = falta.suggested_email || '';
+    $('form-login').hidden = true;
+    $('form-register').hidden = true;
+    $('social-block').hidden = true;
+    $('auth-tabs').hidden = true;
+    // Quien viene de Facebook es un cliente a medio registrar: ni el teclado del
+    // personal ni el botón de cambiar de puerta tienen sentido encima de esto.
+    $('access-switch').hidden = true;
+    $('pin-pad').hidden = true;
+    $('btn-use-pin').hidden = true;
+    $('social-finish').hidden = false;
+    $('screen-auth').hidden = false;
+  }
+
+  $('social-finish').onsubmit = async (ev) => {
+    ev.preventDefault();
+    $('auth-error').hidden = true;
+    try {
+      const correo = $('social-email').value.trim();
+      api.signInWith(await api.post('/auth/oauth/complete', {
+        completion_token: socialCompletionToken,
+        email: correo || undefined,
+        birth_date: $('social-birth').value,
+        accept_terms: $('social-terms').checked,
+      }));
+      socialCompletionToken = null;
+      await afterSignIn();
+    } catch (err) {
+      // El servidor distingue "menor de edad" de "ese correo ya tiene cuenta"; ese
+      // texto es el útil.
+      showError(err, $('auth-error'));
+    }
+  };
+
+  $('social-finish-cancel').onclick = () => {
+    socialCompletionToken = null;
+    $('social-finish').hidden = true;
+    switchAuthTab('login');
+  };
+
+  /**
+   * El panel del perfil: qué cuentas hay ligadas, qué se puede ligar y qué se puede
+   * quitar. El botón de quitar solo sale cuando queda otra manera de entrar.
+   */
+  async function loadSocialPanel() {
+    let estado;
+    let ligadas;
+    try {
+      [estado, ligadas] = await Promise.all([
+        api.get('/auth/oauth/providers'),
+        api.get('/auth/oauth/linked'),
+      ]);
+    } catch {
+      return;
+    }
+    const disponibles = EV2Social.enabledProviders(estado);
+    const yaLigadas = ligadas.identities || [];
+    if (disponibles.length === 0 && yaLigadas.length === 0) {
+      $('social-panel').hidden = true;
+      return;
+    }
+
+    const puedeQuitar = EV2Social.canUnlink(ligadas);
+    const lista = $('social-panel-list');
+    lista.innerHTML = '';
+    for (const ident of yaLigadas) {
+      const cara = EV2Social.look(ident.provider);
+      const fila = document.createElement('div');
+      fila.className = 'flex items-center justify-between gap-3 text-sm';
+      const izq = document.createElement('span');
+      izq.className = 'flex items-center gap-2';
+      const i = document.createElement('i');
+      i.className = cara.icon;
+      i.style.color = cara.color;
+      const texto = document.createElement('span');
+      texto.textContent = ident.email || ident.display_name || ident.provider;
+      izq.append(i, texto);
+      fila.appendChild(izq);
+      if (puedeQuitar) {
+        const quitar = document.createElement('button');
+        quitar.type = 'button';
+        quitar.className = 'text-xs text-red-300 underline';
+        quitar.textContent = t('social.unlink');
+        quitar.onclick = async () => {
+          $('social-panel-error').hidden = true;
+          try {
+            await api.del(`/auth/oauth/${encodeURIComponent(ident.provider)}`);
+            await loadSocialPanel();
+          } catch (err) {
+            showError(err, $('social-panel-error'));
+          }
+        };
+        fila.appendChild(quitar);
+      }
+      lista.appendChild(fila);
+    }
+
+    const agregar = $('social-panel-add');
+    agregar.innerHTML = '';
+    const ligados = new Set(yaLigadas.map((x) => x.provider));
+    for (const p of disponibles.filter((x) => !ligados.has(x.provider))) {
+      agregar.appendChild(socialButton({
+        icon: p.icon,
+        color: p.color,
+        text: t('social.link', { provider: p.label }),
+        onClick: async () => {
+          $('social-panel-error').hidden = true;
+          try {
+            const r = await api.post(`/auth/oauth/${encodeURIComponent(p.provider)}/link`,
+              { redirect_to: 'index.html' });
+            location.href = r.authorize_url;
+          } catch (err) {
+            showError(err, $('social-panel-error'));
+          }
+        },
+      }));
+    }
+
+    $('social-panel-empty').hidden = yaLigadas.length > 0;
+    const nota = $('social-panel-note');
+    nota.textContent = puedeQuitar ? '' : t('social.lastWayIn');
+    nota.hidden = puedeQuitar || yaLigadas.length === 0;
+    $('social-panel').hidden = false;
+  }
+
   async function signOut() {
     if (state.realtime) state.realtime.close();
     await api.logout();
@@ -171,8 +660,13 @@
     renderMenu();
     renderCart();
     renderOrders();
-    if (!$('screen-app').hidden) { renderFloor(); renderTaxi(); }
+    if (!$('screen-app').hidden) { renderFloor(); renderTaxi(); renderHome(); }
+    if (!$('screen-preview').hidden) renderPreview();
     if (!$('screen-staff').hidden) renderStaffPending();
+    renderSocialButtons();
+    // El teclado se vuelve a armar: las teclas de borrar y limpiar llevan texto.
+    if (!$('screen-auth').hidden) { buildKeys(); renderAccess(); }
+    if (!$('social-panel').hidden) loadSocialPanel();
     setConnection(lastConnection.on, lastConnection.key);
     hub.emit('language', lang());
   }
@@ -190,6 +684,11 @@
    * dejarlo en la del invitado o mandarlo a un archivo con datos inventados.
    */
   async function afterSignIn() {
+    // Antes que el rol y antes que nada: el servidor le bloquea TODAS las rutas menos
+    // /auth/pin, /auth/password, /auth/logout y /auth/me. Mandarlo a su pantalla sin
+    // cambiar el PIN es mandarlo a una pantalla que solo sabe dar errores.
+    if (api.session.user && api.session.user.must_change_pin) { startPinChange(); return; }
+
     const role = api.session.user && api.session.user.role;
     const decision = EV2Roles.route(role, location.pathname, lang());
 
@@ -231,6 +730,13 @@
     $('profile-club').textContent = (state.club && state.club.name) || 'EV2 Clandestinoz';
     await Promise.all([loadFloor(), loadMenu(), loadOrders(), loadTaxi()]);
     connectRealtime();
+    // El panel de cuentas ligadas no bloquea la entrada al club: si falla, el perfil
+    // se queda sin ese recuadro y todo lo demás funciona.
+    loadSocialPanel();
+    if (socialLinkedToast) {
+      toast(t('social.linked', { provider: socialLinkedToast }), 'ok');
+      socialLinkedToast = null;
+    }
     hub.emit('enter', context());
   }
 
@@ -276,6 +782,7 @@
       }
       if (state.myTable) state.selectedId = state.myTable.id;
       renderFloor();
+      renderHome();
     } catch (err) { showError(err); }
   }
 
@@ -283,7 +790,7 @@
     try {
       const data = await api.get(`/nightclubs/${clubId()}/drinks`);
       state.drinks = data.drinks || [];
-      state.categories = [...new Set(state.drinks.map((d) => d.category).filter(Boolean))].sort();
+      state.categories = EV2Client.orderCategories(state.drinks.map((d) => d.category));
       renderMenu();
     } catch (err) { showError(err); }
   }
@@ -472,7 +979,7 @@
       b.onclick = () => { state.category = b.dataset.cat || null; renderMenu(); };
     });
 
-    const list = state.drinks.filter((d) => !state.category || d.category === state.category);
+    const list = EV2Client.filterMenu(state.drinks, { category: state.category, search: state.search });
     $('menu-list').innerHTML = list.map((d) => {
       const qty = cart.quantityOf(d.id);
       const out = d.available === false || Number(d.stock) <= 0;
@@ -481,17 +988,17 @@
         ${thumb(d)}
         <div class="flex-1 min-w-0">
           <p class="font-semibold">${escape(d.name)}</p>
-          <p class="text-xs text-white/50">${escape(d.category || '')}${out ? ` · ${escape(t('menu.soldOut'))}` : ''}</p>
+          ${state.category && !out ? '' : `<p class="text-xs text-white/50">${state.category ? '' : escape(d.category || '')}${out ? `${state.category ? '' : ' · '}${escape(t('menu.soldOut'))}` : ''}</p>`}
           <p class="text-sm mt-1">${money(d.price, d.currency)}</p>
         </div>
         ${out ? '' : `
         <div class="flex items-center gap-2">
-          ${qty > 0 ? `<button data-less="${d.id}" class="w-9 h-9 rounded-full card">−</button>
-                       <span class="w-5 text-center">${qty}</span>` : ''}
-          <button data-more="${d.id}" class="w-9 h-9 rounded-full ev2-button">+</button>
+          ${qty > 0 ? `<button data-less="${d.id}" class="w-11 h-11 rounded-full card text-lg" aria-label="−">−</button>
+                       <span class="w-5 text-center font-semibold">${qty}</span>` : ''}
+          <button data-more="${d.id}" class="w-11 h-11 rounded-full ev2-button text-lg" aria-label="+">+</button>
         </div>`}
       </div>`;
-    }).join('') || `<p class="text-white/40 text-sm text-center py-10">${escape(t('menu.empty'))}</p>`;
+    }).join('') || `<p class="text-white/40 text-sm text-center py-10">${escape(t(state.search ? 'menu.noMatch' : 'menu.empty'))}</p>`;
 
     $('menu-list').querySelectorAll('[data-more]').forEach((b) => {
       b.onclick = () => {
@@ -546,6 +1053,7 @@
   // ---------------------------------------------------------------- pedidos
 
   function renderOrders() {
+    renderHome();
     const lang = EV2Format.getLanguage();
     const open = state.orders.filter((o) => EV2Client.isOpenOrder(o.status)).length;
     $('orders-badge').hidden = open === 0;
@@ -674,6 +1182,7 @@
     // La insignia de la pestaña: se ve el aviso aunque estés en el menú pidiendo.
     $('taxi-badge').hidden = !head.urgent;
     $('taxi-badge').textContent = '!';
+    renderHome();
 
     const pickup = state.taxi.pickup;
     $('taxi-pickup').hidden = !pickup;
@@ -855,7 +1364,7 @@
 
   $('btn-taxi-cancel').onclick = async () => {
     const ride = state.taxi.ride;
-    if (!ride || !window.confirm(t('taxi.confirmCancel'))) return;
+    if (!ride || !(await ask(t('taxi.confirmCancel'), { danger: true }))) return;
     try {
       await api.post(`/nightclubs/${clubId()}/taxi/rides/${ride.id}/cancel`, {});
       await loadTaxi();
@@ -864,18 +1373,176 @@
 
   // ---------------------------------------------------------------- navegación
 
-  const VIEWS = ['map', 'menu', 'orders', 'show', 'flirt', 'taxi', 'profile'];
+  const VIEWS = ['home', 'map', 'menu', 'orders', 'show', 'flirt', 'taxi', 'profile'];
+  // Las vistas que no tienen pestaña propia encienden la de donde se llega a ellas.
+  const TAB_OF = { map: 'home', taxi: 'home', flirt: 'show' };
 
   function showView(name) {
     for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
+    const tab = TAB_OF[name] || name;
     document.querySelectorAll('.nav-tab').forEach((b) => {
-      b.className = `nav-tab py-3 text-[10px] ${b.dataset.view === name ? 'tab-active' : 'text-white/50'}`;
+      const on = b.dataset.view === tab;
+      b.className = `nav-tab py-2.5 text-[11px] ${on ? 'tab-active' : 'text-white/50'}`;
+      if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     });
+    if (name === 'home') renderHome();
+    const main = document.querySelector('#screen-app main');
+    if (main) main.scrollTop = 0;
     // El lienzo se mide al mostrarse: dibujarlo mientras estaba oculto lo deja en blanco.
     if (name === 'map') drawMap();
     hub.emit('view', name);
   }
   document.querySelectorAll('.nav-tab').forEach((b) => { b.onclick = () => showView(b.dataset.view); });
+  document.querySelectorAll('[data-goto]').forEach((b) => { b.onclick = () => showView(b.dataset.goto); });
+
+  // ---------------------------------------------------------------- vitrina sin cuenta (D74)
+
+  // Antes de la cuenta: la carta y las noches, de solo lectura. Pedir y reservar siguen
+  // pidiendo cuenta, porque cobran dinero y necesitan un nombre.
+  const preview = { drinks: [], events: [], categories: [], category: null, search: '', loaded: false, failed: false };
+
+  async function openPreview() {
+    $('screen-auth').hidden = true;
+    $('screen-preview').hidden = false;
+    window.scrollTo(0, 0);
+    if (!preview.loaded) {
+      try {
+        const res = await fetch(`${meta('ev2:api', '/api')}/nightclubs/by-slug/${encodeURIComponent(CLUB_SLUG)}/showcase`);
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        preview.drinks = data.drinks || [];
+        preview.events = data.events || [];
+        preview.categories = EV2Client.orderCategories(preview.drinks.map((d) => d.category));
+        preview.loaded = true;
+        preview.failed = false;
+      } catch {
+        preview.failed = true;
+      }
+    }
+    renderPreview();
+  }
+
+  function renderPreview() {
+    const nights = preview.events;
+    $('preview-nights-wrap').hidden = nights.length === 0;
+    $('preview-nights').innerHTML = nights.map((e) => {
+      const date = new Date(`${String(e.event_date).slice(0, 10)}T12:00:00`);
+      const day = Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString(lang() === 'en' ? 'en-US' : 'es-MX',
+        { weekday: 'long', day: 'numeric', month: 'long' });
+      const doors = e.doors_open_at ? new Date(e.doors_open_at).toLocaleTimeString(lang() === 'en' ? 'en-US' : 'es-MX',
+        { hour: 'numeric', minute: '2-digit' }) : '';
+      return `
+      <div class="card rounded-xl p-4">
+        <p class="font-display text-lg leading-tight">${escape(e.name)}</p>
+        <p class="text-sm text-white/60 mt-0.5 capitalize">${escape(day)}</p>
+        <p class="text-xs text-white/45 mt-1">${doors ? escape(t('preview.doors', { time: doors })) : ''}${Number(e.ticket_price) > 0 ? ` · ${escape(t('preview.cover', { amount: money(e.ticket_price, e.currency) }))}` : ''}</p>
+      </div>`;
+    }).join('');
+
+    const cats = $('preview-categories');
+    cats.innerHTML = [null, ...preview.categories].map((c) => `
+      <button data-pcat="${c === null ? '' : escape(c)}"
+              class="px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${preview.category === c ? 'ev2-button' : 'card'}">
+        ${c === null ? escape(t('menu.all')) : escape(c)}
+      </button>`).join('');
+    cats.querySelectorAll('[data-pcat]').forEach((b) => {
+      b.onclick = () => { preview.category = b.dataset.pcat || null; renderPreview(); };
+    });
+
+    if (preview.failed) {
+      $('preview-list').innerHTML = `<p class="text-sm text-red-300 text-center py-8">${escape(t('preview.error'))}</p>`;
+      return;
+    }
+    const list = EV2Client.filterMenu(preview.drinks, { category: preview.category, search: preview.search });
+    $('preview-list').innerHTML = list.map((d) => `
+      <div class="card rounded-xl p-3 flex items-center gap-3">
+        ${thumb(d)}
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold">${escape(d.name)}</p>
+          ${preview.category ? '' : `<p class="text-xs text-white/50">${escape(d.category || '')}</p>`}
+        </div>
+        <p class="text-sm font-semibold">${money(d.price, d.currency)}</p>
+      </div>`).join('') || `<p class="text-white/40 text-sm text-center py-10">${escape(t(preview.search ? 'menu.noMatch' : 'menu.empty'))}</p>`;
+  }
+
+  $('btn-preview').onclick = openPreview;
+  $('btn-preview-back').onclick = () => { $('screen-preview').hidden = true; $('screen-auth').hidden = false; };
+  $('btn-preview-join').onclick = () => {
+    $('screen-preview').hidden = true;
+    $('screen-auth').hidden = false;
+    switchMode('client');
+    switchAuthTab('register');
+  };
+  $('preview-search').addEventListener('input', (e) => { preview.search = e.target.value; renderPreview(); });
+
+  // ---------------------------------------------------------------- inicio (D74)
+
+  function renderHome() {
+    if (!$('view-home')) return;
+    const user = api.session.user || {};
+    $('home-name').textContent = user.display_name || '';
+    const table = state.myTable;
+    $('home-where').textContent = table ? t('home.atTable', { code: table.code }) : t('home.noTable');
+    // La tarjeta de la mesa cambia de trabajo: sin mesa invita a elegir; con mesa, lleva al plano.
+    const seat = $('home-seat').querySelectorAll('span span');
+    seat[0].textContent = table ? t('home.seatedTitle', { code: table.code }) : t('home.seatTitle');
+    seat[1].textContent = table ? t('home.seatedHint') : t('home.seatHint');
+
+    const last = EV2Client.lastRepeatable(state.orders);
+    $('home-repeat').hidden = !last;
+    $('home-orders').classList.toggle('col-span-2', !last);
+
+    const live = state.orders.filter((o) => EV2Client.isOpenOrder(o.status));
+    $('home-live').hidden = live.length === 0;
+    if (live.length) {
+      const o = live[0];
+      $('home-live-status').textContent = EV2Client.orderLabel(o.status, lang());
+      $('home-live-items').textContent = (o.items || [])
+        .map((i) => `${i.quantity}× ${i.name || i.drink_name || ''}`).join(', ');
+      $('home-live-bar').style.width = `${Math.round(EV2Client.orderProgress(o.status) * 100)}%`;
+      $('home-live-count').hidden = live.length < 2;
+      $('home-live-count').textContent = t('home.liveMore', { n: live.length - 1 });
+    }
+
+    const ride = state.taxi.ride;
+    const rideLive = Boolean(ride && EV2Taxi.isLive(ride.status));
+    $('home-exit-hint').textContent = t(rideLive ? 'home.exitLive' : 'home.exitHint');
+    $('home-exit').style.borderColor = rideLive ? 'var(--ev2-lime)' : '';
+  }
+
+  $('home-seat').onclick = () => showView('map');
+  $('home-menu').onclick = () => showView('menu');
+  $('home-orders').onclick = () => showView('orders');
+  $('home-live').onclick = () => showView('orders');
+  $('home-show').onclick = () => showView('show');
+  $('home-flirt').onclick = () => showView('flirt');
+  $('home-exit').onclick = () => showView('taxi');
+  $('show-flirt').onclick = () => showView('flirt');
+  $('profile-taxi').onclick = () => showView('taxi');
+  $('profile-map').onclick = () => showView('map');
+
+  // Repetir lo ultimo: se llena el carrito y la persona lo revisa antes de pedir. No se
+  // manda solo: un toque accidental no puede costar dinero.
+  $('home-repeat').onclick = () => {
+    const last = EV2Client.lastRepeatable(state.orders);
+    if (!last) return;
+    let missing = 0;
+    for (const item of last.items || []) {
+      const drink = state.drinks.find((d) => d.id === item.drink_id);
+      for (let i = 0; i < Number(item.quantity || 0); i += 1) {
+        if (!drink || !cart.add(drink)) { missing += 1; break; }
+      }
+    }
+    renderMenu(); renderCart();
+    showView('menu');
+    toast(t(missing ? 'home.repeatPartial' : 'home.repeated'), missing ? 'info' : 'ok');
+  };
+
+  // Buscar en la carta: mientras se escribe, sin boton.
+  $('menu-search').addEventListener('input', (e) => {
+    state.search = e.target.value;
+    renderMenu();
+  });
 
   // ---------------------------------------------------------------- tiempo real
 
@@ -953,6 +1620,11 @@
     EV2Format.setLanguage(EV2Format.getLanguage());
     EV2Format.applyTo(document);
     $('btn-lang').textContent = EV2Format.otherLanguage().toUpperCase();
+    // Cuál de las dos puertas se abre primero, antes de pintar nada: en la tableta de
+    // la barra la de siempre es la del personal.
+    access.mode = rememberedMode();
+    buildKeys();
+    renderAccess();
     try {
       const data = await api.get(`/nightclubs/by-slug/${encodeURIComponent(CLUB_SLUG)}`);
       state.club = data.nightclub;
@@ -963,6 +1635,14 @@
     } catch {
       // Sin club no se puede entrar, pero la pantalla de acceso debe verse igual.
     }
+    // Los botones sociales, antes de retomar la sesión: si la persona no tiene sesión
+    // guardada, lo primero que ve es la pantalla de acceso ya completa.
+    loadSocialButtons();
+
+    // La vuelta del proveedor manda sobre la sesión guardada: quien acaba de entrar
+    // con Facebook espera entrar CON ESA cuenta, no con la que quedó en el teléfono.
+    if (await handleSocialReturn()) return;
+
     const user = await api.resume();
     if (user) await afterSignIn();
   }());

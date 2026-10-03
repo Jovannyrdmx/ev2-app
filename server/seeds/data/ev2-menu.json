@@ -1,914 +1,1486 @@
 {
-  "$comment": "Catalogo real de EV2 Clandestinoz, exportado de SoftRestaurant11 (tabla productos) el 2026-09-08 y entregado por el dueño. Los precios YA INCLUYEN el IVA del 8% de la franja fronteriza, que es como se cobran en la caja. Se excluyen: los grupos B2 y B3 (copias del mismo catalogo para las otras dos barras), los SUSPENDIDOS, lo bloqueado en la caja, lo de precio abierto (lo teclea el cajero) y lo de precio cero (cortesias). La llave estable es `pos_id` = productos.idproducto, la misma que usara la sincronizacion con el POS.",
-  "version": 1,
-  "source": "SoftRestaurant11 · productos.xls",
-  "exported_on": "2026-09-08",
+  "$comment": "Catalogo real de EV2 Clandestinoz, exportado de SoftRestaurant11 (tabla productos) y generado por scripts/import-sr11-catalog.py. Los precios YA INCLUYEN el IVA del 8% de la franja fronteriza (verificado contra la columna preciosinimpuestos del export), que es como se cobran en la caja. Las tres barras comparten catalogo y precio: donde las copias B2/B3 traian precios distintos se carga EL MAYOR, y los pos_id de las copias quedan en pos_id_aliases para que la sincronizacion reconozca una venta hecha en cualquier barra. Se excluyen los SUSPENDIDOS, lo bloqueado en la caja, lo de precio cero (cortesias) y los grupos que no son barra (COVER, VIP, PAQUETES).",
+  "version": 2,
+  "source": "SoftRestaurant11 - productos.xls",
+  "exported_on": "2026-09-14",
   "currency": "MXN",
   "tax_included": true,
   "tax_rate_pct": 8,
-  "items": [
+  "price_rule": "max_across_bars",
+  "unified_prices": [
     {
-      "pos_id": "02159",
-      "name": "AMIGA DATE CUENTA",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02008",
-      "name": "AZULITO",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02026",
-      "name": "AZULITO S/A",
-      "category": "Drinks",
-      "price": 110.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02071",
-      "name": "BACARDI - COCA COLA",
-      "category": "Drinks",
-      "price": 120.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02161",
-      "name": "BANANA COLADA",
-      "category": "Drinks",
-      "price": 250.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02153",
-      "name": "BELLAKEO TROPICAL",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02004",
-      "name": "BICHOTA",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02068",
-      "name": "BLACK LABEL - AGUA MINERAL",
-      "category": "Drinks",
-      "price": 150.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02155",
-      "name": "BLACK LABEL - MONSTER",
-      "category": "Drinks",
-      "price": 170.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02067",
-      "name": "BLACK LABEL - SPRITE",
-      "category": "Drinks",
-      "price": 150.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02021",
-      "name": "BOTE DE BASURA",
-      "category": "Drinks",
-      "price": 260.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "0212026",
-      "name": "BUCHANANS 12 - AGUA MINERAL",
-      "category": "Drinks",
-      "price": 150.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02154",
-      "name": "BUCHANANS 12 - MONSTER",
-      "category": "Drinks",
-      "price": 170.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02046",
-      "name": "BUCHANANS 12 - SPRITE",
-      "category": "Drinks",
-      "price": 150.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02030",
-      "name": "BUCHANANS 18 - AGUA MINERAL",
-      "category": "Drinks",
-      "price": 250.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02029",
       "name": "BUCHANANS 18 - SPRITE",
-      "category": "Drinks",
-      "price": 250.0,
-      "pos_group": "DRINKS"
+      "from": 250.0,
+      "to": 260.0,
+      "bars": [
+        [
+          "DRINKS",
+          250.0
+        ],
+        [
+          "DRINKS B2",
+          260.0
+        ],
+        [
+          "DRINKS B3",
+          260.0
+        ]
+      ]
     },
     {
-      "pos_id": "02001",
-      "name": "CAIPIRIÑA",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02070",
       "name": "CAPITAN MORGAN - COCA COLA",
-      "category": "Drinks",
-      "price": 120.0,
-      "pos_group": "DRINKS"
+      "from": 120.0,
+      "to": 240.0,
+      "bars": [
+        [
+          "DRINKS",
+          120.0
+        ],
+        [
+          "DRINKS B2",
+          120.0
+        ],
+        [
+          "DRINKS B3",
+          240.0
+        ]
+      ]
     },
     {
-      "pos_id": "02158",
-      "name": "CLAMATO PREPARADO",
-      "category": "Drinks",
-      "price": 150.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02011",
-      "name": "CLANDEDRINK",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02152",
-      "name": "COSMOPOLITAN",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02149",
-      "name": "EN LAS ROCAS BLACK LABEL",
-      "category": "Drinks",
-      "price": 160.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02150",
-      "name": "EN LAS ROCAS BUCHANANS 12",
-      "category": "Drinks",
-      "price": 180.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02148",
-      "name": "EN LAS ROCAS RED LABEL",
-      "category": "Drinks",
-      "price": 130.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02072",
-      "name": "FABULOSO",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02069",
-      "name": "JACK DANIELS - COCA COLA",
-      "category": "Drinks",
-      "price": 150.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02160",
-      "name": "KRIPTONITA",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02162",
-      "name": "LUCES DE HABANA",
-      "category": "Drinks",
-      "price": 260.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02007",
-      "name": "LYSOL",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02156",
-      "name": "MALIBU PIÑA",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02041",
-      "name": "MANGO KUSH",
-      "category": "Drinks",
-      "price": 580.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "12025",
-      "name": "MARGARITA",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02016",
-      "name": "MARGARITA CHERRY",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02023",
-      "name": "MARGARITA CHERRY S/A",
-      "category": "Drinks",
-      "price": 110.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02015",
-      "name": "MARGARITA MANGO",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02022",
-      "name": "MARGARITA MANGO S/A",
-      "category": "Drinks",
-      "price": 110.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02050",
-      "name": "MARGARITA S/A",
-      "category": "Drinks",
-      "price": 110.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02010",
-      "name": "PALOMA CLANDESTINA",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02062",
-      "name": "PALOMA OAXAQUEÑA",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02019",
-      "name": "PIÑA COLADA",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02025",
-      "name": "PIÑA COLADA S/A",
-      "category": "Drinks",
-      "price": 110.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02066",
-      "name": "RED LABEL - AGUA MINERAL",
-      "category": "Drinks",
-      "price": 120.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02065",
-      "name": "RED LABEL - SPRITE",
-      "category": "Drinks",
-      "price": 120.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02003",
-      "name": "REY MAMABICHO",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02020",
-      "name": "SEX ON THE BEACH",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02006",
-      "name": "SUAVITEL",
-      "category": "Drinks",
-      "price": 240.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02064",
-      "name": "TAMARINDAZO",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02157",
-      "name": "TEQUILA MINERAL",
-      "category": "Drinks",
-      "price": 240.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02018",
-      "name": "TEQUILA SUNRISE",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02073",
-      "name": "TORNADO",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02005",
-      "name": "TUSSA",
-      "category": "Drinks",
-      "price": 220.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "02151",
       "name": "VODKA CON AGUA MINERAL (1L)",
-      "category": "Drinks",
-      "price": 120.0,
-      "pos_group": "DRINKS"
-    },
-    {
-      "pos_id": "012044",
-      "name": "CUB. TECATE LIGHT 1/4",
-      "category": "Cervezas",
-      "price": 300.0,
-      "pos_group": "CERVEZAS"
-    },
-    {
-      "pos_id": "01007",
-      "name": "CUB. TECATE ROJA 1/4",
-      "category": "Cervezas",
-      "price": 300.0,
-      "pos_group": "CERVEZAS"
-    },
-    {
-      "pos_id": "02042",
-      "name": "MICHELADA CLASICA",
-      "category": "Cervezas",
-      "price": 240.0,
-      "pos_group": "CERVEZAS"
-    },
-    {
-      "pos_id": "02043",
-      "name": "MICHELADA MANGO",
-      "category": "Cervezas",
-      "price": 240.0,
-      "pos_group": "CERVEZAS"
-    },
-    {
-      "pos_id": "01006",
-      "name": "MICHELADA TAMARINDO",
-      "category": "Cervezas",
-      "price": 240.0,
-      "pos_group": "CERVEZAS"
-    },
-    {
-      "pos_id": "01001",
-      "name": "TECATE LIGHT 1/4",
-      "category": "Cervezas",
-      "price": 30.0,
-      "pos_group": "CERVEZAS"
-    },
-    {
-      "pos_id": "01017",
-      "name": "TECATE ROJA 1/4",
-      "category": "Cervezas",
-      "price": 30.0,
-      "pos_group": "CERVEZAS"
-    },
-    {
-      "pos_id": "04008",
-      "name": "RONDA BABY MANGO",
-      "category": "Shots",
-      "price": 250.0,
-      "pos_group": "SHOTS"
-    },
-    {
-      "pos_id": "04009",
-      "name": "RONDA MAMADAS",
-      "category": "Shots",
-      "price": 360.0,
-      "pos_group": "SHOTS"
-    },
-    {
-      "pos_id": "04010",
-      "name": "RONDA PERLAS NEGRAS",
-      "category": "Shots",
-      "price": 720.0,
-      "pos_group": "SHOTS"
-    },
-    {
-      "pos_id": "04007",
-      "name": "RONDA RAINBOW",
-      "category": "Shots",
-      "price": 250.0,
-      "pos_group": "SHOTS"
-    },
-    {
-      "pos_id": "04014",
-      "name": "RONDA TAMARINDAZO",
-      "category": "Shots",
-      "price": 240.0,
-      "pos_group": "SHOTS"
-    },
-    {
-      "pos_id": "04040",
-      "name": "SHOT BACANORA",
-      "category": "Shots",
-      "price": 120.0,
-      "pos_group": "SHOTS"
-    },
-    {
-      "pos_id": "04039",
-      "name": "SHOT CAPITAN MORGAN",
-      "category": "Shots",
-      "price": 60.0,
-      "pos_group": "SHOTS"
-    },
-    {
-      "pos_id": "04002",
-      "name": "SHOT DON JULIO 70",
-      "category": "Shots",
-      "price": 150.0,
-      "pos_group": "SHOTS"
-    },
-    {
-      "pos_id": "04041",
-      "name": "SHOT HORNITOS REPOSADO",
-      "category": "Shots",
-      "price": 120.0,
-      "pos_group": "SHOTS"
-    },
-    {
-      "pos_id": "04003",
-      "name": "SHOT MAESTRO TEQUILERO",
-      "category": "Shots",
-      "price": 120.0,
-      "pos_group": "SHOTS"
-    },
-    {
-      "pos_id": "04006",
-      "name": "SHOT PERLA NEGRA",
-      "category": "Shots",
-      "price": 130.0,
-      "pos_group": "SHOTS"
-    },
-    {
-      "pos_id": "04005",
-      "name": "SHOT TEQUILA MANGO",
-      "category": "Shots",
-      "price": 60.0,
-      "pos_group": "SHOTS"
-    },
-    {
-      "pos_id": "04004",
-      "name": "SHOT VODKA TAMARINDO",
-      "category": "Shots",
-      "price": 60.0,
-      "pos_group": "SHOTS"
-    },
-    {
-      "pos_id": "01015",
-      "name": "AGUA",
-      "category": "Sin alcohol",
-      "price": 30.0,
-      "pos_group": "SERVICIOS"
-    },
-    {
-      "pos_id": "05001",
-      "name": "AGUA MINERAL CH",
-      "category": "Sin alcohol",
-      "price": 30.0,
-      "pos_group": "SERVICIOS"
-    },
-    {
-      "pos_id": "05006",
-      "name": "JUGO ARANDANO",
-      "category": "Sin alcohol",
-      "price": 100.0,
-      "pos_group": "SERVICIOS"
-    },
-    {
-      "pos_id": "05010",
-      "name": "JUGO MANGO",
-      "category": "Sin alcohol",
-      "price": 100.0,
-      "pos_group": "SERVICIOS"
-    },
-    {
-      "pos_id": "172056",
-      "name": "JUGO NARANJA",
-      "category": "Sin alcohol",
-      "price": 100.0,
-      "pos_group": "SERVICIOS"
-    },
-    {
-      "pos_id": "05007",
-      "name": "JUGO PIÑA",
-      "category": "Sin alcohol",
-      "price": 100.0,
-      "pos_group": "SERVICIOS"
-    },
-    {
-      "pos_id": "05008",
-      "name": "MONSTER",
-      "category": "Sin alcohol",
-      "price": 110.0,
-      "pos_group": "SERVICIOS"
-    },
-    {
-      "pos_id": "05003",
-      "name": "SPRITE",
-      "category": "Sin alcohol",
-      "price": 50.0,
-      "pos_group": "SERVICIOS"
-    },
-    {
-      "pos_id": "05009",
-      "name": "SQUIRT",
-      "category": "Sin alcohol",
-      "price": 50.0,
-      "pos_group": "SERVICIOS"
-    },
+      "from": 120.0,
+      "to": 220.0,
+      "bars": [
+        [
+          "DRINKS",
+          120.0
+        ],
+        [
+          "DRINKS B2",
+          220.0
+        ],
+        [
+          "DRINKS B3",
+          220.0
+        ]
+      ]
+    }
+  ],
+  "items": [
     {
       "pos_id": "03124",
       "name": "30-30 AÑEJO",
       "category": "Botellas",
       "price": 2600.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "20003",
+        "21003"
+      ]
     },
     {
       "pos_id": "03123",
       "name": "30-30 BLANCO",
       "category": "Botellas",
       "price": 1500.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "20004",
+        "21005"
+      ]
     },
     {
       "pos_id": "03126",
       "name": "30-30 CRISTALINO",
       "category": "Botellas",
       "price": 3000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "20005",
+        "21004"
+      ]
     },
     {
       "pos_id": "03125",
       "name": "30-30 REPOSADO",
       "category": "Botellas",
       "price": 1500.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "20006",
+        "21006"
+      ]
     },
     {
       "pos_id": "03043",
       "name": "ABSOLUT",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "20001",
+        "21001"
+      ]
     },
     {
       "pos_id": "03011",
       "name": "ABSOLUT LIMON",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03048",
+        "03049"
+      ]
     },
     {
       "pos_id": "03044",
       "name": "ABSOLUT MANGO",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03050",
+        "03051"
+      ]
     },
     {
       "pos_id": "03046",
       "name": "ABSOLUT PERA",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03052",
+        "03053"
+      ]
     },
     {
       "pos_id": "03045",
       "name": "ABSOLUT RASPBERRY",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03054",
+        "03055"
+      ]
     },
     {
       "pos_id": "03047",
       "name": "ABSOLUT SANDIA",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03056",
+        "03057"
+      ]
     },
     {
       "pos_id": "03004",
       "name": "AZUL MANGO",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03058",
+        "03059"
+      ]
     },
     {
       "pos_id": "03015",
       "name": "BACARDI",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03060",
+        "03061"
+      ]
     },
     {
       "pos_id": "03026",
       "name": "BACARDI LIMON",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03062",
+        "03063"
+      ]
     },
     {
       "pos_id": "03027",
       "name": "BACARDI MANGO CHILE",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03064",
+        "03065"
+      ]
     },
     {
       "pos_id": "03028",
       "name": "BACARDI RASPBERRY",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03066",
+        "03067"
+      ]
     },
     {
       "pos_id": "03131",
       "name": "BARULLO SPICY SANDIA",
       "category": "Botellas",
       "price": 1600.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "20010",
+        "21047"
+      ]
     },
     {
       "pos_id": "03009",
       "name": "BLACK LABEL",
       "category": "Botellas",
       "price": 2650.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03068",
+        "03069"
+      ]
     },
     {
       "pos_id": "03017",
       "name": "BLUE LABEL",
       "category": "Botellas",
       "price": 13000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03070",
+        "03071"
+      ]
     },
     {
       "pos_id": "03040",
       "name": "BOMBAY",
       "category": "Botellas",
       "price": 2000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03072",
+        "03073"
+      ]
     },
     {
       "pos_id": "03006",
       "name": "BUCHANANS 12",
       "category": "Botellas",
       "price": 2650.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03074",
+        "03075"
+      ]
     },
     {
       "pos_id": "03007",
       "name": "BUCHANANS 18",
       "category": "Botellas",
       "price": 4000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03076",
+        "03077"
+      ]
     },
     {
       "pos_id": "03128",
       "name": "BUCHANANS 21",
       "category": "Botellas",
       "price": 13000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "20009",
+        "21009"
+      ]
     },
     {
       "pos_id": "03037",
       "name": "BUCHANANS MASTER",
       "category": "Botellas",
       "price": 3500.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03078",
+        "03079"
+      ]
     },
     {
       "pos_id": "03038",
       "name": "BUCHANANS PIÑA",
       "category": "Botellas",
       "price": 3000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03080",
+        "03081"
+      ]
     },
     {
       "pos_id": "03014",
       "name": "CAPTAIN MORGAN",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03082",
+        "03083"
+      ]
     },
     {
       "pos_id": "03024",
       "name": "CHAMPAGNE DE LA CASA",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03084",
+        "03085"
+      ]
     },
     {
       "pos_id": "03021",
       "name": "CLASE AZUL REPOSADO",
       "category": "Botellas",
       "price": 11500.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03086",
+        "03087"
+      ]
     },
     {
       "pos_id": "03023",
       "name": "DOM PERIGNON",
       "category": "Botellas",
       "price": 15000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03088",
+        "03089"
+      ]
     },
     {
       "pos_id": "03020",
       "name": "DON JULIO 1942",
       "category": "Botellas",
       "price": 7000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03090",
+        "03091"
+      ]
     },
     {
       "pos_id": "03001",
       "name": "DON JULIO 70",
       "category": "Botellas",
       "price": 3300.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03092",
+        "03093"
+      ]
     },
     {
       "pos_id": "03039",
       "name": "DON JULIO BLANCO",
       "category": "Botellas",
       "price": 2000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03094",
+        "03095"
+      ]
     },
     {
       "pos_id": "03122",
       "name": "DON JULIO REPOSADO",
       "category": "Botellas",
       "price": 2200.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "20002",
+        "21002"
+      ]
     },
     {
       "pos_id": "03010",
       "name": "DOUBLE BLACK LABEL",
       "category": "Botellas",
       "price": 3000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03096",
+        "03097"
+      ]
     },
     {
       "pos_id": "03003",
       "name": "GRAN MALO",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03098",
+        "03099"
+      ]
     },
     {
       "pos_id": "03013",
       "name": "GREY GOOSE",
       "category": "Botellas",
       "price": 2000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03100",
+        "03101"
+      ]
     },
     {
       "pos_id": "03005",
       "name": "HERRADURA ULTRA",
       "category": "Botellas",
       "price": 2200.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03102",
+        "03103"
+      ]
     },
     {
       "pos_id": "03016",
       "name": "HPNOTIQ",
       "category": "Botellas",
       "price": 2000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03104",
+        "03105"
+      ]
     },
     {
       "pos_id": "03031",
       "name": "JACK DANIELS",
       "category": "Botellas",
       "price": 2400.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03106",
+        "03107"
+      ]
     },
     {
       "pos_id": "03042",
       "name": "JAGERMEISTER",
       "category": "Botellas",
       "price": 1700.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03108",
+        "03109"
+      ]
     },
     {
       "pos_id": "03002",
       "name": "MAESTRO TEQUILERO",
       "category": "Botellas",
       "price": 3000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03110",
+        "03111"
+      ]
     },
     {
       "pos_id": "03129",
       "name": "MEZCAL 400 CONEJOS JOVEN",
       "category": "Botellas",
       "price": 1800.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "20008",
+        "21008"
+      ]
     },
     {
       "pos_id": "03022",
       "name": "MOET",
       "category": "Botellas",
       "price": 3500.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03112",
+        "03113"
+      ]
     },
     {
       "pos_id": "03019",
       "name": "NUVO",
       "category": "Botellas",
       "price": 2000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03114",
+        "03115"
+      ]
     },
     {
       "pos_id": "12014",
       "name": "RED LABEL",
       "category": "Botellas",
       "price": 1450.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03116",
+        "03117"
+      ]
     },
     {
       "pos_id": "03012",
       "name": "SMIRNOFF TAMARINDO",
       "category": "Botellas",
       "price": 1250.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03118",
+        "03119"
+      ]
     },
     {
       "pos_id": "01019",
       "name": "TEQUILA 1800",
       "category": "Botellas",
       "price": 2600.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "03120",
+        "03121"
+      ]
     },
     {
       "pos_id": "03127",
       "name": "TITOS",
       "category": "Botellas",
       "price": 2000.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "20007",
+        "21007"
+      ]
     },
     {
       "pos_id": "03041",
       "name": "TORRES 10",
       "category": "Botellas",
       "price": 1500.0,
-      "pos_group": "BOTELLAS"
+      "pos_group": "BOTELLAS",
+      "pos_id_aliases": [
+        "21048"
+      ]
+    },
+    {
+      "pos_id": "012044",
+      "name": "CUB. TECATE LIGHT 1/4",
+      "category": "Cervezas",
+      "price": 300.0,
+      "pos_group": "CERVEZAS",
+      "pos_id_aliases": [
+        "01026",
+        "01027"
+      ]
+    },
+    {
+      "pos_id": "01007",
+      "name": "CUB. TECATE ROJA 1/4",
+      "category": "Cervezas",
+      "price": 300.0,
+      "pos_group": "CERVEZAS",
+      "pos_id_aliases": [
+        "01028",
+        "01029"
+      ]
+    },
+    {
+      "pos_id": "02042",
+      "name": "MICHELADA CLASICA",
+      "category": "Cervezas",
+      "price": 240.0,
+      "pos_group": "CERVEZAS",
+      "pos_id_aliases": [
+        "01030",
+        "01031"
+      ]
+    },
+    {
+      "pos_id": "02043",
+      "name": "MICHELADA MANGO",
+      "category": "Cervezas",
+      "price": 240.0,
+      "pos_group": "CERVEZAS",
+      "pos_id_aliases": [
+        "01032",
+        "01033"
+      ]
+    },
+    {
+      "pos_id": "01006",
+      "name": "MICHELADA TAMARINDO",
+      "category": "Cervezas",
+      "price": 240.0,
+      "pos_group": "CERVEZAS",
+      "pos_id_aliases": [
+        "01034",
+        "01035"
+      ]
+    },
+    {
+      "pos_id": "01001",
+      "name": "TECATE LIGHT 1/4",
+      "category": "Cervezas",
+      "price": 30.0,
+      "pos_group": "CERVEZAS",
+      "pos_id_aliases": [
+        "01038",
+        "01039"
+      ]
+    },
+    {
+      "pos_id": "01017",
+      "name": "TECATE ROJA 1/4",
+      "category": "Cervezas",
+      "price": 30.0,
+      "pos_group": "CERVEZAS",
+      "pos_id_aliases": [
+        "01040",
+        "01041"
+      ]
+    },
+    {
+      "pos_id": "02159",
+      "name": "AMIGA DATE CUENTA",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24049",
+        "25049"
+      ]
+    },
+    {
+      "pos_id": "02008",
+      "name": "AZULITO",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02074",
+        "02075"
+      ]
+    },
+    {
+      "pos_id": "02026",
+      "name": "AZULITO S/A",
+      "category": "Drinks",
+      "price": 110.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02076",
+        "02077"
+      ]
+    },
+    {
+      "pos_id": "02071",
+      "name": "BACARDI - COCA COLA",
+      "category": "Drinks",
+      "price": 120.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02078",
+        "02079"
+      ]
+    },
+    {
+      "pos_id": "02161",
+      "name": "BANANA COLADA",
+      "category": "Drinks",
+      "price": 250.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24052",
+        "25052"
+      ]
+    },
+    {
+      "pos_id": "02153",
+      "name": "BELLAKEO TROPICAL",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24043",
+        "25043"
+      ]
+    },
+    {
+      "pos_id": "02004",
+      "name": "BICHOTA",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02080",
+        "02081"
+      ]
+    },
+    {
+      "pos_id": "02068",
+      "name": "BLACK LABEL - AGUA MINERAL",
+      "category": "Drinks",
+      "price": 150.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02082",
+        "02083"
+      ]
+    },
+    {
+      "pos_id": "02155",
+      "name": "BLACK LABEL - MONSTER",
+      "category": "Drinks",
+      "price": 170.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24045",
+        "25045"
+      ]
+    },
+    {
+      "pos_id": "02067",
+      "name": "BLACK LABEL - SPRITE",
+      "category": "Drinks",
+      "price": 150.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02084",
+        "02085"
+      ]
+    },
+    {
+      "pos_id": "02021",
+      "name": "BOTE DE BASURA",
+      "category": "Drinks",
+      "price": 260.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02086",
+        "02087"
+      ]
+    },
+    {
+      "pos_id": "0212026",
+      "name": "BUCHANANS 12 - AGUA MINERAL",
+      "category": "Drinks",
+      "price": 150.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02088",
+        "02089"
+      ]
+    },
+    {
+      "pos_id": "02154",
+      "name": "BUCHANANS 12 - MONSTER",
+      "category": "Drinks",
+      "price": 170.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24044",
+        "25044"
+      ]
+    },
+    {
+      "pos_id": "02046",
+      "name": "BUCHANANS 12 - SPRITE",
+      "category": "Drinks",
+      "price": 150.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02090",
+        "02091"
+      ]
+    },
+    {
+      "pos_id": "02030",
+      "name": "BUCHANANS 18 - AGUA MINERAL",
+      "category": "Drinks",
+      "price": 250.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02092",
+        "02093"
+      ]
+    },
+    {
+      "pos_id": "02029",
+      "name": "BUCHANANS 18 - SPRITE",
+      "category": "Drinks",
+      "price": 260.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02094",
+        "02095"
+      ]
+    },
+    {
+      "pos_id": "02001",
+      "name": "CAIPIRIÑA",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02096",
+        "02097"
+      ]
+    },
+    {
+      "pos_id": "02070",
+      "name": "CAPITAN MORGAN - COCA COLA",
+      "category": "Drinks",
+      "price": 240.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02098",
+        "02099"
+      ]
+    },
+    {
+      "pos_id": "02158",
+      "name": "CLAMATO PREPARADO",
+      "category": "Drinks",
+      "price": 150.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24048",
+        "25048"
+      ]
+    },
+    {
+      "pos_id": "02011",
+      "name": "CLANDEDRINK",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02100",
+        "02101"
+      ]
+    },
+    {
+      "pos_id": "02152",
+      "name": "COSMOPOLITAN",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24042",
+        "25042"
+      ]
+    },
+    {
+      "pos_id": "02149",
+      "name": "EN LAS ROCAS BLACK LABEL",
+      "category": "Drinks",
+      "price": 160.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24040",
+        "25039"
+      ]
+    },
+    {
+      "pos_id": "02150",
+      "name": "EN LAS ROCAS BUCHANANS 12",
+      "category": "Drinks",
+      "price": 180.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24039",
+        "25040"
+      ]
+    },
+    {
+      "pos_id": "02148",
+      "name": "EN LAS ROCAS RED LABEL",
+      "category": "Drinks",
+      "price": 130.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "242147",
+        "252148"
+      ]
+    },
+    {
+      "pos_id": "02072",
+      "name": "FABULOSO",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02102",
+        "02103"
+      ]
+    },
+    {
+      "pos_id": "02069",
+      "name": "JACK DANIELS - COCA COLA",
+      "category": "Drinks",
+      "price": 150.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02104",
+        "02105"
+      ]
+    },
+    {
+      "pos_id": "02160",
+      "name": "KRIPTONITA",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24050",
+        "25050"
+      ]
+    },
+    {
+      "pos_id": "02162",
+      "name": "LUCES DE HABANA",
+      "category": "Drinks",
+      "price": 260.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24051",
+        "25051"
+      ]
+    },
+    {
+      "pos_id": "02007",
+      "name": "LYSOL",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02106",
+        "02107"
+      ]
+    },
+    {
+      "pos_id": "02156",
+      "name": "MALIBU PIÑA",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24046",
+        "25046"
+      ]
+    },
+    {
+      "pos_id": "02041",
+      "name": "MANGO KUSH",
+      "category": "Drinks",
+      "price": 580.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02108",
+        "02109"
+      ]
+    },
+    {
+      "pos_id": "12025",
+      "name": "MARGARITA",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02110",
+        "02111"
+      ]
+    },
+    {
+      "pos_id": "02016",
+      "name": "MARGARITA CHERRY",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02112",
+        "02113"
+      ]
+    },
+    {
+      "pos_id": "02023",
+      "name": "MARGARITA CHERRY S/A",
+      "category": "Drinks",
+      "price": 110.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02114",
+        "02115"
+      ]
+    },
+    {
+      "pos_id": "02015",
+      "name": "MARGARITA MANGO",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02116",
+        "02117"
+      ]
+    },
+    {
+      "pos_id": "02022",
+      "name": "MARGARITA MANGO S/A",
+      "category": "Drinks",
+      "price": 110.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02118",
+        "02119"
+      ]
+    },
+    {
+      "pos_id": "02050",
+      "name": "MARGARITA S/A",
+      "category": "Drinks",
+      "price": 110.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02120",
+        "02121"
+      ]
+    },
+    {
+      "pos_id": "02010",
+      "name": "PALOMA CLANDESTINA",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02122",
+        "02123"
+      ]
+    },
+    {
+      "pos_id": "02062",
+      "name": "PALOMA OAXAQUEÑA",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02124",
+        "02125"
+      ]
+    },
+    {
+      "pos_id": "02019",
+      "name": "PIÑA COLADA",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02126",
+        "02127"
+      ]
+    },
+    {
+      "pos_id": "02025",
+      "name": "PIÑA COLADA S/A",
+      "category": "Drinks",
+      "price": 110.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02128",
+        "02129"
+      ]
+    },
+    {
+      "pos_id": "02066",
+      "name": "RED LABEL - AGUA MINERAL",
+      "category": "Drinks",
+      "price": 120.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02130",
+        "02131"
+      ]
+    },
+    {
+      "pos_id": "02065",
+      "name": "RED LABEL - SPRITE",
+      "category": "Drinks",
+      "price": 120.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02132",
+        "02133"
+      ]
+    },
+    {
+      "pos_id": "02003",
+      "name": "REY MAMABICHO",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02134",
+        "02135"
+      ]
+    },
+    {
+      "pos_id": "02020",
+      "name": "SEX ON THE BEACH",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02136",
+        "02137"
+      ]
+    },
+    {
+      "pos_id": "02006",
+      "name": "SUAVITEL",
+      "category": "Drinks",
+      "price": 240.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02138",
+        "02139"
+      ]
+    },
+    {
+      "pos_id": "02064",
+      "name": "TAMARINDAZO",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02140",
+        "02141"
+      ]
+    },
+    {
+      "pos_id": "02157",
+      "name": "TEQUILA MINERAL",
+      "category": "Drinks",
+      "price": 240.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24047",
+        "25047"
+      ]
+    },
+    {
+      "pos_id": "02018",
+      "name": "TEQUILA SUNRISE",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02142",
+        "02143"
+      ]
+    },
+    {
+      "pos_id": "02073",
+      "name": "TORNADO",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02144",
+        "02145"
+      ]
+    },
+    {
+      "pos_id": "02005",
+      "name": "TUSSA",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "02146",
+        "02147"
+      ]
+    },
+    {
+      "pos_id": "02151",
+      "name": "VODKA CON AGUA MINERAL (1L)",
+      "category": "Drinks",
+      "price": 220.0,
+      "pos_group": "DRINKS",
+      "pos_id_aliases": [
+        "24041",
+        "25041"
+      ]
+    },
+    {
+      "pos_id": "04008",
+      "name": "RONDA BABY MANGO",
+      "category": "Shots",
+      "price": 250.0,
+      "pos_group": "SHOTS",
+      "pos_id_aliases": [
+        "04017",
+        "04018"
+      ]
+    },
+    {
+      "pos_id": "04009",
+      "name": "RONDA MAMADAS",
+      "category": "Shots",
+      "price": 360.0,
+      "pos_group": "SHOTS",
+      "pos_id_aliases": [
+        "04019",
+        "04020"
+      ]
+    },
+    {
+      "pos_id": "04010",
+      "name": "RONDA PERLAS NEGRAS",
+      "category": "Shots",
+      "price": 720.0,
+      "pos_group": "SHOTS",
+      "pos_id_aliases": [
+        "04021",
+        "04022"
+      ]
+    },
+    {
+      "pos_id": "04007",
+      "name": "RONDA RAINBOW",
+      "category": "Shots",
+      "price": 250.0,
+      "pos_group": "SHOTS",
+      "pos_id_aliases": [
+        "04023",
+        "04024"
+      ]
+    },
+    {
+      "pos_id": "04014",
+      "name": "RONDA TAMARINDAZO",
+      "category": "Shots",
+      "price": 240.0,
+      "pos_group": "SHOTS",
+      "pos_id_aliases": [
+        "04025",
+        "04026"
+      ]
+    },
+    {
+      "pos_id": "04040",
+      "name": "SHOT BACANORA",
+      "category": "Shots",
+      "price": 120.0,
+      "pos_group": "SHOTS",
+      "pos_id_aliases": [
+        "34013",
+        "35013"
+      ]
+    },
+    {
+      "pos_id": "04039",
+      "name": "SHOT CAPITAN MORGAN",
+      "category": "Shots",
+      "price": 60.0,
+      "pos_group": "SHOTS",
+      "pos_id_aliases": [
+        "344038",
+        "354039"
+      ]
+    },
+    {
+      "pos_id": "04002",
+      "name": "SHOT DON JULIO 70",
+      "category": "Shots",
+      "price": 150.0,
+      "pos_group": "SHOTS",
+      "pos_id_aliases": [
+        "04029",
+        "04030"
+      ]
+    },
+    {
+      "pos_id": "04041",
+      "name": "SHOT HORNITOS REPOSADO",
+      "category": "Shots",
+      "price": 120.0,
+      "pos_group": "SHOTS",
+      "pos_id_aliases": []
+    },
+    {
+      "pos_id": "04003",
+      "name": "SHOT MAESTRO TEQUILERO",
+      "category": "Shots",
+      "price": 120.0,
+      "pos_group": "SHOTS",
+      "pos_id_aliases": [
+        "04031",
+        "04032"
+      ]
+    },
+    {
+      "pos_id": "04006",
+      "name": "SHOT PERLA NEGRA",
+      "category": "Shots",
+      "price": 130.0,
+      "pos_group": "SHOTS",
+      "pos_id_aliases": [
+        "04033",
+        "04034"
+      ]
+    },
+    {
+      "pos_id": "04005",
+      "name": "SHOT TEQUILA MANGO",
+      "category": "Shots",
+      "price": 60.0,
+      "pos_group": "SHOTS",
+      "pos_id_aliases": [
+        "04035",
+        "04036"
+      ]
+    },
+    {
+      "pos_id": "04004",
+      "name": "SHOT VODKA TAMARINDO",
+      "category": "Shots",
+      "price": 60.0,
+      "pos_group": "SHOTS",
+      "pos_id_aliases": [
+        "04037",
+        "04038"
+      ]
+    },
+    {
+      "pos_id": "01015",
+      "name": "AGUA",
+      "category": "Sin alcohol",
+      "price": 30.0,
+      "pos_group": "SERVICIOS",
+      "pos_id_aliases": [
+        "05012",
+        "05013"
+      ]
+    },
+    {
+      "pos_id": "05001",
+      "name": "AGUA MINERAL CH",
+      "category": "Sin alcohol",
+      "price": 30.0,
+      "pos_group": "SERVICIOS",
+      "pos_id_aliases": [
+        "05014",
+        "05015"
+      ]
+    },
+    {
+      "pos_id": "05006",
+      "name": "JUGO ARANDANO",
+      "category": "Sin alcohol",
+      "price": 100.0,
+      "pos_group": "SERVICIOS",
+      "pos_id_aliases": [
+        "05018",
+        "05019"
+      ]
+    },
+    {
+      "pos_id": "05010",
+      "name": "JUGO MANGO",
+      "category": "Sin alcohol",
+      "price": 100.0,
+      "pos_group": "SERVICIOS",
+      "pos_id_aliases": [
+        "05020",
+        "05021"
+      ]
+    },
+    {
+      "pos_id": "172056",
+      "name": "JUGO NARANJA",
+      "category": "Sin alcohol",
+      "price": 100.0,
+      "pos_group": "SERVICIOS",
+      "pos_id_aliases": [
+        "05022",
+        "05023"
+      ]
+    },
+    {
+      "pos_id": "05007",
+      "name": "JUGO PIÑA",
+      "category": "Sin alcohol",
+      "price": 100.0,
+      "pos_group": "SERVICIOS",
+      "pos_id_aliases": [
+        "05024",
+        "05025"
+      ]
+    },
+    {
+      "pos_id": "05008",
+      "name": "MONSTER",
+      "category": "Sin alcohol",
+      "price": 110.0,
+      "pos_group": "SERVICIOS",
+      "pos_id_aliases": [
+        "05028",
+        "05029"
+      ]
+    },
+    {
+      "pos_id": "05003",
+      "name": "SPRITE",
+      "category": "Sin alcohol",
+      "price": 50.0,
+      "pos_group": "SERVICIOS",
+      "pos_id_aliases": [
+        "05030",
+        "05031"
+      ]
+    },
+    {
+      "pos_id": "05009",
+      "name": "SQUIRT",
+      "category": "Sin alcohol",
+      "price": 50.0,
+      "pos_group": "SERVICIOS",
+      "pos_id_aliases": [
+        "05032",
+        "05033"
+      ]
     }
   ],
   "reservation_bottles": [

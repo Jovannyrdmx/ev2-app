@@ -207,6 +207,53 @@ No hay que volver a levantar nada ni se toca el certificado: es solo el cortafue
 
 ---
 
+## 3.6 Cloudflare delante (obligatorio, no opcional)
+
+Sin esto el club es invisible para casi todo el mundo, y lo descubrimos por las malas:
+la **IPv4 de este servidor no recibe conexiones entrantes** —Hostinger la filtra en su
+red, con el servidor perfectamente sano— mientras la IPv6 funciona. El resultado es que
+solo entra quien tenga IPv6. La mayoria de las redes, incluida la del punto de venta del
+club, no lo tienen: para ellas el sistema simplemente no existe.
+
+Cloudflare resuelve eso haciendo de traductor: habla con tu servidor por **IPv6**, que
+funciona, y atiende a los visitantes por **IPv4**, que es lo que casi todos tienen.
+
+1. Cuenta gratuita en Cloudflare, **Add a site**, tu dominio, plan **Free**.
+2. Cambia los nameservers del dominio a los dos que te de Cloudflare (en Hostinger:
+   Dominios entonces DNS / Nameservers, personalizados). Tarda desde minutos hasta horas.
+3. En Cloudflare, los registros:
+
+   ```
+   BORRA   A     tudominio.com  -> <la IPv4>           (no recibe conexiones)
+   CREA    AAAA  tudominio.com  -> <la IPv6 del VPS>   Proxied (nube NARANJA)
+   CREA    AAAA  www            -> <la IPv6 del VPS>   Proxied
+   ```
+
+   La nube **naranja** es lo que hace el trabajo. En gris (*DNS only*) no arregla nada:
+   el visitante seguiria yendo directo a tu servidor.
+4. **SSL/TLS, Overview, Full (strict)**. Cualquier otro modo deja el tramo entre
+   Cloudflare y tu servidor mal cifrado o roto.
+5. Espera a que Cloudflare diga *Active*.
+
+Comprueba desde una maquina **fuera** del servidor:
+
+```bash
+nslookup tudominio.com          # debe dar una IP de Cloudflare (104.x / 172.67.x)
+curl -4 -s https://tudominio.com/api/health
+```
+
+Ese `curl -4` es el que importa: es la prueba de que una red sin IPv6 ya entra.
+
+> **`TRUST_PROXY_HOPS` pasa a 3.** Con Cloudflare son tres proxies delante de la API
+> (Cloudflare, Caddy, nginx). Si se queda en 2, la API ve **una sola direccion para todo
+> el mundo** y el limite de 10 intentos de acceso por minuto se comparte entre todos:
+> diez contrasenas equivocadas de cualquiera dejan al club entero sin poder entrar. El
+> valor sale del `.env`, asi que se corrige sin reconstruir nada; si algun dia apagas el
+> proxy de Cloudflare, vuelve a 2.
+
+> **Para volver atras** son cinco minutos: pon la nube en gris y todo queda como antes.
+> Nada de este paso es irreversible.
+
 ## 4. Levantar
 
 ```bash
@@ -279,9 +326,16 @@ con sus propios comandos:
 docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api npm run seed:floor
 docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api npm run seed:prices
 docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api npm run seed:menu
+docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api npm run seed:supplies
 ```
 
-Ninguno de los tres es opcional. Sin `seed:prices` ninguna mesa tiene precio y la
+`seed:supplies` carga las tres ubicaciones (almacen y las dos barras), los 88 insumos,
+las 129 recetas y los 60 puntos de entrega con su QR. **Carga existencia CERO a
+proposito**: las botellas entran por `almacen.html`, con una entrada de mercancia o un
+conteo fisico. Es idempotente y no pisa un tamano de botella ya confirmado a mano ni una
+zona ya asignada a una barra.
+
+Ninguno de los cuatro es opcional. Sin `seed:prices` ninguna mesa tiene precio y la
 pantalla de reservación sale vacía sin explicar por qué; sin `seed:menu` el cliente
 abre el menú y no hay nada que pedir.
 
@@ -338,6 +392,11 @@ git pull
 docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d --build
 ```
 
+Las migraciones se aplican solas al arrancar la API. **Cuando la actualizacion trae
+seeds nuevos, hay que correrlos a mano**: la API no los ejecuta al arrancar, porque un
+seed que corre solo en cada despliegue es un seed que algun dia va a pisar datos reales.
+La bitacora (`docs/AVANCE.md`) dice cual trae cada paso.
+
 Las migraciones se aplican solas al arrancar la API. Antes de actualizar en un servidor
 con datos reales, **respalda primero**:
 
@@ -361,12 +420,59 @@ docker compose --env-file .env -f deploy/docker-compose.prod.yml logs -f api
 curl -s https://tudominio.com/api/health
 ```
 
-Para conectarte a la base con un cliente SQL desde tu máquina, **túnel SSH**, no abrir el
-puerto:
+### Reiniciar los datos de prueba (D70)
+
+Vacia toda la actividad (inventario y bodega, eventos y noches, PCs e impresoras,
+pedidos, cobros, reservaciones, propinas, turnos...) y conserva la configuracion
+(usuarios y PIN, carta, recetas, insumos, plano, precios). Saca un respaldo antes y pide
+escribir `BORRAR`:
 
 ```bash
-ssh -L 5432:localhost:5432 ev2@IP-DEL-SERVIDOR
-# y en el túnel, dentro del servidor:
+cd ~/ev2-app
+bash deploy/reiniciar-datos-prueba.sh
+```
+
+Al final imprime el comando exacto para deshacerlo con el respaldo. **Nunca** con el
+club abierto ni con dinero real de por medio: el libro de transacciones tambien se vacia.
+
+### Panel para ver las tablas (Adminer, D69)
+
+El panel corre en el servidor como el contenedor `ev2-adminer`, publicado **solo en
+`127.0.0.1:8081`**: desde internet no existe. Se llega a el con un tunel SSH.
+
+**Una sola vez, en el servidor** (despues de `git pull` y `up -d`):
+
+```bash
+cd ~/ev2-app
+bash deploy/panel-bd-lectura.sh     # crea el usuario ev2_lectura y muestra su contrasena UNA vez
+```
+
+**Cada vez que quieras ver la base, en tu PC con Windows:** doble clic en
+`deploy\Abrir-Panel-BD.bat`. Abre el tunel y el navegador en `http://localhost:8081` con
+todo lleno menos la contrasena. Deja la ventana negra abierta mientras lo uses.
+
+A mano, desde cualquier sistema:
+
+```bash
+ssh -N -L 8081:127.0.0.1:8081 ev2@45.93.100.244
+# y en el navegador: http://localhost:8081
+#   Sistema: PostgreSQL · Servidor: postgres · Usuario: ev2_lectura · Base: ev2
+```
+
+- **`ev2_lectura` no puede cambiar nada**: la base rechaza cualquier edicion, aunque el
+  panel muestre los botones. Cada consulta se corta a los 30 s para no frenar el club.
+- **Para corregir un dato**, no uses el panel con `postgres`: hazlo desde la app (deja
+  rastro de quien) o con SQL por SSH. Dos clics en el panel borran una fila de la caja.
+- **Si la contrasena de `ev2_lectura` se filtro**, vuelve a correr
+  `bash deploy/panel-bd-lectura.sh`: genera otra y la anterior deja de servir.
+- **Nunca** cambies el puerto del panel a `8081:8080` sin el `127.0.0.1:` delante:
+  publicaria la pantalla de acceso a la base a todo internet (Docker se salta `ufw`).
+  `server/tests/compose-ports.test.js` falla si alguien lo hace.
+
+Para una consulta rapida sin panel, por SSH:
+
+```bash
+cd ~/ev2-app
 docker compose --env-file .env -f deploy/docker-compose.prod.yml exec postgres psql -U postgres ev2
 ```
 

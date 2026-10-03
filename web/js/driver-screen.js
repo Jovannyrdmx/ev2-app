@@ -10,6 +10,10 @@
 /* global EV2, EV2Format, EV2Taxi, EV2Roles, EV2PasswordGate */
 (function () {
   'use strict';
+  // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
+  const ask = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.confirm(text, opts) : Promise.resolve(window.confirm(text)));
+
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -137,6 +141,12 @@
   // ---------------------------------------------------------------- quién entró
 
   async function afterSignIn() {
+    // El PIN se cambia donde está el teclado, no aquí (D46): mientras no lo cambie, el
+    // servidor le bloquea todas las rutas y esta pantalla solo sabría dar errores.
+    if (EV2PasswordGate.mustChangePin(api.session.user)) {
+      location.href = EV2PasswordGate.PIN_PAGE;
+      return;
+    }
     if (EV2PasswordGate.isRequired(api.session.user)) { showPasswordGate(); return; }
     const role = api.session.user && api.session.user.role;
     if (role !== 'driver') {
@@ -408,7 +418,7 @@
 
   $('btn-ride-cancel').onclick = async () => {
     const ride = state.ride;
-    if (!ride || !window.confirm(t('taxi.confirmCancel'))) return;
+    if (!ride || !(await ask(t('taxi.confirmCancel'), { danger: true }))) return;
     try {
       await api.post(`/nightclubs/${clubId()}/taxi/rides/${ride.id}/cancel`, {});
       state.ride = null;

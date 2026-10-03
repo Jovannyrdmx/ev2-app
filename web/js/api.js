@@ -179,7 +179,9 @@
 
     // ---------------------------------------------------------------- petición
 
-    async function rawRequest(method, path, { body, headers, signal, timeoutMs } = {}) {
+    async function rawRequest(method, path, {
+      body, form, blob, headers, signal, timeoutMs,
+    } = {}) {
       if (!doFetch) throw new Error('No hay fetch disponible; pásalo en createClient({ fetch })');
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
       const timer = controller
@@ -193,6 +195,13 @@
         'X-Request-Id': requestId,
       }, headers || {});
       if (body !== undefined) finalHeaders['Content-Type'] = 'application/json';
+      // Con `form` NO se pone Content-Type a mano: el navegador tiene que escribirlo
+      // él, porque lleva el `boundary` que separa las partes. Ponerlo nosotros manda
+      // un multipart sin frontera y el servidor no encuentra el archivo.
+      if (form !== undefined) delete finalHeaders['Content-Type'];
+      // Una imagen no es JSON. Sin esto el `Accept` pediría JSON y una capa
+      // intermedia estricta podría contestar 406 a la foto del ticket.
+      if (blob) finalHeaders.Accept = '*/*';
       if (session.accessToken) finalHeaders.Authorization = `Bearer ${session.accessToken}`;
 
       let res;
@@ -200,7 +209,8 @@
         res = await doFetch(cfg.baseUrl + path, {
           method,
           headers: finalHeaders,
-          body: body === undefined ? undefined : JSON.stringify(body),
+          body: form !== undefined ? form
+            : (body === undefined ? undefined : JSON.stringify(body)),
           signal: controller ? controller.signal : undefined,
         });
       } catch (err) {
@@ -210,6 +220,13 @@
       }
 
       if (res.status === 204) return { status: 204, data: null, requestId };
+      // La foto del ticket vuelve como imagen, no como JSON. El error SÍ es JSON, así
+      // que solo se pide el blob cuando la respuesta salió bien.
+      if (blob && res.status >= 200 && res.status < 300) {
+        let imagen = null;
+        try { imagen = await res.blob(); } catch { imagen = null; }
+        return { status: res.status, data: imagen, requestId };
+      }
       let data = null;
       try { data = await res.json(); } catch { data = null; }
       return { status: res.status, data, requestId };
@@ -296,6 +313,26 @@
       const data = await request('POST', '/auth/login', {
         body: { nightclub_slug: nightclubSlug, email, password },
       });
+      applyTokens(data);
+      bus.emit('auth:signed_in', { user: session.user });
+      return session.user;
+    }
+
+    /**
+     * Guardar una sesión que ya vino armada de otra ruta.
+     *
+     * La usa el acceso con una cuenta social: la sesión no nace de `/auth/login`
+     * sino de canjear el pase de mano (`/auth/oauth/handoff`) o de terminar el
+     * registro (`/auth/oauth/complete`). Es la MISMA sesión —los mismos tokens,
+     * el mismo guardado, el mismo aviso— y por eso entra por aquí en vez de que
+     * cada pantalla escriba en `session` por su cuenta: una pantalla que guarda
+     * tokens a mano es una pantalla que algún día se olvida de `persist()` y
+     * pierde la sesión en la siguiente recarga.
+     */
+    function signInWith(data) {
+      if (!data || !data.access_token) {
+        throw new Error('signInWith needs a response with an access_token');
+      }
       applyTokens(data);
       bus.emit('auth:signed_in', { user: session.user });
       return session.user;
@@ -478,6 +515,7 @@
       NetworkError,
       uuid,
       login,
+      signInWith,
       logout,
       resume,
       refresh,
@@ -486,6 +524,12 @@
       request,
       get: (path, opts) => request('GET', path, opts),
       post: (path, body, opts) => request('POST', path, Object.assign({ body }, opts)),
+      // Subir un archivo: la foto del ticket o la factura. Pasa por el mismo camino
+      // que todo lo demás —token, renovación en 401, reintentos— porque una subida
+      // que falla por un token caducado tiene que reintentarse sola, igual que un GET.
+      postForm: (path, form, opts) => request('POST', path, Object.assign({ form }, opts)),
+      /** Trae una imagen con el token puesto. Devuelve un Blob. */
+      getBlob: (path, opts) => request('GET', path, Object.assign({ blob: true }, opts)),
       put: (path, body, opts) => request('PUT', path, Object.assign({ body }, opts)),
       patch: (path, body, opts) => request('PATCH', path, Object.assign({ body }, opts)),
       del: (path, opts) => request('DELETE', path, opts),

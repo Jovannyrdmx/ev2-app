@@ -29,9 +29,19 @@ const newOrder = (over = {}) => ({
   ...over,
 });
 
-async function stockOf(drinkId) {
-  const { rows } = await pool.query('SELECT quantity FROM inventory WHERE drink_id = $1', [drinkId]);
-  return Number(rows[0].quantity);
+/**
+ * Existencia real de un producto: la del INSUMO del que sale. Desde la migración 018
+ * el producto no tiene contador propio, y preguntarle a uno era justo el defecto.
+ */
+async function stockOf(drinkId, locationId = null) {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(sum(ss.stock), 0)::float8 AS stock
+       FROM drink_supplies ds
+       JOIN supplies s ON s.id = ds.supply_id
+       LEFT JOIN supply_stock ss ON ss.supply_id = s.id
+        AND ($2::uuid IS NULL OR ss.location_id = $2::uuid)
+      WHERE ds.drink_id = $1`, [drinkId, locationId]);
+  return rows.length ? Number(rows[0].stock) : null;
 }
 
 /** Lo que ve la barra del cobro de un pedido. */
@@ -106,7 +116,11 @@ describe('POST /orders', () => {
       .send(newOrder({ items: [{ drink_id: shot.id, quantity: 5 }] }));
 
     expect(res.status).toBe(409);
-    expect(res.body.error.details[0]).toMatchObject({ reason: 'out_of_stock', stock: 3 });
+    // El error nombra el INSUMO que faltó y cuánto queda de verdad, no un
+    // "sin existencias" que obliga a adivinar cuál de los ingredientes se acabó.
+    expect(res.body.error.details.supplies[0]).toMatchObject({
+      reason: 'out_of_stock', available: 3, needed: 5,
+    });
     expect(await stockOf(shot.id)).toBe(3);
   });
 
@@ -125,7 +139,21 @@ describe('POST /orders', () => {
     expect(res.status).toBe(404);
   });
 
+  /**
+   * Invitar un trago es alcanzar a una persona concreta, así que desde D65 pasa por
+   * las mismas reglas que el flirteo: los dos sentados y ella con el consentimiento
+   * prendido. Estas tres líneas son esas precondiciones.
+   */
+  async function puedenInvitarse() {
+    await pool.query(
+      'UPDATE user_preferences SET accept_flirts = true WHERE user_id = $1', [other.id]);
+    await pool.query(
+      'INSERT INTO table_occupants (table_id, user_id) VALUES ($1,$2), ($1,$3)',
+      [table.id, guest.id, other.id]);
+  }
+
   it('permite invitar una bebida a otra persona', async () => {
+    await puedenInvitarse();
     const res = await api().post(url('/orders')).set(auth(guest))
       .send(newOrder({ recipient_id: other.id, message: 'Salud' }));
     expect(res.status).toBe(201);
@@ -133,11 +161,25 @@ describe('POST /orders', () => {
   });
 
   it('impide invitar a alguien que te bloqueó', async () => {
+    await puedenInvitarse();
     await pool.query('INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1,$2)',
       [other.id, guest.id]);
     const res = await api().post(url('/orders')).set(auth(guest))
       .send(newOrder({ recipient_id: other.id }));
+    // 404 y no 403: un bloqueo contesta lo mismo que "no existe", para que quien
+    // acosa no aprenda que lo bloquearon y se haga otra cuenta (D65).
+    expect(res.status).toBe(404);
+  });
+
+  it('impide invitar a quien NO quiere que la contacten', async () => {
+    // El hueco que D65 cerró: `accept_flirts` apagado no se miraba por este camino.
+    await pool.query(
+      'INSERT INTO table_occupants (table_id, user_id) VALUES ($1,$2), ($1,$3)',
+      [table.id, guest.id, other.id]);
+    const res = await api().post(url('/orders')).set(auth(guest))
+      .send(newOrder({ recipient_id: other.id, message: 'Hola' }));
     expect(res.status).toBe(403);
+    expect(res.body.error.message).toMatch(/no acepta/i);
   });
 
   it('valida el cuerpo de la petición', async () => {
@@ -193,6 +235,26 @@ describe('Flujo de estados', () => {
     expect(rows[0].ready_at).toBeInstanceOf(Date);
     expect(rows[0].delivered_at).toBeInstanceOf(Date);
     expect(rows[0].bartender_id).toBe(bartender.id);
+  });
+
+  it('la barra lo marca listo de un solo toque, sin pasar por "preparando" (D73)', async () => {
+    const id = await makeOrder();
+    await payFor(id);
+    const res = await setStatus(id, 'ready', bartender);
+    expect(res.status).toBe(200);
+    expect(res.body.order.status).toBe('ready');
+    const { rows } = await pool.query(
+      'SELECT prep_started_at, ready_at, bartender_id FROM drink_orders WHERE id = $1', [id]);
+    // No se inventa cuando empezo: no se sabe, y la hora queda vacia.
+    expect(rows[0].prep_started_at).toBeNull();
+    expect(rows[0].ready_at).toBeInstanceOf(Date);
+    expect(rows[0].bartender_id).toBe(bartender.id);
+  });
+
+  it('un pedido sin pagar no se salta a listo', async () => {
+    const id = await makeOrder();
+    const res = await setStatus(id, 'ready', bartender);
+    expect(res.status).toBe(409);
   });
 
   it('rechaza saltarse etapas', async () => {
@@ -268,6 +330,12 @@ describe('Consultas de pedidos', () => {
   });
 
   it('cada quien ve sus pedidos enviados y recibidos', async () => {
+    // El regalo necesita sus precondiciones (D65): los dos sentados y ella aceptando.
+    await pool.query(
+      'UPDATE user_preferences SET accept_flirts = true WHERE user_id = $1', [other.id]);
+    await pool.query(
+      'INSERT INTO table_occupants (table_id, user_id) VALUES ($1,$2), ($1,$3)',
+      [table.id, guest.id, other.id]);
     await api().post(url('/orders')).set(auth(guest)).send(newOrder({ recipient_id: other.id }));
     const mine = await api().get(url('/orders/mine')).set(auth(guest));
     const theirs = await api().get(url('/orders/mine')).set(auth(other));
@@ -430,5 +498,102 @@ describe('El mesero levanta el pedido', () => {
   it('un pedido hecho desde el teléfono del cliente no lleva mesero', async () => {
     const res = await api().post(url('/orders')).set(auth(guest)).send(newOrder());
     expect(res.body.order.taken_by).toBeNull();
+  });
+});
+
+/**
+ * La venta en la barra.
+ *
+ * El cliente que llega a la barra, pide y paga ahí mismo: la mitad de la clientela de
+ * una barra. Hasta ahora el sistema no la contemplaba — el pedido exigía una mesa — así
+ * que el cantinero servía el trago y el inventario nunca se enteraba.
+ */
+describe('Venta directa en la barra', () => {
+  let barra;
+  beforeEach(async () => {
+    barra = await f.barOf(club.id, 'barra-baja');
+  });
+
+  const venta = (over = {}) => api().post(url('/orders')).set(auth(bartender)).send({
+    client_request_id: randomUUID(),
+    bar_location_id: barra,
+    items: [{ drink_id: beer.id, quantity: 2 }],
+    ...over,
+  });
+
+  it('se crea sin mesa y con la barra de la que sale', async () => {
+    const res = await venta();
+    expect(res.status).toBe(201);
+    expect(res.body.order.table_id).toBeNull();
+    expect(res.body.order.bar_location_id).toBe(barra);
+    expect(res.body.order.bar_name).toBe('Barra planta baja');
+  });
+
+  it('nace debiendo dinero, igual que cualquier otro pedido', async () => {
+    const res = await venta();
+    expect(res.body.order.payment_status).toBe('pending');
+    expect(res.body.order.subtotal).toBe('120.00');
+  });
+
+  it('queda a nombre del cantinero: es quien recibió el dinero', async () => {
+    const res = await venta();
+    expect(res.body.order.taken_by).toBe(bartender.id);
+    expect(res.body.order.sender_id).toBe(bartender.id);
+  });
+
+  it('el cantinero la cobra en efectivo y queda confirmada de un paso', async () => {
+    const res = await venta();
+    const pago = await payFor(res.body.order.id, bartender);
+    expect(pago.status).toBe(201);
+
+    const after = await api().get(url(`/orders/${res.body.order.id}`)).set(auth(bartender));
+    expect(after.body.order.payment_status).toBe('paid');
+    expect(after.body.order.status).toBe('confirmed');
+  });
+
+  it('descuenta del estante de ESA barra', async () => {
+    const antes = await f.supplyStock(beer.supply_id, barra);
+    await venta();
+    expect(await f.supplyStock(beer.supply_id, barra)).toBe(antes - 2);
+  });
+
+  it('no se lleva lo que no hay en esa barra', async () => {
+    const arriba = await f.barOf(club.id, 'barra-alta');
+    const res = await venta({ bar_location_id: arriba });
+    expect(res.status).toBe(409);
+    expect(res.body.error.details.supplies[0].available).toBe(0);
+  });
+
+  it('aparece en la cola de su barra y no en la otra', async () => {
+    const res = await venta();
+    await payFor(res.body.order.id, bartender);
+    const arriba = await f.barOf(club.id, 'barra-alta');
+
+    const suya = await api().get(url(`/orders?bar_id=${barra}&active=true`)).set(auth(bartender));
+    const otra = await api().get(url(`/orders?bar_id=${arriba}&active=true`)).set(auth(bartender));
+    expect(suya.body.orders.map((o) => o.id)).toContain(res.body.order.id);
+    expect(otra.body.orders.map((o) => o.id)).not.toContain(res.body.order.id);
+  });
+
+  it('es idempotente: el doble toque no cobra dos rondas', async () => {
+    const key = randomUUID();
+    const uno = await venta({ client_request_id: key });
+    const dos = await venta({ client_request_id: key });
+    expect(uno.body.order.id).toBe(dos.body.order.id);
+    expect(dos.headers['idempotent-replay']).toBe('true');
+  });
+
+  it('un cliente NO puede elegir de qué barra sale su pedido', async () => {
+    // Elegiría la barra que tenga existencia, no la que le toca a su mesa.
+    const arriba = await f.barOf(club.id, 'barra-alta');
+    const res = await api().post(url('/orders')).set(auth(guest)).send({
+      client_request_id: randomUUID(),
+      table_id: table.id,
+      bar_location_id: arriba,
+      items: [{ drink_id: beer.id, quantity: 1 }],
+    });
+    expect(res.status).toBe(201);
+    // Se ignora lo que mandó: sale de la barra que atiende su mesa.
+    expect(res.body.order.bar_location_id).toBe(barra);
   });
 });

@@ -10,68 +10,9 @@
     <meta name="ev2:api" content="/api">
     <meta name="ev2:ws" content="">
     <meta name="ev2:club" content="ev2">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
-
-        :root {
-            --ev2-cyan: #00BFFF;
-            --ev2-pink: #FF1493;
-            --ev2-lime: #00FF00;
-            --ev2-gold: #FFD700;
-            --ev2-red: #FF4444;
-        }
-
-        body { font-family: 'Inter', system-ui, sans-serif; background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%); }
-        .font-display { font-family: 'Poppins', sans-serif; font-weight: 700; }
-
-        .ev2-gradient {
-            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
-            -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-        }
-        .ev2-button {
-            background: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink));
-            color: #000; font-weight: 700;
-            transition: filter .15s ease, transform .1s ease;
-        }
-        .ev2-button:active { transform: scale(.98); }
-        .ev2-button:disabled { filter: grayscale(1) brightness(.55); cursor: not-allowed; }
-
-        /* Se opera desde el coche, de noche, a veces con el motor andando. */
-        button, select, input, .tap { min-height: 52px; font-size: 1rem; }
-
-        .card { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10); }
-
-        .switch {
-            border: 2px solid var(--ev2-cyan); color: var(--ev2-cyan);
-            background: transparent; border-radius: 10px; font-weight: 700;
-        }
-        .switch.on {
-            background: linear-gradient(135deg, var(--ev2-lime), var(--ev2-cyan));
-            color: #000; border-color: var(--ev2-lime);
-        }
-
-        .eta-choice {
-            border: 2px solid rgba(255,255,255,.2); border-radius: 10px;
-            background: transparent; color: #fff; font-weight: 700; padding: 0 .25rem;
-        }
-        .eta-choice.on { border-color: var(--ev2-lime); background: rgba(0,255,0,.15); color: var(--ev2-lime); }
-
-        .dot { width: .5rem; height: .5rem; border-radius: 9999px; display: inline-block; }
-        .dot-on { background: var(--ev2-lime); }
-        .dot-off { background: var(--ev2-red); }
-        .dot-wait { background: var(--ev2-gold); }
-
-        @keyframes flash-in { from { background: rgba(0,255,0,.3); } to { background: rgba(255,255,255,.05); } }
-        .just-arrived { animation: flash-in 1.6s ease-out; }
-
-        .field { width: 100%; padding: .6rem 1rem; border-radius: .6rem; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); outline: none; }
-        .field:focus { border-color: var(--ev2-cyan); }
-        [hidden] { display: none !important; }
-    </style>
+    <link rel="stylesheet" href="css/ev2.css">
 </head>
-<body class="text-white">
+<body class="text-white page-driver">
 <div class="max-w-md mx-auto min-h-screen flex flex-col">
 
   <!-- ============================ ENTRAR ============================ -->
@@ -87,6 +28,11 @@
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.enter">Entrar al club</button>
     </form>
+    <!-- El personal de piso ya no tiene contraseña: entra con su PIN, y el teclado
+         está en la pantalla de acceso. Sin este enlace, quien abre esta página
+         directamente se queda mirando un formulario que no puede llenar. -->
+    <a href="index.html" class="block mt-4 text-center text-sm text-white/50 underline"
+       data-i18n="pin.usePin">Entrar con PIN</a>
     <p id="auth-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
   </section>
 
@@ -207,6 +153,7 @@
 
 <script src="js/api.js"></script>
 <script src="js/format.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/roles.js"></script>
 <script src="js/password-gate.js"></script>
 <script src="js/taxi-ride.js"></script>
