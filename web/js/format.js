@@ -3677,7 +3677,9 @@
     // El mensaje del servidor viene en español y suele decir *por qué* mejor que uno
     // genérico. En inglés no sirve: está en español, así que se usa el catálogo.
     if (err.message && err.code && err.code !== 'unknown' && lang === 'es'
-        && !ENGLISH_SERVER_MESSAGES.has(err.message)) {
+        && !ENGLISH_SERVER_MESSAGES.has(err.message)
+        // "Requires role: ..." es de la capa de permisos y siempre viene en ingles (D76).
+        && !/^Requires role/.test(err.message)) {
       return err.message;
     }
     return t(`error.${err.code || 'unknown'}`, err.message);

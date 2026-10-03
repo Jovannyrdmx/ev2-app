@@ -58,14 +58,14 @@ describe('Lo que ve quien cobra', () => {
   it('dice en qué va el corte, sin adivinar', () => {
     expect(Cut.statusKey(null)).toBe('cut.noShift');
     expect(Cut.statusKey(corteAbierto())).toBe('cut.open');
-    expect(Cut.statusKey(corteAbierto({ closing: { status: 'declared' } }))).toBe('cut.waitingManager');
+    // Desde D54 no hay estado intermedio: el corte se cierra en un acto, con el gerente.
     expect(Cut.statusKey(corteAbierto({ closing: { status: 'confirmed' } }))).toBe('cut.confirmed');
   });
 
   it('cada texto existe en español y en inglés', () => {
     const claves = [...Object.values(Cut.METHOD_KEY), 'cut.mOther', 'cut.title', 'cut.toHand',
       'cut.handed', 'cut.tips', 'cut.drop', 'cut.declare', 'cut.noShift', 'cut.open',
-      'cut.waitingManager', 'cut.confirmed', 'cut.errAmount', 'cut.errTooMuch',
+      'cut.confirmed', 'cut.errAmount', 'cut.errTooMuch',
       'cut.errNoShift', 'cut.errShiftClosed', 'cut.errAlready', 'cut.drop.declared',
       'cut.drop.received', 'cut.drop.rejected', 'cut.confirmDeclare', 'cut.sending',
       'cut.dropSent', 'cut.declared', 'cut.close', 'cut.amount', 'cut.hint'];
@@ -81,7 +81,12 @@ describe('Lo que NO se deja hacer', () => {
     // O el número está mal tecleado, o ese dinero no es del club. Las dos cosas se
     // paran antes de que alguien suelte los billetes.
     expect(Cut.dropBlocker(3500, corteAbierto())).toBe('cut.errTooMuch');
-    expect(Cut.dropBlocker(3000, corteAbierto())).toBeNull();
+    expect(Cut.dropBlocker(3000, corteAbierto(), { reason: 'Caja llena', pin: '123456' })).toBeNull();
+  });
+
+  it('un retiro sin motivo o sin el código del gerente no sale (D54)', () => {
+    expect(Cut.dropBlocker(3000, corteAbierto(), { reason: '', pin: '123456' })).toBe('cut.errReason');
+    expect(Cut.dropBlocker(3000, corteAbierto(), { reason: 'Caja llena', pin: '12' })).toBe('cut.errPin');
   });
 
   it('ni cero, ni letras, ni negativos', () => {
@@ -97,10 +102,13 @@ describe('Lo que NO se deja hacer', () => {
   });
 
   it('el corte no se declara dos veces', () => {
-    expect(Cut.closeBlocker(3000, corteAbierto())).toBeNull();
-    // Cero SÍ es válido al cerrar: alguien que solo cobró con tarjeta no entrega nada.
-    expect(Cut.closeBlocker(0, corteAbierto())).toBeNull();
-    expect(Cut.closeBlocker(3000, corteAbierto({ closing: { status: 'declared' } })))
+    const pin = { pin: '123456' };
+    expect(Cut.closeBlocker(3000, corteAbierto(), pin)).toBeNull();
+    // Cero SÍ es válido al cerrar si es lo que se debía: con la diferencia, se explica.
+    expect(Cut.closeBlocker(0, corteAbierto(), pin)).toBe('cut.errDiffReason');
+    expect(Cut.closeBlocker(0, corteAbierto(), { ...pin, reason: 'Faltante, se aclara' })).toBeNull();
+    expect(Cut.closeBlocker(3000, corteAbierto(), {})).toBe('cut.errPin');
+    expect(Cut.closeBlocker(3000, corteAbierto({ closing: { status: 'confirmed' } }), pin))
       .toBe('cut.errAlready');
   });
 });
@@ -144,12 +152,12 @@ describe('La hoja, contra el DOM de verdad', () => {
     expect(doc.getElementById('cut-drops').textContent).toMatch(/cut\.drop\.received/);
   });
 
-  it('con el corte ya declarado, los botones se apagan: le toca al gerente', async () => {
-    const { hoja, doc } = montar(corteAbierto({ closing: { status: 'declared' } }));
+  it('con el corte ya cerrado, los botones se apagan', async () => {
+    const { hoja, doc } = montar(corteAbierto({ closing: { status: 'confirmed' } }));
     await hoja.open();
     expect(doc.getElementById('cut-drop').disabled).toBe(true);
     expect(doc.getElementById('cut-declare').disabled).toBe(true);
-    expect(doc.getElementById('cut-status').textContent).toBe('cut.waitingManager');
+    expect(doc.getElementById('cut-status').textContent).toBe('cut.confirmed');
   });
 
   it('si el servidor no contesta, lo dice en vez de enseñar ceros', async () => {

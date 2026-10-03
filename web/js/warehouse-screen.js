@@ -422,7 +422,7 @@
             ${state.locationFilter ? '' : `<p class="text-[11px] text-white/40 mt-.5">${perLocation || escape(t('wh.noStockAnywhere'))}</p>`}
             ${unconfirmed ? `<p class="text-[11px] text-pink-300 mt-1">${escape(t('wh.confirmSize'))}</p>` : ''}
           </div>
-          <div class="flex flex-col gap-1 shrink-0">
+          <div class="flex flex-col sm:flex-row gap-1 sm:gap-2 shrink-0 sm:items-center">
             <button class="chip tap px-3" data-supply="${escape(supply.id)}" data-kind="receive">${escape(t('wh.kind.receive'))}</button>
             <button class="chip tap px-3" data-supply="${escape(supply.id)}" data-kind="transfer">${escape(t('wh.kind.transfer'))}</button>
             <button class="chip tap px-3" data-supply="${escape(supply.id)}" data-kind="count">${escape(t('wh.kind.count'))}</button>

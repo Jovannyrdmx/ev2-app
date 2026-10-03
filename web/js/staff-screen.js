@@ -186,7 +186,11 @@
       try { apply(await api.get(path)); } catch (err) { showError(err); }
     };
     await Promise.all([
-      get(`/nightclubs/${club}/orders?active=true&limit=100`, (d) => { state.orders = d.orders || []; }),
+      // La cola de pedidos es del mesero y del gerente. La anfitriona no lleva charolas:
+      // pedirla le contestaba 403 y la pantalla abria con un error en ingles (D76).
+      canSeeOrders()
+        ? get(`/nightclubs/${club}/orders?active=true&limit=100`, (d) => { state.orders = d.orders || []; })
+        : Promise.resolve(),
       get(`/nightclubs/${club}/tables`, (d) => { state.tables = d.tables || []; }),
       get(`/nightclubs/${club}/tables/stats`, (d) => { state.stats = d; }),
       get(`/nightclubs/${club}/staff/me/tips?limit=50`, (d) => { state.tips = d.tips || []; }),
@@ -220,6 +224,7 @@
   }
 
   async function loadOrders() {
+    if (!canSeeOrders()) { renderAll(); return; }
     try {
       const d = await api.get(`/nightclubs/${clubId()}/orders?active=true&limit=100`);
       state.orders = d.orders || [];
@@ -245,7 +250,10 @@
   const TABS = ['trays', 'tables', 'door', 'me'];
 
   const DOOR_ROLES = ['hostess', 'manager', 'admin'];
+  // Quien ve la cola de pedidos: lo mismo que acepta el servidor en GET /orders.
+  const ORDER_ROLES = ['waiter', 'bartender', 'manager', 'admin'];
   const isDoorRole = () => DOOR_ROLES.includes(api.session.user && api.session.user.role);
+  const canSeeOrders = () => ORDER_ROLES.includes(api.session.user && api.session.user.role);
 
 
   // ---------------------------------------------------------------- la puerta: leer un pase
@@ -713,6 +721,12 @@
     const doorTab = document.querySelector('[data-tab="door"]');
     if (doorTab) doorTab.hidden = !isDoorRole();
     if (state.tab === 'door' && !isDoorRole()) state.tab = 'trays';
+    // Sin charolas, la anfitriona abre en la puerta, que es donde trabaja (D76).
+    const traysTab = document.querySelector('[data-tab="trays"]');
+    if (traysTab) traysTab.hidden = !canSeeOrders();
+    // Charolas, tragos y barra son numeros del mesero; a la anfitriona no le dicen nada.
+    if ($('floor-stats')) $('floor-stats').hidden = !canSeeOrders();
+    if (state.tab === 'trays' && !canSeeOrders()) state.tab = isDoorRole() ? 'door' : 'tables';
 
     for (const tab of TABS) $(`tab-${tab}`).hidden = tab !== state.tab;
     document.querySelectorAll('[data-tab]').forEach((b) => {
