@@ -11,8 +11,11 @@
  * Porque el flujo de verdad son seis eslabones, y ninguna prueba los recorría
  * juntos:
  *
- *   mesero pide → se cobra → se confirma → se encola la comanda →
- *   la PC de esa barra la toma → sale el papel
+ *   mesero pide → se confirma → se encola la comanda →
+ *   la PC de esa barra la toma → sale el papel → la caja cobra
+ *
+ * Desde D77 el pedido del mesero entra a la barra al levantarlo y lo cobra después la
+ * caja de esa barra; antes, pagar era lo que lo mandaba. La comanda sale UNA vez.
  *
  * Entre el cuarto y el quinto eslabón se perdieron dos noches: la comanda se encolaba
  * para una impresora de la barra baja y la única PC estaba asignada a la barra alta,
@@ -47,6 +50,7 @@ afterAll(closePool);
 
 beforeEach(async () => {
   await truncateAll();
+  cajas.clear();
   club = await f.createNightclub({ slug: 'ev2-flujo' });
   admin = await f.createUser(club.id, { role: 'admin' });
   manager = await f.createUser(club.id, { role: 'manager' });
@@ -121,11 +125,27 @@ const pedir = async (over = {}) => {
   return res.body.order;
 };
 
+/**
+ * La caja de la barra de ese pedido cobra (D77). Cada barra tiene su cajero; se abre
+ * su caja la primera vez que hace falta.
+ */
+const cajas = new Map();
+async function cajeroDe(locationId) {
+  if (!cajas.has(locationId)) {
+    const cajero = await f.createUser(club.id, { role: 'cashier' });
+    await f.openTill(club.id, { cashier: cajero, locationId, authorizer: manager });
+    cajas.set(locationId, cajero);
+  }
+  return cajas.get(locationId);
+}
+
 const cobrar = async (orderId) => {
   const { rows } = await pool.query(
-    `SELECT id, amount::text AS amount, currency FROM transactions
-      WHERE reference_type = 'drink_order' AND reference_id = $1`, [orderId]);
-  return api().post(url('/manual-payments/register')).set(auth(waiter)).send({
+    `SELECT tx.id, tx.amount::text AS amount, tx.currency, o.bar_location_id
+       FROM transactions tx JOIN drink_orders o ON o.id = tx.reference_id
+      WHERE tx.reference_type = 'drink_order' AND tx.reference_id = $1`, [orderId]);
+  const cajero = await cajeroDe(rows[0].bar_location_id);
+  return api().post(url('/manual-payments/register')).set(auth(cajero)).send({
     transaction_id: rows[0].id,
     method: 'cash',
     amount: Number(rows[0].amount),
@@ -157,21 +177,15 @@ const avisarImpreso = (pc, jobId) => api().post(`/api/print-agent/jobs/${jobId}/
 // ============================================================================
 
 describe('El camino feliz, eslabón por eslabón', () => {
-  it('se cobra el pedido y el papel sale en la barra de esa zona', async () => {
+  it('el mesero pide, el papel sale en la barra de esa zona, y la caja cobra', async () => {
     const barra = club.locations['barra-baja'];
     await atender(barra);
     const impresora = await altaImpresora(barra);
     await prenderComandas();
     const pc = await altaPC('PC barra baja', { location_id: barra, purpose: 'orders' });
 
-    // 1. El mesero pide.
+    // 1 y 2. El mesero pide, y en el mismo acto el pedido entra a la barra (D77).
     const pedido = await pedir();
-    expect(await estadoPedido(pedido.id)).toBe('pending');
-    expect(await comandas()).toHaveLength(0); // todavía no: pagar es lo que lo manda
-
-    // 2. Se cobra. Pagar confirma el pedido Y saca la comanda, en el mismo acto.
-    const cobro = await cobrar(pedido.id);
-    expect(cobro.status).toBeLessThan(300);
     expect(await estadoPedido(pedido.id)).toBe('confirmed');
 
     // 3. La comanda quedó encolada para la impresora de ESA barra.
@@ -191,12 +205,38 @@ describe('El camino feliz, eslabón por eslabón', () => {
     expect(papel).toContain('T-7');
     expect(papel).toContain('Cerveza Coronita');
     expect(papel).toContain('120.00'); // dos cervezas de 60
-    expect(papel).toMatch(/PAGADO/);
+    // Todavía no se cobra: lo cobra la caja cuando el mesero le entregue el dinero.
+    expect(papel).toMatch(/POR COBRAR/);
 
     // 6. Sale el papel y queda constancia.
     await avisarImpreso(pc, comanda.id);
     const [despues] = await comandas();
     expect(despues.status).toBe('printed');
+
+    // 7. La caja cobra, y NO sale una segunda comanda: la barra no prepara dos veces.
+    const cobro = await cobrar(pedido.id);
+    expect(cobro.status).toBeLessThan(300);
+    expect(await estadoPedido(pedido.id)).toBe('confirmed');
+    expect(await comandas()).toHaveLength(1);
+  });
+
+  it('lo que pide el cliente desde su teléfono sigue saliendo al pagarse', async () => {
+    const barra = club.locations['barra-baja'];
+    await atender(barra);
+    await altaImpresora(barra);
+    await prenderComandas();
+    const cliente = await f.createUser(club.id, { role: 'guest' });
+
+    const res = await api().post(url('/orders')).set(auth(cliente)).send({
+      client_request_id: randomUUID(), table_id: table.id,
+      items: [{ drink_id: beer.id, quantity: 1 }],
+    });
+    expect(res.body.order.status).toBe('pending');
+    expect(await comandas()).toHaveLength(0); // sin pagar no llega a la barra
+
+    await cobrar(res.body.order.id);
+    const [comanda] = await comandas();
+    expect(Buffer.from(comanda.payload).toString('latin1')).toMatch(/PAGADO/);
   });
 
   it('un trago de cortesía también llega a la barra, aunque no pase por caja', async () => {
@@ -209,7 +249,14 @@ describe('El camino feliz, eslabón por eslabón', () => {
     await prenderComandas();
     const gratis = await f.createDrink(club.id, { name: 'Agua de la casa', price: 0, stock: 10 });
 
-    const pedido = await pedir({ items: [{ drink_id: gratis.id, quantity: 1 }] });
+    // Ahora que el pedido del mesero entra solo a la barra, la cortesía que confirma
+    // el personal a mano es la del cliente: un trago de precio cero desde su teléfono.
+    const cliente = await f.createUser(club.id, { role: 'guest' });
+    const { body } = await api().post(url('/orders')).set(auth(cliente)).send({
+      client_request_id: randomUUID(), table_id: table.id,
+      items: [{ drink_id: gratis.id, quantity: 1 }],
+    });
+    const pedido = body.order;
     await api().post(url(`/orders/${pedido.id}/status`))
       .set(auth(bartender)).send({ status: 'confirmed' });
 
@@ -415,17 +462,29 @@ describe('Reimprimir la comanda desde el piso', () => {
     expect(tomados[0].printer.id).toBe(impresora.id);
   });
 
-  it('un pedido sin cobrar NO se puede mandar a la barra', async () => {
-    // Es el freno que impide que este botón sirva tragos gratis: en este sistema el
-    // pedido llega a la barra cuando se paga, y un papel reimpreso se ve igual que
-    // uno legítimo.
+  it('un pedido que todavía no llega a la barra NO se puede mandar con este botón', async () => {
+    // Es el freno que impide que este botón sirva tragos gratis: lo que pide un
+    // cliente desde su teléfono llega a la barra cuando se paga, y un papel reimpreso
+    // se ve igual que uno legítimo.
     await clubListo();
-    const pedido = await pedir(); // …y no se cobra
+    const cliente = await f.createUser(club.id, { role: 'guest' });
+    const { body } = await api().post(url('/orders')).set(auth(cliente)).send({
+      client_request_id: randomUUID(), table_id: table.id,
+      items: [{ drink_id: beer.id, quantity: 1 }],
+    }); // …y no se cobra
 
-    const res = await reimprimir(pedido.id);
+    const res = await reimprimir(body.order.id);
     expect(res.status).toBe(400);
     expect(res.body.error.message).toMatch(/todavía no se cobra/i);
     expect(await comandas()).toHaveLength(0);
+  });
+
+  it('el pedido del mesero, que se cobra en caja, sí se reimprime sin cobrar (D77)', async () => {
+    await clubListo();
+    const pedido = await pedir(); // ya está en la barra, por cobrar en caja
+    const res = await reimprimir(pedido.id);
+    expect(res.status).toBe(202);
+    expect(await comandas()).toHaveLength(2);
   });
 
   it('un pedido cancelado tampoco', async () => {

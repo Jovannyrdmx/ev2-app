@@ -222,11 +222,21 @@ async function publishConfirmed({ nightclubId, payment, tx, reservation, order }
     await events.publish({
       nightclubId,
       type: 'order_confirmed',
-      audience: { roles: ['bartender', 'waiter', 'manager'], userIds: [order.sender_id] },
+      audience: { roles: ['bartender', 'waiter', 'cashier', 'manager'], userIds: [order.sender_id] },
       payload: {
         order_id: order.id, status: 'confirmed', reason: null,
         transaction_id: tx.id, refund_due: false,
       },
+    });
+  } else if (tx.reference_type === 'drink_order') {
+    // El pedido que se cobra en caja (D77) ya estaba en la barra: pagarlo no lo
+    // confirma, solo lo salda. Se avisa igual, para que el mesero y la caja dejen de
+    // verlo como pendiente.
+    await events.publish({
+      nightclubId,
+      type: 'order_paid',
+      audience: { roles: ['bartender', 'waiter', 'cashier', 'manager'] },
+      payload: { order_id: tx.reference_id, transaction_id: tx.id },
     });
   }
 }

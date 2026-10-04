@@ -26,17 +26,21 @@ const cuts = require('../services/shift-closings');
 const managerAuth = require('../services/manager-auth');
 const tickets = require('../services/tickets');
 const events = require('../services/events');
+const till = require('../services/till');
 
 const router = express.Router({ mergeParams: true });
 
 router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
 
-const STAFF_ROLES = ['waiter', 'bartender', 'hostess', 'manager'];
+// El mesero y el bartender siguen aquí aunque desde D77 ya no cobran: un turno que
+// cobró antes del cambio todavía tiene que poder hacer su corte.
+const STAFF_ROLES = ['waiter', 'bartender', 'hostess', 'cashier', 'manager'];
 
 /** El turno abierto de alguien, o el último que cerró sin corte. */
 async function shiftToCut(runner, { nightclubId, userId }) {
   const { rows } = await runner.query(
-    `SELECT s.id, s.user_id, s.section, s.started_at, s.ended_at
+    `SELECT s.id, s.user_id, s.section, s.started_at, s.ended_at,
+            s.location_id, s.opening_float::text AS opening_float
        FROM staff_shifts s
        LEFT JOIN shift_closings c ON c.shift_id = s.id
       WHERE s.nightclub_id = $1 AND s.user_id = $2
@@ -174,6 +178,82 @@ router.get('/nightclubs/:nightclubId/cash-drops',
     res.json({ drops: rows });
   }));
 
+// ---------------------------------------------------------------- la caja (D77)
+
+/**
+ * Mi caja: la barra que me asignaron esta noche, si ya está abierta, con qué fondo, y
+ * los pedidos de esa barra que siguen sin cobrar.
+ */
+router.get('/nightclubs/:nightclubId/till',
+  requireRole('cashier'),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    res.json(await till.state(pool, { nightclubId: req.params.nightclubId, user: req.user }));
+  }));
+
+/**
+ * Abrir la caja con su fondo.
+ *
+ * El cajero teclea el fondo que recibe y el gerente que se lo entrega teclea su
+ * código ahí mismo. La barra NO se manda: sale del rol de la noche.
+ */
+router.post('/nightclubs/:nightclubId/till/open',
+  requireRole('cashier'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      opening_float: z.number().min(0).max(1_000_000),
+      currency: z.enum(['MXN', 'USD']).default('MXN'),
+      manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos'),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    // La barra se revisa ANTES de gastar un intento de PIN del gerente: sin barra
+    // asignada no hay nada que autorizar.
+    const asignada = await till.assignedBar(pool, { nightclubId, userId: req.user.id });
+    if (!asignada) {
+      throw ApiError.unprocessable(
+        'No tienes barra asignada para esta noche. El gerente te asigna una en el rol de la noche.');
+    }
+    const autoriza = await managerAuth.authorize(pool, {
+      nightclubId, pin: req.body.manager_pin, selfId: req.user.id, ip: req.ip,
+    });
+
+    const client = await pool.connect();
+    let abierta;
+    try {
+      await client.query('BEGIN');
+      abierta = await till.open(client, {
+        nightclubId,
+        userId: req.user.id,
+        openingFloat: req.body.opening_float,
+        currency: req.body.currency,
+        authorizer: autoriza,
+      });
+      await events.publish({
+        nightclubId, type: 'till_opened', client,
+        audience: { roles: ['manager', 'admin'], userIds: [req.user.id] },
+        payload: {
+          shift_id: abierta.shiftId,
+          user_id: req.user.id,
+          user_name: req.user.display_name || null,
+          location_id: abierta.bar.location_id,
+          location_name: abierta.bar.location_name,
+          opening_float: abierta.openingFloat,
+          authorized_by: autoriza.name,
+        },
+      });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    res.status(201).json(await till.state(pool, { nightclubId, user: req.user }));
+  }));
+
 // ---------------------------------------------------------------- el corte
 
 /**
@@ -197,6 +277,9 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
       difference_reason: z.string().trim().max(280).optional(),
       notes: z.string().trim().max(280).optional(),
       manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos'),
+      // La caja con pedidos sin cobrar solo se cierra si el gerente que teclea su
+      // código lo acepta expresamente (D77).
+      acknowledge_pending: z.boolean().default(false),
     }),
   }),
   asyncHandler(async (req, res) => {
@@ -221,6 +304,7 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
         reason: req.body.difference_reason,
         notes: req.body.notes,
         authorizer: autoriza,
+        acknowledgePending: req.body.acknowledge_pending,
       });
       await client.query('COMMIT');
     } catch (err) {
@@ -241,6 +325,9 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
         expected_cash: hecho.expected_cash,
         counted_cash: hecho.counted_cash,
         difference: hecho.difference,
+        opening_float: hecho.opening_float,
+        pending_orders: hecho.pending_orders,
+        pending_total: hecho.pending_total,
         authorized_by: autoriza.name,
       },
     });
@@ -271,12 +358,15 @@ const CLOSING_SELECT = `
          c.counted_cash::text AS counted_cash, c.difference::text AS difference,
          c.difference_reason, c.status, c.confirmed_at,
          c.authorized_at, c.authorized_role, c.ticket_job_id,
+         c.location_id, l.name AS location_name, c.opening_float::text AS opening_float,
+         c.pending_orders, c.pending_total::text AS pending_total,
          u.display_name AS user_name, m.display_name AS confirmed_by_name,
          a.display_name AS authorized_by_name
     FROM shift_closings c
     JOIN users u ON u.id = c.user_id
     LEFT JOIN users m ON m.id = c.confirmed_by
-    LEFT JOIN users a ON a.id = c.authorized_by`;
+    LEFT JOIN users a ON a.id = c.authorized_by
+    LEFT JOIN supply_locations l ON l.id = c.location_id`;
 
 router.get('/nightclubs/:nightclubId/shift-closings',
   requireRole('manager'),

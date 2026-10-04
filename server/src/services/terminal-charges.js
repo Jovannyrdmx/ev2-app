@@ -235,7 +235,7 @@ async function push(pool, { charge, tx, terminal, nightclubId }) {
   await events.publish({
     nightclubId,
     type: 'terminal_charge_started',
-    audience: { roles: ['manager', 'bartender', 'waiter', 'hostess'], userIds: [charge.started_by] },
+    audience: { roles: ['manager', 'cashier', 'hostess'], userIds: [charge.started_by] },
     payload: { charge_id: charge.id, transaction_id: tx.id, terminal: terminal.label },
   });
 
@@ -689,7 +689,7 @@ async function announce({ nightclubId, chargeId, status, outcome, startedBy }) {
     nightclubId,
     type: 'terminal_charge_updated',
     audience: {
-      roles: ['manager', 'bartender', 'waiter', 'hostess'],
+      roles: ['manager', 'cashier', 'hostess'],
       userIds: [startedBy, outcome && outcome.tx ? outcome.tx.payer_user_id : null].filter(Boolean),
     },
     payload: { charge_id: chargeId, status },

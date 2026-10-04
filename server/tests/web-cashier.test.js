@@ -1,0 +1,251 @@
+/**
+ * La caja de la barra en el navegador (D77): las decisiones de `web/js/cashier.js`,
+ * y la pantalla `web/caja.html` contra su controlador real.
+ */
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const { JSDOM } = require('jsdom');
+
+const ROOT = path.join(__dirname, '..', '..', 'web');
+const leer = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+
+const Cashier = require(path.join(ROOT, 'js', 'cashier.js'));
+const Cut = require(path.join(ROOT, 'js', 'shift-cut.js'));
+const Roles = require(path.join(ROOT, 'js', 'roles.js'));
+const Take = require(path.join(ROOT, 'js', 'order-taking.js'));
+const catalogo = require(path.join(ROOT, 'js', 'format.js'));
+
+const html = leer('caja.html');
+const controlador = leer('js/cashier-screen.js');
+
+// ============================================================================
+
+describe('EV2Cashier: la fase de la caja', () => {
+  it('sin asignación, asignada y cerrada, abierta', () => {
+    expect(Cashier.phase(null)).toBe('no_assignment');
+    expect(Cashier.phase({ till: null, assignment: null })).toBe('no_assignment');
+    expect(Cashier.phase({ till: null, assignment: { location_id: 'b' } })).toBe('closed');
+    expect(Cashier.phase({ till: { location_id: 'b' }, assignment: null })).toBe('open');
+  });
+});
+
+describe('EV2Cashier: abrir la caja', () => {
+  const asignada = { till: null, assignment: { location_id: 'b', location_name: 'Barra baja' } };
+
+  it('pide el fondo (puede ser cero) y el código del gerente', () => {
+    expect(Cashier.openBlocker({ state: asignada, amount: '', pin: '123456' })).toBe('till.errFloat');
+    expect(Cashier.openBlocker({ state: asignada, amount: '-5', pin: '123456' })).toBe('till.errFloat');
+    expect(Cashier.openBlocker({ state: asignada, amount: '0', pin: '12345' })).toBe('cut.errPin');
+    expect(Cashier.openBlocker({ state: asignada, amount: '0', pin: '123456' })).toBeNull();
+    expect(Cashier.openBlocker({ state: asignada, amount: '1500', pin: '123456' })).toBeNull();
+  });
+
+  it('sin barra asignada, o con la caja ya abierta, no se intenta', () => {
+    expect(Cashier.openBlocker({ state: null, amount: '100', pin: '123456' })).toBe('till.errNoBar');
+    expect(Cashier.openBlocker({
+      state: { till: { location_id: 'b' } }, amount: '100', pin: '123456',
+    })).toBe('till.errOpen');
+  });
+
+  it('manda el fondo como número y NUNCA la barra: la barra la decide el rol', () => {
+    const body = Cashier.openPayload({ amount: '1500.555', pin: '123456' });
+    expect(body).toEqual({ opening_float: 1500.56, currency: 'MXN', manager_pin: '123456' });
+    expect(body).not.toHaveProperty('location_id');
+  });
+});
+
+describe('EV2Cashier: lo que falta por cobrar', () => {
+  const pedidos = [
+    { order_id: 'o3', taken_by: 'w2', taken_by_name: 'Ana', subtotal: '80.00', created_at: '2026-10-03T23:10:00Z' },
+    { order_id: 'o1', taken_by: 'w1', taken_by_name: 'Luis', subtotal: '120.00', created_at: '2026-10-03T23:00:00Z' },
+    { order_id: 'o2', taken_by: 'w1', taken_by_name: 'Luis', subtotal: '60.50', created_at: '2026-10-03T23:20:00Z' },
+  ];
+
+  it('agrupa por mesero, con el total en centavos exactos', () => {
+    const grupos = Cashier.groupByWaiter(pedidos);
+    expect(grupos.map((g) => g.name)).toEqual(['Luis', 'Ana']);
+    expect(grupos[0].orders.map((o) => o.order_id)).toEqual(['o1', 'o2']);
+    expect(grupos[0].total).toBe('180.50');
+    expect(grupos[1].total).toBe('80.00');
+  });
+
+  it('el grupo que lleva más tiempo sin pagar va primero', () => {
+    const grupos = Cashier.groupByWaiter([pedidos[0], pedidos[2]]);
+    expect(grupos.map((g) => g.name)).toEqual(['Ana', 'Luis']);
+  });
+
+  it('un pedido sin mesero se agrupa aparte con el nombre que se le dé', () => {
+    const grupos = Cashier.groupByWaiter([{ order_id: 'x', subtotal: '10', created_at: null }],
+      { noName: 'Sin mesero' });
+    expect(grupos[0].name).toBe('Sin mesero');
+  });
+
+  it('suma y resume', () => {
+    expect(Cashier.total(pedidos)).toBe('260.50');
+    expect(Cashier.itemsSummary({ items: [{ name: 'Corona', quantity: 2 }, { name: 'Shot', quantity: 1 }] }))
+      .toBe('2× Corona, 1× Shot');
+    expect(Cashier.destination({ table_code: 'T-3' })).toBe('T-3');
+    expect(Cashier.destination({ delivery_point_name: 'Pista A' })).toBe('Pista A');
+    expect(Cashier.destination({})).toBeNull();
+  });
+
+  it('el cobro va por el pedido, sin `on_behalf_of`', () => {
+    const order = Cashier.asChargeable({
+      transaction_id: 't1', subtotal: '120.00', currency: 'MXN', sender_id: 'g1',
+    });
+    const body = Take.chargePayload({ order, method: 'cash', reference: '' });
+    expect(body).toEqual({ transaction_id: 't1', method: 'cash', amount: 120, currency: 'MXN' });
+  });
+});
+
+describe('EV2Cashier: qué eventos refrescan la caja', () => {
+  const ev = (type, payload = {}) => ({ type: 'event', event_type: type, payload });
+
+  it('los de pedidos y pagos sí; los de otras cosas no', () => {
+    expect(Cashier.shouldRefresh(ev('order_paid'))).toBe(true);
+    expect(Cashier.shouldRefresh(ev('order_cancelled'))).toBe(true);
+    expect(Cashier.shouldRefresh(ev('payment_confirmed'))).toBe(true);
+    expect(Cashier.shouldRefresh(ev('song_requested'))).toBe(false);
+    expect(Cashier.shouldRefresh(null)).toBe(false);
+  });
+
+  it('un pedido nuevo de OTRA barra no la mueve', () => {
+    expect(Cashier.shouldRefresh(ev('order_created', { bar_location_id: 'b2' }), { locationId: 'b1' }))
+      .toBe(false);
+    expect(Cashier.shouldRefresh(ev('order_created', { bar_location_id: 'b1' }), { locationId: 'b1' }))
+      .toBe(true);
+  });
+});
+
+describe('EV2ShiftCut con caja (D77)', () => {
+  const t = (k) => k;
+  const corte = (over = {}) => ({
+    shift: { id: 's', location_id: 'b' },
+    totals: {
+      by_method: [{ method: 'cash', amount: '120.00', count: 1 }],
+      tips: { amount: '0.00', count: 0 },
+    },
+    opening_float: '1000.00',
+    cash_to_hand: '1120.00',
+    pending_orders: [],
+    closing: null,
+    ...over,
+  });
+
+  it('el fondo es el primer renglón del corte', () => {
+    const lineas = Cut.lines(corte(), t);
+    expect(lineas[0]).toMatchObject({ key: 'float', value: '1000.00', cash: true });
+    expect(lineas[1]).toMatchObject({ key: 'cash', value: '120.00' });
+  });
+
+  it('sin fondo, no hay renglón de fondo', () => {
+    expect(Cut.lines(corte({ opening_float: '0.00' }), t).map((l) => l.key)).toEqual(['cash']);
+  });
+
+  it('con pedidos sin cobrar no cierra, salvo que el gerente lo marque', () => {
+    const c = corte({ pending_orders: [{ order_id: 'o1' }] });
+    expect(Cut.pendingCount(c)).toBe(1);
+    expect(Cut.closeBlocker(1120, c, { pin: '123456' })).toBe('cut.errPending');
+    expect(Cut.closeBlocker(1120, c, { pin: '123456', acknowledgePending: true })).toBeNull();
+  });
+
+  it('sabe si es el corte de una caja', () => {
+    expect(Cut.isTill(corte())).toBe(true);
+    expect(Cut.isTill(corte({ shift: { id: 's' } }))).toBe(false);
+  });
+});
+
+describe('El rol de cajero', () => {
+  it('entra a caja.html', () => {
+    expect(Roles.describe('cashier', 'es')).toMatchObject({ label: 'Cajero', home: 'caja.html', ready: true });
+  });
+});
+
+// ============================================================================
+
+const abiertas = [];
+afterEach(() => { while (abiertas.length) abiertas.pop().close(); });
+
+function documento() {
+  const dom = new JSDOM(html, { url: 'https://ev2.local/caja.html' });
+  abiertas.push(dom.window);
+  return dom.window.document;
+}
+
+function idsQueBusca(fuente) {
+  const ids = new Set();
+  const re = /\$\('([a-z0-9-]+)'\)/g;
+  let m = re.exec(fuente);
+  while (m) { ids.add(m[1]); m = re.exec(fuente); }
+  return [...ids];
+}
+
+describe('caja.html y su controlador', () => {
+  it('cada id que busca cashier-screen.js existe en caja.html', () => {
+    const doc = documento();
+    const faltantes = idsQueBusca(controlador).filter((id) => !doc.getElementById(id));
+    expect(faltantes).toEqual([]);
+  });
+
+  it('las hojas nacen cerradas y el folio escondido', () => {
+    const doc = documento();
+    for (const id of ['sale-sheet', 'charge-sheet', 'screen-till', 'till-open', 'till-closed']) {
+      expect({ id, hidden: doc.getElementById(id).hasAttribute('hidden') }).toEqual({ id, hidden: true });
+    }
+    expect(doc.getElementById('sale-reference').hasAttribute('hidden')).toBe(true);
+    expect(doc.getElementById('charge-reference').hasAttribute('hidden')).toBe(true);
+    expect(doc.getElementById('btn-sale-charge').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('el código del gerente va enmascarado y no se autocompleta', () => {
+    const pin = documento().getElementById('open-pin');
+    expect(pin.getAttribute('type')).toBe('password');
+    expect(pin.getAttribute('autocomplete')).toBe('off');
+    expect(pin.getAttribute('maxlength')).toBe('6');
+  });
+
+  it('carga lo que usa ANTES del controlador', () => {
+    const srcs = [...documento().querySelectorAll('script')].map((s) => s.getAttribute('src'));
+    const yo = srcs.indexOf('js/cashier-screen.js');
+    for (const src of ['js/api.js', 'js/format.js', 'js/roles.js', 'js/password-gate.js',
+      'js/client.js', 'js/order-taking.js', 'js/terminal-charge.js', 'js/shift-cut.js',
+      'js/cashier.js']) {
+      expect({ src, antes: srcs.indexOf(src) > -1 && srcs.indexOf(src) < yo })
+        .toEqual({ src, antes: true });
+    }
+  });
+
+  it('la barra no se manda al abrir: la decide el rol de la noche', () => {
+    expect(controlador).not.toMatch(/till\/open[^;]*location_id/);
+  });
+
+  it('el PIN se borra siempre después de usarlo', () => {
+    expect(controlador).toMatch(/finally \{[^}]*\$\('open-pin'\)\.value = ''/);
+  });
+
+  it('se esconde todo detrás de la puerta de la contraseña', () => {
+    expect(controlador).toMatch(/PASSWORD_GATE_HIDES\s*=\s*\[[^\]]*'sale-sheet'[^\]]*'charge-sheet'/);
+  });
+});
+
+describe('nada de la caja sale sin traducir', () => {
+  const claves = (fuente, attr) => [...fuente.matchAll(new RegExp(`${attr}="([^"]+)"`, 'g'))]
+    .map((m) => m[1]);
+
+  it('cada data-i18n de caja.html y cada t() del controlador existe en los dos idiomas', () => {
+    const usadas = new Set([...claves(html, 'data-i18n'), ...claves(html, 'data-i18n-placeholder'),
+      ...claves(html, 'data-i18n-title')]);
+    for (const m of controlador.matchAll(/t\('([a-zA-Z]+\.[a-zA-Z0-9_.]+)'/g)) usadas.add(m[1]);
+    for (const key of Take.methodKeys()) usadas.add(`take.method.${key}`);
+    for (const key of ['till.errOpen', 'till.errNoBar', 'till.errFloat', 'cut.errPin',
+      'cut.float', 'cut.pending', 'cut.ackPending', 'cut.errPending']) usadas.add(key);
+    expect(usadas.size).toBeGreaterThan(30);
+    for (const lang of ['es', 'en']) {
+      catalogo.setLanguage(lang);
+      const faltantes = [...usadas].filter((k) => catalogo.t(k) === k);
+      expect({ lang, faltantes }).toEqual({ lang, faltantes: [] });
+    }
+  });
+});

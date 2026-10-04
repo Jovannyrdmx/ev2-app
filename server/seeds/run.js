@@ -30,6 +30,7 @@ const USERS = [
   ['manager', 'Mariana', 'Gerente', 'manager@ev2.local'],
   ['bartender', 'Beto', 'Barra', 'bartender@ev2.local'],
   ['waiter', 'Wendy', 'Mesera', 'waiter@ev2.local'],
+  ['cashier', 'Carla', 'Caja', 'cashier@ev2.local'],
   ['dancer', 'Dana', 'Star', 'dancer@ev2.local', 'Dana Star'],
   ['dj', 'Diego', 'Beats', 'dj@ev2.local', 'DJ Diego'],
   ['light_tech', 'Luis', 'Luces', 'lights@ev2.local'],
@@ -38,7 +39,7 @@ const USERS = [
   ['guest', 'Gabriel', 'Cliente', 'guest@ev2.local'],
 ];
 
-const STAFF_ROLES = new Set(['waiter', 'bartender', 'dancer', 'dj', 'light_tech', 'valet', 'hostess', 'manager']);
+const STAFF_ROLES = new Set(['waiter', 'bartender', 'cashier', 'dancer', 'dj', 'light_tech', 'valet', 'hostess', 'manager']);
 
 async function seed() {
   if (process.env.NODE_ENV === 'production') {

@@ -111,7 +111,7 @@
     for (const lane of LANES) lanes[lane].sort(queueOrder);
     // Lo que no esta pagado no se puede preparar: se queda visible, pero debajo de lo
     // que si se puede hacer ya, para que no tape la cola real (D73).
-    lanes.new = lanes.new.filter((o) => isPaid(o)).concat(lanes.new.filter((o) => !isPaid(o)));
+    lanes.new = lanes.new.filter((o) => canPrepare(o)).concat(lanes.new.filter((o) => !canPrepare(o)));
     return lanes;
   }
 
@@ -163,6 +163,16 @@
     (order && order.payment_status) || 'not_required');
 
   /**
+   * Lo que levanta el mesero se cobra en la caja de la barra (D77): entra a la barra
+   * sin pagar a propósito y se prepara igual. Lo demás —lo que pide un cliente desde
+   * su teléfono— sigue esperando su pago.
+   */
+  const payAtTill = (order) => Boolean(order && order.pay_at_till);
+
+  /** Si la barra lo puede preparar ya. */
+  const canPrepare = (order) => isPaid(order) || payAtTill(order);
+
+  /**
    * Mover una tarjeta de lugar dentro de su carril.
    *
    * Devuelve la lista COMPLETA de ids del carril en el orden nuevo, que es lo que
@@ -210,7 +220,7 @@
 
   /** Los eventos del socket que mueven la cola. `order_created` trae un pedido nuevo. */
   const ORDER_EVENTS = ['order_created', 'order_confirmed', 'order_preparing',
-    'order_ready', 'order_delivered', 'order_cancelled', 'order_pos_error'];
+    'order_ready', 'order_delivered', 'order_cancelled', 'order_pos_error', 'order_paid'];
 
   const statusFromType = (type) => (String(type || '').startsWith('order_')
     ? String(type).slice('order_'.length) : null);
@@ -234,8 +244,17 @@
     const id = payload.order_id;
     if (!id) return { changed: false };
 
-    const status = payload.status || statusFromType(kind);
     const index = (orders || []).findIndex((o) => o.id === id);
+
+    // La caja cobró un pedido que ya estaba en la barra (D77): no cambia de carril,
+    // solo deja de estar por cobrar.
+    if (kind === 'order_paid') {
+      if (index === -1) return { changed: false };
+      orders[index] = Object.assign({}, orders[index], { payment_status: 'paid' });
+      return { changed: true, paid: id };
+    }
+
+    const status = payload.status || statusFromType(kind);
 
     if (index === -1) {
       // No lo teníamos. Si ya está cerrado no hace falta traerlo; si sigue vivo, sí.
@@ -294,6 +313,8 @@
     queueOrder,
     filterByBar,
     isPaid,
+    payAtTill,
+    canPrepare,
     reorder,
     itemsSummary,
     itemCount,

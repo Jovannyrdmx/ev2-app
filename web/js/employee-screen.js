@@ -25,7 +25,7 @@
   });
   const CLUB_SLUG = meta('ev2:club', 'ev2');
   // El portal es para el personal. El gerente cobra por nómina, no por este portal.
-  const EMPLOYEE_ROLES = ['waiter', 'bartender', 'dancer', 'dj', 'light_tech', 'valet', 'hostess'];
+  const EMPLOYEE_ROLES = ['waiter', 'bartender', 'cashier', 'dancer', 'dj', 'light_tech', 'valet', 'hostess'];
   const PASSWORD_GATE_HIDES = ['screen-auth', 'screen-wrong-role', 'screen-portal'];
 
   const state = {

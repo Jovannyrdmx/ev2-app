@@ -513,6 +513,18 @@ describe('EV2Roster.progress', () => {
   it('un rol vacío no revienta', () => {
     expect(Roster.progress({}).assigned).toBe(0);
   });
+
+  it('una barra sin cajero también deja el rol incompleto (D77)', () => {
+    const p = Roster.progress({
+      roster: [{ user_id: 'b1', display_name: 'Sol', on_shift: true }],
+      gaps: { sections: [], bars: [], tills: [{ location_id: 'b', name: 'Barra baja' }] },
+    });
+    expect(p).toMatchObject({ complete: false, missing_bars: 0, missing_tills: 1 });
+  });
+
+  it('al cajero se le asigna una barra, una sola', () => {
+    expect(Roster.ruleFor('cashier')).toEqual({ target: 'location', multi: false });
+  });
 });
 
 describe('EV2Roster.describeMine', () => {

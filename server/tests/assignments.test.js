@@ -287,14 +287,44 @@ describe('los huecos del rol', () => {
   it('el rol completo no deja huecos', async () => {
     const otroMesero = await f.createUser(club.id, { role: 'waiter' });
     const otroBarman = await f.createUser(club.id, { role: 'bartender' });
+    const cajeroBaja = await f.createUser(club.id, { role: 'cashier' });
+    const cajeroAlta = await f.createUser(club.id, { role: 'cashier' });
     await asignar({ user_id: waiter.id, section: 'ZONA ROJA' });
     await asignar({ user_id: otroMesero.id, section: 'TERRAZA' });
     await asignar({ user_id: bartender.id, location_id: barBaja });
     await asignar({ user_id: otroBarman.id, location_id: barAlta });
+    await asignar({ user_id: cajeroBaja.id, location_id: barBaja });
+    await asignar({ user_id: cajeroAlta.id, location_id: barAlta });
 
     const lista = await roster();
-    expect(lista.body.gaps).toEqual({ sections: [], bars: [] });
-    expect(lista.body.assigned).toBe(4);
+    expect(lista.body.gaps).toEqual({ sections: [], bars: [], tills: [] });
+    expect(lista.body.assigned).toBe(6);
+  });
+
+  // D77: cada barra necesita su caja, y un cajero no tapa el hueco del bartender.
+  it('la barra sin cajero es un hueco aparte, y el cajero no cuenta como bartender', async () => {
+    const cajero = await f.createUser(club.id, { role: 'cashier' });
+    await asignar({ user_id: cajero.id, location_id: barBaja });
+    const lista = await roster();
+    expect(lista.body.gaps.tills.map((b) => b.name)).toEqual(['Barra planta alta']);
+    expect(lista.body.gaps.bars).toHaveLength(2);
+  });
+});
+
+describe('el cajero en el rol de la noche (D77)', () => {
+  it('se le asigna una barra, no una zona', async () => {
+    const cajero = await f.createUser(club.id, { role: 'cashier' });
+    const zona = await asignar({ user_id: cajero.id, section: 'ZONA ROJA' });
+    expect(zona.status).toBe(400);
+    const barra = await asignar({ user_id: cajero.id, location_id: barBaja });
+    expect(barra.status).toBeLessThan(300);
+  });
+
+  it('no cubre dos cajas la misma noche', async () => {
+    const cajero = await f.createUser(club.id, { role: 'cashier' });
+    await asignar({ user_id: cajero.id, location_id: barBaja });
+    const segunda = await asignar({ user_id: cajero.id, location_id: barAlta });
+    expect(segunda.status).toBe(409);
   });
 });
 

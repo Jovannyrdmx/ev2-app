@@ -21,7 +21,7 @@ const pins = require('../services/pins');
 
 const router = express.Router({ mergeParams: true });
 
-const EMPLOYEE_ROLES = ['waiter', 'bartender', 'dancer', 'dj', 'light_tech', 'valet', 'hostess'];
+const EMPLOYEE_ROLES = ['waiter', 'bartender', 'cashier', 'dancer', 'dj', 'light_tech', 'valet', 'hostess'];
 
 /**
  * `manager` se puede dar de alta por aquí, pero solo el administrador puede hacerlo.

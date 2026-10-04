@@ -31,7 +31,7 @@
     },
     waiter: {
       label: { es: 'Mesero', en: 'Waiter' }, home: 'staff.html', ready: true,
-      does: { es: 'Recibir los pedidos de sus mesas, marcarlos entregados y ver sus propinas.', en: 'Take orders from their tables, mark them delivered and see their tips.' },
+      does: { es: 'Levantar los pedidos de sus mesas, entregarlos y llevar el cobro a la caja de la barra; ver sus propinas.', en: "Take orders from their tables, deliver them and bring the money to the bar's till; see their tips." },
     },
     bartender: {
       label: { es: 'Bartender', en: 'Bartender' }, home: 'bartender.html', ready: true,
@@ -60,6 +60,10 @@
     driver: {
       label: { es: 'Conductor', en: 'Driver' }, home: 'driver.html', ready: true,
       does: { es: 'Aceptar viajes, confirmar inicio y fin, y ver lo cobrado.', en: 'Accept rides, confirm start and end, and see what was charged.' },
+    },
+    cashier: {
+      label: { es: 'Cajero', en: 'Cashier' }, home: 'caja.html', ready: true,
+      does: { es: 'La caja de su barra: abrir con fondo, cobrar lo que traen los meseros, vender en la barra y hacer el corte.', en: "Their bar's till: open with a float, collect what the waiters bring, sell at the bar and cash up." },
     },
     warehouse: {
       label: { es: 'Almacén', en: 'Storeroom' }, home: 'almacen.html', ready: true,

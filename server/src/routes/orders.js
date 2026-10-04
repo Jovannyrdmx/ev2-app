@@ -10,6 +10,7 @@ const events = require('../services/events');
 const inventory = require('../services/inventory');
 const tickets = require('../services/tickets');
 const consent = require('../services/consent');
+const till = require('../services/till');
 
 const router = express.Router({ mergeParams: true });
 
@@ -31,8 +32,14 @@ const TRANSITIONS = {
 
 const { createOrder, ORDER_SELECT } = require('../services/orders');
 
-const STAFF_ROLES = ['bartender', 'waiter', 'manager', 'admin'];
-const TAKING_ROLES = ['waiter', 'bartender', 'manager', 'admin'];
+const STAFF_ROLES = ['bartender', 'waiter', 'cashier', 'manager', 'admin'];
+// Quién levanta pedidos (D77): el mesero en el piso, el cajero en la venta directa
+// de su barra, y la gerencia. El bartender ya no: prepara, no vende ni cobra.
+const TAKING_ROLES = ['waiter', 'cashier', 'manager', 'admin'];
+// Lo que levanta el mesero entra a la barra al levantarlo y se cobra en la caja de
+// esa barra. Todo lo demás —el cliente desde su teléfono, la venta directa del
+// cajero— sigue la regla de siempre: llega a la barra cuando está pagado.
+const PAY_AT_TILL_ROLES = ['waiter'];
 
 const createSchema = z.object({
   client_request_id: uuid,
@@ -145,6 +152,14 @@ router.post('/nightclubs/:nightclubId/orders',
 
       const parties = await resolveParties(client, { req, nightclubId, tableId: b.table_id });
 
+      // El cajero vende en la barra de su caja, y solo con la caja abierta (D77).
+      let cajaAbierta = null;
+      if (req.user.role === till.CASHIER) {
+        cajaAbierta = await till.openTill(client, { nightclubId, userId: req.user.id });
+        if (!cajaAbierta) throw ApiError.conflict('Abre tu caja antes de vender');
+      }
+      const payAtTill = PAY_AT_TILL_ROLES.includes(req.user.role);
+
       let order;
       try {
         order = await createOrder({
@@ -153,8 +168,11 @@ router.post('/nightclubs/:nightclubId/orders',
           clientRequestId: b.client_request_id,
           deliveryPointId: b.delivery_point_id,
           // Solo el personal elige de que barra sale un pedido. Un cliente que lo
-          // mandara elegiria la barra con existencia, no la que le toca.
-          barLocationId: STAFF_ROLES.includes(req.user.role) ? b.bar_location_id : undefined,
+          // mandara elegiria la barra con existencia, no la que le toca. El cajero
+          // tampoco elige: vende en SU barra, la de su caja abierta.
+          barLocationId: cajaAbierta ? cajaAbierta.location_id
+            : (STAFF_ROLES.includes(req.user.role) ? b.bar_location_id : undefined),
+          payAtTill,
         });
       } catch (err) {
         // Concurrent request with the same idempotency key.
@@ -170,18 +188,32 @@ router.post('/nightclubs/:nightclubId/orders',
       }
       const { subtotal, currency: orderCurrency } = order;
 
+      // El pedido del mesero entra a la barra en este mismo acto (D77): se confirma
+      // y sale su comanda, sin esperar el cobro. El cobro queda abierto en el libro
+      // y lo cierra la caja de esa barra cuando el mesero le entrega el dinero.
+      if (payAtTill) {
+        await client.query(
+          `UPDATE drink_orders SET status = 'confirmed', confirmed_at = now(), updated_at = now()
+            WHERE id = $1 AND status = 'pending'`, [order.id]);
+        await tickets.printOrder(client, { nightclubId, orderId: order.id, userId: req.user.id });
+      }
+
       await events.publish({
         nightclubId, type: 'order_created', client,
         // El mesero va en la audiencia: es quien lleva la charola a la mesa, y sin esto
         // su pantalla no se enteraba de nada — se quedaba viendo una lista vacía
-        // mientras los tragos se calentaban en la barra.
+        // mientras los tragos se calentaban en la barra. El cajero, porque lo que
+        // levanta un mesero es lo que su caja va a cobrar.
         audience: {
-          roles: ['bartender', 'waiter', 'manager'],
+          roles: ['bartender', 'waiter', 'cashier', 'manager'],
           userIds: [req.user.id, parties.senderId, b.recipient_id].filter(Boolean),
         },
         payload: {
           order_id: order.id, table_id: b.table_id || null, subtotal, currency: orderCurrency,
-          transaction_id: order.transactionId, awaiting_payment: Boolean(order.transactionId),
+          transaction_id: order.transactionId,
+          awaiting_payment: Boolean(order.transactionId) && !payAtTill,
+          pay_at_till: payAtTill,
+          bar_location_id: order.barLocationId || null,
         },
       });
 
@@ -206,7 +238,7 @@ router.post('/nightclubs/:nightclubId/orders',
 // lleva mas tiempo pagado es el que mas tiempo lleva esperando de verdad. Un
 // pedido sin pagar no tiene hora de pago y cae al final, que es donde debe estar.
 router.get('/nightclubs/:nightclubId/orders',
-  requireRole('bartender', 'waiter', 'manager'),
+  requireRole('bartender', 'waiter', 'cashier', 'manager'),
   validate({
     params: z.object({ nightclubId: uuid }),
     query: pagination.extend({
@@ -225,7 +257,10 @@ router.get('/nightclubs/:nightclubId/orders',
           AND ($2::text IS NULL OR o.status = $2::text)
           AND ($3::boolean IS FALSE OR o.status IN ('pending','confirmed','preparing','ready','pos_error'))
           AND ($4::uuid IS NULL OR o.bar_location_id = $4::uuid)
-          AND ($5::boolean IS FALSE OR COALESCE(tx.status, 'not_required') IN ('paid', 'not_required'))
+          -- La cola de la barra: lo pagado, y lo que se cobra en caja (D77), que la
+          -- barra prepara sin esperar el cobro.
+          AND ($5::boolean IS FALSE OR o.pay_at_till
+               OR COALESCE(tx.status, 'not_required') IN ('paid', 'not_required'))
           AND ($6::boolean IS FALSE OR o.taken_by = $7::uuid)
         ORDER BY
           -- El cantinero puede reacomodar sus tarjetas; lo que reacomoda es esto y
@@ -261,7 +296,7 @@ router.get('/nightclubs/:nightclubId/orders/:orderId',
     if (rows.length === 0) throw ApiError.notFound('Order not found');
     const order = rows[0];
     const isParty = [order.sender_id, order.recipient_id].includes(req.user.id);
-    const isStaff = ['bartender', 'waiter', 'manager', 'admin'].includes(req.user.role);
+    const isStaff = STAFF_ROLES.includes(req.user.role);
     if (!isParty && !isStaff) throw ApiError.forbidden('Not your order');
     res.json({ order });
   }));
@@ -288,14 +323,14 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
   asyncHandler(async (req, res) => {
     const { nightclubId, orderId } = req.params;
     const next = req.body.status;
-    const staffRoles = ['bartender', 'waiter', 'manager', 'admin'];
+    const staffRoles = STAFF_ROLES;
 
     const client = await pool.connect();
     let refundDue = false;
     try {
       await client.query('BEGIN');
       const cur = await client.query(
-        `SELECT o.id, o.status, o.sender_id, o.recipient_id,
+        `SELECT o.id, o.status, o.sender_id, o.recipient_id, o.pay_at_till,
                 tx.id AS transaction_id, tx.status AS payment_status
            FROM drink_orders o
            LEFT JOIN transactions tx
@@ -327,7 +362,10 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
       // The bar does not pour on credit. Confirming is what sends the ticket to the
       // bar, so that is where the charge is checked -- once, in the one place every
       // path goes through, instead of trusting each screen to remember.
-      if (next === 'confirmed' && order.transaction_id && order.payment_status !== 'paid') {
+      // La excepción es el pedido que se cobra en caja (D77): ese entra a la barra
+      // sin pagar a propósito, y su cobro lo cierra el cajero.
+      if (next === 'confirmed' && order.transaction_id && order.payment_status !== 'paid'
+          && !order.pay_at_till) {
         throw ApiError.conflict('Ese pedido todavía no está pagado', {
           transaction_id: order.transaction_id,
           payment_status: order.payment_status,
@@ -382,7 +420,9 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
 
       await events.publish({
         nightclubId, type: `order_${next}`, client,
-        audience: { roles: ['bartender', 'waiter', 'manager'], userIds: [order.sender_id] },
+        audience: {
+          roles: ['bartender', 'waiter', 'cashier', 'manager'], userIds: [order.sender_id],
+        },
         payload: {
           order_id: orderId, status: next, reason: req.body.reason || null,
           transaction_id: order.transaction_id || null,
@@ -415,7 +455,7 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
  * un pedido nuevo y la barra prepara otra ronda.
  */
 router.post('/nightclubs/:nightclubId/orders/:orderId/reprint',
-  requireRole('waiter', 'bartender', 'manager', 'admin'),
+  requireRole('waiter', 'bartender', 'cashier', 'manager', 'admin'),
   validate({ params: z.object({ nightclubId: uuid, orderId: uuid }) }),
   asyncHandler(async (req, res) => {
     const out = await tickets.reprintOrder(pool, {

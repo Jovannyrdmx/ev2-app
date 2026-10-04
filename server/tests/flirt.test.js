@@ -45,12 +45,14 @@ const seat = (user, table) => api().post(url(`/tables/${table.id}/seat`))
 /**
  * Cobra el pedido de una invitación. Desde que cada pedido nace con su cobro, la barra
  * no lo prepara hasta que alguien paga — y en una invitación paga quien la manda.
+ * Aquí lo registra el gerente: desde D77 el mesero ya no recibe dinero, y lo que se
+ * prueba en esta suite es la invitación, no quién cobra.
  */
 async function payOrder(orderId) {
   const { rows } = await pool.query(
     `SELECT id, amount::text AS amount, currency FROM transactions
       WHERE reference_type = 'drink_order' AND reference_id = $1`, [orderId]);
-  return api().post(url('/manual-payments/register')).set(auth(waiter)).send({
+  return api().post(url('/manual-payments/register')).set(auth(manager)).send({
     transaction_id: rows[0].id,
     method: 'cash',
     amount: Number(rows[0].amount),

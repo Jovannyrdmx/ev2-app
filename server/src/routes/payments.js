@@ -11,6 +11,7 @@ const { pool } = require('../db/pool');
 const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, currency, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
+const till = require('../services/till');
 const payments = require('../services/payments');
 const events = require('../services/events');
 const paymentConfig = require('../config/payments');
@@ -20,10 +21,15 @@ const terminalCharges = require('../services/terminal-charges');
 const router = express.Router({ mergeParams: true });
 
 const method = z.enum(payments.METHODS);
-// Who may take money for the club. The waiter is on this list because the table is
-// where most of it is taken: an order is charged the moment it is placed, and he is
-// the one standing there with the terminal.
-const STAFF_ROLES = ['hostess', 'waiter', 'bartender', 'manager'];
+// Who may take money for the club. Since D77 the drinks are paid at the till of each
+// bar, so the cashier is here and the waiter and the bartender are not: the waiter
+// brings the money to the till, the bartender only prepares. The hostess still takes
+// the cover at the door.
+const STAFF_ROLES = ['hostess', 'cashier', 'manager'];
+
+// Puestos del piso que desde D77 no reciben dinero por ninguna puerta, ni siquiera
+// por la que usa un cliente para declarar su propia transferencia.
+const NON_COLLECTING_STAFF = ['waiter', 'bartender'];
 
 function isManager(user) {
   return user.role === 'manager' || user.role === 'admin';
@@ -222,6 +228,9 @@ router.post('/nightclubs/:nightclubId/manual-payments',
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
     const b = req.body;
+    if (NON_COLLECTING_STAFF.includes(req.user.role)) {
+      throw ApiError.forbidden('Los tragos se cobran en la caja de la barra');
+    }
     if (b.on_behalf_of && !isStaff(req.user)) {
       throw ApiError.forbidden('Solo el personal registra pagos a nombre de otra persona');
     }
@@ -518,6 +527,8 @@ router.post('/nightclubs/:nightclubId/manual-payments/register',
       const { tx } = await loadPayableTransaction(client, {
         transactionId: b.transaction_id, nightclubId, user: req.user, onBehalfOf: b.on_behalf_of,
       });
+      // El cajero cobra solo lo de su barra, con la caja abierta (D77).
+      await till.assertCanCollect(client, { nightclubId, user: req.user, transactionId: tx.id });
       let created;
       try {
         const { rows } = await client.query(
@@ -787,6 +798,9 @@ router.post('/nightclubs/:nightclubId/terminal-charges',
     let apartado;
     try {
       await client.query('BEGIN');
+      await till.assertCanCollect(client, {
+        nightclubId, user: req.user, transactionId: req.body.transaction_id,
+      });
       apartado = await terminalCharges.reserve(client, {
         nightclubId,
         transactionId: req.body.transaction_id,

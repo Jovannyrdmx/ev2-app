@@ -89,7 +89,7 @@ router.get('/nightclubs/:nightclubId/staff',
   validate({
     params: z.object({ nightclubId: uuid }),
     query: z.object({
-      role: z.enum(['waiter', 'bartender', 'dancer', 'dj', 'light_tech', 'valet', 'hostess', 'manager']).optional(),
+      role: z.enum(['waiter', 'bartender', 'cashier', 'dancer', 'dj', 'light_tech', 'valet', 'hostess', 'manager']).optional(),
       on_shift: z.coerce.boolean().default(false),
     }),
   }),

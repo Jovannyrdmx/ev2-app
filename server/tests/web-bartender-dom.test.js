@@ -21,7 +21,6 @@ const leer = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const html = leer('bartender.html');
 const controlador = leer('js/bartender-screen.js');
 const catalogo = require(path.join(ROOT, 'js', 'format.js'));
-const Take = require(path.join(ROOT, 'js', 'order-taking.js'));
 
 const abiertas = [];
 afterEach(() => { while (abiertas.length) abiertas.pop().close(); });
@@ -47,46 +46,39 @@ describe('el controlador y el HTML se encuentran', () => {
     expect(faltantes).toEqual([]);
   });
 
-  it('la hoja de venta nace cerrada', () => {
-    expect(documento().getElementById('sale-sheet').hasAttribute('hidden')).toBe(true);
-  });
-
-  it('el folio del voucher nace escondido: solo lo pide la terminal', () => {
-    expect(documento().getElementById('sale-reference').hasAttribute('hidden')).toBe(true);
-  });
-
-  it('el botón de cobrar nace apagado: todavía no hay nada pedido', () => {
-    expect(documento().getElementById('btn-sale-charge').hasAttribute('disabled')).toBe(true);
+  it('la barra ya no cobra: ni venta directa, ni terminal, ni corte (D77)', () => {
+    // Todo eso es de la caja de cada barra (caja.html). Si vuelve a aparecer aquí, el
+    // bartender estaría cobrando con un permiso que el servidor ya no le da.
+    const doc = documento();
+    for (const id of ['sale-sheet', 'btn-new-sale', 'btn-sale-charge', 'btn-cut']) {
+      expect({ id, existe: Boolean(doc.getElementById(id)) }).toEqual({ id, existe: false });
+    }
+    expect(controlador).not.toMatch(/manual-payments|terminal-charges|shifts\/me/);
   });
 
   it('los chips de barra nacen escondidos: con una sola barra no hay nada que elegir', () => {
     expect(documento().getElementById('bar-chips').hasAttribute('hidden')).toBe(true);
   });
 
-  it('carga el carrito y las formas de pago ANTES del controlador', () => {
+  it('carga la cola ANTES del controlador', () => {
     const doc = documento();
     const srcs = [...doc.querySelectorAll('script')].map((s) => s.getAttribute('src'));
-    for (const src of ['js/api.js', 'js/client.js', 'js/order-taking.js', 'js/bar-queue.js',
-      'js/bartender-screen.js']) {
+    for (const src of ['js/api.js', 'js/bar-queue.js', 'js/bartender-screen.js']) {
       expect(srcs).toContain(src);
     }
-    expect(srcs.indexOf('js/client.js')).toBeLessThan(srcs.indexOf('js/bartender-screen.js'));
-    expect(srcs.indexOf('js/order-taking.js')).toBeLessThan(srcs.indexOf('js/bartender-screen.js'));
+    expect(srcs.indexOf('js/bar-queue.js')).toBeLessThan(srcs.indexOf('js/bartender-screen.js'));
   });
 
   it('no trae ningún número escrito a mano', () => {
     const doc = documento();
-    for (const id of ['stat-open', 'stat-oldest', 'sale-total']) {
+    for (const id of ['stat-open', 'stat-oldest']) {
       expect(doc.getElementById(id).textContent.trim()).toBe('—');
     }
     expect(doc.getElementById('lane-list').textContent.trim()).toBe('');
-    expect(doc.getElementById('sale-menu').textContent.trim()).toBe('');
   });
 
-  it('la hoja de venta se esconde cuando el servidor exige cambiar la contraseña', () => {
-    // Si no, el cantinero podría teclear una ronda entera detrás de la puerta de la
-    // contraseña y cada llamada fallaría sin decirle por qué.
-    expect(controlador).toMatch(/PASSWORD_GATE_HIDES\s*=\s*\[[^\]]*'sale-sheet'/);
+  it('la hoja del almacén se esconde cuando el servidor exige cambiar la contraseña', () => {
+    expect(controlador).toMatch(/PASSWORD_GATE_HIDES\s*=\s*\[[^\]]*'req-sheet'/);
   });
 });
 
@@ -109,15 +101,11 @@ describe('nada sale sin traducir', () => {
     }
   });
 
-  it('cada texto que pide el controlador para la venta existe en los dos idiomas', () => {
+  it('cada texto que pide el controlador de la barra existe en los dos idiomas', () => {
     const usadas = new Set();
-    const re = /t\('((?:sale|bar)\.[a-zA-Z0-9_.]+)'/g;
+    const re = /t\('((?:sale|bar|req)\.[a-zA-Z0-9_.]+)'/g;
     let m = re.exec(controlador);
     while (m) { usadas.add(m[1]); m = re.exec(controlador); }
-    // Las formas de pago se arman con plantilla; se comprueban una por una.
-    for (const key of Take.methodKeys()) usadas.add(`take.method.${key}`);
-    // Y los motivos por los que la venta se bloquea.
-    for (const motivo of ['no_bar', 'empty_cart']) usadas.add(`sale.blocked.${motivo}`);
 
     expect(usadas.size).toBeGreaterThanOrEqual(12);
     for (const lang of ['es', 'en']) {

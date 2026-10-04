@@ -33,12 +33,16 @@
 'use strict';
 
 const { ApiError } = require('../middleware/errors');
+const till = require('./till');
 
 /** Lo que el club espera recibir en la mano al final del turno. */
 const CASH_METHODS = ['cash'];
 
-/** Puestos que cobran y, por lo tanto, hacen corte. */
-const COLLECTING_ROLES = ['waiter', 'bartender', 'hostess'];
+/**
+ * Puestos que cobran y, por lo tanto, hacen corte. Desde D77 el mesero y el
+ * bartender ya no cobran: el dinero de los tragos lo recibe el cajero de cada barra.
+ */
+const COLLECTING_ROLES = ['cashier', 'hostess'];
 
 const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 const money = (n) => round2(n).toFixed(2);
@@ -194,8 +198,16 @@ async function shiftSummary(runner, { nightclubId, shift }) {
   const entregado = receivedTotal(drops);
   const { rows } = await runner.query(
     `SELECT id, status, declared_cash::text AS declared_cash, counted_cash::text AS counted_cash,
-            difference::text AS difference, difference_reason, declared_at, confirmed_at
+            difference::text AS difference, difference_reason, declared_at, confirmed_at,
+            opening_float::text AS opening_float, pending_orders, pending_total::text AS pending_total
        FROM shift_closings WHERE shift_id = $1`, [shift.id]);
+
+  // La caja (D77): el fondo con el que abrió es dinero del club que también se
+  // devuelve al cerrar, y lo que su barra tiene sin cobrar es lo que el corte pregunta.
+  const fondo = round2(shift.opening_float || 0);
+  const pendientes = shift.location_id && !rows[0]
+    ? await till.pendingOrders(runner, { nightclubId, locationId: shift.location_id })
+    : [];
   return {
     shift: {
       id: shift.id,
@@ -203,13 +215,18 @@ async function shiftSummary(runner, { nightclubId, shift }) {
       section: shift.section,
       started_at: shift.started_at,
       ended_at: shift.ended_at,
+      location_id: shift.location_id || null,
     },
     totals,
+    opening_float: money(fondo),
     drops,
     drops_received: entregado,
     drops_pending: pendingDrops(drops).length,
-    // Lo que tiene que entregar ahora mismo.
-    cash_to_hand: money(round2(Number(totals.cash_collected) - Number(entregado))),
+    // Lo que tiene que entregar ahora mismo: el fondo, más el efectivo cobrado, menos
+    // lo que ya salió en retiros.
+    cash_to_hand: money(round2(fondo + Number(totals.cash_collected) - Number(entregado))),
+    pending_orders: pendientes,
+    pending_total: money(pendientes.reduce((n, o) => round2(n + Number(o.subtotal)), 0)),
     closing: rows[0] || null,
   };
 }
@@ -279,6 +296,7 @@ async function withdraw(client, {
  */
 async function close(client, {
   nightclubId, shift, role, declaredCash, countedCash, reason, notes, authorizer,
+  acknowledgePending = false,
 }) {
   const resumen = await shiftSummary(client, { nightclubId, shift });
   if (resumen.closing) {
@@ -289,6 +307,17 @@ async function close(client, {
     throw ApiError.unprocessable(
       `Hay ${pendientes.length} retiro(s) de efectivo sin contar en ese turno.`,
       { pending_drops: pendientes.map((d) => d.id) });
+  }
+
+  // La caja no se cierra con pedidos sin cobrar (D77) salvo que el gerente que
+  // autoriza este corte lo diga expresamente. Los pedidos no desaparecen: siguen en
+  // la barra para la siguiente caja, y quedan escritos en este corte con su monto.
+  const porCobrar = resumen.pending_orders;
+  if (porCobrar.length > 0 && !acknowledgePending) {
+    throw ApiError.unprocessable(
+      `Tu barra tiene ${porCobrar.length} pedido(s) sin cobrar por ${resumen.pending_total}. `
+      + 'Cóbralos o cancélalos, o que el gerente autorice cerrar con ellos pendientes.',
+      { pending_orders: porCobrar, pending_total: resumen.pending_total });
   }
 
   const esperado = Number(resumen.cash_to_hand);
@@ -307,16 +336,29 @@ async function close(client, {
                                  declared_cash, declared_notes,
                                  counted_cash, difference, difference_reason,
                                  status, confirmed_by, confirmed_at,
-                                 authorized_by, authorized_at, authorized_role)
+                                 authorized_by, authorized_at, authorized_role,
+                                 location_id, opening_float, pending_orders, pending_total)
      VALUES ($1,$2,$3,$4::text,$5,COALESCE($6, now()),$7::text,$8::jsonb,$9,$10,$11,$12,$13,
-             $14,$15,$16::text,'confirmed',$17, now(), $17, now(), $18::text)
+             $14,$15,$16::text,'confirmed',$17, now(), $17, now(), $18::text,
+             $19,$20,$21::jsonb,$22)
      RETURNING id`,
     [nightclubId, shift.id, shift.user_id, role, shift.started_at, shift.ended_at,
       resumen.totals.currency, JSON.stringify(resumen.totals), resumen.totals.cash_collected,
       resumen.drops_received, esperado.toFixed(2), round2(Number(declaredCash)).toFixed(2),
       notes || null,
       contado.toFixed(2), diferencia.toFixed(2), reason ? String(reason).trim() : null,
-      authorizer.id, authorizer.role]);
+      authorizer.id, authorizer.role,
+      shift.location_id || null, resumen.opening_float,
+      JSON.stringify(porCobrar.map((o) => ({
+        order_id: o.order_id,
+        table_code: o.table_code || null,
+        delivery_point_name: o.delivery_point_name || null,
+        taken_by_name: o.taken_by_name || null,
+        subtotal: o.subtotal,
+        currency: o.currency,
+        created_at: o.created_at,
+      }))),
+      resumen.pending_total]);
 
   // El corte es el último paso del turno: al cerrarlo, el turno queda cerrado.
   await client.query(
@@ -327,6 +369,9 @@ async function close(client, {
     expected_cash: money(esperado),
     counted_cash: money(contado),
     difference: money(diferencia),
+    opening_float: resumen.opening_float,
+    pending_orders: porCobrar.length,
+    pending_total: resumen.pending_total,
     authorized_by: authorizer.name,
   };
 }

@@ -1498,6 +1498,25 @@
         motivo.textContent = c.difference_reason;
         card.appendChild(motivo);
       }
+      // La caja de una barra (D77): de qué barra, con qué fondo, y los pedidos que se
+      // quedaron sin cobrar con el permiso de quien autorizó este corte.
+      if (c.location_name || Number(c.opening_float) > 0) {
+        const fondo = document.createElement('p');
+        fondo.className = 'text-[11px] text-white/50';
+        fondo.textContent = t('cuts.till', {
+          bar: c.location_name || '—', amount: money(c.opening_float, c.currency),
+        });
+        card.appendChild(fondo);
+      }
+      if ((c.pending_orders || []).length > 0) {
+        const pendientes = document.createElement('p');
+        pendientes.className = 'text-[11px]';
+        pendientes.style.color = '#fcd34d';
+        pendientes.textContent = t('cuts.pendingLeft', {
+          n: c.pending_orders.length, amount: money(c.pending_total, c.currency),
+        });
+        card.appendChild(pendientes);
+      }
       const autoriza = document.createElement('p');
       autoriza.className = 'text-[11px] text-white/40';
       autoriza.textContent = c.authorized_by_name
@@ -2763,7 +2782,7 @@
   // ==================================================== el rol de la noche
 
   async function openRoster(night) {
-    state.roster = { night, roster: [], gaps: { sections: [], bars: [] } };
+    state.roster = { night, roster: [], gaps: { sections: [], bars: [], tills: [] } };
     $('roster-night').textContent = `${night.name} · ${String(night.event_date).slice(0, 10)}`;
     $('roster-error').hidden = true;
     $('roster-sheet').hidden = false;
@@ -2776,7 +2795,7 @@
     try {
       const data = await api.get(`/nightclubs/${clubId()}/nights/${r.night.id}/roster`);
       r.roster = data.roster || [];
-      r.gaps = data.gaps || { sections: [], bars: [] };
+      r.gaps = data.gaps || { sections: [], bars: [], tills: [] };
     } catch (err) {
       showError(err, $('roster-error'));
       return;
@@ -2815,7 +2834,7 @@
       ? `<span class="text-emerald-300">${escape(t('roster.complete'))}</span>`
       : `<span class="text-amber-200">${escape(t('roster.missing', {
         zones: avance.missing_sections, bars: avance.missing_bars,
-      }))}</span>`;
+      }))}${avance.missing_tills ? ` · ${escape(t('roster.missingTills', { n: avance.missing_tills }))}` : ''}</span>`;
 
     const persona = (p) => `
       <div class="flex items-center justify-between gap-2 text-sm">

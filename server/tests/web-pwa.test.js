@@ -53,7 +53,7 @@ describe('La cáscara guardada para trabajar sin señal', () => {
     // Las cinco que se abren adentro, donde la señal es mala. `pase.html` NO: lo abre
     // un invitado desde su teléfono, en la calle, y su contenido es de un solo uso.
     for (const pagina of ['index.html', 'manager.html', 'almacen.html',
-      'bartender.html', 'staff.html', 'valet.html', 'employee-portal.html']) {
+      'bartender.html', 'staff.html', 'valet.html', 'employee-portal.html', 'caja.html']) {
       expect({ pagina, guardada: guardados.has(pagina) })
         .toEqual({ pagina, guardada: true });
     }

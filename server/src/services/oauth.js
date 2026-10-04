@@ -232,7 +232,7 @@ function canUnlink({ hasPassword, identityCount }) {
  * sitio, que es como se roba una contraseña.
  */
 const SAFE_REDIRECTS = ['index.html', 'staff.html', 'manager.html', 'bartender.html',
-  'almacen.html', 'valet.html', 'driver.html', 'employee-portal.html'];
+  'almacen.html', 'valet.html', 'driver.html', 'employee-portal.html', 'caja.html'];
 
 function safeRedirect(destino) {
   const limpio = String(destino || '').replace(/^\/+/, '').split(/[?#]/)[0];

@@ -424,3 +424,43 @@ describe('A dónde va el pedido', () => {
     expect(Bar.destination({})).toBeNull();
   });
 });
+
+describe('Lo que se cobra en caja (D77)', () => {
+  const delMesero = (over = {}) => ({
+    id: 'o1', status: 'confirmed', payment_status: 'pending', pay_at_till: true,
+    created_at: '2026-10-03T23:00:00Z', ...over,
+  });
+
+  it('lo que levantó el mesero se prepara sin estar pagado', () => {
+    expect(Bar.isPaid(delMesero())).toBe(false);
+    expect(Bar.canPrepare(delMesero())).toBe(true);
+  });
+
+  it('lo que pidió el cliente sin pagar sigue sin prepararse', () => {
+    expect(Bar.canPrepare({ status: 'pending', payment_status: 'pending', pay_at_till: false }))
+      .toBe(false);
+  });
+
+  it('en "Nuevos" va con lo pagado, no abajo con lo que espera dinero', () => {
+    const lanes = Bar.groupByLane([
+      { id: 'cliente', status: 'pending', payment_status: 'pending', created_at: '2026-10-03T22:00:00Z' },
+      delMesero(),
+    ]);
+    expect(lanes.new.map((o) => o.id)).toEqual(['o1', 'cliente']);
+  });
+
+  it('el aviso de que la caja lo cobró lo marca pagado sin moverlo de carril', () => {
+    const orders = [delMesero()];
+    const change = Bar.applyEvent(orders, {
+      type: 'event', event_type: 'order_paid', payload: { order_id: 'o1' },
+    });
+    expect(change).toMatchObject({ changed: true, paid: 'o1' });
+    expect(orders[0]).toMatchObject({ status: 'confirmed', payment_status: 'paid' });
+  });
+
+  it('el aviso de un pedido que no está en la pantalla no hace nada', () => {
+    expect(Bar.applyEvent([], {
+      type: 'event', event_type: 'order_paid', payload: { order_id: 'x' },
+    })).toEqual({ changed: false });
+  });
+});

@@ -430,7 +430,7 @@ router.get('/nightclubs/:nightclubId/delivery-points',
   }),
   asyncHandler(async (req, res) => {
     const q = req.query;
-    const staff = ['waiter', 'bartender', 'hostess', 'warehouse', 'manager', 'admin']
+    const staff = ['waiter', 'bartender', 'cashier', 'hostess', 'warehouse', 'manager', 'admin']
       .includes(req.user.role);
     const { rows } = await pool.query(
       `${POINT_SELECT}

@@ -26,7 +26,7 @@ const router = express.Router({ mergeParams: true });
 router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
 
 /** Quién administra los objetos: los mismos que atienden el piso y la puerta. */
-const STAFF = ['waiter', 'bartender', 'hostess', 'security', 'manager', 'admin'];
+const STAFF = ['waiter', 'bartender', 'cashier', 'hostess', 'security', 'manager', 'admin'];
 
 const categoria = z.enum(lf.CATEGORIES);
 

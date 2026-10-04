@@ -19,7 +19,7 @@ const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
 const terminalCharges = require('../src/services/terminal-charges');
 
-let club; let manager; let waiter; let guest;
+let club; let manager; let cobrador; let guest;
 
 // ---------------------------------------------------------------- Mercado Pago de mentira
 
@@ -198,7 +198,10 @@ beforeEach(async () => {
 
   club = await f.createNightclub({ slug: 'ev2-mp' });
   manager = await f.createUser(club.id, { role: 'manager' });
-  waiter = await f.createUser(club.id, { role: 'waiter' });
+  // Quien cobra con la terminal en estas pruebas es la puerta (la hostess cobra el
+  // cover). Desde D77 el mesero ya no cobra, y la caja de cada barra —que solo cobra
+  // pedidos de SU barra— tiene sus propias pruebas en `cashier.test.js`.
+  cobrador = await f.createUser(club.id, { role: 'hostess' });
   guest = await f.createUser(club.id, { role: 'guest' });
 });
 
@@ -226,7 +229,7 @@ async function cobroPendiente(amount = '450.00') {
   return rows[0];
 }
 
-const empezar = async (tx, terminal, quien = waiter) => api()
+const empezar = async (tx, terminal, quien = cobrador) => api()
   .post(`/api/nightclubs/${club.id}/terminal-charges`)
   .set(await tokenDe(quien))
   .send({ transaction_id: tx.id, terminal_id: terminal.id });
@@ -274,12 +277,12 @@ describe('Las terminales del club', () => {
     expect(mismoNombre.status).toBe(409);
   });
 
-  it('el mesero las ve pero no las da de alta', async () => {
+  it('quien cobra las ve pero no las da de alta', async () => {
     await altaTerminal();
     expect((await api().get(`/api/nightclubs/${club.id}/payment-terminals`)
-      .set(await tokenDe(waiter))).status).toBe(200);
+      .set(await tokenDe(cobrador))).status).toBe(200);
     expect((await api().post(`/api/nightclubs/${club.id}/payment-terminals`)
-      .set(await tokenDe(waiter))
+      .set(await tokenDe(cobrador))
       .send({ external_id: 'X__Y', label: 'Mía' })).status).toBe(403);
   });
 
@@ -318,7 +321,7 @@ describe('Cobrar', () => {
     expect(creada.idempotency).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it('el segundo mesero que toca cobrar NO despierta una segunda terminal', async () => {
+  it('el segundo que toca cobrar NO despierta una segunda terminal', async () => {
     // Sin esto, el cliente paga dos veces y la segunda es una devolución que nadie nota
     // esa noche.
     const t = await altaTerminal();
@@ -484,7 +487,7 @@ describe('Cuando algo falla', () => {
     const creado = await empezar(tx, t);
     const res = await api()
       .post(`/api/nightclubs/${club.id}/terminal-charges/${creado.body.charge.id}/cancel`)
-      .set(await tokenDe(waiter)).send({});
+      .set(await tokenDe(cobrador)).send({});
 
     expect(res.status).toBe(200);
     expect(res.body.charge.status).toBe('canceled');
@@ -504,7 +507,7 @@ describe('Cuando algo falla', () => {
 
     const res = await api()
       .post(`/api/nightclubs/${club.id}/terminal-charges/${creado.body.charge.id}/cancel`)
-      .set(await tokenDe(waiter)).send({});
+      .set(await tokenDe(cobrador)).send({});
     expect(res.status).toBe(409);
   });
 
@@ -520,7 +523,7 @@ describe('Cuando algo falla', () => {
 
     const res = await api()
       .get(`/api/nightclubs/${club.id}/terminal-charges/${creado.body.charge.id}`)
-      .set(await tokenDe(waiter));
+      .set(await tokenDe(cobrador));
     expect(res.status).toBe(200);
     expect(res.body.charge.status).toBe('processed');
     expect((await estadoDe(tx.id)).status).toBe('paid');
@@ -579,7 +582,7 @@ describe('Que no se cobre dos veces', () => {
 
     const efectivo = await api()
       .post(`/api/nightclubs/${club.id}/manual-payments/register`)
-      .set(await tokenDe(waiter))
+      .set(await tokenDe(cobrador))
       .send({
         transaction_id: tx.id, method: 'cash', amount: 450, currency: 'MXN',
       });
@@ -598,11 +601,11 @@ describe('Que no se cobre dos veces', () => {
     const creado = await empezar(tx, t);
     await api()
       .post(`/api/nightclubs/${club.id}/terminal-charges/${creado.body.charge.id}/cancel`)
-      .set(await tokenDe(waiter)).send({});
+      .set(await tokenDe(cobrador)).send({});
 
     const efectivo = await api()
       .post(`/api/nightclubs/${club.id}/manual-payments/register`)
-      .set(await tokenDe(waiter))
+      .set(await tokenDe(cobrador))
       .send({ transaction_id: tx.id, method: 'cash', amount: 450, currency: 'MXN' });
 
     expect(efectivo.status).toBe(201);
@@ -776,7 +779,7 @@ describe('Lo que la guía de Point dice y faltaba', () => {
     return { t, tx, chargeId: creado.body.charge.id, orderId: rows[0].external_order_id };
   }
   const verCobro = async (chargeId) => api()
-    .get(`/api/nightclubs/${club.id}/terminal-charges/${chargeId}`).set(await tokenDe(waiter));
+    .get(`/api/nightclubs/${club.id}/terminal-charges/${chargeId}`).set(await tokenDe(cobrador));
   const pagado = async (orderId, extra) => { resolverOrden(orderId, 'processed', extra); await notificar(orderId); };
   const devolver = async (chargeId, quien = manager, reason = 'Se cobró dos veces a la mesa 12') => api()
     .post(`/api/nightclubs/${club.id}/terminal-charges/${chargeId}/refund`)
@@ -822,7 +825,7 @@ describe('Lo que la guía de Point dice y faltaba', () => {
     mpFake.orders.get(orderId).status = 'at_terminal';
     const res = await api()
       .post(`/api/nightclubs/${club.id}/terminal-charges/${chargeId}/cancel`)
-      .set(await tokenDe(waiter)).send({});
+      .set(await tokenDe(cobrador)).send({});
     expect(res.status).toBe(200);
     expect(res.body.charge.status).toBe('canceled');
     const llamada = mpFake.calls.find((c) => c.path.endsWith('/cancel'));
@@ -834,7 +837,7 @@ describe('Lo que la guía de Point dice y faltaba', () => {
     resolverOrden(orderId, 'processed'); // pagó, y el webhook todavía no llega
     const res = await api()
       .post(`/api/nightclubs/${club.id}/terminal-charges/${chargeId}/cancel`)
-      .set(await tokenDe(waiter)).send({});
+      .set(await tokenDe(cobrador)).send({});
     expect(res.status).toBe(409);
     expect(res.body.error.message).toMatch(/YA pasó/);
     expect((await estadoDe(tx.id)).status).toBe('paid');
@@ -936,7 +939,7 @@ describe('Lo que la guía de Point dice y faltaba', () => {
     const { chargeId, orderId } = await cobroVivo();
     expect((await devolver(chargeId)).status).toBe(409); // todavía no se paga
     await pagado(orderId);
-    expect((await devolver(chargeId, waiter)).status).toBe(403);
+    expect((await devolver(chargeId, cobrador)).status).toBe(403);
     expect((await devolver(chargeId, manager, 'no')).status).toBe(400);
     expect((await devolver(chargeId)).status).toBe(200);
     const otraVez = await devolver(chargeId);
@@ -988,7 +991,7 @@ describe('Lo que la guía de Point dice y faltaba', () => {
     expect(este.status).toBe('refunded');
     expect(este.refunds).toHaveLength(1);
     expect((await api().get(`/api/nightclubs/${club.id}/terminal-charges`)
-      .set(await tokenDe(waiter))).status).toBe(403);
+      .set(await tokenDe(cobrador))).status).toBe(403);
   });
 
   it('el corte de la noche enseña lo devuelto con tarjeta, aparte', async () => {

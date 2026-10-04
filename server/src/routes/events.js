@@ -51,7 +51,7 @@ router.get('/nightclubs/:nightclubId/events',
   }),
   asyncHandler(async (req, res) => {
     // Guests only ever see published events; staff see everything.
-    const isStaff = ['hostess', 'waiter', 'bartender', 'manager', 'admin'].includes(req.user.role);
+    const isStaff = ['hostess', 'waiter', 'bartender', 'cashier', 'manager', 'admin'].includes(req.user.role);
     const status = isStaff ? (req.query.status || null) : 'published';
 
     const { rows } = await pool.query(
@@ -82,7 +82,7 @@ router.get('/nightclubs/:nightclubId/events/:eventId',
       [req.params.eventId, req.params.nightclubId]);
     if (rows.length === 0) throw ApiError.notFound('Event not found');
 
-    const isStaff = ['hostess', 'waiter', 'bartender', 'manager', 'admin'].includes(req.user.role);
+    const isStaff = ['hostess', 'waiter', 'bartender', 'cashier', 'manager', 'admin'].includes(req.user.role);
     if (!isStaff && rows[0].status !== 'published') throw ApiError.notFound('Event not found');
     res.json({ event: rows[0] });
   }));
@@ -216,7 +216,7 @@ router.get('/nightclubs/:nightclubId/events/:eventId/zones',
     const { event, zones } = await eventPricing.getEventPricing({
       nightclubId: req.params.nightclubId, eventId: req.params.eventId,
     });
-    const isStaff = ['hostess', 'waiter', 'bartender', 'manager', 'admin'].includes(req.user.role);
+    const isStaff = ['hostess', 'waiter', 'bartender', 'cashier', 'manager', 'admin'].includes(req.user.role);
     if (!isStaff && event.status !== 'published') throw ApiError.notFound('Event not found');
 
     res.json({

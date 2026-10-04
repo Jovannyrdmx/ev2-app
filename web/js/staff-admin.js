@@ -18,7 +18,7 @@
 }(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const EMPLOYEE_ROLES = ['waiter', 'bartender', 'hostess', 'dancer', 'dj', 'light_tech', 'valet'];
+  const EMPLOYEE_ROLES = ['waiter', 'bartender', 'cashier', 'hostess', 'dancer', 'dj', 'light_tech', 'valet'];
 
   const MANAGER_ROLE = 'manager';
 

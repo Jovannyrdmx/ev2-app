@@ -213,7 +213,11 @@
       // Las terminales del club. Si no hay ninguna, el método de tarjeta se ofrece
       // igual pero dice por qué no se puede, en vez de fallar desde el servidor con el
       // cliente enfrente.
-      get(`/nightclubs/${club}/payment-terminals`, (d) => { state.terminals = d.terminals || []; }),
+      // El mesero ya no cobra (D77): el servidor le contesta 403 a las terminales, y
+      // pedirlas solo pondría un error rojo en su pantalla.
+      isWaiter()
+        ? Promise.resolve()
+        : get(`/nightclubs/${club}/payment-terminals`, (d) => { state.terminals = d.terminals || []; }),
     ]);
     // El botón de la cámara solo aparece si este teléfono de verdad puede leer un
     // QR. Enseñarlo y que falle al tocarlo es peor que no enseñarlo: en la puerta
@@ -253,6 +257,9 @@
   // Quien ve la cola de pedidos: lo mismo que acepta el servidor en GET /orders.
   const ORDER_ROLES = ['waiter', 'bartender', 'manager', 'admin'];
   const isDoorRole = () => DOOR_ROLES.includes(api.session.user && api.session.user.role);
+  // Desde D77 el mesero no cobra: levanta el pedido, la barra lo prepara y él lleva
+  // el dinero a la caja de esa barra. La puerta (hostess) y la gerencia siguen cobrando.
+  const isWaiter = () => (api.session.user && api.session.user.role) === 'waiter';
   const canSeeOrders = () => ORDER_ROLES.includes(api.session.user && api.session.user.role);
 
 
@@ -1138,6 +1145,9 @@
     // También en la pestaña: si no se ve desde "Por llevar", nadie va a cobrarlo.
     $('count-unpaid').textContent = String(pendientes.length);
     $('count-unpaid').hidden = pendientes.length === 0;
+    // El mesero ya no cobra (D77): recibe el dinero del cliente y lo lleva a la caja
+    // de la barra, que es donde se registra. Aquí solo ve cuánto es.
+    const cobraAqui = !isWaiter();
     $('unpaid-list').innerHTML = pendientes.map((order) => `
       <div class="flex items-center justify-between gap-2" data-unpaid="${escape(order.id)}">
         <div class="min-w-0">
@@ -1145,15 +1155,20 @@
             <span class="text-white/40">${order.table_code ? escape(`· ${t('floor.tableShort')} ${order.table_code}`) : ''}</span></p>
           <p class="text-xs text-white/50 truncate">${escape((order.items || []).map((i) => `${i.quantity}× ${i.name}`).join(', '))}</p>
         </div>
-        <button class="ev2-button rounded-lg px-3 py-2 text-xs font-display flex-none">
+        ${cobraAqui ? `<button class="ev2-button rounded-lg px-3 py-2 text-xs font-display flex-none">
           ${escape(money(order.subtotal, order.currency))}
-        </button>
+        </button>` : `<div class="text-right flex-none">
+          <p class="text-sm font-display">${escape(money(order.subtotal, order.currency))}</p>
+          <p class="text-[11px] text-sky-300">${escape(t('take.payAtTill'))}</p>
+        </div>`}
       </div>`).join('');
 
-    $('unpaid-list').querySelectorAll('[data-unpaid]').forEach((el) => {
-      const order = pendientes.find((o) => o.id === el.dataset.unpaid);
-      el.querySelector('button').onclick = () => openCharge(order);
-    });
+    if (cobraAqui) {
+      $('unpaid-list').querySelectorAll('[data-unpaid]').forEach((el) => {
+        const order = pendientes.find((o) => o.id === el.dataset.unpaid);
+        el.querySelector('button').onclick = () => openCharge(order);
+      });
+    }
 
     renderReady();
   }
@@ -1356,7 +1371,7 @@
     }
     $('take-guest').textContent = take.guestId
       ? (guests.find((g) => g.id === take.guestId) || {}).name || ''
-      : t('take.onMyNameNote');
+      : t(isWaiter() ? 'take.payAtTillNote' : 'take.onMyNameNote');
 
     // Con el pedido ya creado, la carta deja de importar: lo que falta es cobrar.
     const cobrando = Boolean(take.order);
@@ -1436,6 +1451,14 @@
         requestId: take.cart.requestKey(EV2.uuid),
       });
       const res = await api.post(`/nightclubs/${clubId()}/orders`, body);
+      // Lo del mesero entra a la barra al levantarlo y se cobra en la caja (D77): no
+      // hay paso de cobro aquí.
+      if (res.order && res.order.pay_at_till) {
+        toast(t('take.sentToBar', { total: money(res.order.subtotal, res.order.currency) }), 'ok');
+        closeTake();
+        await Promise.all([loadOrders(), loadTables()]);
+        return;
+      }
       take.order = res.order;
       takeError(null);
       await loadOrders();
@@ -1524,6 +1547,9 @@
       ? (minutes === null ? t('floor.onShift', { n: 0 }) : t('floor.onShift', { n: minutes }))
       : t('floor.offShift');
     $('btn-shift').textContent = t(onShift ? 'floor.shiftEnd' : 'floor.shiftStart');
+    // El mesero ya no tiene corte (D77): no recibe dinero del club.
+    $('btn-cut').hidden = isWaiter();
+    $('cut-hint').textContent = t(isWaiter() ? 'cut.hintWaiter' : 'cut.hint');
 
     const totals = EV2Staff.tipTotals(state.tips, state.currency);
     $('tips-paid').textContent = money(totals.paid, totals.currency);
@@ -1577,7 +1603,7 @@
       // El servidor no deja cerrar el turno con dinero del club sin corte. En vez de
       // enseñar el error y dejar a la persona buscando dónde, se le abre el corte.
       showError(err);
-      if (err && err.status === 422) corte().open();
+      if (err && err.status === 422 && !isWaiter()) corte().open();
     }
   };
 

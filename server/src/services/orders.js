@@ -12,7 +12,7 @@ const inventory = require('./inventory');
 const ORDER_SELECT = `
   SELECT o.id, o.status, o.subtotal, o.currency, o.message, o.created_at, o.confirmed_at,
          o.ready_at, o.delivered_at, o.cancelled_at, o.pos_order_id, o.pos_error,
-         o.prep_started_at, o.bar_position,
+         o.prep_started_at, o.bar_position, o.pay_at_till,
          o.table_id, t.code AS table_code, t.section AS table_section, t.floor AS table_floor,
          o.bar_location_id, bar.name AS bar_name, bar.code AS bar_code,
          o.delivery_point_id, dp.name AS delivery_point_name, dp.kind AS delivery_point_kind,
@@ -57,10 +57,12 @@ const ORDER_SELECT = `
  * @param {string} p.clientRequestId
  * @param {string} [p.chargeType]     ledger type; 'drink_order' unless it is a bottle
  * @param {object} [p.chargeMetadata] extra ledger context (a gift, who it is for)
+ * @param {boolean} [p.payAtTill]     the bar prepares it before payment; the till collects (D77)
  * @returns {{ id, subtotal: number, currency: string, transactionId: string|null }}
  */
 async function createOrder({ client, nightclubId, senderId, recipientId, tableId, takenBy,
-  message, items, clientRequestId, chargeType, chargeMetadata, deliveryPointId, barLocationId }) {
+  message, items, clientRequestId, chargeType, chargeMetadata, deliveryPointId, barLocationId,
+  payAtTill = false }) {
   if (tableId) {
     const t = await client.query('SELECT id FROM tables WHERE id = $1 AND nightclub_id = $2 AND active',
       [tableId, nightclubId]);
@@ -124,10 +126,11 @@ async function createOrder({ client, nightclubId, senderId, recipientId, tableId
   const created = await client.query(
     `INSERT INTO drink_orders (nightclub_id, sender_id, recipient_id, table_id, taken_by, message,
                                subtotal, currency, client_request_id,
-                               delivery_point_id, bar_location_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+                               delivery_point_id, bar_location_id, pay_at_till)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
     [nightclubId, senderId, recipientId || null, resolvedTableId, takenBy || null, message || null,
-      subtotal.toFixed(2), currency, clientRequestId, deliveryPointId || null, bar],
+      subtotal.toFixed(2), currency, clientRequestId, deliveryPointId || null, bar,
+      Boolean(payAtTill)],
   );
   const order = created.rows[0];
 
@@ -172,7 +175,9 @@ async function createOrder({ client, nightclubId, senderId, recipientId, tableId
     transactionId = charge.rows[0].id;
   }
 
-  return { id: order.id, subtotal, currency, drinks: drinks.rows, transactionId };
+  return {
+    id: order.id, subtotal, currency, drinks: drinks.rows, transactionId, barLocationId: bar,
+  };
 }
 
 module.exports = { createOrder, ORDER_SELECT };

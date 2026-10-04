@@ -27,6 +27,9 @@
     waiter: { target: 'section', multi: true },
     hostess: { target: 'section', multi: true },
     bartender: { target: 'location', multi: false },
+    // El cajero tiene UNA caja en UNA barra (D77); su asignación decide de qué barra
+    // cobra.
+    cashier: { target: 'location', multi: false },
   };
 
   const ASSIGNABLE_ROLES = Object.keys(ASSIGNABLE);
@@ -155,15 +158,19 @@
    * mirando la lista de asignados: se nota mirando lo que falta, y es la mitad del
    * valor de armar un rol.
    */
-  function progress({ roster = [], gaps = { sections: [], bars: [] } }) {
+  function progress({ roster = [], gaps = { sections: [], bars: [], tills: [] } }) {
     const faltanZonas = (gaps.sections || []).length;
     const faltanBarras = (gaps.bars || []).length;
+    // Desde D77 cada barra necesita también su caja: sin cajero, lo que preparan no lo
+    // cobra nadie.
+    const faltanCajas = (gaps.tills || []).length;
     return {
       assigned: roster.length,
       on_shift: roster.filter((p) => p.on_shift).length,
       missing_sections: faltanZonas,
       missing_bars: faltanBarras,
-      complete: faltanZonas === 0 && faltanBarras === 0,
+      missing_tills: faltanCajas,
+      complete: faltanZonas === 0 && faltanBarras === 0 && faltanCajas === 0,
       // Quien quedó en el rol y no marcó entrada. Es lo que el gerente revisa a
       // las once de la noche.
       not_arrived: roster.filter((p) => !p.on_shift).map((p) => p.display_name),

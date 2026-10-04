@@ -1,8 +1,8 @@
 /**
  * EV2 — el corte del turno, en la pantalla de quien cobra (D51).
  *
- * Contesta la pregunta que un mesero y un bartender se hacen a las tres de la mañana
- * con la bolsa llena: **¿cuánto de esto es del club?** Y da las dos únicas acciones
+ * Contesta la pregunta que quien cobra —desde D77, el cajero de cada barra y la
+ * puerta— se hace a las tres de la mañana: **¿cuánto de esto es del club?** Y da las dos únicas acciones
  * que hacen falta para responderla sin discutir: entregar una parte ahora, y cerrar
  * el turno entregando el resto.
  *
@@ -70,17 +70,32 @@
    * `counted` es lo que el gerente contó, y la diferencia se mide contra lo que la
    * persona DEBÍA entregar —no contra lo que declaró—, igual que en el servidor.
    */
-  function closeBlocker(declared, cut, { counted = null, reason = '', pin = '' } = {}) {
+  function closeBlocker(declared, cut, {
+    counted = null, reason = '', pin = '', acknowledgePending = false,
+  } = {}) {
     const n = Number(declared);
     if (!Number.isFinite(n) || n < 0) return 'cut.errAmount';
     if (!cut || !cut.shift) return 'cut.errNoShift';
     if (cut.closing) return 'cut.errAlready';
+    // La caja con pedidos de su barra sin cobrar (D77) no se cierra salvo que el
+    // gerente que teclea su código lo acepte, marcándolo.
+    if (pendingCount(cut) > 0 && !acknowledgePending) return 'cut.errPending';
     const contado = counted === null || counted === '' ? n : Number(counted);
     if (!Number.isFinite(contado) || contado < 0) return 'cut.errCounted';
     if (!/^\d{6}$/.test(String(pin))) return 'cut.errPin';
     const diferencia = Math.round((contado - Number(cut.cash_to_hand)) * 100) / 100;
     if (diferencia !== 0 && String(reason).trim().length < 5) return 'cut.errDiffReason';
     return null;
+  }
+
+  /** Cuántos pedidos de su barra le quedan sin cobrar a una caja (D77). */
+  function pendingCount(cut) {
+    return ((cut && cut.pending_orders) || []).length;
+  }
+
+  /** Si este corte es de una caja: tiene fondo o tiene barra. */
+  function isTill(cut) {
+    return Boolean(cut && cut.shift && cut.shift.location_id);
   }
 
   /** Cuánto se desvía lo contado de lo que esa persona debía entregar. */
@@ -92,13 +107,25 @@
     /** Lo que el corte enseña, en el orden en que se lee. */
   function lines(cut, t) {
     if (!cut || !cut.totals) return [];
-    const out = cut.totals.by_method.map((l) => ({
+    const out = [];
+    // El fondo con el que abrió la caja (D77) va primero: es dinero del club que
+    // también se devuelve, y sin verlo el "por entregar" parece inflado.
+    if (Number(cut.opening_float) > 0) {
+      out.push({
+        key: 'float', label: t('cut.float'), value: cut.opening_float, count: 0, cash: true,
+      });
+    }
+    return out.concat(cut.totals.by_method.map((l) => ({
       key: l.method,
       label: t(methodKey(l.method)),
       value: l.amount,
       count: l.count,
       cash: isCash(l.method),
-    }));
+    })), tipsLine(cut, t));
+  }
+
+  function tipsLine(cut, t) {
+    const out = [];
     if (Number(cut.totals.tips.amount) > 0) {
       out.push({
         key: 'tips', label: t('cut.tips'), value: cut.totals.tips.amount,
@@ -151,6 +178,14 @@
           </div>
         </div>
         <div id="cut-drops" class="space-y-1"></div>
+        <!-- Los pedidos de la barra que la caja no ha cobrado (D77). -->
+        <div id="cut-pending-box" class="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 space-y-2" hidden>
+          <p id="cut-pending" class="text-sm text-amber-100">—</p>
+          <label class="flex items-start gap-2 text-xs text-white/70">
+            <input id="cut-ack" type="checkbox" class="mt-0.5">
+            <span id="cut-ack-label">—</span>
+          </label>
+        </div>
         <p id="cut-error" class="text-sm text-red-300" hidden></p>
         <div class="grid grid-cols-2 gap-2 pt-1">
           <input id="cut-amount" type="number" min="0" step="50" inputmode="decimal"
@@ -209,6 +244,14 @@
         box.appendChild(fila);
       }
 
+      const pendientes = pendingCount(cut);
+      $('cut-pending-box').hidden = !(pendientes > 0 && cut && !cut.closing);
+      $('cut-pending').textContent = t('cut.pending', {
+        n: pendientes, amount: dinero(cut && cut.pending_total),
+      });
+      $('cut-ack-label').textContent = t('cut.ackPending');
+      if (pendientes === 0) $('cut-ack').checked = false;
+
       $('cut-handed').textContent = dinero(cut && cut.drops_received);
       $('cut-tohand').textContent = dinero(cut && cut.cash_to_hand);
 
@@ -228,7 +271,7 @@
       const puede = Boolean(cut && cut.shift && !cut.closing);
       $('cut-drop').disabled = !puede || Boolean(cut.shift.ended_at);
       $('cut-declare').disabled = !puede;
-      for (const id of ['cut-amount', 'cut-counted', 'cut-reason', 'cut-pin']) {
+      for (const id of ['cut-amount', 'cut-counted', 'cut-reason', 'cut-pin', 'cut-ack']) {
         $(id).disabled = !puede;
       }
     }
@@ -253,7 +296,9 @@
 
       const bloqueo = tipo === 'drop'
         ? dropBlocker(monto, estado.cut, { reason: motivo, pin })
-        : closeBlocker(monto, estado.cut, { counted: contado, reason: motivo, pin });
+        : closeBlocker(monto, estado.cut, {
+          counted: contado, reason: motivo, pin, acknowledgePending: $('cut-ack').checked,
+        });
       if (bloqueo) {
         avisar(t(bloqueo, bloqueo === 'cut.errDiffReason'
           ? { amount: dinero(Math.abs(difference(contado === '' ? monto : contado, estado.cut))) }
@@ -283,6 +328,7 @@
             declared_cash: monto,
             counted_cash: contado === '' ? monto : Number(contado),
             ...(motivo.trim() ? { difference_reason: motivo.trim() } : {}),
+            ...(pendingCount(estado.cut) > 0 ? { acknowledge_pending: $('cut-ack').checked } : {}),
             manager_pin: pin,
           });
           if (deps.toast) {
@@ -292,6 +338,7 @@
         $('cut-amount').value = '';
         $('cut-counted').value = '';
         $('cut-reason').value = '';
+        $('cut-ack').checked = false;
         await refrescar();
       } catch (err) {
         avisar(deps.errorMessage ? deps.errorMessage(err) : String(err.message || err));
@@ -327,6 +374,6 @@
 
   return {
     METHOD_KEY, methodKey, isCash, money, lines, statusKey,
-    dropBlocker, closeBlocker, difference, createSheet,
+    dropBlocker, closeBlocker, difference, pendingCount, isTill, createSheet,
   };
 }));

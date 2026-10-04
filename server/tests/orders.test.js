@@ -5,7 +5,8 @@ const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
 
-let club; let guest; let other; let bartender; let waiter; let manager; let table; let beer; let shot;
+let club; let guest; let other; let bartender; let waiter; let manager; let cashier; let table;
+let beer; let shot;
 
 beforeAll(setupSchema);
 afterAll(closePool);
@@ -17,6 +18,10 @@ beforeEach(async () => {
   bartender = await f.createUser(club.id, { role: 'bartender' });
   waiter = await f.createUser(club.id, { role: 'waiter' });
   manager = await f.createUser(club.id, { role: 'manager' });
+  // La caja de la barra de planta baja, que es de donde salen los pedidos de estas
+  // pruebas: desde D77 el dinero de los tragos lo recibe el cajero de cada barra.
+  cashier = await f.createUser(club.id, { role: 'cashier' });
+  await f.openTill(club.id, { cashier, locationId: club.bar_id, authorizer: manager });
   table = await f.createTable(club.id, { code: 'T-1', capacity: 4 });
   beer = await f.createDrink(club.id, { name: 'Cerveza', price: 60, stock: 10 });
   shot = await f.createDrink(club.id, { name: 'Tequila', price: 80, stock: 3 });
@@ -54,13 +59,13 @@ async function chargeOf(orderId) {
 }
 
 /**
- * Cobra el pedido como lo hace el mesero en la mesa: efectivo en mano, registrado en
- * el acto. Es el camino real, no un UPDATE a la tabla — si esto se rompe, se rompe
+ * Cobra el pedido como lo hace la caja de la barra (D77): efectivo en mano, registrado
+ * en el acto. Es el camino real, no un UPDATE a la tabla — si esto se rompe, se rompe
  * también para el club.
  */
 async function payFor(orderId, by) {
   const charge = await chargeOf(orderId);
-  return api().post(url('/manual-payments/register')).set(auth(by || waiter)).send({
+  return api().post(url('/manual-payments/register')).set(auth(by || cashier)).send({
     transaction_id: charge.id,
     method: 'cash',
     amount: Number(charge.amount),
@@ -396,7 +401,7 @@ describe('El pedido trae su cobro', () => {
   it('un cobro por un monto distinto al del pedido se rechaza', async () => {
     const res = await api().post(url('/orders')).set(auth(guest)).send(newOrder());
     const charge = await chargeOf(res.body.order.id);
-    const pago = await api().post(url('/manual-payments/register')).set(auth(waiter)).send({
+    const pago = await api().post(url('/manual-payments/register')).set(auth(cashier)).send({
       transaction_id: charge.id, method: 'cash', amount: 100, currency: charge.currency,
     });
     expect(pago.status).toBe(422);
@@ -406,12 +411,12 @@ describe('El pedido trae su cobro', () => {
   it('la terminal del club exige el folio del voucher', async () => {
     const res = await api().post(url('/orders')).set(auth(guest)).send(newOrder());
     const charge = await chargeOf(res.body.order.id);
-    const sinFolio = await api().post(url('/manual-payments/register')).set(auth(waiter)).send({
+    const sinFolio = await api().post(url('/manual-payments/register')).set(auth(cashier)).send({
       transaction_id: charge.id, method: 'card_terminal', amount: 120, currency: 'MXN',
     });
     expect(sinFolio.status).toBe(422);
 
-    const conFolio = await api().post(url('/manual-payments/register')).set(auth(waiter)).send({
+    const conFolio = await api().post(url('/manual-payments/register')).set(auth(cashier)).send({
       transaction_id: charge.id, method: 'card_terminal', amount: 120, currency: 'MXN',
       reference: 'VOUCHER-448120',
     });
@@ -422,7 +427,7 @@ describe('El pedido trae su cobro', () => {
   it('una transferencia NO se da por cobrada en la mesa: la confirma el gerente', async () => {
     const res = await api().post(url('/orders')).set(auth(guest)).send(newOrder());
     const charge = await chargeOf(res.body.order.id);
-    const pago = await api().post(url('/manual-payments/register')).set(auth(waiter)).send({
+    const pago = await api().post(url('/manual-payments/register')).set(auth(cashier)).send({
       transaction_id: charge.id, method: 'spei', amount: 120, currency: 'MXN', reference: 'ABC123456',
     });
     expect(pago.status).toBe(422);
@@ -498,6 +503,114 @@ describe('El mesero levanta el pedido', () => {
   it('un pedido hecho desde el teléfono del cliente no lleva mesero', async () => {
     const res = await api().post(url('/orders')).set(auth(guest)).send(newOrder());
     expect(res.body.order.taken_by).toBeNull();
+    expect(res.body.order.pay_at_till).toBe(false);
+  });
+});
+
+/**
+ * La caja de cada barra (D77). Lo que levanta el mesero entra a la barra en ese
+ * momento, sin pagar; el mesero entrega, recibe el dinero y lo lleva a la caja de esa
+ * barra, que es la única que lo cobra.
+ */
+describe('El pedido del mesero se cobra en la caja de su barra', () => {
+  const setStatus = (id, status, user) => api().post(url(`/orders/${id}/status`))
+    .set(auth(user)).send({ status });
+  const delMesero = () => api().post(url('/orders')).set(auth(waiter))
+    .send(newOrder({ table_id: table.id }));
+
+  it('entra a la barra al levantarlo: confirmado, sin pagar y marcado para caja', async () => {
+    const res = await delMesero();
+    expect(res.status).toBe(201);
+    expect(res.body.order.status).toBe('confirmed');
+    expect(res.body.order.confirmed_at).not.toBeNull();
+    expect(res.body.order.payment_status).toBe('pending');
+    expect(res.body.order.pay_at_till).toBe(true);
+    expect(res.body.order.bar_location_id).toBe(club.bar_id);
+  });
+
+  it('la barra lo ve en su cola de lo que se prepara y lo puede preparar sin el cobro', async () => {
+    const res = await delMesero();
+    const cola = await api().get(url(`/orders?bar_id=${club.bar_id}&active=true&paid_only=true`))
+      .set(auth(bartender));
+    expect(cola.body.orders.map((o) => o.id)).toContain(res.body.order.id);
+    const listo = await setStatus(res.body.order.id, 'ready', bartender);
+    expect(listo.status).toBe(200);
+  });
+
+  it('el pedido del cliente desde su teléfono sigue sin entrar a la cola hasta pagarse', async () => {
+    const res = await api().post(url('/orders')).set(auth(guest)).send(newOrder());
+    const cola = await api().get(url(`/orders?bar_id=${club.bar_id}&active=true&paid_only=true`))
+      .set(auth(bartender));
+    expect(cola.body.orders.map((o) => o.id)).not.toContain(res.body.order.id);
+  });
+
+  it('el mesero ya no cobra: ni registra efectivo ni declara pagos', async () => {
+    const res = await delMesero();
+    const charge = await chargeOf(res.body.order.id);
+    const registrar = await api().post(url('/manual-payments/register')).set(auth(waiter)).send({
+      transaction_id: charge.id, method: 'cash', amount: 120, currency: 'MXN',
+    });
+    expect(registrar.status).toBe(403);
+    const declarar = await api().post(url('/manual-payments')).set(auth(waiter)).send({
+      transaction_id: charge.id, method: 'spei', amount: 120, currency: 'MXN', reference: 'ABC123456',
+    });
+    expect(declarar.status).toBe(403);
+    expect((await chargeOf(res.body.order.id)).status).toBe('pending');
+  });
+
+  it('el bartender tampoco cobra', async () => {
+    const res = await delMesero();
+    const charge = await chargeOf(res.body.order.id);
+    const intento = await api().post(url('/manual-payments/register')).set(auth(bartender)).send({
+      transaction_id: charge.id, method: 'cash', amount: 120, currency: 'MXN',
+    });
+    expect(intento.status).toBe(403);
+  });
+
+  it('el cajero de esa barra lo cobra; sigue en la barra y se avisa que ya se pagó', async () => {
+    const res = await delMesero();
+    const pago = await payFor(res.body.order.id);
+    expect(pago.status).toBe(201);
+    const after = await api().get(url(`/orders/${res.body.order.id}`)).set(auth(cashier));
+    expect(after.body.order.status).toBe('confirmed');
+    expect(after.body.order.payment_status).toBe('paid');
+
+    const { rows } = await pool.query(
+      `SELECT type, payload FROM events WHERE type IN ('order_paid','order_confirmed') ORDER BY id`);
+    // No se vuelve a "confirmar" (ya estaba en la barra): se avisa que quedó pagado.
+    expect(rows.map((r) => r.type)).toEqual(['order_paid']);
+    expect(rows[0].payload.order_id).toBe(res.body.order.id);
+  });
+
+  it('el cajero de OTRA barra no lo puede cobrar', async () => {
+    const res = await delMesero();
+    const otroCajero = await f.createUser(club.id, { role: 'cashier' });
+    await f.openTill(club.id, {
+      cashier: otroCajero, locationId: club.locations['barra-alta'], authorizer: manager,
+    });
+    const intento = await payFor(res.body.order.id, otroCajero);
+    expect(intento.status).toBe(403);
+    expect(intento.body.error.message).toMatch(/otra barra/);
+  });
+
+  it('un cajero sin la caja abierta no cobra', async () => {
+    const res = await delMesero();
+    const sinCaja = await f.createUser(club.id, { role: 'cashier' });
+    const intento = await payFor(res.body.order.id, sinCaja);
+    expect(intento.status).toBe(409);
+    expect(intento.body.error.message).toMatch(/Abre tu caja/);
+  });
+
+  it('la caja no cobra cosas que no son pedidos de la barra', async () => {
+    const { rows } = await pool.query(
+      `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status,
+                                 payer_user_id, provider, reference_type, reference_id)
+       VALUES ($1,'reservation_deposit','in',500,'MXN','pending',$2,'manual','reservation',$3)
+       RETURNING id`, [club.id, guest.id, randomUUID()]);
+    const intento = await api().post(url('/manual-payments/register')).set(auth(cashier)).send({
+      transaction_id: rows[0].id, method: 'cash', amount: 500, currency: 'MXN',
+    });
+    expect(intento.status).toBe(403);
   });
 });
 
@@ -505,8 +618,8 @@ describe('El mesero levanta el pedido', () => {
  * La venta en la barra.
  *
  * El cliente que llega a la barra, pide y paga ahí mismo: la mitad de la clientela de
- * una barra. Hasta ahora el sistema no la contemplaba — el pedido exigía una mesa — así
- * que el cantinero servía el trago y el inventario nunca se enteraba.
+ * una barra. Desde D77 la hace el cajero de esa barra, no el cantinero: el cantinero
+ * prepara y la caja cobra.
  */
 describe('Venta directa en la barra', () => {
   let barra;
@@ -514,7 +627,7 @@ describe('Venta directa en la barra', () => {
     barra = await f.barOf(club.id, 'barra-baja');
   });
 
-  const venta = (over = {}) => api().post(url('/orders')).set(auth(bartender)).send({
+  const venta = (over = {}, by = cashier) => api().post(url('/orders')).set(auth(by)).send({
     client_request_id: randomUUID(),
     bar_location_id: barra,
     items: [{ drink_id: beer.id, quantity: 2 }],
@@ -529,21 +642,34 @@ describe('Venta directa en la barra', () => {
     expect(res.body.order.bar_name).toBe('Barra planta baja');
   });
 
-  it('nace debiendo dinero, igual que cualquier otro pedido', async () => {
+  it('nace debiendo dinero y NO entra a la barra hasta cobrarse', async () => {
     const res = await venta();
     expect(res.body.order.payment_status).toBe('pending');
+    expect(res.body.order.status).toBe('pending');
+    expect(res.body.order.pay_at_till).toBe(false);
     expect(res.body.order.subtotal).toBe('120.00');
   });
 
-  it('queda a nombre del cantinero: es quien recibió el dinero', async () => {
+  it('queda a nombre del cajero: es quien recibió el dinero', async () => {
     const res = await venta();
-    expect(res.body.order.taken_by).toBe(bartender.id);
-    expect(res.body.order.sender_id).toBe(bartender.id);
+    expect(res.body.order.taken_by).toBe(cashier.id);
+    expect(res.body.order.sender_id).toBe(cashier.id);
   });
 
-  it('el cantinero la cobra en efectivo y queda confirmada de un paso', async () => {
+  it('el cantinero ya no vende: prepara', async () => {
+    const res = await venta({}, bartender);
+    expect(res.status).toBe(403);
+  });
+
+  it('el cajero sin caja abierta no vende', async () => {
+    const sinCaja = await f.createUser(club.id, { role: 'cashier' });
+    const res = await venta({}, sinCaja);
+    expect(res.status).toBe(409);
+  });
+
+  it('el cajero la cobra en efectivo y queda confirmada de un paso', async () => {
     const res = await venta();
-    const pago = await payFor(res.body.order.id, bartender);
+    const pago = await payFor(res.body.order.id, cashier);
     expect(pago.status).toBe(201);
 
     const after = await api().get(url(`/orders/${res.body.order.id}`)).set(auth(bartender));
@@ -559,14 +685,23 @@ describe('Venta directa en la barra', () => {
 
   it('no se lleva lo que no hay en esa barra', async () => {
     const arriba = await f.barOf(club.id, 'barra-alta');
-    const res = await venta({ bar_location_id: arriba });
+    const cajeroArriba = await f.createUser(club.id, { role: 'cashier' });
+    await f.openTill(club.id, { cashier: cajeroArriba, locationId: arriba, authorizer: manager });
+    const res = await venta({}, cajeroArriba);
     expect(res.status).toBe(409);
     expect(res.body.error.details.supplies[0].available).toBe(0);
   });
 
+  it('sale de la barra de SU caja aunque pida otra', async () => {
+    const arriba = await f.barOf(club.id, 'barra-alta');
+    const res = await venta({ bar_location_id: arriba });
+    expect(res.status).toBe(201);
+    expect(res.body.order.bar_location_id).toBe(barra);
+  });
+
   it('aparece en la cola de su barra y no en la otra', async () => {
     const res = await venta();
-    await payFor(res.body.order.id, bartender);
+    await payFor(res.body.order.id, cashier);
     const arriba = await f.barOf(club.id, 'barra-alta');
 
     const suya = await api().get(url(`/orders?bar_id=${barra}&active=true`)).set(auth(bartender));

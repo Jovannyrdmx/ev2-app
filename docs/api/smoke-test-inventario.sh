@@ -145,7 +145,7 @@ SIT=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$N/tables/$TID/seat" \
 [ "$SIT" = "200" ] || [ "$SIT" = "201" ] && green "la anfitriona lo sienta en la mesa $TCODE" \
   || red "no se pudo sentar al cliente (HTTP $SIT)"
 
-step "4. El mesero levanta el pedido y lo cobra en la mesa"
+step "4. El mesero levanta el pedido; entra a la barra y se cobra en caja (D77)"
 DRK=$(curl -s "$N/drinks?search=BUCHANANS%2012%20-%20SPRITE" -H "Authorization: Bearer $WTR")
 DID=$(echo "$DRK" | jget "d['drinks'][0]['id']")
 ALCANZAN=$(echo "$DRK" | jget "d['drinks'][0]['stock']")
@@ -157,21 +157,26 @@ ORD=$(curl -s -X POST "$N/orders" -H "Authorization: Bearer $WTR" -H 'Content-Ty
 OID=$(echo "$ORD" | jget "d['order']['id']")
 TX=$(echo "$ORD" | jget "d['order']['transaction_id']")
 check "el pedido nace debiendo dinero" "pending" "$(echo "$ORD" | jget "d['order']['payment_status']")"
+check "pero entra a la barra al levantarlo" "confirmed" "$(echo "$ORD" | jget "d['order']['status']")"
+check "marcado para cobrarse en caja" "True" "$(echo "$ORD" | jget "d['order']['pay_at_till']")"
 check "y sale de la barra de abajo" "Barra planta baja" "$(echo "$ORD" | jget "d['order']['bar_name']")"
 
-# La barra no sirve a credito: confirmar sin pagar tiene que fallar.
-SINPAGAR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$N/orders/$OID/status" \
-  -H "Authorization: Bearer $BAR" -H 'Content-Type: application/json' -d '{"status":"confirmed"}')
-check "la barra NO lo prepara sin pagar" "409" "$SINPAGAR"
+# El mesero ya no cobra: el dinero lo recibe la caja de la barra.
+MESERO_COBRA=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$N/manual-payments/register" \
+  -H "Authorization: Bearer $WTR" -H 'Content-Type: application/json' \
+  -d "{\"transaction_id\":\"$TX\",\"method\":\"cash\",\"amount\":$(echo "$ORD" | jget "float(d['order']['subtotal'])"),\"currency\":\"MXN\"}")
+check "el mesero NO puede registrar el cobro" "403" "$MESERO_COBRA"
 
-COBRO=$(curl -s -X POST "$N/manual-payments/register" -H "Authorization: Bearer $WTR" \
+# La caja (con su rol de la noche, su fondo y el PIN del gerente) se prueba en
+# server/tests/cashier.test.js; aqui registra el gerente, que cobra sin caja.
+COBRO=$(curl -s -X POST "$N/manual-payments/register" -H "Authorization: Bearer $MGR" \
   -H 'Content-Type: application/json' \
   -d "{\"transaction_id\":\"$TX\",\"method\":\"cash\",\"amount\":$(echo "$ORD" | jget "float(d['order']['subtotal'])"),\"currency\":\"MXN\"}")
 check "la declaracion del efectivo queda confirmada" "confirmed" \
   "$(echo "$COBRO" | jget "d['payment']['status']")"
 check "y el libro contable lo asienta como pagado" "paid" \
   "$(curl -s "$N/orders/$OID" -H "Authorization: Bearer $BAR" | jget "d['order']['payment_status']")"
-check "y el pedido queda confirmado solo" "confirmed" \
+check "y el pedido sigue en la barra, confirmado" "confirmed" \
   "$(curl -s "$N/orders/$OID" -H "Authorization: Bearer $BAR" | jget "d['order']['status']")"
 
 step "5. La barra correcta lo ve; la otra no"

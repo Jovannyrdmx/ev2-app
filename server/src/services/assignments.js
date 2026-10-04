@@ -42,6 +42,9 @@ const ASSIGNABLE = {
   waiter: { target: 'section', multi: true },
   hostess: { target: 'section', multi: true },
   bartender: { target: 'location', multi: false },
+  // El cajero tiene UNA caja, en UNA barra (D77). Su asignación es lo que decide de
+  // qué barra cobra; él no la elige al abrir caja.
+  cashier: { target: 'location', multi: false },
   // El almacén no atiende piso ni barra: su lugar es el almacén y no se asigna
   // por noche. Se deja fuera a propósito en vez de inventarle un destino.
 };
@@ -130,7 +133,7 @@ async function checkTarget(runner, { nightclubId, rule, section, locationId }) {
   if (!locationId) {
     throw ApiError.badRequest('Falta la barra', [{ field: 'location_id', message: 'Required' }]);
   }
-  if (section) throw ApiError.unprocessable('A un bartender se le asigna una barra, no una zona');
+  if (section) throw ApiError.unprocessable('A un bartender o cajero se le asigna una barra, no una zona');
   const { rows } = await runner.query(
     `SELECT id, kind FROM supply_locations
       WHERE id = $1 AND nightclub_id = $2 AND active`,
@@ -276,14 +279,28 @@ async function gapsFor(runner, { nightclubId, eventId }) {
       WHERE l.nightclub_id = $1 AND l.kind = 'bar' AND l.active
         AND NOT EXISTS (
           SELECT 1 FROM shift_assignments a
-           WHERE a.event_id = $2 AND a.location_id = l.id
+           WHERE a.event_id = $2 AND a.location_id = l.id AND a.role = $3::text
         )
       ORDER BY l.name`,
-    [nightclubId, eventId],
+    [nightclubId, eventId, 'bartender'],
+  );
+  // Desde D77 cada barra necesita también su caja: una barra con bartender y sin
+  // cajero prepara tragos que nadie va a cobrar.
+  const cajas = await runner.query(
+    `SELECT l.id, l.name
+       FROM supply_locations l
+      WHERE l.nightclub_id = $1 AND l.kind = 'bar' AND l.active
+        AND NOT EXISTS (
+          SELECT 1 FROM shift_assignments a
+           WHERE a.event_id = $2 AND a.location_id = l.id AND a.role = $3::text
+        )
+      ORDER BY l.name`,
+    [nightclubId, eventId, 'cashier'],
   );
   return {
     sections: zonas.rows.map((r) => r.section),
     bars: barras.rows.map((r) => ({ location_id: r.id, name: r.name })),
+    tills: cajas.rows.map((r) => ({ location_id: r.id, name: r.name })),
   };
 }
 

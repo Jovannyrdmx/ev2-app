@@ -168,9 +168,10 @@ describe('El panel del gerente y sus terminales', () => {
   });
 
   it('las tres pantallas que cobran cargan el cuadro antes que su controlador', () => {
+    // Desde D77 la barra ya no cobra: la que cobra los tragos es la caja de cada barra.
     for (const [page, controlador] of [
       ['staff.html', 'js/staff-screen.js'],
-      ['bartender.html', 'js/bartender-screen.js'],
+      ['caja.html', 'js/cashier-screen.js'],
       ['manager.html', 'js/manager-screen.js'],
     ]) {
       const dom = new JSDOM(leer(page), { url: `https://ev2.local/${page}` });

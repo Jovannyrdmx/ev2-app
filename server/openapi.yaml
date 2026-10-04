@@ -835,7 +835,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [waiter, bartender, dancer, dj, light_tech, valet, hostess, manager]
+            enum: [waiter, bartender, cashier, dancer, dj, light_tech, valet, hostess, manager]
         - name: on_shift
           in: query
           description: Solo quienes tienen turno abierto
@@ -2071,6 +2071,15 @@ paths:
                       sections: { type: array, items: { type: string } }
                       bars:
                         type: array
+                        description: Barras sin bartender.
+                        items:
+                          type: object
+                          properties:
+                            location_id: { type: string, format: uuid }
+                            name: { type: string }
+                      tills:
+                        type: array
+                        description: Barras sin cajero (D77).
                         items:
                           type: object
                           properties:
@@ -7743,11 +7752,16 @@ paths:
     post:
       operationId: registerManualPayment
       tags: [Pagos manuales]
-      summary: Registrar dinero ya recibido (anfitriona o gerente)
+      summary: Registrar dinero ya recibido (anfitriona, cajero o gerente)
       description: |
-        Efectivo en la puerta: se declara y se confirma en un solo paso, porque quien lo
-        registra es quien lo recibió. No hay segunda persona que verifique, así que el
-        registro deja constancia de **quién tomó el dinero** y de parte de quién.
+        Efectivo en la puerta o en la caja: se declara y se confirma en un solo paso,
+        porque quien lo registra es quien lo recibió. No hay segunda persona que
+        verifique, así que el registro deja constancia de **quién tomó el dinero** y de
+        parte de quién.
+
+        Desde D77 el mesero y el bartender **no** registran pagos (403). El cajero solo
+        cobra pedidos de **su** barra y con la caja abierta (403 / 409); lo mismo vale
+        para `POST /terminal-charges`.
       requestBody:
         required: true
         content:
@@ -9685,6 +9699,71 @@ paths:
                     items: { $ref: '#/components/schemas/CashDrop' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/nightclubs/{nightclubId}/till:
+    get:
+      operationId: getMyTill
+      tags: [Cortes de turno]
+      summary: Mi caja (cajero)
+      description: |
+        Requiere rol `cashier` (D77). La barra que le asignaron esta noche, si ya abrió
+        la caja y con qué fondo, y los pedidos de esa barra que siguen sin cobrar.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: El estado de la caja
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TillState' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/till/open:
+    post:
+      operationId: openTill
+      tags: [Cortes de turno]
+      summary: Abrir la caja con su fondo
+      description: |
+        Requiere rol `cashier` (D77). La barra **no se manda**: sale del rol de la noche
+        (`shift_assignments`) para la noche en curso. El cajero teclea el fondo que
+        recibe y el gerente que se lo entrega teclea su PIN ahí mismo. Una caja por
+        barra; el fondo no se edita después.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [opening_float, manager_pin]
+              properties:
+                opening_float: { type: number, minimum: 0, maximum: 1000000 }
+                currency: { $ref: '#/components/schemas/Currency' }
+                manager_pin: { type: string, pattern: '^\d{6}$' }
+      responses:
+        '201':
+          description: Caja abierta
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TillState' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: Código de autorización inválido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: Su caja ya está abierta, o esa barra ya tiene otra caja abierta
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: No tiene barra asignada para la noche en curso
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /api/nightclubs/{nightclubId}/shifts/me/closing:
     post:
       operationId: closeShiftCut
@@ -9729,6 +9808,13 @@ paths:
                   description: Obligatorio si lo contado no cuadra con lo que debía entregar.
                 notes: { type: string, maxLength: 280 }
                 manager_pin: { type: string, pattern: '^\d{6}$' }
+                acknowledge_pending:
+                  type: boolean
+                  default: false
+                  description: >
+                    Solo para una caja (D77): el gerente que teclea su código acepta
+                    cerrarla con pedidos de su barra sin cobrar. Quedan escritos en el
+                    corte y siguen por cobrar en la barra.
       responses:
         '201':
           description: Corte cerrado y turno cerrado
@@ -9756,7 +9842,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '422':
-          description: Falta el motivo de la diferencia, o hay retiros sin contar
+          description: >
+            Falta el motivo de la diferencia, hay retiros sin contar, o la caja tiene
+            pedidos sin cobrar y no se mandó `acknowledge_pending`
+            (`details.pending_orders`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -10965,7 +11054,7 @@ components:
 
     Role:
       type: string
-      enum: [guest, waiter, bartender, dancer, dj, light_tech, valet, hostess, manager, admin]
+      enum: [guest, waiter, bartender, cashier, dancer, dj, light_tech, valet, hostess, driver, warehouse, manager, admin]
 
     CoverPrice:
       type: object
@@ -11090,6 +11179,18 @@ components:
             section: { type: [string, 'null'] }
             started_at: { type: string, format: date-time }
             ended_at: { type: [string, 'null'], format: date-time }
+            location_id:
+              type: [string, 'null']
+              format: uuid
+              description: La barra, si el turno es una caja (D77).
+        opening_float:
+          type: string
+          description: El fondo con el que abrió la caja; se devuelve en el corte. '0.00' fuera de la caja.
+        pending_orders:
+          type: array
+          description: Los pedidos de la barra de esta caja que siguen sin cobrar (D77).
+          items: { $ref: '#/components/schemas/TillOrder' }
+        pending_total: { type: string }
         totals:
           type: object
           properties:
@@ -11117,7 +11218,7 @@ components:
           items: { $ref: '#/components/schemas/CashDrop' }
         drops_received: { type: string, description: Lo entregado Y contado., example: '1000.00' }
         drops_pending: { type: integer }
-        cash_to_hand: { type: string, description: Lo que tiene que entregar ahora., example: '2000.00' }
+        cash_to_hand: { type: string, description: 'Lo que tiene que entregar ahora: fondo + efectivo cobrado − retiros.', example: '2000.00' }
         closing:
           type: [object, 'null']
           description: El corte de ese turno, si ya se declaró.
@@ -11186,6 +11287,86 @@ components:
           type: [string, 'null']
           format: uuid
           description: El papel en que salió, para reimprimirlo exactamente igual.
+        location_id: { type: [string, 'null'], format: uuid, description: 'La barra, si fue una caja (D77).' }
+        location_name: { type: [string, 'null'] }
+        opening_float: { type: string, description: El fondo con el que abrió la caja. }
+        pending_orders:
+          type: array
+          description: Los pedidos que quedaron sin cobrar con el permiso de quien autorizó el corte.
+          items:
+            type: object
+            properties:
+              order_id: { type: string, format: uuid }
+              table_code: { type: [string, 'null'] }
+              delivery_point_name: { type: [string, 'null'] }
+              taken_by_name: { type: [string, 'null'] }
+              subtotal: { type: string }
+              currency: { $ref: '#/components/schemas/Currency' }
+              created_at: { type: string, format: date-time }
+        pending_total: { type: string }
+
+    TillOrder:
+      type: object
+      description: Un pedido abierto de una barra, como lo ve la caja (D77).
+      properties:
+        order_id: { type: string, format: uuid }
+        status: { type: string }
+        created_at: { type: string, format: date-time }
+        subtotal: { type: string }
+        currency: { $ref: '#/components/schemas/Currency' }
+        pay_at_till: { type: boolean }
+        table_id: { type: [string, 'null'], format: uuid }
+        table_code: { type: [string, 'null'] }
+        table_section: { type: [string, 'null'] }
+        delivery_point_name: { type: [string, 'null'] }
+        taken_by: { type: [string, 'null'], format: uuid }
+        taken_by_name: { type: [string, 'null'] }
+        sender_name: { type: [string, 'null'] }
+        transaction_id: { type: string, format: uuid }
+        payment_status: { type: string, enum: [pending, pending_manual] }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              quantity: { type: integer }
+
+    TillState:
+      type: object
+      description: La caja de quien pregunta (D77).
+      properties:
+        till:
+          type: [object, 'null']
+          properties:
+            shift_id: { type: string, format: uuid }
+            location_id: { type: string, format: uuid }
+            location_name: { type: string }
+            started_at: { type: string, format: date-time }
+            opening_float: { type: string }
+            currency: { $ref: '#/components/schemas/Currency' }
+            float_authorized_by: { type: [string, 'null'] }
+            float_authorized_at: { type: string, format: date-time }
+        assignment:
+          type: [object, 'null']
+          description: La barra que el gerente le asignó para la noche en curso, mientras no abra.
+          properties:
+            location_id: { type: string, format: uuid }
+            location_name: { type: string }
+            event_id: { type: string, format: uuid }
+            event_name: { type: string }
+            doors_open_at: { type: string, format: date-time }
+        pending_orders:
+          type: array
+          description: Lo que levantaron los meseros para esta barra y sigue sin cobrar.
+          items: { $ref: '#/components/schemas/TillOrder' }
+        pending_total: { type: string }
+        awaiting_payment:
+          type: array
+          description: >
+            Lo que pidieron clientes desde la app para esta barra y no han pagado (últimas
+            12 h). No está en la barra ni cuenta para el corte; se puede cobrar aquí.
+          items: { $ref: '#/components/schemas/TillOrder' }
 
     User:
       type: object
@@ -11509,6 +11690,11 @@ components:
           description: >
             El orden en que el cantinero decidió prepararlos. Es una preferencia de
             pantalla: no toca la hora de creación ni la de pago, que son la auditoría.
+        pay_at_till:
+          type: boolean
+          description: >
+            Lo levantó un mesero (D77): entra a la barra al levantarlo, sin pagar, y lo
+            cobra la caja de esa barra. Lo demás llega a la barra ya pagado.
         sender_id: { type: string, format: uuid }
         sender_name: { type: [string, 'null'] }
         recipient_id: { type: [string, 'null'], format: uuid }
@@ -12170,7 +12356,7 @@ components:
 
     EmployeeRole:
       type: string
-      enum: [waiter, bartender, dancer, dj, light_tech, valet, hostess]
+      enum: [waiter, bartender, cashier, dancer, dj, light_tech, valet, hostess]
 
     Employee:
       type: object

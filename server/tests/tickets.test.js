@@ -19,7 +19,8 @@ const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
 const tickets = require('../src/services/tickets');
 
-let club; let guest; let waiter; let bartender; let manager; let admin; let table; let beer; let shot;
+let club; let guest; let waiter; let bartender; let manager; let admin; let cashier; let table;
+let beer; let shot;
 
 beforeAll(setupSchema);
 afterAll(closePool);
@@ -32,6 +33,9 @@ beforeEach(async () => {
   bartender = await f.createUser(club.id, { role: 'bartender', display_name: 'Sol' });
   manager = await f.createUser(club.id, { role: 'manager' });
   admin = await f.createUser(club.id, { role: 'admin' });
+  // La caja de la barra que atiende la TERRAZA (D77): es la que cobra estos pedidos.
+  cashier = await f.createUser(club.id, { role: 'cashier', display_name: 'Caja PB' });
+  await f.openTill(club.id, { cashier, locationId: club.bar_id, authorizer: manager });
   table = await f.createTable(club.id, { code: 'T-7', section: 'TERRAZA', capacity: 4 });
   beer = await f.createDrink(club.id, { name: 'Cerveza Coronita', price: 60, stock: 40 });
   shot = await f.createDrink(club.id, { name: 'Tequila añejo', price: 180, stock: 20 });
@@ -75,9 +79,17 @@ const chargeOf = async (orderId) => {
   return rows[0];
 };
 
+/** Lo que pide un cliente desde su teléfono: llega a la barra cuando se paga. */
+const pideCliente = (over = {}) => api().post(url('/orders')).set(auth(guest)).send({
+  client_request_id: randomUUID(),
+  table_id: table.id,
+  items: [{ drink_id: beer.id, quantity: 2 }],
+  ...over,
+});
+
 const cobrar = async (orderId, over = {}) => {
   const cargo = await chargeOf(orderId);
-  return api().post(url('/manual-payments/register')).set(auth(waiter)).send({
+  return api().post(url('/manual-payments/register')).set(auth(cashier)).send({
     transaction_id: cargo.id,
     method: 'cash',
     amount: Number(cargo.amount),
@@ -149,8 +161,17 @@ describe('La comanda de la barra', () => {
     await atender();
   });
 
-  it('sale al PAGAR, no al pedir: pagar es lo que manda el trago a la barra', async () => {
+  it('lo del mesero sale al PEDIR y una sola vez: cobrarlo en caja no la repite (D77)', async () => {
     const pedido = await pedir();
+    const [comanda] = await jobs('order');
+    expect(comanda.ref_id).toBe(pedido.body.order.id);
+
+    await cobrar(pedido.body.order.id);
+    expect(await jobs('order')).toHaveLength(1);
+  });
+
+  it('lo del cliente sale al PAGAR, no al pedir', async () => {
+    const pedido = await pideCliente();
     expect(await jobs('order')).toHaveLength(0);
 
     await cobrar(pedido.body.order.id);
@@ -162,7 +183,7 @@ describe('La comanda de la barra', () => {
     // Sin nada que cobrar el pedido no pasa por `settle()`: lo confirma el personal a
     // mano. Ese camino también tiene que sacar su comanda, o la barra no se entera.
     const gratis = await f.createDrink(club.id, { name: 'Agua de la casa', price: 0, stock: 10 });
-    const pedido = await pedir({ items: [{ drink_id: gratis.id, quantity: 1 }] });
+    const pedido = await pideCliente({ items: [{ drink_id: gratis.id, quantity: 1 }] });
     expect((await confirmar(pedido.body.order.id)).status).toBe(200);
     const [comanda] = await jobs('order');
     expect(comanda.preview).toContain('Agua de la casa');
@@ -188,17 +209,25 @@ describe('La comanda de la barra', () => {
   it('dice si ya está pagado, porque acaba en la mesa del cliente (D59)', async () => {
     // Un total sin decir que ya se pagó es cómo el siguiente mesero que vea el papel
     // intenta cobrarlo otra vez.
-    const pedido = await pedir();
+    const pedido = await pideCliente();
     await cobrar(pedido.body.order.id);
     const [comanda] = await jobs('order');
     expect(comanda.preview).toContain('PAGADO');
     expect(comanda.preview).not.toContain('POR COBRAR');
   });
 
+  it('lo del mesero dice POR COBRAR: lo cobra la caja cuando le entreguen el dinero', async () => {
+    await pedir();
+    const [comanda] = await jobs('order');
+    expect(comanda.preview).toContain('POR COBRAR');
+    expect(comanda.preview).not.toContain('PAGADO');
+  });
+
   it('un trago de cortesía dice CORTESÍA, no "pagado" ni un total a secas', async () => {
     const gratis = await f.createDrink(club.id, { name: 'Agua de la casa', price: 0, stock: 10 });
     const pedido = await pedir({ items: [{ drink_id: gratis.id, quantity: 1 }] });
-    await confirmar(pedido.body.order.id);
+    // Lo levantó el mesero: entró a la barra solo, sin que nadie lo confirmara.
+    expect(pedido.body.order.status).toBe('confirmed');
     const [comanda] = await jobs('order');
     expect(comanda.preview).toContain('CORTESÍA');
     expect(comanda.preview).not.toContain('PAGADO');
@@ -213,7 +242,7 @@ describe('La comanda de la barra', () => {
     //    nada: la transacción se crea si y solo si `subtotal > 0`. Se comprueba aquí
     //    para que, si algún día aparecen las cuentas de casa, esta prueba falle y
     //    alguien mire la etiqueta del papel antes de que la vea un cliente.
-    const pedido = await pedir();
+    const pedido = await pideCliente();
     const rechazo = await confirmar(pedido.body.order.id);
     expect(rechazo.status).toBe(409);
     expect(await jobs('order')).toHaveLength(0);
@@ -268,9 +297,9 @@ describe('La comanda de la barra', () => {
     expect(await jobs('order')).toHaveLength(0);
   });
 
-  it('un pedido cancelado no manda nada a la barra', async () => {
-    const pedido = await pedir();
-    await api().post(url(`/orders/${pedido.body.order.id}/status`)).set(auth(waiter))
+  it('un pedido cancelado antes de pagarse no manda nada a la barra', async () => {
+    const pedido = await pideCliente();
+    await api().post(url(`/orders/${pedido.body.order.id}/status`)).set(auth(guest))
       .send({ status: 'cancelled', reason: 'se arrepintió' });
     expect(await jobs('order')).toHaveLength(0);
   });
@@ -359,7 +388,7 @@ describe('El recibo de cobro', () => {
     await atender();
   });
 
-  it('sale cuando el mesero cobra en la mesa, con el método y el folio', async () => {
+  it('sale cuando la caja cobra, con el método y el folio', async () => {
     const pedido = await pedir();
     await cobrar(pedido.body.order.id, { method: 'card_terminal', reference: 'VCH-99812' });
     const [recibo] = await jobs('receipt');
@@ -377,9 +406,9 @@ describe('El recibo de cobro', () => {
     await api().post(url('/manual-payment-options')).set(auth(manager)).send({
       method: 'bank_transfer', label: 'Transferencia', instructions: 'CLABE 0123', active: true,
     });
-    const pedido = await pedir();
+    const pedido = await pideCliente();
     const cargo = await chargeOf(pedido.body.order.id);
-    const declarado = await api().post(url('/manual-payments')).set(auth(waiter)).send({
+    const declarado = await api().post(url('/manual-payments')).set(auth(guest)).send({
       transaction_id: cargo.id,
       method: 'bank_transfer',
       amount: Number(cargo.amount),

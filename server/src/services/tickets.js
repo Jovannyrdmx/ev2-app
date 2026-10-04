@@ -634,11 +634,15 @@ async function cutData(runner, { nightclubId, closingId }) {
             c.difference_reason, c.declared_notes, c.confirmed_at, c.authorized_role,
             u.display_name AS user_name,
             a.display_name AS authorized_by,
-            s.section
+            s.section,
+            c.location_id::text AS location_id, l.name AS location_name,
+            c.opening_float::text AS opening_float,
+            c.pending_orders, c.pending_total::text AS pending_total
        FROM shift_closings c
        JOIN users u ON u.id = c.user_id
        LEFT JOIN users a ON a.id = c.authorized_by
        LEFT JOIN staff_shifts s ON s.id = c.shift_id
+       LEFT JOIN supply_locations l ON l.id = c.location_id
       WHERE c.id = $1 AND c.nightclub_id = $2`,
     [closingId, nightclubId]);
   const corte = rows[0];
@@ -657,7 +661,7 @@ async function cutData(runner, { nightclubId, closingId }) {
 }
 
 const ROLE_LABEL = {
-  waiter: 'Mesero', bartender: 'Bartender', hostess: 'Anfitriona',
+  waiter: 'Mesero', bartender: 'Bartender', hostess: 'Anfitriona', cashier: 'Cajero',
   manager: 'Gerente', admin: 'Administrador',
 };
 
@@ -669,6 +673,7 @@ function renderCut(t, data, { club, settings }) {
 
   t.line(`${data.user_name} · ${ROLE_LABEL[data.role] || data.role}`);
   if (data.section) t.line(`Zona: ${data.section}`);
+  if (data.location_name) t.line(`Caja: ${data.location_name}`);
   t.row('Entró', localTime(data.started_at, club.timezone));
   t.row('Salió', localTime(data.ended_at || data.confirmed_at, club.timezone));
 
@@ -711,6 +716,11 @@ function renderCut(t, data, { club, settings }) {
   // ---- el efectivo: lo que tocaba, lo que dijo y lo que se contó
   t.blank().rule();
   t.bold().line('EFECTIVO').boldOff();
+  // El fondo de la caja (D77) también se devuelve: sin este renglón, "debía entregar"
+  // no cuadra con lo cobrado y el papel parece equivocado.
+  if (Number(data.opening_float) > 0) {
+    t.row('Fondo de caja', money(data.opening_float, data.currency));
+  }
   t.row('Efectivo cobrado', money(data.cash_collected, data.currency));
   if (Number(data.drops_total) > 0) {
     t.row('Menos retiros', `-${money(data.drops_total, data.currency)}`);
@@ -733,6 +743,21 @@ function renderCut(t, data, { club, settings }) {
     t.line(`Motivo: ${data.difference_reason}`);
   }
   if (data.declared_notes) t.line(`Nota: ${data.declared_notes}`);
+
+  // ---- lo que la barra dejó sin cobrar, con permiso de quien firma (D77)
+  const pendientes = data.pending_orders || [];
+  if (pendientes.length) {
+    t.blank().rule();
+    t.bold().line('SIN COBRAR (AUTORIZADO)').boldOff();
+    for (const p of pendientes) {
+      const donde = p.table_code ? `Mesa ${p.table_code}` : (p.delivery_point_name || 'Barra');
+      t.row(`${donde}${p.taken_by_name ? ` · ${p.taken_by_name}` : ''}`,
+        money(p.subtotal, p.currency || data.currency));
+    }
+    t.bold();
+    t.row('Total sin cobrar', money(data.pending_total, data.currency));
+    t.boldOff();
+  }
 
   // ---- las firmas, que es para lo que se imprime en papel
   t.blank();
@@ -761,8 +786,10 @@ async function printShiftCut(runner, { nightclubId, closingId, userId = null }) 
   const data = await cutData(runner, { nightclubId, closingId });
   if (!data) return null;
 
+  // El corte de una caja sale en la barra de esa caja (D77); el de la puerta, por su
+  // zona, como siempre.
   const printer = await printing.resolvePrinter(runner, {
-    nightclubId, purpose: 'service', section: data.section,
+    nightclubId, purpose: 'service', section: data.section, locationId: data.location_id || null,
   });
   if (!printer) return null;
 

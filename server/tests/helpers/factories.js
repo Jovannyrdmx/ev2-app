@@ -207,6 +207,25 @@ async function createReservationRules(nightclubId, overrides = {}) {
   return rows[0];
 }
 
+/**
+ * Abre la caja de un cajero directamente en la base (D77): su turno con barra y un
+ * fondo entregado por `authorizer`. Las pruebas que solo necesitan "alguien que
+ * cobra en esa barra" usan esto; la apertura por la API —con el rol de la noche y
+ * el PIN del gerente— tiene su propia suite.
+ */
+async function openTill(nightclubId, {
+  cashier, locationId, authorizer, openingFloat = 0, currency = 'MXN',
+}) {
+  const { rows } = await pool.query(
+    `INSERT INTO staff_shifts (nightclub_id, user_id, location_id, opening_float, float_currency,
+                               float_authorized_by, float_authorized_at, float_authorized_role)
+     VALUES ($1,$2,$3,$4,$5,$6, now(), $7) RETURNING *`,
+    [nightclubId, cashier.id, locationId, Number(openingFloat).toFixed(2), currency,
+      authorizer.id, authorizer.role],
+  );
+  return rows[0];
+}
+
 /** A Date `hours` from now, as an ISO string the API accepts. */
 function hoursFromNow(hours) {
   return new Date(Date.now() + hours * 3_600_000).toISOString();
@@ -215,5 +234,5 @@ function hoursFromNow(hours) {
 module.exports = {
   PASSWORD, createNightclub, createUser, createTable, createDrink,
   createReservationRules, hoursFromNow,
-  createSupply, setRecipe, supplyStock, barOf, stockUp,
+  createSupply, setRecipe, supplyStock, barOf, stockUp, openTill,
 };
