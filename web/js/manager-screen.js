@@ -400,6 +400,59 @@
 
   // ---------------------------------------------------------------- personal
 
+  // Fichas abiertas. Vive fuera de renderStaff porque la lista se vuelve a pintar cada
+  // vez que llegan datos, y la ficha que el gerente está leyendo no debe cerrarse sola.
+  const openStaff = new Set();
+
+  /** Un dato de la ficha, ya listo para leerse. Lo que falta se ve como "—". */
+  function staffDetailValue(row) {
+    if (row.value === null || row.value === undefined || row.value === '') return '—';
+    switch (row.type) {
+      case 'role': return EV2Roles.describe(row.value, lang()).label;
+      case 'status': return t(row.value);
+      case 'country': {
+        const key = `staff.country${row.value}`;
+        const label = t(key);
+        return label && label !== key ? label : row.value;
+      }
+      case 'date': {
+        // Solo el día, leído en UTC: en Hermosillo la medianoche UTC todavía es "ayer".
+        const d = new Date(`${row.value}T00:00:00Z`);
+        if (Number.isNaN(d.getTime())) return '—';
+        return new Intl.DateTimeFormat(EV2Format.locale(), { dateStyle: 'medium', timeZone: 'UTC' })
+          .format(d);
+      }
+      case 'datetime': return EV2Format.dateTime(row.value);
+      default: return String(row.value);
+    }
+  }
+
+  function staffDetail(person) {
+    const box = document.createElement('dl');
+    box.className = 'grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-sm pt-2 border-t border-white/10';
+    for (const row of EV2StaffAdmin.detailsFor(person)) {
+      const dt = document.createElement('dt');
+      dt.className = 'text-white/40';
+      dt.textContent = t(row.key);
+      const dd = document.createElement('dd');
+      dd.className = 'min-w-0 break-words';
+      const shown = staffDetailValue(row);
+      if (row.type === 'phone' && shown !== '—') {
+        // Un toque y se marca: es para lo que el gerente vino a buscar el número.
+        const a = document.createElement('a');
+        a.href = `tel:${row.value.replace(/[^\d+]/g, '')}`;
+        a.className = 'underline';
+        a.textContent = shown;
+        a.onclick = (e) => e.stopPropagation();
+        dd.appendChild(a);
+      } else {
+        dd.textContent = shown;
+      }
+      box.append(dt, dd);
+    }
+    return box;
+  }
+
   function renderStaff() {
     const counts = EV2StaffAdmin.counts(state.staff);
     $('st-onshift').textContent = String(counts.onShift);
@@ -415,8 +468,23 @@
       const actions = EV2StaffAdmin.actionsFor(person);
       const names = EV2StaffAdmin.displayFor(person);
       const card = document.createElement('div');
-      card.className = 'card rounded-xl p-3 space-y-2';
+      card.className = 'card rounded-xl p-3 space-y-2 cursor-pointer';
       if (person.active === false) card.style.opacity = '.55';
+      const isOpen = openStaff.has(person.id);
+      card.setAttribute('role', 'button');
+      card.tabIndex = 0;
+      card.setAttribute('aria-expanded', String(isOpen));
+      card.title = t('staff.detailHint');
+      const toggle = () => {
+        if (openStaff.has(person.id)) openStaff.delete(person.id);
+        else openStaff.add(person.id);
+        renderStaff();
+      };
+      card.onclick = toggle;
+      card.onkeydown = (e) => {
+        if (e.target !== card) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+      };
 
       const head = document.createElement('div');
       head.className = 'flex justify-between items-start gap-3';
@@ -447,7 +515,8 @@
         const b = document.createElement('button');
         b.className = cls;
         b.textContent = t(label);
-        b.onclick = () => fn(b);
+        // Los botones hacen su trabajo sin abrir ni cerrar la ficha.
+        b.onclick = (e) => { e.stopPropagation(); fn(b); };
         row.appendChild(b);
       };
       if (actions.canResetPassword) {
@@ -466,6 +535,7 @@
         add('staff.reactivate', 'ev2-button rounded-lg px-3 py-2 text-sm flex-1',
           (b) => patchEmployee(person, { active: true }, 'staff.reactivated', b));
       }
+      if (isOpen) card.appendChild(staffDetail(person));
       if (row.children.length) card.appendChild(row);
       box.appendChild(card);
     }
