@@ -383,8 +383,11 @@ describe('La cuenta de la mesa', () => {
 });
 
 describe('El recibo de cobro', () => {
+  let impresoraCaja;
   beforeEach(async () => {
     await altaImpresora({ purpose: 'service', name: 'Barra · meseros' });
+    // La impresora de la caja de esa barra (D79): ahí sale lo que cobra la caja.
+    impresoraCaja = await altaImpresora({ purpose: 'till', name: 'Caja PB', host: '192.168.1.52' });
     await atender();
   });
 
@@ -392,6 +395,8 @@ describe('El recibo de cobro', () => {
     const pedido = await pedir();
     await cobrar(pedido.body.order.id, { method: 'card_terminal', reference: 'VCH-99812' });
     const [recibo] = await jobs('receipt');
+    // En la impresora de la caja, no en la de meseros.
+    expect(recibo.printer_id).toBe(impresoraCaja.id);
     expect(recibo.preview).toContain('RECIBO');
     expect(recibo.preview).toContain('Tarjeta (terminal)');
     expect(recibo.preview).toContain('VCH-99812');
@@ -433,8 +438,29 @@ describe('El recibo de cobro', () => {
     expect(recibo.preview).toContain('Mesa T-7');
   });
 
-  it('con los recibos apagados no sale, y el cobro se asienta igual', async () => {
+  it('con los recibos apagados, lo de la caja sale IGUAL (D79); lo demás no', async () => {
     await api().patch(url('/print-settings')).set(auth(admin)).send({ print_receipts: false });
+    const pedido = await pedir();
+    expect((await cobrar(pedido.body.order.id)).status).toBe(201);
+    expect(await jobs('receipt')).toHaveLength(1);
+
+    // Una transferencia que confirma el gerente sigue el interruptor.
+    await api().post(url('/manual-payment-options')).set(auth(manager)).send({
+      method: 'bank_transfer', label: 'Transferencia', instructions: 'CLABE 0123', active: true,
+    });
+    const otro = await pideCliente();
+    const cargo = await chargeOf(otro.body.order.id);
+    const declarado = await api().post(url('/manual-payments')).set(auth(guest)).send({
+      transaction_id: cargo.id, method: 'bank_transfer', amount: Number(cargo.amount),
+      currency: cargo.currency, reference: 'SPEI-7781',
+    });
+    await api().post(url(`/manual-payments/${declarado.body.payment.id}/confirm`))
+      .set(auth(manager)).send({});
+    expect(await jobs('receipt')).toHaveLength(1);
+  });
+
+  it('sin impresora de caja, lo que cobra la caja no sale en la de meseros', async () => {
+    await pool.query('UPDATE printers SET active = false WHERE id = $1', [impresoraCaja.id]);
     const pedido = await pedir();
     expect((await cobrar(pedido.body.order.id)).status).toBe(201);
     expect(await jobs('receipt')).toHaveLength(0);

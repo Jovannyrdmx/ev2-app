@@ -422,3 +422,146 @@ describe('Quién cobra qué', () => {
     expect(pins.PIN_ROLES).toContain('cashier');
   });
 });
+
+// ============================================================================
+// D79: el cambio, las dos formas de pago y el recibo de la caja
+// ============================================================================
+
+describe('Cobrar en caja: cambio y dos formas de pago (D79)', () => {
+  let impresora;
+  beforeEach(async () => {
+    await asignar(cajero, club.bar_id);
+    await abrirCaja();
+    impresora = (await api().post(url('/printers')).set(auth(manager)).send({
+      location_id: club.bar_id, name: 'Caja PB', purpose: 'till',
+      connection: 'network', host: '192.168.1.70',
+    })).body.printer;
+  });
+
+  const pagar = (order, body) => api().post(url('/till/payments')).set(auth(cajero))
+    .send({ transaction_id: order.transaction_id, ...body });
+
+  const recibos = async () => (await pool.query(
+    `SELECT printer_id::text AS printer_id, preview FROM print_jobs WHERE kind = 'receipt'`)).rows;
+
+  it('en efectivo calcula y guarda el cambio, y el recibo sale solo en la impresora de la caja', async () => {
+    const pedido = await pedidoDelMesero(); // 120
+    const res = await pagar(pedido, { method: 'cash', amount: 120, cash_received: 500 });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ paid: true, change_given: '380.00', remaining: '0.00' });
+    const { rows } = await pool.query(
+      'SELECT cash_received::text AS r, change_given::text AS c FROM manual_payments WHERE id = $1',
+      [res.body.payment.id]);
+    expect(rows[0]).toEqual({ r: '500.00', c: '380.00' });
+
+    const [recibo] = await recibos();
+    expect(recibo.printer_id).toBe(impresora.id);
+    expect(recibo.preview).toMatch(/Recibido\s+\$500\.00/);
+    expect(recibo.preview).toMatch(/Cambio\s+\$380\.00/);
+  });
+
+  it('recibir menos de lo que se cobra en efectivo no se acepta', async () => {
+    const pedido = await pedidoDelMesero();
+    const res = await pagar(pedido, { method: 'cash', amount: 120, cash_received: 100 });
+    expect(res.status).toBe(422);
+    expect(res.body.error.message).toMatch(/faltan 20\.00/);
+  });
+
+  it('dos formas de pago: la primera deja el pedido abierto por el resto, la segunda lo completa', async () => {
+    const pedido = await pedidoDelMesero(); // 120
+    const uno = await pagar(pedido, { method: 'cash', amount: 50, cash_received: 100 });
+    expect(uno.status).toBe(201);
+    expect(uno.body).toMatchObject({ paid: false, paid_amount: '50.00', remaining: '70.00', change_given: '50.00' });
+    expect(await recibos()).toHaveLength(0); // el recibo sale UNO, al completarse
+
+    const caja = await miCaja();
+    const abierto = caja.body.pending_orders.find((o) => o.order_id === pedido.id);
+    expect(abierto).toMatchObject({ paid_amount: '50.00', remaining: '70.00' });
+    expect(caja.body.pending_total).toBe('70.00');
+
+    const dos = await pagar(pedido, { method: 'card_terminal', amount: 70, reference: 'VCH-5521' });
+    expect(dos.status).toBe(201);
+    expect(dos.body).toMatchObject({ paid: true, remaining: '0.00' });
+
+    const [recibo] = await recibos();
+    expect(recibo.preview).toMatch(/Efectivo\s+\$50\.00/);
+    expect(recibo.preview).toMatch(/Tarjeta \(terminal\)\s+\$70\.00/);
+    expect(recibo.preview).toContain('VCH-5521');
+    expect(recibo.preview).toMatch(/\$120\.00/);
+    expect((await miCaja()).body.pending_orders).toHaveLength(0);
+
+    // Y el corte ve cada parte en su método.
+    const corte = await api().get(url('/shifts/me/cut')).set(auth(cajero));
+    const metodo = Object.fromEntries(corte.body.totals.by_method.map((l) => [l.method, l.amount]));
+    expect(metodo).toMatchObject({ cash: '50.00', card_terminal: '70.00' });
+  });
+
+  it('las dos partes tienen que ser formas de pago distintas', async () => {
+    const pedido = await pedidoDelMesero();
+    await pagar(pedido, { method: 'cash', amount: 50 });
+    const otra = await pagar(pedido, { method: 'cash', amount: 70 });
+    expect(otra.status).toBe(422);
+    expect(otra.body.error.message).toMatch(/distintas/);
+  });
+
+  it('ninguna parte puede pasarse de lo que falta', async () => {
+    const pedido = await pedidoDelMesero();
+    await pagar(pedido, { method: 'cash', amount: 50 });
+    const otra = await pagar(pedido, { method: 'card_terminal', amount: 80, reference: 'VCH-1' });
+    expect(otra.status).toBe(422);
+    expect(otra.body.error.details.remaining).toBe('70.00');
+  });
+
+  it('la segunda parte tiene que completar: no hay una tercera', async () => {
+    const pedido = await pedidoDelMesero();
+    await pagar(pedido, { method: 'cash', amount: 50 });
+    const otra = await pagar(pedido, { method: 'card_terminal', amount: 30, reference: 'VCH-2' });
+    expect(otra.status).toBe(422);
+    expect(otra.body.error.message).toMatch(/2 formas de pago/);
+  });
+
+  it('un pedido con una parte cobrada no se cancela', async () => {
+    const pedido = await pedidoDelMesero();
+    await pagar(pedido, { method: 'cash', amount: 50 });
+    const res = await api().post(url(`/orders/${pedido.id}/status`)).set(auth(waiter))
+      .send({ status: 'cancelled', reason: 'se fue' });
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toMatch(/cobra el resto/);
+  });
+
+  it('el doble toque no cobra otra parte', async () => {
+    const pedido = await pedidoDelMesero();
+    const key = randomUUID();
+    const a = await pagar(pedido, { method: 'cash', amount: 50, client_request_id: key });
+    const b = await pagar(pedido, { method: 'cash', amount: 50, client_request_id: key });
+    expect(b.status).toBe(200);
+    expect(b.body.payment.id).toBe(a.body.payment.id);
+  });
+
+  it('el cajero de otra barra, o sin caja, no cobra por aquí', async () => {
+    const pedido = await pedidoDelMesero();
+    const otro = await f.createUser(club.id, { role: 'cashier' });
+    const res = await api().post(url('/till/payments')).set(auth(otro))
+      .send({ transaction_id: pedido.transaction_id, method: 'cash', amount: 120 });
+    expect(res.status).toBe(409);
+    const mesero = await api().post(url('/till/payments')).set(auth(waiter))
+      .send({ transaction_id: pedido.transaction_id, method: 'cash', amount: 120 });
+    expect(mesero.status).toBe(403);
+  });
+
+  it('la terminal de MP no deja tercera parte ni pasarse de lo que falta', async () => {
+    const pedido = await pedidoDelMesero();
+    await pagar(pedido, { method: 'cash', amount: 50 });
+    const t = await pool.query(
+      `INSERT INTO payment_terminals (nightclub_id, provider, external_id, label, operating_mode, active)
+       VALUES ($1,'mercadopago','NEWLAND_N950__SBX0000001','Caja PB','PDV',true) RETURNING id`,
+      [club.id]).catch(() => null);
+    if (!t) return; // el esquema de terminales cambió: lo cubre terminal-charges.test.js
+    const mucho = await api().post(url('/terminal-charges')).set(auth(cajero))
+      .send({ transaction_id: pedido.transaction_id, terminal_id: t.rows[0].id, amount: 100 });
+    expect(mucho.status).toBe(422);
+    const poquito = await api().post(url('/terminal-charges')).set(auth(cajero))
+      .send({ transaction_id: pedido.transaction_id, terminal_id: t.rows[0].id, amount: 30 });
+    expect(poquito.status).toBe(422);
+  });
+});

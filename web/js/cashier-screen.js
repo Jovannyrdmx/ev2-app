@@ -33,7 +33,9 @@
     terminals: [],
     drinks: [],
     realtime: null,
-    charge: { open: false, order: null, sending: false },
+    charge: { open: false, order: null, sending: false, split: false, keys: [], pending: [] },
+    // Lo que falta mandar después de que la terminal cobre su parte (D79).
+    afterTerminal: null,
     sale: { open: false, cart: null, search: '', sending: false },
   };
 
@@ -293,11 +295,23 @@
   const allOpenOrders = () => ((state.till && state.till.pending_orders) || [])
     .concat((state.till && state.till.awaiting_payment) || []);
 
+  /**
+   * El cobro de un pedido (D79): lo que falta, con una o dos formas de pago, el
+   * efectivo recibido y el cambio. Las decisiones viven en `EV2Cashier.planCharge`.
+   */
   function openCharge(orderId) {
     const order = allOpenOrders().find((o) => o.order_id === orderId);
     if (!order) return;
-    state.charge = { open: true, order, sending: false };
-    $('charge-reference').value = '';
+    state.charge = {
+      open: true, order, sending: false, split: false,
+      // Una clave por parte, generada UNA vez: el reintento manda la misma y el
+      // servidor no cobra otra parte.
+      keys: [EV2.uuid(), EV2.uuid()],
+      pending: [],
+    };
+    for (const id of ['charge-reference', 'charge-received', 'charge-amount',
+      'charge-b-reference', 'charge-b-received']) $(id).value = '';
+    $('charge-split').checked = false;
     $('charge-error').hidden = true;
     renderChargeMethods();
     renderCharge();
@@ -305,25 +319,60 @@
   }
 
   function closeCharge() {
-    state.charge = { open: false, order: null, sending: false };
+    state.charge = { open: false, order: null, sending: false, split: false, keys: [], pending: [] };
     $('charge-sheet').hidden = true;
   }
   $('btn-charge-close').onclick = closeCharge;
 
+  const optionsFor = (keys) => keys
+    .map((k) => `<option value="${escape(k)}">${escape(t(`take.method.${k}`))}</option>`).join('');
+
+  /** Las formas que se ofrecen: sin terminal activa, Mercado Pago ni aparece. */
+  const hayTerminal = () => (state.terminals || []).some((x) => x && x.active !== false);
+  const ofrecidas = (order) => EV2Cashier.methodsFor(order)
+    .filter((m) => m !== 'mercadopago_point' || hayTerminal());
+
   function renderChargeMethods() {
-    $('charge-method').innerHTML = EV2OrderTaking.methodKeys()
-      .map((k) => `<option value="${escape(k)}">${escape(t(`take.method.${k}`))}</option>`).join('');
-    onChargeMethodChange();
+    const order = state.charge.order;
+    const permitidos = ofrecidas(order);
+    const antes = $('charge-method').value;
+    $('charge-method').innerHTML = optionsFor(permitidos);
+    if (permitidos.includes(antes)) $('charge-method').value = antes;
+    renderMethodB();
   }
 
-  function onChargeMethodChange() {
-    const method = EV2OrderTaking.methodFor($('charge-method').value);
-    $('charge-reference').hidden = !(method && method.requiresReference);
+  /** La segunda forma: cualquiera menos la primera. */
+  function renderMethodB() {
+    const a = $('charge-method').value;
+    const opciones = ofrecidas(state.charge.order).filter((m) => m !== a);
+    const antes = $('charge-b-method').value;
+    $('charge-b-method').innerHTML = optionsFor(opciones);
+    if (opciones.includes(antes)) $('charge-b-method').value = antes;
   }
-  $('charge-method').onchange = onChargeMethodChange;
+
+  /** Lo que el cajero tiene capturado, como lo entiende `planCharge`. */
+  function chargeInput() {
+    return {
+      order: state.charge.order,
+      split: state.charge.split,
+      a: {
+        method: $('charge-method').value,
+        amount: $('charge-amount').value,
+        reference: $('charge-reference').value,
+        received: $('charge-received').value,
+      },
+      b: {
+        method: $('charge-b-method').value,
+        reference: $('charge-b-reference').value,
+        received: $('charge-b-received').value,
+      },
+      terminals: state.terminals,
+    };
+  }
 
   function renderCharge() {
-    const order = state.charge.order;
+    const c = state.charge;
+    const order = c.order;
     if (!order) return;
     const donde = EV2Cashier.destination(order);
     $('charge-what').textContent = [
@@ -332,48 +381,155 @@
     ].filter(Boolean).join(' · ');
     $('charge-items').textContent = EV2Cashier.itemsSummary(order);
     $('charge-total').textContent = money(order.subtotal, order.currency);
+
+    const falta = EV2Cashier.remainingOf(order);
+    const pagado = Number(order.paid_amount || 0);
+    $('charge-paid-row').hidden = !(pagado > 0);
+    $('charge-paid-label').textContent = t('till.paidWith', {
+      methods: (order.parts || []).map((p) => t(`take.method.${p.method}`)).join(' + '),
+    });
+    $('charge-paid').textContent = money(pagado, order.currency);
+    $('charge-due').textContent = money(falta, order.currency);
+
+    const puedeDividir = EV2Cashier.canSplit(order);
+    $('charge-split-row').hidden = !puedeDividir;
+    if (!puedeDividir) c.split = false;
+
+    $('part-a-title').textContent = t(c.split ? 'till.payment1' : 'till.payment');
+    $('charge-amount-row').hidden = !c.split;
+    $('part-b').hidden = !c.split;
+
+    const plan = EV2Cashier.planCharge(chargeInput());
+    const a = $('charge-method').value;
+    $('charge-reference').hidden = a !== 'card_terminal';
+    $('charge-cash').hidden = a !== 'cash';
+    const montoA = c.split ? $('charge-amount').value : falta;
+    pintarCambio('charge-change', montoA ? EV2Cashier.change($('charge-received').value, montoA) : null);
+
+    if (c.split) {
+      const resto = (Math.round(Number(falta) * 100) - Math.round(Number($('charge-amount').value || 0) * 100)) / 100;
+      $('charge-b-amount').textContent = money(resto > 0 ? resto : 0, order.currency);
+      const b = $('charge-b-method').value;
+      $('charge-b-reference').hidden = b !== 'card_terminal';
+      $('charge-b-cash').hidden = b !== 'cash';
+      pintarCambio('charge-b-change', EV2Cashier.change($('charge-b-received').value, resto));
+    }
+
+    $('btn-charge').disabled = c.sending || Boolean(plan.error);
+  }
+
+  /** El cambio, en dorado; si lo recibido no alcanza, en rojo y diciendo cuánto falta. */
+  function pintarCambio(id, cambio) {
+    const el = $(id);
+    if (cambio === null) { el.textContent = '—'; el.style.color = 'var(--ev2-gold)'; return; }
+    const n = Number(cambio);
+    el.textContent = n < 0 ? t('till.short', { amount: money(-n) }) : money(n);
+    el.style.color = n < 0 ? '#fca5a5' : 'var(--ev2-gold)';
+  }
+
+  $('charge-split').onchange = () => {
+    state.charge.split = $('charge-split').checked;
+    renderMethodB();
+    renderCharge();
+  };
+  $('charge-method').onchange = () => { renderMethodB(); renderCharge(); };
+  $('charge-b-method').onchange = renderCharge;
+  for (const id of ['charge-amount', 'charge-reference', 'charge-received',
+    'charge-b-reference', 'charge-b-received']) $(id).oninput = renderCharge;
+
+  /**
+   * Manda las partes en orden. La terminal va primero (`planCharge` la pone ahí): si
+   * la tarjeta no pasa, no se asentó nada. Lo que queda después de la terminal se manda
+   * cuando el cuadro de la terminal avisa que pasó.
+   */
+  async function runSteps(order, steps, keys) {
+    // El cambio se avisa al final, junto con el cobro: si la segunda parte avisara
+    // encima, el cajero no vería cuánto entregar de la primera.
+    let cambio = 0;
+    let pagado = false;
+    for (let i = 0; i < steps.length; i += 1) {
+      const step = steps[i];
+      if (step.terminal) {
+        const terminal = EV2TerminalCharge.pickTerminal(state.terminals, EV2TerminalCharge.recordada());
+        const body = { transaction_id: order.transaction_id, terminal_id: terminal.id };
+        // Solo se manda el monto cuando es una parte: sin él, la terminal cobra lo que falta.
+        if (steps.length > 1) body.amount = Number(step.amount);
+        const res = await api.post(`/nightclubs/${clubId()}/terminal-charges`, body);
+        EV2TerminalCharge.recordar(terminal.id);
+        state.afterTerminal = { order, steps: steps.slice(i + 1), keys: keys.slice(i + 1) };
+        $('charge-sheet').hidden = true;
+        sheet().watch(res.charge);
+        return { waiting: true };
+      }
+      const res = await api.post(`/nightclubs/${clubId()}/till/payments`,
+        EV2Cashier.paymentPayload(order, step, keys[i]));
+      if (res.change_given && Number(res.change_given) > 0) cambio += Number(res.change_given);
+      if (res.paid) pagado = true;
+    }
+    if (cambio > 0) toast(t('till.giveChange', { amount: money(cambio) }), 'ok');
+    else if (pagado) toast(t('take.charged'), 'ok');
+    return { waiting: false };
   }
 
   $('btn-charge').onclick = async () => {
-    const current = state.charge;
-    if (!current.open || current.sending) return;
-    const order = EV2Cashier.asChargeable(current.order);
-    const method = $('charge-method').value;
-    const reference = $('charge-reference').value;
-    const blocker = EV2OrderTaking.chargeBlocker({
-      order, method, reference, terminals: state.terminals,
-    });
-    if (blocker) {
-      $('charge-error').textContent = t(`take.blocked.${blocker}`);
+    const c = state.charge;
+    if (!c.open || c.sending) return;
+    const plan = EV2Cashier.planCharge(chargeInput());
+    if (plan.error) {
+      $('charge-error').textContent = t(plan.error);
       $('charge-error').hidden = false;
       return;
     }
-    current.sending = true;
+    c.sending = true;
     $('btn-charge').disabled = true;
+    $('charge-error').hidden = true;
+    const order = c.order;
     try {
-      if (EV2OrderTaking.isTerminalMethod(method)) {
-        const terminal = EV2TerminalCharge.pickTerminal(state.terminals, EV2TerminalCharge.recordada());
-        const res = await api.post(`/nightclubs/${clubId()}/terminal-charges`, {
-          transaction_id: order.transaction_id, terminal_id: terminal.id,
-        });
-        EV2TerminalCharge.recordar(terminal.id);
+      const out = await runSteps(order, plan.steps, c.keys);
+      if (!out.waiting) {
         closeCharge();
-        sheet().watch(res.charge);
-        return;
+        await loadTill();
       }
-      await api.post(`/nightclubs/${clubId()}/manual-payments/register`,
-        EV2OrderTaking.chargePayload({ order, method, reference }));
-      toast(t('take.charged'), 'ok');
-      closeCharge();
-      await loadTill();
     } catch (err) {
+      // Una parte pudo quedar asentada y la otra no: la lista recargada dice cuánto
+      // falta de verdad, y el cuadro se queda abierto para cobrarlo.
       showError(err, $('charge-error'));
       await loadTill();
+      const fresco = allOpenOrders().find((o) => o.order_id === order.order_id);
+      if (fresco && state.charge.open) {
+        // Si una parte sí quedó asentada, lo que sigue es otro cobro: claves nuevas. Con
+        // las viejas, el servidor devolvería la parte ya pagada en vez de cobrar el resto.
+        if (EV2Cashier.remainingOf(fresco) !== EV2Cashier.remainingOf(order)) {
+          state.charge.keys = [EV2.uuid(), EV2.uuid()];
+        }
+        state.charge.order = fresco;
+        if (!EV2Cashier.canSplit(fresco)) { state.charge.split = false; $('charge-split').checked = false; }
+        renderChargeMethods();
+        renderCharge();
+      } else if (!fresco) {
+        closeCharge();
+      }
     } finally {
-      current.sending = false;
-      $('btn-charge').disabled = false;
+      if (state.charge.open) {
+        state.charge.sending = false;
+        renderCharge();
+      }
     }
   };
+
+  /** La terminal cobró su parte: se manda lo que seguía (el efectivo o el voucher). */
+  async function continueAfterTerminal() {
+    const next = state.afterTerminal;
+    state.afterTerminal = null;
+    if (!next || next.steps.length === 0) { closeCharge(); await loadTill(); return; }
+    try {
+      await runSteps(next.order, next.steps, next.keys);
+      closeCharge();
+    } catch (err) {
+      showError(err);
+    }
+    await loadTill();
+  }
 
   let terminalSheet = null;
   function sheet() {
@@ -385,8 +541,19 @@
         money: (a, c) => money(a, c),
         errorMessage: (err) => EV2Format.errorMessage(err),
         confirm: (texto) => ask(texto),
-        onPaid: async () => { closeSale(); await loadTill(); },
-        onClose: async () => { await loadTill(); },
+        onPaid: async () => {
+          closeSale();
+          // Si la terminal era la primera de dos partes, ahora va la segunda (D79).
+          if (state.afterTerminal) await continueAfterTerminal();
+          else await loadTill();
+        },
+        onClose: async () => {
+          // La terminal no cobró: lo que seguía NO se manda, y el pedido sigue con lo
+          // que de verdad falta.
+          if (state.afterTerminal && state.charge.open) $('charge-sheet').hidden = false;
+          state.afterTerminal = null;
+          await loadTill();
+        },
       });
     }
     return terminalSheet;

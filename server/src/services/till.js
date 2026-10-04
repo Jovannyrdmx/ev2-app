@@ -18,7 +18,9 @@
 'use strict';
 
 const { ApiError } = require('../middleware/errors');
-const { OPEN_TX_STATUSES } = require('./payments');
+const payments = require('./payments');
+
+const { OPEN_TX_STATUSES } = payments;
 
 const CASHIER = 'cashier';
 
@@ -158,7 +160,12 @@ const OPEN_ORDER_SELECT = `
          dp.name AS delivery_point_name,
          o.taken_by, w.display_name AS taken_by_name, s.display_name AS sender_name,
          tx.id AS transaction_id, tx.status AS payment_status,
-         COALESCE(items.items, '[]'::json) AS items
+         COALESCE(items.items, '[]'::json) AS items,
+         -- Lo que ya se pagó de este pedido y con qué (D79: hasta dos formas de pago),
+         -- y lo que falta. Lo que la caja cobra es lo que FALTA.
+         COALESCE(partes.paid, 0)::numeric(12,2)::text AS paid_amount,
+         (o.subtotal - COALESCE(partes.paid, 0))::numeric(12,2)::text AS remaining,
+         COALESCE(partes.parts, '[]'::json) AS parts
     FROM drink_orders o
     JOIN transactions tx ON tx.reference_type = 'drink_order' AND tx.reference_id = o.id
     LEFT JOIN tables t ON t.id = o.table_id
@@ -170,7 +177,18 @@ const OPEN_ORDER_SELECT = `
                       ORDER BY d.name) AS items
         FROM drink_order_items oi JOIN drinks d ON d.id = oi.drink_id
        WHERE oi.order_id = o.id
-    ) items ON true`;
+    ) items ON true
+    LEFT JOIN LATERAL (
+      SELECT sum(x.amount) AS paid,
+             json_agg(json_build_object('method', x.method, 'amount', x.amount::text)) AS parts
+        FROM (
+          SELECT p.method, p.amount FROM manual_payments p
+           WHERE p.transaction_id = tx.id AND p.status = 'confirmed'
+          UNION ALL
+          SELECT 'mercadopago_point', c.amount FROM terminal_charges c
+           WHERE c.transaction_id = tx.id AND c.status = 'processed'
+        ) x
+    ) partes ON true`;
 
 async function pendingOrders(runner, { nightclubId, locationId }) {
   const { rows } = await runner.query(
@@ -237,7 +255,7 @@ async function state(runner, { nightclubId, user }) {
       doors_open_at: assignment.doors_open_at,
     } : null,
     pending_orders: pending,
-    pending_total: money(pending.reduce((n, o) => n + Number(o.subtotal), 0)),
+    pending_total: money(pending.reduce((n, o) => n + Number(o.remaining), 0)),
     awaiting_payment: awaiting,
   };
 }
@@ -274,6 +292,100 @@ async function assertCanCollect(runner, { nightclubId, user, transactionId }) {
   return till;
 }
 
+/**
+ * La caja cobra una parte (o el total) de un pedido de su barra (D79).
+ *
+ * Una parte = una forma de pago: efectivo o voucher de la terminal del banco. La
+ * terminal de Mercado Pago va por su propia ruta (`POST /terminal-charges` con
+ * `amount`) porque esa sí cobra y hay que esperarla. Las dos formas de un mismo cobro
+ * son distintas, y entre las dos suman exacto el pedido.
+ *
+ * Con efectivo, `cashReceived` es lo que el cliente entregó: el cambio lo calcula el
+ * servidor y se guarda con el pago. Nunca se acepta recibir menos de lo que se cobra
+ * en efectivo: eso no es "dar cambio", es cobrar de menos.
+ */
+async function collect(client, {
+  nightclubId, user, transactionId, method, amount, reference = null, cashReceived = null,
+  clientRequestId = null,
+}) {
+  const till = await assertCanCollect(client, { nightclubId, user, transactionId });
+
+  const txRes = await client.query(
+    `SELECT id, amount::text AS amount, currency, status, payer_user_id
+       FROM transactions WHERE id = $1 AND nightclub_id = $2 FOR UPDATE`,
+    [transactionId, nightclubId]);
+  if (txRes.rowCount === 0) throw ApiError.notFound('Cobro no encontrado');
+  const tx = txRes.rows[0];
+  if (tx.status === 'paid') throw ApiError.conflict('Ese cobro ya está pagado');
+  if (!OPEN_TX_STATUSES.includes(tx.status)) {
+    throw ApiError.conflict(`El cobro está '${tx.status}' y ya no admite pago`);
+  }
+
+  // La terminal esperando la tarjeta: cobrar por aquí al mismo tiempo es cobrar dos
+  // veces lo mismo si la tarjeta pasa.
+  const enTerminal = await client.query(
+    `SELECT c.id FROM terminal_charges c
+      WHERE c.transaction_id = $1 AND c.status IN ('creating','waiting','action_required')`,
+    [tx.id]);
+  if (enTerminal.rowCount > 0) {
+    throw ApiError.conflict(
+      'Ese cobro tiene la terminal esperando la tarjeta. Espera a que termine o cancélalo.',
+      { terminal_charge_id: enTerminal.rows[0].id });
+  }
+
+  // Dos partes con la misma forma de pago no son "dos métodos": se dice antes de
+  // escribir nada, con el mismo mensaje que daría el libro.
+  const previas = await payments.partsOf(client, tx.id);
+  if (previas.some((p) => p.kind === method)) {
+    throw ApiError.unprocessable('Las dos partes de un cobro tienen que ser formas de pago distintas');
+  }
+
+  const monto = round2(amount);
+  let recibido = null;
+  let cambio = null;
+  if (cashReceived !== null && cashReceived !== undefined) {
+    if (method !== 'cash') {
+      throw ApiError.unprocessable('El efectivo recibido solo aplica al pago en efectivo');
+    }
+    recibido = round2(cashReceived);
+    if (recibido < monto) {
+      throw ApiError.unprocessable(
+        `Recibiste ${money(recibido)} y el efectivo a cobrar es ${money(monto)}: faltan ${money(monto - recibido)}.`,
+        { cash_received: money(recibido), amount: money(monto) });
+    }
+    cambio = round2(recibido - monto);
+  }
+  if (method === 'card_terminal' && !String(reference || '').trim()) {
+    throw ApiError.unprocessable('Captura el folio del voucher de la terminal');
+  }
+
+  let created;
+  try {
+    const { rows } = await client.query(
+      `INSERT INTO manual_payments (nightclub_id, transaction_id, method, declared_by, amount,
+                                    currency, reference, status, reviewed_by, reviewed_at,
+                                    client_request_id, cash_received, change_given)
+       VALUES ($1,$2,$3::text,$4,$5,$6,$7,'confirmed',$4,now(),$8,$9,$10)
+       RETURNING id, transaction_id, method, amount::text AS amount, currency, status,
+                 declared_by, reference, cash_received::text AS cash_received,
+                 change_given::text AS change_given`,
+      [nightclubId, tx.id, method, user.id, money(monto), tx.currency,
+        reference ? String(reference).trim() : null, clientRequestId,
+        recibido === null ? null : money(recibido), cambio === null ? null : money(cambio)]);
+    created = rows[0];
+  } catch (err) {
+    if (err.code === '23505') {
+      throw ApiError.conflict('Ese cobro ya tiene un pago con esa forma de pago');
+    }
+    throw err;
+  }
+
+  const settled = await payments.settle(client, {
+    payment: created, reviewerId: user.id, nightclubId, allowPartial: true,
+  });
+  return { till, payment: created, ...settled };
+}
+
 module.exports = {
   CASHIER,
   OPEN_BEFORE_DOORS_HOURS,
@@ -285,4 +397,5 @@ module.exports = {
   awaitingPayment,
   state,
   assertCanCollect,
+  collect,
 };

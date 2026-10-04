@@ -788,11 +788,19 @@ router.post('/nightclubs/:nightclubId/terminal-charges',
   requireRole(...STAFF_ROLES),
   validate({
     params: z.object({ nightclubId: uuid }),
-    body: z.object({ transaction_id: uuid, terminal_id: uuid }),
+    body: z.object({
+      transaction_id: uuid,
+      terminal_id: uuid,
+      // Solo una parte del cobro (D79): la caja divide el pago en dos formas.
+      amount: z.number().positive().max(1_000_000).optional(),
+    }),
   }),
   asyncHandler(async (req, res) => {
     mercadopago.assertUsable();
     const { nightclubId } = req.params;
+    if (req.body.amount !== undefined && !['cashier', 'manager', 'admin'].includes(req.user.role)) {
+      throw ApiError.forbidden('Solo la caja o la gerencia dividen un cobro');
+    }
 
     const client = await pool.connect();
     let apartado;
@@ -806,6 +814,7 @@ router.post('/nightclubs/:nightclubId/terminal-charges',
         transactionId: req.body.transaction_id,
         terminalId: req.body.terminal_id,
         userId: req.user.id,
+        amount: req.body.amount ?? null,
       });
       await client.query('COMMIT');
     } catch (err) {

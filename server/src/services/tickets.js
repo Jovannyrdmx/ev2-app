@@ -77,6 +77,7 @@ const METHOD_LABEL = {
   cash_app: 'Cash App',
   bank_transfer: 'Transferencia',
   spei: 'SPEI',
+  mercadopago_point: 'Tarjeta (Mercado Pago)',
 };
 
 // ---------------------------------------------------------------- el club
@@ -533,8 +534,21 @@ function renderReceipt(t, data, { club, settings }) {
   if (data.table_code) t.line(`Mesa ${data.table_code}`);
   t.blank();
 
-  t.row('Forma de pago', METHOD_LABEL[data.method] || data.method);
-  if (data.reference) t.row('Voucher', data.reference);
+  // Las formas de pago (D79): una o dos, cada una con su importe; el efectivo con lo
+  // que se recibió y el cambio, que es lo primero que se discute en una barra.
+  const partes = (data.parts && data.parts.length) ? data.parts
+    : [{ method: data.method, amount: data.amount, reference: data.reference }];
+  const varias = partes.length > 1;
+  for (const p of partes) {
+    const nombre = METHOD_LABEL[p.method] || p.method;
+    if (varias) t.row(nombre, money(p.amount, data.currency));
+    else t.row('Forma de pago', nombre);
+    if (p.reference) t.row(p.method === 'mercadopago_point' ? '  Folio' : '  Voucher', p.reference);
+    if (p.cash_received) {
+      t.row('  Recibido', money(p.cash_received, data.currency));
+      t.row('  Cambio', money(p.change_given || 0, data.currency));
+    }
+  }
   if (data.collected_by) t.row('Atendió', data.collected_by);
 
   t.rule();
@@ -587,16 +601,28 @@ async function receiptData(runner, { nightclubId, transactionId, collectedBy }) 
  */
 async function printReceipt(client, {
   nightclubId, transactionId, method, reference = null, collectedBy = null, copies = 1,
+  parts = null,
 }) {
   const settings = await printing.settingsOf(client, nightclubId);
-  if (!settings.print_receipts) return null;
+
+  // Lo que cobra una caja (D79) sale SIEMPRE, en la impresora de ESA caja, aunque el
+  // gerente haya apagado los recibos: el dueño lo pidió así. Lo demás sigue el
+  // interruptor y la impresora de servicio de la zona, como siempre.
+  const caja = collectedBy ? await client.query(
+    `SELECT location_id FROM staff_shifts
+      WHERE user_id = $1 AND ended_at IS NULL AND location_id IS NOT NULL`,
+    [collectedBy]) : { rows: [] };
+  const tillLocation = caja.rows[0] ? caja.rows[0].location_id : null;
+  if (!tillLocation && !settings.print_receipts) return null;
 
   const data = await receiptData(client, { nightclubId, transactionId, collectedBy });
   if (!data) return null;
 
-  const printer = await printing.resolvePrinter(client, {
-    nightclubId, purpose: 'service', section: data.table_section,
-  });
+  const printer = tillLocation
+    ? await printing.resolvePrinter(client, { nightclubId, purpose: 'till', locationId: tillLocation })
+    : await printing.resolvePrinter(client, {
+      nightclubId, purpose: 'service', section: data.table_section,
+    });
   if (!printer) return null;
 
   const club = await clubOf(client, nightclubId);
@@ -607,7 +633,8 @@ async function printReceipt(client, {
     refId: transactionId,
     copies,
     createdBy: collectedBy,
-    ...build(printer, (t) => renderReceipt(t, { ...data, method, reference }, { club, settings })),
+    ...build(printer, (t) => renderReceipt(t, { ...data, method, reference, parts },
+      { club, settings })),
   });
 }
 
@@ -752,7 +779,7 @@ function renderCut(t, data, { club, settings }) {
     for (const p of pendientes) {
       const donde = p.table_code ? `Mesa ${p.table_code}` : (p.delivery_point_name || 'Barra');
       t.row(`${donde}${p.taken_by_name ? ` · ${p.taken_by_name}` : ''}`,
-        money(p.subtotal, p.currency || data.currency));
+        money(p.remaining || p.subtotal, p.currency || data.currency));
     }
     t.bold();
     t.row('Total sin cobrar', money(data.pending_total, data.currency));
@@ -788,7 +815,11 @@ async function printShiftCut(runner, { nightclubId, closingId, userId = null }) 
 
   // El corte de una caja sale en la barra de esa caja (D77); el de la puerta, por su
   // zona, como siempre.
-  const printer = await printing.resolvePrinter(runner, {
+  // El corte de una caja sale en la impresora de esa caja (D79), y si no tiene, en la
+  // de servicio de su barra; el de la puerta, por su zona, como siempre.
+  const printer = (data.location_id && await printing.resolvePrinter(runner, {
+    nightclubId, purpose: 'till', locationId: data.location_id,
+  })) || await printing.resolvePrinter(runner, {
     nightclubId, purpose: 'service', section: data.section, locationId: data.location_id || null,
   });
   if (!printer) return null;

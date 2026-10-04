@@ -115,11 +115,43 @@ async function applySideEffects(client, tx, nightclubId) {
   return { reservation: null, order: null };
 }
 
+/** El máximo de formas de pago para un mismo cobro (D79). */
+const MAX_PARTS = 2;
+
+const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+
 /**
- * Moves the ledger entry to `paid` and records who said so. Shared by the manager's
- * confirmation and by a staff member registering cash already in hand, so both leave
- * exactly the same trail.
+ * Las partes YA cobradas de un renglón del libro (D79): pagos manuales confirmados y
+ * cobros con terminal que Mercado Pago dio por pagados. `kind` es la forma de pago tal
+ * como se compara para "dos métodos distintos": el voucher del banco (`card_terminal`)
+ * y la terminal de Mercado Pago (`mercadopago_point`) son métodos distintos.
  */
+async function partsOf(client, transactionId, { exceptPaymentId = null, exceptChargeId = null } = {}) {
+  const { rows } = await client.query(
+    `SELECT 'manual' AS source, p.id::text AS id, p.method AS kind, p.method,
+            p.amount::text AS amount, p.reference,
+            p.cash_received::text AS cash_received, p.change_given::text AS change_given,
+            p.created_at
+       FROM manual_payments p
+      WHERE p.transaction_id = $1 AND p.status = 'confirmed'
+        AND ($2::uuid IS NULL OR p.id <> $2::uuid)
+     UNION ALL
+     SELECT 'terminal', c.id::text, 'mercadopago_point', 'mercadopago_point',
+            c.amount::text, c.external_order_id, NULL, NULL, c.created_at
+       FROM terminal_charges c
+      WHERE c.transaction_id = $1 AND c.status = 'processed'
+        AND ($3::uuid IS NULL OR c.id <> $3::uuid)
+      ORDER BY 9`,
+    [transactionId, exceptPaymentId, exceptChargeId]);
+  return rows;
+}
+
+/** Cuánto lleva pagado un renglón, sumando sus partes. */
+async function paidSoFar(client, transactionId) {
+  const parts = await partsOf(client, transactionId);
+  return round2(parts.reduce((n, p) => n + Number(p.amount), 0));
+}
+
 /**
  * Marca pagado un cobro del libro y suelta lo que dependía de él.
  *
@@ -127,9 +159,15 @@ async function applySideEffects(client, tx, nightclubId) {
  * revisando un estado de cuenta, hay una pasarela que ya contestó, y el libro tiene que
  * decir cuál fue y con qué folio. Sin ellos se comporta como siempre — efectivo o
  * manual—, que es lo que usan las tres rutas que ya existían.
+ *
+ * Desde D79 un cobro puede pagarse en DOS partes con formas de pago distintas. Lo que
+ * se compara ya no es "este pago contra el renglón" sino "todas las partes contra el
+ * renglón": el renglón queda pagado cuando suman exacto. Con `allowPartial` (solo la
+ * caja), una parte que todavía no completa el monto se acepta y el renglón sigue
+ * abierto; sin él, la regla es la de siempre — lo que se paga tiene que completar.
  */
 async function settle(client, {
-  payment, reviewerId, nightclubId, provider = null, providerRef = null,
+  payment, reviewerId, nightclubId, provider = null, providerRef = null, allowPartial = false,
 }) {
   const txRes = await client.query(
     `SELECT id, type, amount::text AS amount, currency, status, reference_type, reference_id,
@@ -143,18 +181,54 @@ async function settle(client, {
   if (!OPEN_TX_STATUSES.includes(tx.status)) {
     throw ApiError.conflict(`El cobro está '${tx.status}' y ya no admite pago`);
   }
+  if (payment.currency !== tx.currency) {
+    throw ApiError.unprocessable('La moneda declarada no coincide con la del cobro');
+  }
+
+  // Las otras partes de este mismo cobro, sin contar la que se está asentando (que
+  // según el camino ya está escrita —efectivo, terminal— o todavía no —transferencia).
+  const otras = await partsOf(client, tx.id, {
+    exceptPaymentId: payment.terminal_charge_id ? null : (payment.id || null),
+    exceptChargeId: payment.terminal_charge_id || null,
+  });
+  const kind = payment.terminal_charge_id ? 'mercadopago_point' : payment.method;
+  if (otras.length + 1 > MAX_PARTS) {
+    throw ApiError.unprocessable(`Un cobro se paga con ${MAX_PARTS} formas de pago como máximo`);
+  }
+  if (otras.some((p) => p.kind === kind)) {
+    throw ApiError.unprocessable('Las dos partes de un cobro tienen que ser formas de pago distintas');
+  }
+
+  const previo = round2(otras.reduce((n, p) => n + Number(p.amount), 0));
+  const total = round2(previo + Number(payment.amount));
+  const esperado = round2(tx.amount);
+  const pendiente = round2(esperado - previo);
+
   // The ledger amount cannot be edited -- it is immutable by design -- so a payment for
   // a different amount is not something to reconcile silently. The manager rejects it
   // and asks for the difference.
-  if (Number(payment.amount) !== Number(tx.amount)) {
+  if (total > esperado || (total < esperado && !allowPartial)) {
     throw ApiError.unprocessable(
-      `El monto declarado (${payment.amount}) no coincide con el cobro (${tx.amount}). `
-      + 'Recházalo indicando la diferencia.',
-      { declared: payment.amount, expected: tx.amount },
+      previo > 0
+        ? `Ese cobro ya lleva ${previo.toFixed(2)} pagado: falta ${pendiente.toFixed(2)}, no ${payment.amount}.`
+        : `El monto declarado (${payment.amount}) no coincide con el cobro (${tx.amount}). `
+          + 'Recházalo indicando la diferencia.',
+      { declared: payment.amount, expected: tx.amount, paid: previo.toFixed(2), remaining: pendiente.toFixed(2) },
     );
   }
-  if (payment.currency !== tx.currency) {
-    throw ApiError.unprocessable('La moneda declarada no coincide con la del cobro');
+
+  // Una parte que todavía no completa: queda escrita, el renglón sigue abierto. Pero
+  // solo si todavía cabe otra: la última parte tiene que completar.
+  if (total < esperado && otras.length + 1 >= MAX_PARTS) {
+    throw ApiError.unprocessable(
+      `Un cobro se paga con ${MAX_PARTS} formas de pago como máximo: esta parte tiene que completar los ${pendiente.toFixed(2)} que faltan.`,
+      { remaining: pendiente.toFixed(2) });
+  }
+  if (total < esperado) {
+    return {
+      tx, reservation: null, order: null, receipt: null,
+      partial: true, paid: total.toFixed(2), remaining: round2(esperado - total).toFixed(2),
+    };
   }
 
   await client.query(
@@ -164,31 +238,40 @@ async function settle(client, {
             confirmed_at = now(), updated_at = now()
       WHERE id = $1`,
     [tx.id,
+      // Con dos partes, el proveedor del libro es el de la parte que completó; el
+      // detalle de cada parte vive en su propio renglón (pago manual o cobro con
+      // terminal), que es donde lo lee el corte.
       provider || (CASH_METHODS.includes(payment.method) ? 'cash' : 'manual'),
       reviewerId, providerRef]);
 
   const { reservation, order } = await applySideEffects(client, tx, nightclubId);
 
   // El recibo del dinero que acaba de entrar (D53). Va aquí y no en cada ruta porque
-  // esta función es por donde pasan los TRES caminos de cobro: el mesero cobrando en
-  // la mesa, el gerente confirmando una transferencia, y la terminal cuando la
-  // tarjeta pasa. Engancharlo en un solo lugar es lo que hace imposible que mañana se
-  // agregue un cuarto camino y se quede sin comprobante.
+  // esta función es por donde pasan TODOS los caminos de cobro. Con dos partes (D79)
+  // sale UNO, al completarse, con las dos.
   //
   // Nunca puede tumbar el cobro: `printReceipt` encola con salvaguarda y devuelve
   // `null` si algo falla. Un club sin impresoras cobra exactamente como antes.
+  const estaParte = {
+    kind,
+    method: kind,
+    amount: round2(payment.amount).toFixed(2),
+    // El folio del voucher. De lo que capturó quien cobró, o —cuando cobró la
+    // terminal— del folio que devolvió la pasarela.
+    reference: payment.reference || providerRef || null,
+    cash_received: payment.cash_received || null,
+    change_given: payment.change_given || null,
+  };
   const receipt = await tickets.printReceipt(client, {
     nightclubId,
     transactionId: tx.id,
     method: payment.method,
-    // El folio del voucher. De lo que capturó quien cobró, o —cuando cobró la
-    // terminal— del folio que devolvió la pasarela, que es el mismo papel que el
-    // cliente ya tiene en la mano.
-    reference: payment.reference || providerRef || null,
+    reference: estaParte.reference,
     collectedBy: reviewerId,
+    parts: otras.concat([estaParte]),
   });
 
-  return { tx, reservation, order, receipt };
+  return { tx, reservation, order, receipt, partial: false, paid: total.toFixed(2), remaining: '0.00' };
 }
 
 async function publishConfirmed({ nightclubId, payment, tx, reservation, order }) {
@@ -243,5 +326,5 @@ async function publishConfirmed({ nightclubId, payment, tx, reservation, order }
 
 module.exports = {
   METHODS, CASH_METHODS, ON_THE_SPOT_METHODS, OPEN_TX_STATUSES, PAYMENT_SELECT,
-  present, settle, applySideEffects, publishConfirmed,
+  MAX_PARTS, present, settle, partsOf, paidSoFar, applySideEffects, publishConfirmed,
 };

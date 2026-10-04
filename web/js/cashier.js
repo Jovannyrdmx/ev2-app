@@ -122,7 +122,7 @@
    * trae ids y la caja necesita la mesa, el mesero y el importe.
    */
   const REFRESH_EVENTS = ['order_created', 'order_paid', 'order_confirmed', 'order_cancelled',
-    'payment_confirmed', 'till_opened', 'shift_closed'];
+    'payment_confirmed', 'payment_partial', 'till_opened', 'shift_closed'];
 
   function shouldRefresh(message, { locationId } = {}) {
     const kind = message && (message.event_type || message.type);
@@ -134,7 +134,126 @@
     return true;
   }
 
+  // ---------------------------------------------------------------- el cobro (D79)
+
+  const METHOD_KEYS = ['cash', 'mercadopago_point', 'card_terminal'];
+  const isCash = (m) => m === 'cash';
+  const isTerminal = (m) => m === 'mercadopago_point';
+  const needsReference = (m) => m === 'card_terminal';
+
+  /** Lo que falta por cobrar de un pedido (el servidor ya lo resta de las partes pagadas). */
+  function remainingOf(order) {
+    if (!order) return '0.00';
+    if (order.remaining !== undefined && order.remaining !== null) return fromCents(toCents(order.remaining));
+    return fromCents(toCents(order.subtotal));
+  }
+
+  /** Las formas de pago que ya se usaron en este pedido. */
+  const usedMethods = (order) => ((order && order.parts) || []).map((p) => p.method);
+
+  /**
+   * Con qué se puede cobrar lo que falta. Una forma ya usada no se repite: las dos
+   * partes de un cobro son formas de pago distintas.
+   */
+  function methodsFor(order) {
+    const usadas = usedMethods(order);
+    return METHOD_KEYS.filter((m) => !usadas.includes(m));
+  }
+
+  /** Solo se divide un pedido que todavía no tiene ninguna parte pagada. */
+  const canSplit = (order) => usedMethods(order).length === 0;
+
+  /**
+   * El cambio a entregar, en centavos exactos. `null` si todavía no se puede decir
+   * (no tecleó lo recibido); negativo si lo recibido no alcanza.
+   */
+  function change(received, amount) {
+    if (received === '' || received === null || received === undefined) return null;
+    const r = Number(received);
+    if (!Number.isFinite(r)) return null;
+    return fromCents(toCents(r) - toCents(amount));
+  }
+
+  /**
+   * Arma el cobro: una o dos partes, y en qué orden se mandan. Devuelve
+   * `{ error }` con la clave del motivo, o `{ steps }`.
+   *
+   * La terminal de Mercado Pago va PRIMERO: es la única que puede decir que no (una
+   * tarjeta rechazada). Si dice que no, todavía no se asentó nada y la caja escoge otra
+   * forma; si se cobrara primero el efectivo, quedaría media cuenta pagada esperando.
+   *
+   * `a` y `b` son `{ method, amount, reference, received }`. Sin `split`, `a` paga
+   * todo lo que falta y su monto no se teclea.
+   */
+  function planCharge({ order, split = false, a = {}, b = {}, terminals } = {}) {
+    const falta = toCents(remainingOf(order));
+    if (falta <= 0) return { error: 'till.errNothingDue' };
+    const permitidos = methodsFor(order);
+    if (split && !canSplit(order)) return { error: 'till.errSplitTwice' };
+
+    const partes = split
+      ? [{ ...a, amount: a.amount }, { ...b, amount: fromCents(falta - toCents(a.amount)) }]
+      : [{ ...a, amount: fromCents(falta) }];
+
+    if (split) {
+      const ca = toCents(a.amount);
+      if (!(Number(a.amount) > 0) || ca <= 0 || ca >= falta) return { error: 'till.errSplitAmount' };
+      if (!a.method || !b.method || a.method === b.method) return { error: 'till.errSplitSame' };
+    }
+
+    for (const p of partes) {
+      if (!p.method || !permitidos.includes(p.method)) return { error: 'till.errMethod' };
+      if (needsReference(p.method) && !String(p.reference == null ? '' : p.reference).trim()) {
+        return { error: 'take.blocked.no_reference' };
+      }
+      if (isTerminal(p.method) && terminals !== undefined
+        && !(terminals || []).some((t) => t && t.active !== false)) {
+        return { error: 'take.blocked.no_terminal' };
+      }
+      if (isCash(p.method) && p.received !== '' && p.received !== null && p.received !== undefined) {
+        const c = change(p.received, p.amount);
+        if (c === null) return { error: 'till.errReceived' };
+        if (toCents(c) < 0) return { error: 'till.errReceivedShort' };
+      }
+    }
+
+    const steps = partes
+      .map((p) => ({
+        method: p.method,
+        amount: fromCents(toCents(p.amount)),
+        reference: needsReference(p.method) ? String(p.reference).trim() : null,
+        cash_received: isCash(p.method) && p.received !== '' && p.received !== undefined && p.received !== null
+          ? fromCents(toCents(p.received)) : null,
+        change: isCash(p.method) ? change(p.received, p.amount) : null,
+        terminal: isTerminal(p.method),
+      }))
+      .sort((x, y) => Number(y.terminal) - Number(x.terminal));
+    return { steps };
+  }
+
+  /** Lo que se manda por `POST /till/payments` para una parte manual. */
+  function paymentPayload(order, step, requestId) {
+    const body = {
+      transaction_id: order.transaction_id,
+      method: step.method,
+      amount: Number(step.amount),
+    };
+    if (step.reference) body.reference = step.reference;
+    if (step.cash_received !== null && step.cash_received !== undefined) {
+      body.cash_received = Number(step.cash_received);
+    }
+    if (requestId) body.client_request_id = requestId;
+    return body;
+  }
+
   return {
+    METHOD_KEYS,
+    remainingOf,
+    methodsFor,
+    canSplit,
+    change,
+    planCharge,
+    paymentPayload,
     phase,
     openBlocker,
     openPayload,

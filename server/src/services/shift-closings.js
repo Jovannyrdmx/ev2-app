@@ -226,7 +226,8 @@ async function shiftSummary(runner, { nightclubId, shift }) {
     // lo que ya salió en retiros.
     cash_to_hand: money(round2(fondo + Number(totals.cash_collected) - Number(entregado))),
     pending_orders: pendientes,
-    pending_total: money(pendientes.reduce((n, o) => round2(n + Number(o.subtotal)), 0)),
+    // Lo que FALTA por cobrar (D79): un pedido con una parte pagada solo debe el resto.
+    pending_total: money(pendientes.reduce((n, o) => round2(n + Number(o.remaining)), 0)),
     closing: rows[0] || null,
   };
 }
@@ -355,6 +356,7 @@ async function close(client, {
         delivery_point_name: o.delivery_point_name || null,
         taken_by_name: o.taken_by_name || null,
         subtotal: o.subtotal,
+        remaining: o.remaining,
         currency: o.currency,
         created_at: o.created_at,
       }))),

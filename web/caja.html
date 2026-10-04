@@ -135,7 +135,7 @@
 
   <!-- ====================== COBRAR UN PEDIDO ====================== -->
   <div id="charge-sheet" class="fixed inset-0 z-40 flex items-end justify-center bg-black/80" hidden>
-    <div class="w-full max-w-md rounded-t-2xl p-5 space-y-3" style="background:#12121f;border-top:1px solid rgba(255,255,255,.12)">
+    <div class="w-full max-w-md rounded-t-2xl p-5 space-y-3 max-h-[92vh] overflow-y-auto" style="background:#12121f;border-top:1px solid rgba(255,255,255,.12)">
       <div class="flex items-center justify-between gap-2">
         <div class="min-w-0">
           <p class="font-display text-lg" data-i18n="till.charge">Cobrar</p>
@@ -144,13 +144,70 @@
         <button id="btn-charge-close" class="card rounded-lg px-3 py-2 text-xs" data-i18n="sale.close">Cerrar</button>
       </div>
       <p id="charge-items" class="text-sm text-white/70">—</p>
-      <div class="flex items-center justify-between">
-        <span class="text-sm text-white/60" data-i18n="sale.total">Total</span>
-        <span id="charge-total" class="font-display text-2xl">—</span>
+      <div class="space-y-1">
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-white/60" data-i18n="sale.total">Total</span>
+          <span id="charge-total" class="text-sm">—</span>
+        </div>
+        <!-- Lo que ya se pagó con otra forma de pago (D79). -->
+        <div id="charge-paid-row" class="flex items-center justify-between text-sm text-emerald-300" hidden>
+          <span id="charge-paid-label">—</span>
+          <span id="charge-paid">—</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="font-display" data-i18n="till.toCollect">Por cobrar</span>
+          <span id="charge-due" class="font-display text-2xl">—</span>
+        </div>
       </div>
-      <select id="charge-method" class="field"></select>
-      <input id="charge-reference" class="field uppercase" placeholder="Folio del voucher"
-             data-i18n-placeholder="sale.reference" maxlength="40" hidden>
+
+      <!-- Dos formas de pago (D79). Solo cuando el pedido no tiene ninguna parte pagada. -->
+      <label id="charge-split-row" class="flex items-center gap-2 text-sm text-white/80">
+        <input id="charge-split" type="checkbox">
+        <span data-i18n="till.split">Dividir en 2 formas de pago</span>
+      </label>
+
+      <!-- Parte A: la forma de pago (o la primera, si se divide). -->
+      <div class="card rounded-xl p-3 space-y-2">
+        <p id="part-a-title" class="text-xs uppercase tracking-wider text-white/40" data-i18n="till.payment">Forma de pago</p>
+        <select id="charge-method" class="field"></select>
+        <label id="charge-amount-row" class="block space-y-1" hidden>
+          <span class="text-xs text-white/50" data-i18n="till.amount">Monto de esta parte</span>
+          <input id="charge-amount" type="number" min="0" step="1" inputmode="decimal" class="field text-center"
+                 placeholder="Monto" data-i18n-placeholder="till.amount">
+        </label>
+        <input id="charge-reference" class="field uppercase" placeholder="Folio del voucher"
+               data-i18n-placeholder="sale.reference" maxlength="40" hidden>
+        <div id="charge-cash" class="space-y-1" hidden>
+          <label for="charge-received" class="text-xs text-white/50" data-i18n="till.received">Efectivo recibido</label>
+          <input id="charge-received" type="number" min="0" step="50" inputmode="decimal" class="field text-center text-xl"
+                 placeholder="Efectivo recibido" data-i18n-placeholder="till.received">
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-white/60" data-i18n="till.change">Cambio</span>
+            <span id="charge-change" class="font-display text-2xl" style="color:var(--ev2-gold)">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Parte B: la segunda forma de pago, por el resto. -->
+      <div id="part-b" class="card rounded-xl p-3 space-y-2" hidden>
+        <div class="flex items-center justify-between">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="till.payment2">Segunda forma de pago</p>
+          <span id="charge-b-amount" class="font-display">—</span>
+        </div>
+        <select id="charge-b-method" class="field"></select>
+        <input id="charge-b-reference" class="field uppercase" placeholder="Folio del voucher"
+               data-i18n-placeholder="sale.reference" maxlength="40" hidden>
+        <div id="charge-b-cash" class="space-y-1" hidden>
+          <label for="charge-b-received" class="text-xs text-white/50" data-i18n="till.received">Efectivo recibido</label>
+          <input id="charge-b-received" type="number" min="0" step="50" inputmode="decimal" class="field text-center text-xl"
+                 placeholder="Efectivo recibido" data-i18n-placeholder="till.received">
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-white/60" data-i18n="till.change">Cambio</span>
+            <span id="charge-b-change" class="font-display text-2xl" style="color:var(--ev2-gold)">—</span>
+          </div>
+        </div>
+      </div>
+
       <button id="btn-charge" class="ev2-button w-full py-4 rounded-xl font-display" data-i18n="till.chargeDo">Cobrar</button>
       <p id="charge-error" class="text-sm text-red-300" hidden></p>
     </div>

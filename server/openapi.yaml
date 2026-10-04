@@ -1516,7 +1516,7 @@ paths:
                         severity: { type: string, enum: [warn, info] }
                         location_id: { type: string, format: uuid }
                         location_name: { type: string }
-                        purpose: { type: string, enum: [orders, service] }
+                        purpose: { type: string, enum: [orders, service, till] }
                         printer_name: { type: string }
                         agent_name: { type: string }
                         sections:
@@ -4368,6 +4368,14 @@ paths:
               properties:
                 transaction_id: { type: string, format: uuid }
                 terminal_id: { type: string, format: uuid }
+                amount:
+                  type: number
+                  exclusiveMinimum: 0
+                  description: |
+                    Solo cajero, gerente o admin (D79), para cobrar UNA parte de un pago con
+                    dos formas. Sin él, se cobra lo que falta del renglón. No puede pasar de
+                    lo que falta (`422`, con `details.remaining`); la parte que deja algo
+                    pendiente solo puede ser la primera.
       responses:
         '201':
           description: La terminal está esperando la tarjeta
@@ -9774,6 +9782,103 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
 
+  /api/nightclubs/{nightclubId}/till/payments:
+    post:
+      operationId: collectAtTill
+      tags: [Cortes de turno]
+      summary: Cobrar en la caja, con cambio y hasta dos formas de pago
+      description: |
+        Requiere rol `cashier` con la caja abierta (D79). Asienta un pago manual
+        (efectivo o voucher de la terminal del club) de un pedido de su barra.
+
+        - **Cambio**: con `method=cash`, `cash_received` es lo que entregó el cliente;
+          el servidor guarda el cambio (`cash_received - amount`) y lo devuelve.
+        - **Dos formas de pago**: `amount` puede ser menor que lo que falta; entonces el
+          pago queda como primera parte (`paid=false`, evento `payment_partial`) y la
+          segunda —con otra forma de pago, incluida la terminal de Mercado Pago— tiene
+          que completar exacto. Máximo dos partes, nunca dos con la misma forma.
+        - **Recibo**: al completar el pago se imprime solo en la impresora `till` de la
+          barra, siempre, aunque el club tenga apagados los recibos.
+
+        `client_request_id` hace la petición idempotente: repetirla devuelve el mismo
+        pago con `200` y `Idempotent-Replay: true`.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transaction_id, method, amount]
+              properties:
+                transaction_id: { type: string, format: uuid }
+                method: { type: string, enum: [cash, card_terminal] }
+                amount: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+                reference:
+                  type: string
+                  minLength: 3
+                  maxLength: 60
+                  description: Folio del voucher. Obligatorio con `card_terminal`.
+                cash_received:
+                  type: number
+                  exclusiveMinimum: 0
+                  maximum: 1000000
+                  description: Solo con `cash`. Tiene que cubrir `amount`.
+                client_request_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Repetición de una petición ya asentada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment: { type: object }
+                  paid: { type: boolean }
+        '201':
+          description: Pago asentado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      transaction_id: { type: string, format: uuid }
+                      method: { type: string, enum: [cash, card_terminal] }
+                      amount: { type: string }
+                      cash_received: { type: [string, 'null'] }
+                      change_given: { type: [string, 'null'] }
+                  paid: { type: boolean, description: '`false` si falta la segunda parte.' }
+                  paid_amount: { type: string }
+                  remaining: { type: string }
+                  change_given: { type: [string, 'null'] }
+                  receipt:
+                    type: [object, 'null']
+                    description: El trabajo de impresión del recibo, si se completó el pago.
+                    properties:
+                      job_id: { type: string, format: uuid }
+                      status: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Ya pagado, con una terminal esperando, o esa forma de pago ya se usó
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: |
+            El efectivo no alcanza, falta el folio, el monto pasa de lo que falta, ya hay
+            dos partes, o la segunda parte no completa el pago.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /api/nightclubs/{nightclubId}/shifts/me/closing:
     post:
       operationId: closeShiftCut
@@ -11334,6 +11439,20 @@ components:
         sender_name: { type: [string, 'null'] }
         transaction_id: { type: string, format: uuid }
         payment_status: { type: string, enum: [pending, pending_manual] }
+        paid_amount:
+          type: string
+          description: Lo ya pagado con partes anteriores (D79). `0.00` si no hay ninguna.
+        remaining:
+          type: string
+          description: Lo que falta por cobrar (`subtotal` menos `paid_amount`).
+        parts:
+          type: array
+          description: Las partes ya pagadas, con su forma de pago.
+          items:
+            type: object
+            properties:
+              method: { type: string, enum: [cash, card_terminal, mercadopago_point] }
+              amount: { type: string }
         items:
           type: array
           items:
@@ -14086,8 +14205,10 @@ components:
         name: { type: string, maxLength: 60 }
         purpose:
           type: string
-          enum: [orders, service]
-          description: '`orders` es la PC del bartender; `service` la de meseros.'
+          enum: [orders, service, till]
+          description: |
+            `orders` es la PC del bartender; `service` la de meseros; `till` la de la caja
+            de esa barra (D79): ahí sale el recibo de cada cobro del cajero.
         connection: { type: string, enum: [network, windows], default: network }
         host:
           type: [string, 'null']
@@ -14120,7 +14241,7 @@ components:
         location_id: { type: string, format: uuid }
         location_name: { type: [string, 'null'] }
         name: { type: string }
-        purpose: { type: string, enum: [orders, service] }
+        purpose: { type: string, enum: [orders, service, till] }
         connection: { type: string, enum: [network, windows] }
         host: { type: [string, 'null'] }
         port: { type: integer }

@@ -11,6 +11,7 @@ const inventory = require('../services/inventory');
 const tickets = require('../services/tickets');
 const consent = require('../services/consent');
 const till = require('../services/till');
+const payments = require('../services/payments');
 
 const router = express.Router({ mergeParams: true });
 
@@ -357,6 +358,19 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
       if (!TRANSITIONS[order.status].includes(next)) {
         throw ApiError.conflict(`Cannot go from '${order.status}' to '${next}'`,
           { allowed: TRANSITIONS[order.status] });
+      }
+
+      // Un pedido con una parte ya cobrada (D79, dos formas de pago) no se cancela así:
+      // esa parte es dinero que entró, y cancelar cerraría el cobro como si no hubiera
+      // pasado. Se cobra el resto, o el gerente decide la devolución.
+      if (next === 'cancelled' && order.transaction_id
+          && ['pending', 'pending_manual'].includes(order.payment_status)) {
+        const yaPagado = await payments.paidSoFar(client, order.transaction_id);
+        if (yaPagado > 0) {
+          throw ApiError.conflict(
+            `Ese pedido ya tiene ${yaPagado.toFixed(2)} cobrados de una parte: cobra el resto, o que el gerente decida la devolución.`,
+            { paid: yaPagado.toFixed(2) });
+        }
       }
 
       // The bar does not pour on credit. Confirming is what sends the ticket to the

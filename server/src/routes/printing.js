@@ -401,7 +401,7 @@ const MANAGE = ['manager', 'admin'];
 const printerBody = z.object({
   location_id: uuid,
   name: z.string().trim().min(1).max(60),
-  purpose: z.enum(['orders', 'service']),
+  purpose: z.enum(['orders', 'service', 'till']),
   connection: z.enum(['network', 'windows']).default('network'),
   host: z.string().trim().min(1).max(120).nullish(),
   port: z.coerce.number().int().min(1).max(65535).default(9100),
@@ -573,7 +573,7 @@ router.post('/nightclubs/:nightclubId/print-agents/invite',
     // llevándose el papel de todo el club mientras alguien vuelve al panel.
     body: z.object({
       location_id: uuid.nullish(),
-      purpose: z.enum(['orders', 'service']).nullish(),
+      purpose: z.enum(['orders', 'service', 'till']).nullish(),
     }).default({}),
   }),
   asyncHandler(async (req, res) => {
@@ -628,7 +628,7 @@ router.patch('/nightclubs/:nightclubId/print-agents/:agentId',
       active: z.coerce.boolean().optional(),
       area: z.object({
         location_id: uuid.nullish(),
-        purpose: z.enum(['orders', 'service']).nullish(),
+        purpose: z.enum(['orders', 'service', 'till']).nullish(),
       }).optional(),
     }).refine((b) => b.active !== undefined || b.area !== undefined,
       { message: 'No hay nada que cambiar' }),

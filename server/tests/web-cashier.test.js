@@ -241,11 +241,92 @@ describe('nada de la caja sale sin traducir', () => {
     for (const key of Take.methodKeys()) usadas.add(`take.method.${key}`);
     for (const key of ['till.errOpen', 'till.errNoBar', 'till.errFloat', 'cut.errPin',
       'cut.float', 'cut.pending', 'cut.ackPending', 'cut.errPending']) usadas.add(key);
+    // Lo que planCharge puede devolver y lo que se arma con plantillas (D79).
+    for (const key of Cashier.METHOD_KEYS) usadas.add(`take.method.${key}`);
+    for (const key of ['till.errNothingDue', 'till.errSplitTwice', 'till.errSplitAmount',
+      'till.errSplitSame', 'till.errMethod', 'till.errReceived', 'till.errReceivedShort',
+      'take.blocked.no_reference', 'take.blocked.no_terminal', 'till.payment1',
+      'till.amount', 'till.received', 'prn.pTill']) usadas.add(key);
     expect(usadas.size).toBeGreaterThan(30);
     for (const lang of ['es', 'en']) {
       catalogo.setLanguage(lang);
       const faltantes = [...usadas].filter((k) => catalogo.t(k) === k);
       expect({ lang, faltantes }).toEqual({ lang, faltantes: [] });
     }
+  });
+});
+
+describe('EV2Cashier: el cobro con cambio y dos formas de pago (D79)', () => {
+  const pedido = (extra = {}) => ({ transaction_id: 't1', subtotal: '450.00', ...extra });
+  const terminals = [{ id: 'x', active: true }];
+
+  it('lo que falta descuenta lo ya pagado', () => {
+    expect(Cashier.remainingOf(pedido())).toBe('450.00');
+    expect(Cashier.remainingOf(pedido({ remaining: '150' }))).toBe('150.00');
+    expect(Cashier.remainingOf(null)).toBe('0.00');
+  });
+
+  it('una forma ya usada no se ofrece otra vez, y no se divide dos veces', () => {
+    const conParte = pedido({ remaining: '150', parts: [{ method: 'cash', amount: '300' }] });
+    expect(Cashier.methodsFor(pedido())).toEqual(Cashier.METHOD_KEYS);
+    expect(Cashier.methodsFor(conParte)).not.toContain('cash');
+    expect(Cashier.canSplit(conParte)).toBe(false);
+    expect(Cashier.planCharge({ order: conParte, split: true, a: { method: 'card_terminal', amount: 50 },
+      b: { method: 'mercadopago_point' } })).toEqual({ error: 'till.errSplitTwice' });
+  });
+
+  it('calcula el cambio en centavos exactos', () => {
+    expect(Cashier.change('500', '450')).toBe('50.00');
+    expect(Cashier.change('0.3', '0.1')).toBe('0.20');
+    expect(Cashier.change('400', '450')).toBe('-50.00');
+    expect(Cashier.change('', '450')).toBeNull();
+    expect(Cashier.change('abc', '450')).toBeNull();
+  });
+
+  it('un solo pago en efectivo: cobra todo lo que falta y lleva lo recibido', () => {
+    const r = Cashier.planCharge({ order: pedido(), a: { method: 'cash', received: '500' } });
+    expect(r.steps).toEqual([{ method: 'cash', amount: '450.00', reference: null,
+      cash_received: '500.00', change: '50.00', terminal: false }]);
+    expect(Cashier.paymentPayload(pedido(), r.steps[0], 'req-1')).toEqual({
+      transaction_id: 't1', method: 'cash', amount: 450, cash_received: 500, client_request_id: 'req-1',
+    });
+  });
+
+  it('el efectivo sin teclear lo recibido se acepta; si no alcanza, no', () => {
+    expect(Cashier.planCharge({ order: pedido(), a: { method: 'cash' } }).steps[0].cash_received).toBeNull();
+    expect(Cashier.planCharge({ order: pedido(), a: { method: 'cash', received: '400' } }))
+      .toEqual({ error: 'till.errReceivedShort' });
+    expect(Cashier.planCharge({ order: pedido(), a: { method: 'cash', received: 'x' } }))
+      .toEqual({ error: 'till.errReceived' });
+  });
+
+  it('dos formas: la segunda paga el resto, y la terminal va primero', () => {
+    const r = Cashier.planCharge({ order: pedido(), split: true, terminals,
+      a: { method: 'cash', amount: '300', received: '500' }, b: { method: 'mercadopago_point' } });
+    expect(r.steps.map((s) => [s.method, s.amount])).toEqual([
+      ['mercadopago_point', '150.00'], ['cash', '300.00']]);
+    expect(r.steps[1].change).toBe('200.00');
+  });
+
+  it('dos formas: rechaza montos fuera de rango, la misma forma y el folio vacío', () => {
+    const base = { order: pedido(), split: true, terminals };
+    for (const amount of ['0', '450', '600', '']) {
+      expect(Cashier.planCharge({ ...base, a: { method: 'cash', amount }, b: { method: 'card_terminal', reference: 'F1' } }))
+        .toEqual({ error: 'till.errSplitAmount' });
+    }
+    expect(Cashier.planCharge({ ...base, a: { method: 'cash', amount: '100' }, b: { method: 'cash' } }))
+      .toEqual({ error: 'till.errSplitSame' });
+    expect(Cashier.planCharge({ ...base, a: { method: 'cash', amount: '100' }, b: { method: 'card_terminal', reference: ' ' } }))
+      .toEqual({ error: 'take.blocked.no_reference' });
+  });
+
+  it('sin terminal activa no se ofrece cobrar con Mercado Pago', () => {
+    expect(Cashier.planCharge({ order: pedido(), terminals: [], a: { method: 'mercadopago_point' } }))
+      .toEqual({ error: 'take.blocked.no_terminal' });
+  });
+
+  it('un pedido ya pagado no se cobra', () => {
+    expect(Cashier.planCharge({ order: pedido({ remaining: '0' }), a: { method: 'cash' } }))
+      .toEqual({ error: 'till.errNothingDue' });
   });
 });

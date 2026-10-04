@@ -126,7 +126,9 @@ async function record(runner, { chargeId, source, action, status = null, request
  *
  * Devuelve la fila recién creada en `creating`. Todavía no existe nada en Mercado Pago.
  */
-async function reserve(client, { nightclubId, transactionId, terminalId, userId }) {
+async function reserve(client, {
+  nightclubId, transactionId, terminalId, userId, amount = null,
+}) {
   const txRes = await client.query(
     `SELECT id, type, amount::text AS amount, currency, status
        FROM transactions WHERE id = $1 AND nightclub_id = $2 FOR UPDATE`,
@@ -137,6 +139,27 @@ async function reserve(client, { nightclubId, transactionId, terminalId, userId 
   if (tx.status === 'paid') throw ApiError.conflict('Ese cobro ya está pagado');
   if (!OPEN_TX_STATUSES.includes(tx.status)) {
     throw ApiError.conflict(`El cobro está '${tx.status}' y ya no admite pago`);
+  }
+
+  // Lo que la terminal va a cobrar: lo que FALTA del renglón (D79). Si ya hay una
+  // parte pagada, cobrar el total sería cobrar dos veces esa parte. `amount` solo lo
+  // manda quien divide el cobro (la caja): una parte, nunca más de lo que falta.
+  const pagado = await payments.paidSoFar(client, tx.id);
+  const falta = Math.round((Number(tx.amount) - pagado) * 100) / 100;
+  const monto = amount === null || amount === undefined ? falta : Math.round(Number(amount) * 100) / 100;
+  if (!(monto > 0) || monto > falta) {
+    throw ApiError.unprocessable(
+      `A ese cobro le faltan ${falta.toFixed(2)}; la terminal no puede cobrar ${monto.toFixed(2)}.`,
+      { remaining: falta.toFixed(2) });
+  }
+  if (monto < falta) {
+    // Si esta parte no completa, la que la complete tiene que ser OTRA forma de pago,
+    // y no puede haber ya dos.
+    const partes = await payments.partsOf(client, tx.id);
+    if (partes.length >= payments.MAX_PARTS - 1) {
+      throw ApiError.unprocessable(
+        `Un cobro se paga con ${payments.MAX_PARTS} formas de pago como máximo: la terminal tiene que cobrar los ${falta.toFixed(2)} que faltan.`);
+    }
   }
 
   const termRes = await client.query(
@@ -172,7 +195,7 @@ async function reserve(client, { nightclubId, transactionId, terminalId, userId 
           status, started_by, expires_at)
        VALUES ($1,$2,$3,$4,$5,$6,'creating',$7, now() + make_interval(secs => $8))
        RETURNING id, idempotency_key, amount::text AS amount, currency, expires_at`,
-      [nightclubId, tx.id, terminal.id, crypto.randomUUID(), tx.amount, tx.currency,
+      [nightclubId, tx.id, terminal.id, crypto.randomUUID(), monto.toFixed(2), tx.currency,
         userId, EXPIRATION_SECONDS]);
     return { charge: rows[0], tx, terminal };
   } catch (err) {
@@ -358,13 +381,20 @@ async function apply(pool, { chargeId, read, source, requestId = null, rawPayloa
         return { charge, changed: true, mismatch: true };
       }
 
+      // Una terminal que cobró solo una parte del renglón (D79, dos formas de pago):
+      // esa parte se asienta y el renglón sigue abierto por lo que falta.
+      const renglon = await client.query(
+        'SELECT amount::text AS amount FROM transactions WHERE id = $1', [charge.transaction_id]);
+      const esParte = renglon.rows[0] && Number(charge.amount) < Number(renglon.rows[0].amount);
       const settled = await payments.settle(client, {
         payment: {
           transaction_id: charge.transaction_id,
+          terminal_charge_id: charge.id,
           amount: charge.amount,
           currency: charge.currency,
           method: 'card_terminal',
         },
+        allowPartial: esParte,
         // Quien inició el cobro. Nadie "aprobó" nada: lo aprobó la tarjeta.
         reviewerId: charge.started_by,
         nightclubId: charge.nightclub_id,
@@ -694,7 +724,18 @@ async function announce({ nightclubId, chargeId, status, outcome, startedBy }) {
     },
     payload: { charge_id: chargeId, status },
   });
-  if (outcome && outcome.tx) {
+  if (outcome && outcome.partial) {
+    // La terminal cobró su parte y falta la otra (D79): la caja tiene que enterarse
+    // para cobrar el resto.
+    await events.publish({
+      nightclubId,
+      type: 'payment_partial',
+      audience: { roles: ['manager', 'cashier'], userIds: [startedBy].filter(Boolean) },
+      payload: {
+        transaction_id: outcome.tx.id, paid: outcome.paid, remaining: outcome.remaining,
+      },
+    });
+  } else if (outcome && outcome.tx) {
     await payments.publishConfirmed({
       nightclubId,
       payment: {

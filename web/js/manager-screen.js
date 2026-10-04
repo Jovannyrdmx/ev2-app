@@ -82,6 +82,9 @@
   const escape = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  /** El nombre de cada propósito de impresora. `till` es la caja de una barra (D79). */
+  const PURPOSE_KEY = { orders: 'prn.pOrders', service: 'prn.pService', till: 'prn.pTill' };
+
   let toastTimer = null;
   function toast(message, kind = 'info') {
     const el = $('toast');
@@ -1771,7 +1774,7 @@
       nombre.textContent = p.name;
       const donde = document.createElement('p');
       donde.className = 'text-[11px] text-white/50 truncate';
-      donde.textContent = `${p.location_name || ''} · ${t(p.purpose === 'orders' ? 'prn.pOrders' : 'prn.pService')}`;
+      donde.textContent = `${p.location_name || ''} · ${t(PURPOSE_KEY[p.purpose] || 'prn.pService')}`;
       const como = document.createElement('p');
       como.className = 'text-[11px] text-white/40 truncate';
       como.textContent = p.connection === 'windows'
@@ -2026,7 +2029,7 @@
 
     const selPapel = document.createElement('select');
     selPapel.className = 'card rounded-lg px-2 py-1 text-xs min-w-0 flex-1';
-    for (const [valor, clave] of [['', 'prn.areaBoth'], ['orders', 'prn.pOrders'], ['service', 'prn.pService']]) {
+    for (const [valor, clave] of [['', 'prn.areaBoth'], ['orders', 'prn.pOrders'], ['service', 'prn.pService'], ['till', 'prn.pTill']]) {
       const opt = document.createElement('option');
       opt.value = valor;
       opt.textContent = t(clave);

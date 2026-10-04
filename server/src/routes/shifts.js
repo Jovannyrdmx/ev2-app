@@ -27,6 +27,7 @@ const managerAuth = require('../services/manager-auth');
 const tickets = require('../services/tickets');
 const events = require('../services/events');
 const till = require('../services/till');
+const payments = require('../services/payments');
 
 const router = express.Router({ mergeParams: true });
 
@@ -252,6 +253,91 @@ router.post('/nightclubs/:nightclubId/till/open',
       client.release();
     }
     res.status(201).json(await till.state(pool, { nightclubId, user: req.user }));
+  }));
+
+/**
+ * La caja cobra un pedido de su barra, completo o una de sus dos partes (D79).
+ *
+ * Efectivo o voucher del banco; la terminal de Mercado Pago va por
+ * `POST /terminal-charges` con `amount`. Con efectivo, `cash_received` es lo que dio
+ * el cliente y el servidor calcula el cambio. Al completarse el pago, el recibo sale
+ * solo en la impresora de la caja.
+ */
+router.post('/nightclubs/:nightclubId/till/payments',
+  requireRole('cashier'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      transaction_id: uuid,
+      method: z.enum(['cash', 'card_terminal']),
+      amount: z.number().positive().max(1_000_000),
+      reference: z.string().trim().min(3).max(60).optional(),
+      cash_received: z.number().positive().max(1_000_000).optional(),
+      client_request_id: uuid.optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const b = req.body;
+
+    // El doble toque: la misma clave devuelve el mismo pago, no cobra otra parte.
+    if (b.client_request_id) {
+      const ya = await pool.query(
+        `SELECT p.id, p.transaction_id, p.method, p.amount::text AS amount,
+                p.cash_received::text AS cash_received, p.change_given::text AS change_given,
+                t.status AS transaction_status
+           FROM manual_payments p JOIN transactions t ON t.id = p.transaction_id
+          WHERE p.client_request_id = $1 AND p.nightclub_id = $2`,
+        [b.client_request_id, nightclubId]);
+      if (ya.rowCount > 0) {
+        res.set('Idempotent-Replay', 'true');
+        return res.status(200).json({ payment: ya.rows[0], paid: ya.rows[0].transaction_status === 'paid' });
+      }
+    }
+
+    const client = await pool.connect();
+    let hecho;
+    try {
+      await client.query('BEGIN');
+      hecho = await till.collect(client, {
+        nightclubId,
+        user: req.user,
+        transactionId: b.transaction_id,
+        method: b.method,
+        amount: b.amount,
+        reference: b.reference || null,
+        cashReceived: b.cash_received ?? null,
+        clientRequestId: b.client_request_id || null,
+      });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    if (hecho.partial) {
+      await events.publish({
+        nightclubId,
+        type: 'payment_partial',
+        audience: { roles: ['manager', 'cashier'], userIds: [req.user.id] },
+        payload: {
+          transaction_id: hecho.tx.id, paid: hecho.paid, remaining: hecho.remaining,
+        },
+      });
+    } else {
+      await payments.publishConfirmed({ nightclubId, ...hecho });
+    }
+
+    return res.status(201).json({
+      payment: hecho.payment,
+      paid: !hecho.partial,
+      paid_amount: hecho.paid,
+      remaining: hecho.remaining,
+      change_given: hecho.payment.change_given,
+      receipt: hecho.receipt ? { job_id: hecho.receipt.id, status: hecho.receipt.status } : null,
+    });
   }));
 
 // ---------------------------------------------------------------- el corte

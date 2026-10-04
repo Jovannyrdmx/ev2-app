@@ -1061,3 +1061,66 @@ describe('Una cuenta de prueba sin ninguna Point vinculada', () => {
     expect((await estadoDe(tx.id)).status).toBe('paid');
   });
 });
+
+// ---------------------------------------------------------------- dos formas de pago (D79)
+
+describe('La terminal cobra solo una parte (D79)', () => {
+  const empezarParte = async (tx, terminal, amount, quien = manager) => api()
+    .post(`/api/nightclubs/${club.id}/terminal-charges`)
+    .set(await tokenDe(quien))
+    .send({ transaction_id: tx.id, terminal_id: terminal.id, amount });
+
+  const ordenDe = async (chargeId) => (await pool.query(
+    'SELECT external_order_id FROM terminal_charges WHERE id = $1', [chargeId])).rows[0].external_order_id;
+
+  it('cobra su parte, el renglón sigue abierto, y el efectivo completa el resto', async () => {
+    const t = await altaTerminal();
+    const tx = await cobroPendiente('450.00');
+    const res = await empezarParte(tx, t, 200);
+    expect(res.status).toBe(201);
+    expect(res.body.charge.amount).toBe('200.00');
+    // A Mercado Pago se le pidió la PARTE, no el total.
+    const pedido = mpFake.calls.find((c) => c.method === 'POST' && c.path === '/v1/orders');
+    expect(Number(pedido.body.transactions.payments[0].amount)).toBe(200);
+
+    const orderId = await ordenDe(res.body.charge.id);
+    resolverOrden(orderId, 'processed');
+    expect((await notificar(orderId)).status).toBe(200);
+    expect((await estadoDe(tx.id)).status).toBe('pending');
+    const aviso = await pool.query(`SELECT payload FROM events WHERE type = 'payment_partial'`);
+    expect(aviso.rows[0].payload).toMatchObject({ paid: '200.00', remaining: '250.00' });
+
+    // El resto, en efectivo: completa y queda pagado.
+    const resto = await api().post(`/api/nightclubs/${club.id}/manual-payments/register`)
+      .set(await tokenDe(manager))
+      .send({ transaction_id: tx.id, method: 'cash', amount: 250, currency: 'MXN' });
+    expect(resto.status).toBe(201);
+    expect((await estadoDe(tx.id)).status).toBe('paid');
+  });
+
+  it('no cobra más de lo que falta', async () => {
+    const t = await altaTerminal();
+    const tx = await cobroPendiente('450.00');
+    const res = await empezarParte(tx, t, 500);
+    expect(res.status).toBe(422);
+    expect(res.body.error.details.remaining).toBe('450.00');
+  });
+
+  it('sin `amount`, con una parte ya pagada, cobra solo lo que falta', async () => {
+    const t = await altaTerminal();
+    const tx = await cobroPendiente('450.00');
+    await pool.query(
+      `INSERT INTO manual_payments (nightclub_id, transaction_id, method, declared_by, amount,
+                                    currency, status, reviewed_by, reviewed_at)
+       VALUES ($1,$2,'cash',$3,100,'MXN','confirmed',$3,now())`, [club.id, tx.id, manager.id]);
+    const res = await empezar(tx, t, manager);
+    expect(res.status).toBe(201);
+    expect(res.body.charge.amount).toBe('350.00');
+  });
+
+  it('dividir el cobro es de la caja o la gerencia, no de la puerta', async () => {
+    const t = await altaTerminal();
+    const tx = await cobroPendiente('450.00');
+    expect((await empezarParte(tx, t, 100, cobrador)).status).toBe(403);
+  });
+});
