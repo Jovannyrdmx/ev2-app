@@ -233,6 +233,49 @@
     return { primary: legal || text(p.display_name), secondary: '' };
   }
 
+  /**
+   * La ficha de una persona: lo que el gerente ve al tocar su tarjeta.
+   *
+   * Existe porque la lista solo enseña nombre, rol y correo, y cuando hay que llamarle
+   * a un mesero a media noche el teléfono tiene que estar a un toque, no en la base.
+   *
+   * Devuelve los datos crudos en orden; formatear fechas y traducir es de la pantalla.
+   * Un dato que no existe sale como `null` y la pantalla lo pinta como "—": nunca se
+   * rellena con algo que parezca real.
+   */
+  function detailsFor(person) {
+    const p = person || {};
+    const value = (v) => (text(v) ? text(v) : null);
+    const dateOnly = (v) => {
+      const s = text(v);
+      // Postgres manda DATE como medianoche UTC; solo importa el día.
+      return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+    };
+    const legal = `${text(p.first_name)} ${text(p.last_name)}`.trim();
+    const active = p.active !== false;
+
+    const rows = [
+      { key: 'staff.phone', type: 'phone', value: value(p.phone) },
+      { key: 'staff.email', type: 'text', value: value(p.email) },
+      { key: 'staff.dLegalName', type: 'text', value: legal || null },
+      { key: 'staff.dStageName', type: 'text', value: value(p.stage_name) },
+      { key: 'staff.role', type: 'role', value: value(p.role) },
+      { key: 'staff.dCode', type: 'text', value: value(p.employee_code) },
+      { key: 'staff.dHireDate', type: 'date', value: dateOnly(p.hire_date) },
+      { key: 'staff.dCountry', type: 'country', value: value(p.country) },
+      { key: 'staff.dStatus', type: 'status', value: statusOf(p) },
+      { key: 'staff.dShiftSince', type: 'datetime',
+        value: active && p.on_shift ? value(p.shift_started_at) : null },
+      { key: 'staff.dLastLogin', type: 'datetime', value: value(p.last_login_at) },
+    ];
+    // La fecha de baja solo tiene sentido en una baja: en un activo sería un "—" que
+    // haría pensar que falta un dato.
+    if (!active) {
+      rows.push({ key: 'staff.dDeactivatedAt', type: 'datetime', value: value(p.deactivated_at) });
+    }
+    return rows;
+  }
+
   return {
     EMPLOYEE_ROLES,
     MANAGER_ROLE,
@@ -246,5 +289,6 @@
     validateEmployee,
     employeePayload,
     displayFor,
+    detailsFor,
   };
 }));

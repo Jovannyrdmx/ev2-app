@@ -193,6 +193,79 @@ describe('El personal, visto por el gerente', () => {
   });
 });
 
+// --------------------------------------------------------------- ficha del empleado
+
+describe('La ficha de una persona, al tocar su tarjeta', () => {
+  const waiter = {
+    id: '2', role: 'waiter', email: 'beto@ev2.mx', phone: '662 123 4567',
+    first_name: 'Beto', last_name: 'Ríos', display_name: 'Beto', stage_name: null,
+    employee_code: 'M-07', hire_date: '2026-05-01T00:00:00.000Z', country: 'MX',
+    active: true, on_shift: true, shift_started_at: '2026-09-06T03:15:00.000Z',
+    last_login_at: '2026-09-06T03:10:00.000Z', must_change_password: false, deactivated_at: null,
+  };
+  const byKey = (rows) => Object.fromEntries(rows.map((r) => [r.key, r]));
+
+  it('trae el teléfono primero, que es para lo que se abre', () => {
+    const rows = Admin.detailsFor(waiter);
+    expect(rows[0]).toEqual({ key: 'staff.phone', type: 'phone', value: '662 123 4567' });
+  });
+
+  it('enseña todos los datos que el servidor manda, en orden', () => {
+    expect(Admin.detailsFor(waiter).map((r) => r.key)).toEqual([
+      'staff.phone', 'staff.email', 'staff.dLegalName', 'staff.dStageName', 'staff.role',
+      'staff.dCode', 'staff.dHireDate', 'staff.dCountry', 'staff.dStatus',
+      'staff.dShiftSince', 'staff.dLastLogin',
+    ]);
+    const d = byKey(Admin.detailsFor(waiter));
+    expect(d['staff.dLegalName'].value).toBe('Beto Ríos');
+    expect(d['staff.role'].value).toBe('waiter');
+    expect(d['staff.dCode'].value).toBe('M-07');
+    expect(d['staff.dCountry'].value).toBe('MX');
+    expect(d['staff.dStatus'].value).toBe('staff.stOnShift');
+    expect(d['staff.dShiftSince'].value).toBe('2026-09-06T03:15:00.000Z');
+  });
+
+  it('la fecha de ingreso es solo el día, sin la hora que agrega Postgres', () => {
+    expect(byKey(Admin.detailsFor(waiter))['staff.dHireDate'].value).toBe('2026-05-01');
+    expect(byKey(Admin.detailsFor({ ...waiter, hire_date: '2026-05-01' }))['staff.dHireDate'].value)
+      .toBe('2026-05-01');
+  });
+
+  it('lo que no está capturado sale vacío, nunca inventado', () => {
+    const d = byKey(Admin.detailsFor({
+      ...waiter, phone: null, employee_code: '  ', hire_date: null, last_login_at: undefined,
+    }));
+    expect(d['staff.phone'].value).toBeNull();
+    expect(d['staff.dCode'].value).toBeNull();
+    expect(d['staff.dHireDate'].value).toBeNull();
+    expect(d['staff.dLastLogin'].value).toBeNull();
+    expect(d['staff.dStageName'].value).toBeNull();
+  });
+
+  it('"en turno desde" solo tiene hora si de verdad está en turno', () => {
+    const d = byKey(Admin.detailsFor({ ...waiter, on_shift: false }));
+    expect(d['staff.dShiftSince'].value).toBeNull();
+    expect(d['staff.dStatus'].value).toBe('staff.stOffShift');
+  });
+
+  it('una baja enseña desde cuándo; un activo no tiene esa fila', () => {
+    expect(Admin.detailsFor(waiter).some((r) => r.key === 'staff.dDeactivatedAt')).toBe(false);
+    const gone = byKey(Admin.detailsFor({
+      ...waiter, active: false, on_shift: true, deactivated_at: '2026-08-01T20:00:00.000Z',
+    }));
+    expect(gone['staff.dDeactivatedAt'].value).toBe('2026-08-01T20:00:00.000Z');
+    expect(gone['staff.dStatus'].value).toBe('staff.stInactive');
+    // Una baja no puede estar "en turno" aunque llegue un dato viejo diciendo que sí.
+    expect(gone['staff.dShiftSince'].value).toBeNull();
+  });
+
+  it('no truena con una persona vacía', () => {
+    const rows = Admin.detailsFor(undefined);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(byKey(rows)['staff.phone'].value).toBeNull();
+  });
+});
+
 // --------------------------------------------------------------- turno y tragos
 
 describe('El turno de un empleado', () => {
