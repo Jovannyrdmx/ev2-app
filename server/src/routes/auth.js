@@ -235,15 +235,18 @@ router.post('/pin-login', validate({ body: pinLoginSchema }), asyncHandler(async
   // forma de averiguar PINes ajenos de a uno por intento.
   if (!user) throw ApiError.unauthorized('PIN incorrecto');
 
-  // La gerencia, solo desde la red del club. Aqui SI se distingue el mensaje: quien
-  // llego hasta aca ya demostro saber un PIN valido, asi que no hay nada que filtrar,
-  // y un gerente que no entiende por que su PIN no sirve desde su casa merece que se
-  // lo digan.
-  const esGerencia = user.role === 'manager' || user.role === 'admin';
-  if (esGerencia && !clubNetwork.isInsideClub(req.ip)) {
+  // El administrador, solo desde la red del club. Aqui SI se distingue el mensaje:
+  // quien llego hasta aca ya demostro saber un PIN valido, asi que no hay nada que
+  // filtrar.
+  //
+  // El gerente entra con su PIN desde donde sea, igual que el resto del personal
+  // (D78, decision del dueno). Lo que lo protege es lo mismo que al piso: el freno
+  // por intentos, una sola sesion abierta y el PIN de un solo uso al darlo de alta.
+  const esAdmin = user.role === 'admin';
+  if (esAdmin && !clubNetwork.isInsideClub(req.ip)) {
     throw ApiError.forbidden(clubNetwork.isConfigured()
-      ? 'La gerencia entra con PIN solo desde la red del club. Desde fuera, usa tu correo y contraseña.'
-      : 'El acceso con PIN para la gerencia no está habilitado en este servidor. Usa tu correo y contraseña.');
+      ? 'El administrador entra con PIN solo desde la red del club. Desde fuera, usa tu correo y contraseña.'
+      : 'El acceso con PIN para el administrador no está habilitado en este servidor. Usa tu correo y contraseña.');
   }
 
   // Una sola sesion abierta (decision del dueno). Ademas de lo que pidio, esto es una

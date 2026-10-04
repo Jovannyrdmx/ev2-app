@@ -201,7 +201,7 @@ async function recordAttempt(runner, {
 
 // ---------------------------------------------------------------- entrar y cambiar
 
-/** Los roles que entran con PIN. La gerencia, solo desde la red del club (ver rutas). */
+/** Los roles que entran con PIN. El administrador, solo desde la red del club (ver rutas; D78). */
 const PIN_ROLES = ['waiter', 'bartender', 'cashier', 'dancer', 'dj', 'light_tech', 'valet',
   'hostess', 'warehouse', 'driver', 'manager', 'admin'];
 

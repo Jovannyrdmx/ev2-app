@@ -25,16 +25,17 @@
   /**
    * Qué roles puede dar de alta quien está viendo la pantalla.
    *
-   * El gerente da de alta piso. Al gerente lo nombra el administrador, y a nadie más:
-   * un gerente que puede crear gerentes puede crearse un cómplice, y desde ese momento
-   * el permiso de gerente —caja, precios, retiros, nómina— ya no protege nada. El
-   * servidor lo revisa otra vez; esto solo evita ofrecer una opción que va a fallar.
+   * El gerente y el administrador dan de alta piso y gerentes (D78). El servidor lo
+   * revisa otra vez y deja constancia de quién nombró a cada gerente; esto solo evita
+   * ofrecer una opción que va a fallar.
    *
    * `admin` no aparece nunca: ese rol solo se da desde la consola del servidor
    * (`npm run promote`), que es lo que lo hace valer algo.
    */
   function creatableRoles(viewerRole) {
-    return viewerRole === 'admin'
+    // Desde D78 un gerente también da de alta gerentes; tocar la cuenta de un gerente
+    // que ya existe sigue siendo solo del administrador (lo cuida el servidor).
+    return ['admin', 'manager'].includes(viewerRole)
       ? EMPLOYEE_ROLES.concat(MANAGER_ROLE)
       : EMPLOYEE_ROLES.slice();
   }

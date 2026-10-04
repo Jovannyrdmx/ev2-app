@@ -139,23 +139,24 @@ describe('El personal, visto por el gerente', () => {
     expect(Admin.validateEmployee(sinTelefono, NOW)).toEqual({});
   });
 
-  // Un gerente que puede nombrar gerentes puede nombrarse un cómplice, y desde ese
-  // momento el permiso de gerente —caja, precios, retiros, nómina— ya no protege nada.
-  it('solo el administrador puede ofrecer el alta de un gerente', () => {
-    expect(Admin.creatableRoles('manager')).not.toContain('manager');
+  // Desde D78 el gerente y el administrador dan de alta gerentes. El piso, no.
+  it('el gerente y el administrador pueden ofrecer el alta de un gerente', () => {
+    expect(Admin.creatableRoles('manager')).toContain('manager');
     expect(Admin.creatableRoles('admin')).toContain('manager');
     // `admin` no se da por ninguna pantalla: solo desde la consola del servidor.
     expect(Admin.creatableRoles('admin')).not.toContain('admin');
+    expect(Admin.creatableRoles('manager')).not.toContain('admin');
     // Sin saber quién mira, la lista es la de piso: equivocarse hacia el lado que da
     // menos permiso es lo correcto.
     expect(Admin.creatableRoles(undefined)).toEqual(Admin.EMPLOYEE_ROLES);
+    expect(Admin.creatableRoles('waiter')).toEqual(Admin.EMPLOYEE_ROLES);
   });
 
-  it('el alta de un gerente se rechaza si quien la captura no es administrador', () => {
+  it('el alta de un gerente la acepta la gerencia; nadie captura un administrador', () => {
     const gerente = { ...good, role: 'manager' };
-    expect(Admin.validateEmployee(gerente, NOW, 'manager')).toMatchObject({ role: 'staff.errRole' });
+    expect(Admin.validateEmployee(gerente, NOW, 'manager')).toEqual({});
     expect(Admin.validateEmployee(gerente, NOW, 'admin')).toEqual({});
-    // Y `admin` no se captura nunca, ni siendo administrador.
+    expect(Admin.validateEmployee(gerente, NOW, undefined)).toMatchObject({ role: 'staff.errRole' });
     expect(Admin.validateEmployee({ ...good, role: 'admin' }, NOW, 'admin'))
       .toMatchObject({ role: 'staff.errRole' });
   });

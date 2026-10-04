@@ -112,9 +112,9 @@ describe('Alta de empleados', () => {
   });
 });
 
-// Un gerente que puede nombrar gerentes puede nombrarse un cómplice, y desde ahí el
-// permiso de gerente —caja, precios, retiros, nómina— ya no protege nada. Estas
-// pruebas cuidan justo esa puerta, en las cuatro formas de abrirla.
+// Desde D78 un gerente también da de alta gerentes (decisión del dueño). Lo que sigue
+// cerrado es tocar la cuenta de un gerente que ya existe: eso es tomársela, y solo lo
+// hace el administrador. Estas pruebas cuidan las dos mitades.
 describe('Alta y manejo de gerentes', () => {
   let admin;
 
@@ -127,9 +127,29 @@ describe('Alta y manejo de gerentes', () => {
     first_name: 'Ana', last_name: 'Solís', role: 'manager', birth_date: '1990-02-11', ...over,
   });
 
-  it('un gerente no puede crear otro gerente; el administrador sí', async () => {
-    expect((await nuevoGerente(manager)).status).toBe(403);
+  it('un gerente da de alta a otro gerente, con su PIN como el resto del personal (D78)', async () => {
+    const res = await nuevoGerente(manager);
+    expect(res.status).toBe(201);
+    expect(res.body.employee).toMatchObject({ role: 'manager', has_pin: true, must_change_pin: true });
+    expect(res.body.pin).toMatch(/^\d{6}$/);
+    // Y su contraseña temporal, para entrar al panel con correo si hace falta.
+    expect(res.body.temporary_password).toMatch(/^[A-Za-z0-9]{12}$/);
 
+    // Queda escrito QUIÉN lo nombró.
+    const { rows } = await pool.query(
+      `SELECT actor_id FROM audit_log WHERE action = 'manager_created' AND entity_id = $1`,
+      [res.body.employee.id]);
+    expect(rows.map((r) => r.actor_id)).toEqual([manager.id]);
+
+    // Y entra con ese PIN, desde donde sea, sin depender de la red del club.
+    delete process.env.CLUB_NETWORKS;
+    const entrada = await api().post('/api/auth/pin-login')
+      .send({ nightclub_slug: club.slug, pin: res.body.pin });
+    expect(entrada.status).toBe(200);
+    expect(entrada.body.user.role).toBe('manager');
+  });
+
+  it('el administrador también da de alta gerentes', async () => {
     const res = await nuevoGerente(admin);
     expect(res.status).toBe(201);
     expect(res.body.employee).toMatchObject({ role: 'manager', active: true, must_change_password: true });
@@ -182,11 +202,18 @@ describe('Alta y manejo de gerentes', () => {
       .toEqual([['manager', 'waiter'], ['waiter', 'manager']]);
   });
 
-  it('un gerente no se asciende a sí mismo por el parche', async () => {
+  it('un gerente puede ascender a alguien del piso a gerente, y queda registrado (D78)', async () => {
     const res = await api().patch(url(`/employees/${waiter.id}`)).set(auth(manager)).send({ role: 'manager' });
-    expect(res.status).toBe(403);
-    const { rows } = await pool.query('SELECT role FROM users WHERE id = $1', [waiter.id]);
-    expect(rows[0].role).toBe('waiter');
+    expect(res.status).toBe(200);
+    expect(res.body.employee.role).toBe('manager');
+    const { rows } = await pool.query(
+      `SELECT actor_id FROM audit_log WHERE action = 'manager_role_changed' AND entity_id = $1`,
+      [waiter.id]);
+    expect(rows.map((r) => r.actor_id)).toEqual([manager.id]);
+  });
+
+  it('el piso sigue sin poder nombrar gerentes', async () => {
+    expect((await nuevoGerente(waiter)).status).toBe(403);
   });
 });
 

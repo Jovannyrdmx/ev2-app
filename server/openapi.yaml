@@ -3919,10 +3919,11 @@ paths:
         - **El freno es por club, no por cuenta ni por IP.** A partir de 30 fallos en 10
           minutos en ese club cada intento tarda 2 s, y a partir de 100, 5 s. Nunca
           bloquea: dejar fuera al turno entero la noche del sábado es peor que el ataque.
-        - **La gerencia solo desde la red del club** (`CLUB_NETWORKS` en el `.env`). Desde
-          fuera, `manager` y `admin` reciben 403 y entran con correo y contraseña. Ahí sí
-          se distingue el mensaje: quien llegó hasta ese punto ya demostró saber un PIN
-          válido, así que no hay nada que filtrar.
+        - **El administrador solo desde la red del club** (`CLUB_NETWORKS` en el `.env`).
+          Desde fuera, `admin` recibe 403 y entra con correo y contraseña. Ahí sí se
+          distingue el mensaje: quien llegó hasta ese punto ya demostró saber un PIN
+          válido, así que no hay nada que filtrar. El gerente (`manager`) entra con su PIN
+          desde donde sea, igual que el resto del personal (D78).
 
         Entrar **cierra las demás sesiones** de esa persona: es lo que el dueño pidió, y
         además es la única señal que tiene el club de que un PIN se filtró — al empleado
@@ -4847,8 +4848,11 @@ paths:
       tags: [Empleados]
       summary: Dar de alta a un empleado
       description: |
-        Requiere rol `manager`. Devuelve una **contraseña temporal una sola vez**; el
-        empleado debe cambiarla al entrar. Nunca se guarda en claro.
+        Requiere rol `manager` (o `admin`). Devuelve el **PIN de seis dígitos una sola
+        vez**, de un solo uso: el empleado lo cambia al entrar. Un gerente nuevo
+        (`role: manager`) lo puede dar de alta un gerente o el administrador (D78);
+        además del PIN recibe una contraseña temporal, también una sola vez, y el alta
+        queda en `audit_log`. Nada se guarda en claro.
       parameters: [{ $ref: '#/components/parameters/NightclubId' }]
       requestBody:
         required: true
@@ -4864,7 +4868,13 @@ paths:
                 type: object
                 properties:
                   employee: { $ref: '#/components/schemas/Employee' }
-                  temporary_password: { type: string, description: Se muestra solo aquí. }
+                  pin:
+                    type: string
+                    pattern: '^\d{6}$'
+                    description: El PIN de un solo uso. Se muestra solo aquí.
+                  temporary_password:
+                    type: string
+                    description: Solo para gerentes. Se muestra solo aquí.
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
           description: Ya existe una cuenta con ese correo

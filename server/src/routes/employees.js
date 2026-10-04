@@ -24,26 +24,33 @@ const router = express.Router({ mergeParams: true });
 const EMPLOYEE_ROLES = ['waiter', 'bartender', 'cashier', 'dancer', 'dj', 'light_tech', 'valet', 'hostess'];
 
 /**
- * `manager` se puede dar de alta por aquí, pero solo el administrador puede hacerlo.
+ * `manager` se puede dar de alta por aquí, y desde D78 lo puede hacer un gerente o el
+ * administrador (decisión del dueño). Lo que hace seguro abrirlo:
  *
- * No es simetría con los demás roles: un gerente que puede nombrar gerentes puede
- * nombrarse un cómplice, y a partir de ahí el permiso de gerente ya no protege nada
- * —caja, precios, retiros, nómina—. El administrador es el dueño del club, y su rol
- * no lo da ninguna pantalla: solo `npm run promote` en la consola del servidor.
+ *   * Cada alta o ascenso a gerente queda en `audit_log` con quién lo hizo.
+ *   * Un gerente sigue SIN poder tocar la cuenta de otro gerente —quitarle el rol,
+ *     darlo de baja, reiniciarle contraseña o PIN—: eso es tomarle la cuenta, y solo
+ *     lo hace el administrador (`mayTouchManager`).
  *
  * `admin` NO está en la lista. Que la única forma de crear un administrador sea tener
- * acceso a la máquina es justo lo que hace que el rol signifique algo.
+ * acceso a la máquina (`npm run promote`) es justo lo que hace que el rol signifique algo.
  */
 const MANAGER_ROLE = 'manager';
 const CREATABLE_ROLES = [...EMPLOYEE_ROLES, MANAGER_ROLE];
 
-/** Quien pide el alta o el cambio, ¿puede otorgar este rol? */
+/** Quien pide el alta o el cambio, ¿puede otorgar este rol? (D78: gerente o admin) */
 function mayGrant(requester, role) {
   if (role !== MANAGER_ROLE) return true;
-  return requester && requester.role === 'admin';
+  return Boolean(requester) && ['manager', 'admin'].includes(requester.role);
 }
 
-const ONLY_ADMIN = 'Solo el administrador puede dar de alta o nombrar gerentes';
+/** ¿Puede tocar la cuenta de alguien que YA es gerente? Solo el administrador. */
+function mayTouchManager(requester) {
+  return Boolean(requester) && requester.role === 'admin';
+}
+
+const ONLY_MANAGEMENT = 'Solo la gerencia o el administrador pueden dar de alta o nombrar gerentes';
+const ONLY_ADMIN = 'Solo el administrador puede cambiar la cuenta de otro gerente';
 
 const EMPLOYEE_SELECT = `
   SELECT u.id, u.email, u.phone, u.first_name, u.last_name, u.display_name, u.role, u.status,
@@ -113,7 +120,7 @@ router.post('/nightclubs/:nightclubId/employees',
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
     const b = req.body;
-    if (!mayGrant(req.user, b.role)) throw ApiError.forbidden(ONLY_ADMIN);
+    if (!mayGrant(req.user, b.role)) throw ApiError.forbidden(ONLY_MANAGEMENT);
     if (!pins.isConfigured()) {
       throw ApiError.notImplemented('No se le puede generar un PIN a un empleado nuevo. '
         + pins.configProblem());
@@ -223,7 +230,7 @@ router.patch('/nightclubs/:nightclubId/employees/:userId',
   asyncHandler(async (req, res) => {
     const { nightclubId, userId } = req.params;
     const b = req.body;
-    if (!mayGrant(req.user, b.role)) throw ApiError.forbidden(ONLY_ADMIN);
+    if (!mayGrant(req.user, b.role)) throw ApiError.forbidden(ONLY_MANAGEMENT);
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -241,7 +248,7 @@ router.patch('/nightclubs/:nightclubId/employees/:userId',
       const esGerente = cur.rows[0].role === MANAGER_ROLE;
       const tocaLaCuenta = Boolean(b.role) || b.active === false
         || b.reset_password === true || b.reset_pin === true;
-      if (esGerente && tocaLaCuenta && !mayGrant(req.user, MANAGER_ROLE)) {
+      if (esGerente && tocaLaCuenta && !mayTouchManager(req.user)) {
         throw ApiError.forbidden(ONLY_ADMIN);
       }
 

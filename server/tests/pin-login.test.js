@@ -231,20 +231,20 @@ describe('El freno del club', () => {
   });
 });
 
-describe('La gerencia: PIN en el club, contraseña desde fuera', () => {
-  it('sin CLUB_NETWORKS configurada, el gerente NO entra con PIN en ningún lado', async () => {
+describe('El administrador: PIN en el club; el gerente, desde donde sea (D78)', () => {
+  it('sin CLUB_NETWORKS configurada, el administrador NO entra con PIN en ningún lado', async () => {
     // Falla hacia el lado seguro a propósito: un servidor recién instalado no debe
-    // quedar aceptando PINes de gerente desde internet.
-    await darPin(manager.id, '481937');
+    // quedar aceptando el PIN del dueño desde internet.
+    await darPin(admin.id, '481937');
     const res = await entrar('481937');
     expect(res.status).toBe(403);
     expect(res.body.error.message).toMatch(/no está habilitado/i);
   });
 
-  it('con la red del club configurada, entra desde adentro', async () => {
+  it('con la red del club configurada, el administrador entra desde adentro', async () => {
     // supertest llega como 127.0.0.1, así que esa es "la red del club" en la prueba.
     process.env.CLUB_NETWORKS = '127.0.0.0/8';
-    await darPin(manager.id, '481937');
+    await darPin(admin.id, '481937');
     expect((await entrar('481937')).status).toBe(200);
   });
 
@@ -254,6 +254,19 @@ describe('La gerencia: PIN en el club, contraseña desde fuera', () => {
     const res = await entrar('205864');
     expect(res.status).toBe(403);
     expect(res.body.error.message).toMatch(/red del club/i);
+  });
+
+  it('el gerente entra con su PIN aunque no haya red del club configurada', async () => {
+    await darPin(manager.id, '481937');
+    const res = await entrar('481937');
+    expect(res.status).toBe(200);
+    expect(res.body.user.role).toBe('manager');
+  });
+
+  it('y aunque esté fuera de la red del club', async () => {
+    process.env.CLUB_NETWORKS = '187.234.11.90';
+    await darPin(manager.id, '481937');
+    expect((await entrar('481937')).status).toBe(200);
   });
 
   it('el piso entra desde donde sea: esto no le aplica', async () => {
