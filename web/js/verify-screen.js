@@ -46,7 +46,7 @@
     rows.innerHTML = view.rows.map((row) => `
       <div class="flex justify-between gap-3 py-2 text-sm">
         <dt class="text-white/50">${esc(t(row.labelKey))}</dt>
-        <dd class="text-right">${esc(row.value)}</dd>
+        <dd class="text-right">${esc(row.valueKey ? t(row.valueKey) : row.value)}</dd>
       </div>`).join('');
 
     $('verify-issued').textContent = view.issuedAt

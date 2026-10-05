@@ -141,12 +141,40 @@ function certificate(row, { nightclubName }) {
         description: [row.vehicle_make, row.vehicle_model].filter(Boolean).join(' ') || null,
       }
       : null,
+    mode: 'taxi',
     disclaimer: CERTIFICATE_DISCLAIMER,
+  };
+}
+
+/**
+ * Leaving without a club ride (D85): on foot, confirmed by the hostess, or with the
+ * car the valet just delivered. Same shape as the ride certificate, without a driver,
+ * and the disclaimer says who vouches for it: the club's own staff.
+ */
+const DEPARTURE_DISCLAIMER = 'Esta constancia solo acredita que la persona salió del '
+  + 'establecimiento a la hora indicada, confirmado por personal del club. No sustituye '
+  + 'ninguna identificación oficial ni otorga permiso, autorización o efecto legal alguno.';
+
+function departureCertificate(row, { nightclubName }) {
+  const expiresAt = row.expires_at ? new Date(row.expires_at) : null;
+  return {
+    folio: row.folio,
+    nightclub: nightclubName,
+    issued_at: row.confirmed_at,
+    expires_at: row.expires_at,
+    valid: Boolean(expiresAt && expiresAt > new Date()),
+    guest: row.guest_short_name,
+    driver: null,
+    vehicle: row.vehicle_plate
+      ? { plate: row.vehicle_plate, color: null, description: row.vehicle_desc || null }
+      : null,
+    mode: row.mode,
+    disclaimer: DEPARTURE_DISCLAIMER,
   };
 }
 
 module.exports = {
   settingsFor, pickupAverages, availability, quote,
-  generateFolio, normalizeFolio, certificate,
-  LIVE_STATUSES, ETA_CHOICES, CERTIFICATE_DISCLAIMER,
+  generateFolio, normalizeFolio, certificate, departureCertificate,
+  LIVE_STATUSES, ETA_CHOICES, CERTIFICATE_DISCLAIMER, DEPARTURE_DISCLAIMER,
 };

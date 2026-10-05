@@ -519,6 +519,45 @@
           <p id="taxi-pickup" class="text-xs text-white/50 mt-2" hidden></p>
         </div>
 
+        <!--
+          Salir sin taxi (D85): a pie o en el auto de alguien más. El cliente la pide,
+          enseña esta pantalla en la puerta y la hostess la confirma; el folio nace
+          ahí, porque el club solo avala lo que vio su gente. Con valet no hace falta:
+          la constancia sale sola al entregar el auto.
+        -->
+        <div id="dep-card" class="card rounded-xl p-4 space-y-3" hidden>
+          <div id="dep-none" class="space-y-3" hidden>
+            <div>
+              <p class="font-display text-lg" data-i18n="dep.title">¿Te vas sin taxi?</p>
+              <p class="text-sm text-white/60" data-i18n="dep.hint">A pie o en el auto de alguien más: pide tu comprobante de salida y enséñalo a la hostess en la puerta.</p>
+            </div>
+            <button id="btn-dep-request" class="ev2-button w-full py-3 rounded-xl font-display"><i class="fa-solid fa-right-from-bracket mr-2"></i><span data-i18n="dep.request">Salgo por mi cuenta</span></button>
+          </div>
+          <div id="dep-requested" class="space-y-3 text-center" hidden>
+            <p class="text-[11px] uppercase tracking-wider" style="color:var(--ev2-cyan)" data-i18n="dep.waiting">Esperando a la hostess</p>
+            <p id="dep-name" class="font-display text-3xl">—</p>
+            <p class="text-sm text-white/60" data-i18n="dep.showHostess">Muestra esta pantalla a la hostess en la puerta.</p>
+            <button id="btn-dep-cancel" class="w-full py-2 text-sm text-red-300 underline" data-i18n="dep.cancel">Ya no me voy</button>
+          </div>
+          <div id="dep-certificate" class="rounded-lg p-3 space-y-3" style="background:rgba(0,255,0,.07);border:1px solid rgba(0,255,0,.35)" hidden>
+            <div class="text-center">
+              <p class="text-[11px] uppercase tracking-wider" style="color:var(--ev2-lime)" data-i18n="taxi.certificate">Comprobante de salida</p>
+              <p id="dep-cert-state" class="font-display text-sm">—</p>
+              <p id="dep-folio" class="font-display text-2xl tracking-widest my-1">—</p>
+            </div>
+            <dl id="dep-cert-rows" class="divide-y divide-white/5"></dl>
+            <div class="text-[11px] text-white/50 space-y-1">
+              <p id="dep-cert-club"></p>
+              <p id="dep-cert-issued"></p>
+              <p id="dep-cert-expires"></p>
+            </div>
+            <a id="dep-cert-link" href="verificar.html" target="_blank" rel="noopener"
+               class="block text-center text-xs underline" style="color:var(--ev2-cyan)"
+               data-i18n="cert.verifyHere">Verificar este folio</a>
+            <p id="dep-cert-disclaimer" class="text-[11px] text-white/40 leading-snug border-t border-white/10 pt-2"></p>
+          </div>
+        </div>
+
         <!-- El viaje en curso: el coche, el conductor y el comprobante. -->
         <div id="taxi-live" class="card rounded-xl p-4 space-y-3" hidden>
           <div class="flex items-start justify-between gap-3">

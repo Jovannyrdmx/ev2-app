@@ -153,7 +153,12 @@
     const expired = expires !== null && expires <= stamp;
     const vehicle = cert.vehicle || null;
     const rows = [];
-    if (cert.guest) rows.push({ labelKey: 'cert.guest', value: cert.guest });
+    // Sin taxi (D85) no hay pasajero ni conductor: se dice cómo salió la persona.
+    const withoutRide = cert.mode === 'on_foot' || cert.mode === 'valet';
+    if (cert.guest) {
+      rows.push({ labelKey: withoutRide ? 'cert.person' : 'cert.guest', value: cert.guest });
+    }
+    if (withoutRide) rows.push({ labelKey: 'cert.leftBy', valueKey: `cert.mode_${cert.mode}` });
     if (cert.driver) rows.push({ labelKey: 'cert.driver', value: cert.driver });
     if (vehicle && vehicle.plate) rows.push({ labelKey: 'cert.plate', value: vehicle.plate });
     const car = vehicle ? [vehicle.color, vehicle.description].filter(Boolean).join(' ') : '';
@@ -295,6 +300,25 @@
     return { changed: true, refreshRide: rideId, status };
   }
 
+  // ------------------------------------------------------- salida sin taxi (D85)
+
+  /**
+   * En qué va la salida a pie o con valet del cliente: 'none' (puede pedirla),
+   * 'requested' (esperando a la hostess), 'confirmed' (tiene constancia vigente) o
+   * 'expired' (la constancia ya venció: puede pedir otra).
+   */
+  function departureStage(departure, now) {
+    if (!departure) return 'none';
+    if (departure.status === 'requested') return 'requested';
+    if (departure.status !== 'confirmed') return 'none';
+    const expires = toTime(departure.expires_at);
+    return expires !== null && expires <= (now || Date.now()) ? 'expired' : 'confirmed';
+  }
+
+  /** Si un evento del socket toca la salida sin taxi. */
+  const isDepartureEvent = (message) => /^departure_/.test(
+    String((message && (message.event_type || message.type)) || ''));
+
   return {
     LIVE_STATUSES,
     CLOSED_STATUSES,
@@ -320,5 +344,7 @@
     driverView,
     tonightTotal,
     applyEvent,
+    departureStage,
+    isDepartureEvent,
   };
 }));

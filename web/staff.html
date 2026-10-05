@@ -146,6 +146,16 @@
         </div>
 
         <!--
+          Salidas sin taxi por confirmar (D85). El cliente pidió su comprobante y se lo
+          enseña a la hostess; al confirmar nace el folio. Solo aparece cuando hay
+          alguien esperando: la puerta no necesita un panel vacío.
+        -->
+        <div id="dep-panel" class="card rounded-xl p-4 space-y-2" style="border-color:var(--ev2-cyan)" hidden>
+          <p class="text-xs uppercase tracking-wider text-white/40"><span data-i18n="dep.pendingTitle">Salidas por confirmar</span> · <span id="dep-count">0</span></p>
+          <div id="dep-list" class="space-y-2"></div>
+        </div>
+
+        <!--
           El escáner. Va arriba de todo porque es lo primero y casi lo único que se
           usa en la puerta: llega alguien, se lee su pase, entra.
 

@@ -32,6 +32,8 @@
     employee: null, currency: 'MXN', realtime: null, busy: new Set(), arrived: new Set(),
     reservations: [], doorSearch: '', terminals: [],
     doorSummary: null,
+    // Quién pidió su comprobante de salida sin taxi y espera en la puerta (D85).
+    departures: [],
     // El catálogo de covers del club. Antes eran tres números escritos en este archivo:
     // el cadenero cobraba $300 y tecleaba 150, y el corte cuadraba contra un total que
     // él mismo había puesto. Ahora los pone el gerente y el servidor los verifica.
@@ -205,6 +207,7 @@
           (d) => { state.reservations = d.reservations || []; })
         : Promise.resolve(),
       isDoorRole() ? loadDoorSummary() : Promise.resolve(),
+      canConfirmExit() ? loadDepartures() : Promise.resolve(),
       // Los covers del club. Sin catálogo la puerta sigue vendiendo con el importe
       // tecleado (y el servidor lo marca como tecleado); con catálogo, el precio deja
       // de escribirse a mano.
@@ -704,6 +707,50 @@
       boton.disabled = kind === 'vip_extra' && !EV2DoorScan.canSellExtra(scan.last);
     }
   }
+
+  // ---------------------------------------------------------------- salidas sin taxi (D85)
+
+  // Confirmar la salida es de la hostess: es quien está en la puerta viendo salir a la
+  // gente. El gerente no la confirma (el servidor tampoco lo deja).
+  const canConfirmExit = () => ['hostess', 'admin'].includes(api.session.user && api.session.user.role);
+
+  async function loadDepartures() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/departures`);
+      state.departures = data.departures || [];
+    } catch { state.departures = []; }
+    renderDepartures();
+  }
+
+  function renderDepartures() {
+    const list = canConfirmExit() ? state.departures : [];
+    $('dep-panel').hidden = list.length === 0;
+    $('dep-count').textContent = String(list.length);
+    const now = Date.now();
+    $('dep-list').innerHTML = list.map((d) => {
+      const min = Math.max(0, Math.round((now - new Date(d.requested_at).getTime()) / 60000));
+      return `
+        <div class="flex items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2">
+          <div class="min-w-0">
+            <p class="font-display text-lg truncate">${escape(d.guest)}</p>
+            <p class="text-[11px] text-white/45">${escape(t('dep.waited', { min }))}</p>
+          </div>
+          <button data-dep-confirm="${escape(d.id)}" class="ev2-button rounded-lg px-4 py-3 text-sm shrink-0">${escape(t('dep.confirm'))}</button>
+        </div>`;
+    }).join('');
+  }
+
+  $('dep-list').onclick = async (ev) => {
+    const button = ev.target.closest('[data-dep-confirm]');
+    if (!button) return;
+    button.disabled = true;
+    try {
+      const res = await api.post(
+        `/nightclubs/${clubId()}/departures/${button.getAttribute('data-dep-confirm')}/confirm`, {});
+      toast(t('dep.confirmedDoor', { folio: res.departure.folio }), 'ok');
+    } catch (err) { showError(err); }
+    await loadDepartures();
+  };
 
   // ---------------------------------------------------------------- el aforo
 
@@ -1635,6 +1682,11 @@
       // El cobro con terminal se entera por aquí antes que por la consulta: son los
       // segundos en que alguien está mirando la pantalla con el cliente enfrente.
       if (terminalSheet) terminalSheet.onEvent(message);
+      // Alguien pidió (o canceló) su salida sin taxi: la lista de la puerta se refresca.
+      if (/^departure_/.test(String(message && (message.event_type || message.type) || ''))) {
+        if (canConfirmExit()) await loadDepartures();
+        return;
+      }
       // La puerta escucha el mismo socket: una reservación nueva o un cambio de
       // estado tiene que aparecer sin que la anfitriona jale la pantalla.
       if (EV2Door.affectsDoor(message)) {

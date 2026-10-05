@@ -28,6 +28,7 @@ const { authenticate, requireRole, sameNightclub } = require('../middleware/auth
 const { temporaryPassword } = require('../services/credentials');
 const events = require('../services/events');
 const taxi = require('../services/taxi');
+const departures = require('../services/departures');
 
 const router = express.Router({ mergeParams: true });
 
@@ -1277,6 +1278,11 @@ router.get('/taxi/verify/:folio', verifyLimiter,
         WHERE r.conduct_code = $1`,
       [taxi.normalizeFolio(req.params.folio)]);
     if (rows.length === 0) {
+      // Not a ride: maybe a departure on foot or with valet (D85). Same format, one page.
+      const departure = await departures.byFolio(pool, taxi.normalizeFolio(req.params.folio));
+      if (departure) {
+        return res.json({ certificate: departures.certificate(departure, departure.nightclub_name) });
+      }
       return res.status(404).json({
         error: {
           code: 'not_found',

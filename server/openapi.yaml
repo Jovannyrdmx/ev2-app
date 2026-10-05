@@ -6740,6 +6740,7 @@ paths:
         Sin sesión: quien tiene el folio impreso puede comprobarlo. Devuelve el mínimo que
         hace útil la comprobación —club, hora de salida, vigencia, nombre corto del pasajero
         y el auto— y **nunca** el destino, el monto, el teléfono ni el apellido completo.
+        Verifica también las salidas sin taxi (a pie o con valet, D85): mismo formato de folio.
         Limitado a 20 peticiones por minuto.
       security: []
       parameters:
@@ -6755,6 +6756,141 @@ paths:
                   certificate: { $ref: '#/components/schemas/DepartureCertificate' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/nightclubs/{nightclubId}/departures:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listPendingDepartures
+      tags: [Taxi y salida segura]
+      summary: Salidas sin taxi por confirmar (hostess y gerente)
+      description: |
+        Las solicitudes abiertas, la más antigua primero. Una que nadie confirmó dentro del
+        tiempo de espera del taxi (`request_timeout_minutes`) se cierra sola como `expired`.
+      responses:
+        '200':
+          description: Pendientes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  departures:
+                    type: array
+                    items: { $ref: '#/components/schemas/GuestDeparture' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: requestDeparture
+      tags: [Taxi y salida segura]
+      summary: Salgo por mi cuenta (cliente)
+      description: |
+        Abre la solicitud de constancia de salida sin taxi. Si ya hay una abierta, la
+        devuelve (200) en lugar de crear otra. El folio nace cuando la hostess confirma.
+      responses:
+        '200':
+          description: Ya había una solicitud abierta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  departure: { $ref: '#/components/schemas/GuestDeparture' }
+        '201':
+          description: Solicitud creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  departure: { $ref: '#/components/schemas/GuestDeparture' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/departures/mine:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: getMyDeparture
+      tags: [Taxi y salida segura]
+      summary: Mi salida sin taxi
+      description: La solicitud abierta o, si no hay, la última constancia vigente.
+      responses:
+        '200':
+          description: Salida actual
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  departure:
+                    oneOf:
+                      - { $ref: '#/components/schemas/GuestDeparture' }
+                      - { type: 'null' }
+                  certificate:
+                    oneOf:
+                      - { $ref: '#/components/schemas/DepartureCertificate' }
+                      - { type: 'null' }
+
+  /api/nightclubs/{nightclubId}/departures/{departureId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - { name: departureId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: cancelDeparture
+      tags: [Taxi y salida segura]
+      summary: Cancelar mi solicitud de salida
+      responses:
+        '200':
+          description: Cancelada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  departure: { $ref: '#/components/schemas/GuestDeparture' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/departures/{departureId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - { name: departureId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: confirmDeparture
+      tags: [Taxi y salida segura]
+      summary: Confirmar la salida (solo hostess)
+      description: La hostess vio salir a la persona; aquí nace el folio de la constancia.
+      responses:
+        '200':
+          description: Confirmada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  departure: { $ref: '#/components/schemas/GuestDeparture' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/departures/{departureId}/certificate:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - { name: departureId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getGuestDepartureCertificate
+      tags: [Taxi y salida segura]
+      summary: Constancia de una salida sin taxi (su dueño o el gerente)
+      responses:
+        '200':
+          description: Constancia
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  certificate: { $ref: '#/components/schemas/DepartureCertificate' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /api/nightclubs/{nightclubId}/valet-settings:
     parameters:
@@ -7196,6 +7332,11 @@ paths:
                 type: object
                 properties:
                   ticket: { $ref: '#/components/schemas/ValetTicket' }
+                  departure_folio:
+                    type: [string, 'null']
+                    description: |
+                      Folio de la constancia de salida que se emitió al entregar (D85). Null
+                      cuando el ticket no está ligado a la cuenta de un cliente.
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -13184,7 +13325,30 @@ components:
           oneOf:
             - { $ref: '#/components/schemas/RideVehicle' }
             - { type: 'null' }
+        mode:
+          type: string
+          enum: [taxi, on_foot, valet]
+          description: |
+            Cómo salió la persona. `on_foot` la confirmó la hostess en la puerta; `valet` se
+            emitió al entregar el auto con el QR del ticket (D85).
         disclaimer: { type: string }
+
+    GuestDeparture:
+      type: object
+      description: Salida sin taxi (D85). El folio existe solo cuando ya está confirmada.
+      properties:
+        id: { type: string, format: uuid }
+        mode: { type: string, enum: [on_foot, valet] }
+        status: { type: string, enum: [requested, confirmed, canceled] }
+        guest: { type: string, description: 'Nombre e inicial del apellido.' }
+        vehicle_plate: { type: [string, 'null'] }
+        folio: { type: [string, 'null'] }
+        requested_at: { type: string, format: date-time }
+        confirmed_at: { type: [string, 'null'], format: date-time }
+        expires_at: { type: [string, 'null'], format: date-time }
+        canceled_at: { type: [string, 'null'], format: date-time }
+        cancel_reason: { type: [string, 'null'], enum: [guest, expired, superseded, null] }
+        confirmed_by_name: { type: [string, 'null'], description: Solo para el gerente. }
 
     TaxiStats:
       type: object

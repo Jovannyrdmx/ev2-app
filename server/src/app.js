@@ -33,6 +33,7 @@ const tipRoutes = require('./routes/tips');
 const lostFoundRoutes = require('./routes/lost-found');
 const shiftRoutes = require('./routes/shifts');
 const taxiRoutes = require('./routes/taxi');
+const departureRoutes = require('./routes/departures');
 const valetRoutes = require('./routes/valet');
 const posRoutes = require('./routes/pos');
 const paymentRoutes = require('./routes/payments');
@@ -231,6 +232,7 @@ function createApp() {
   app.use('/api', lostFoundRoutes);
   app.use('/api', shiftRoutes);
   app.use('/api', taxiRoutes);
+  app.use('/api', departureRoutes);
   app.use('/api', valetRoutes);
   app.use('/api', posRoutes);
   app.use('/api', paymentRoutes);

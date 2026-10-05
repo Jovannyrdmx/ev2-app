@@ -18,6 +18,7 @@ const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, pagination, currency } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const events = require('../services/events');
+const departures = require('../services/departures');
 const valet = require('../services/valet');
 
 const router = express.Router({ mergeParams: true });
@@ -552,10 +553,11 @@ router.post('/nightclubs/:nightclubId/valet/tickets/:ticketId/deliver',
   asyncHandler(async (req, res) => {
     const { nightclubId, ticketId } = req.params;
     const client = await pool.connect();
+    let departure = null;
     try {
       await client.query('BEGIN');
       const current = await client.query(
-        `SELECT id, qr_token, status, user_id, fee, currency
+        `SELECT id, qr_token, status, user_id, fee, currency, plate, vehicle_desc
            FROM valet_tickets WHERE id = $1 AND nightclub_id = $2 FOR UPDATE`,
         [ticketId, nightclubId]);
       if (current.rowCount === 0) throw ApiError.notFound('Ticket no encontrado');
@@ -593,6 +595,11 @@ router.post('/nightclubs/:nightclubId/valet/tickets/:ticketId/deliver',
                 valet_out_id = $2, transaction_id = $3, updated_at = now()
           WHERE id = $1`,
         [ticketId, req.user.id, transactionId]);
+      // The car went out with its owner and the QR matched: that is the departure,
+      // seen by club staff, so the certificate is issued right here (D85).
+      departure = await departures.issueForValet(client, {
+        nightclubId, ticket, staffId: req.user.id,
+      });
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -610,7 +617,18 @@ router.post('/nightclubs/:nightclubId/valet/tickets/:ticketId/deliver',
         payload: { ticket_id: ticketId, code: full.rows[0].code },
       });
     }
-    res.json({ ticket: presentTicket(full.rows[0], isManager(req.user) ? 'manager' : 'staff') });
+    if (departure) {
+      await events.publish({
+        nightclubId,
+        type: 'departure_confirmed',
+        audience: { userIds: [departure.user_id], roles: ['manager'] },
+        payload: { departure_id: departure.id, folio: departure.folio, expires_at: departure.expires_at },
+      });
+    }
+    res.json({
+      ticket: presentTicket(full.rows[0], isManager(req.user) ? 'manager' : 'staff'),
+      departure_folio: departure ? departure.folio : null,
+    });
   }));
 
 /**
