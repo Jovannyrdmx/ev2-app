@@ -126,6 +126,16 @@ router.post('/nightclubs/:nightclubId/shifts/me/cash-drops',
       client.release();
     }
 
+    // El papel del retiro (D81), fuera de la transacción: el retiro ya está hecho.
+    let ticket = null;
+    try {
+      ticket = await tickets.printCashDrop(pool, {
+        nightclubId, dropId: hecho.id, userId: req.user.id,
+      });
+    } catch (err) {
+      req.log?.warn?.({ err }, 'no se pudo imprimir el retiro');
+    }
+
     await events.publish({
       nightclubId,
       type: 'cash_withdrawn',
@@ -139,7 +149,10 @@ router.post('/nightclubs/:nightclubId/shifts/me/cash-drops',
         authorized_by: autoriza.name,
       },
     });
-    res.status(201).json({ withdrawal: hecho });
+    res.status(201).json({
+      withdrawal: hecho,
+      ticket: ticket ? { job_id: ticket.id, status: ticket.status } : null,
+    });
   }));
 
 /**

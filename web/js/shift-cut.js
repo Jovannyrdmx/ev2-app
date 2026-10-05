@@ -319,9 +319,11 @@
             amount: monto, reason: motivo.trim(), manager_pin: pin,
           });
           if (deps.toast) {
-            deps.toast(t('cut.dropSent', {
+            // El ticket del retiro (D81): si no salió, se dice junto con el aviso.
+            const sinPapel = hecho.ticket === null;
+            deps.toast(t(sinPapel ? 'cut.dropSentNoTicket' : 'cut.dropSent', {
               name: (hecho.withdrawal && hecho.withdrawal.authorized_by) || '',
-            }), 'ok');
+            }), sinPapel ? 'warn' : 'ok');
           }
         } else {
           const hecho = await api.post(`/nightclubs/${clubId()}/shifts/me/closing`, {

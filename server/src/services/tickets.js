@@ -838,6 +838,76 @@ async function printShiftCut(runner, { nightclubId, closingId, userId = null }) 
   return job;
 }
 
+// ---------------------------------------------------------------- el retiro de efectivo
+
+/** Lo que va en el ticket de un retiro parcial (D81): sale del renglón ya escrito. */
+async function dropData(runner, { nightclubId, dropId }) {
+  const { rows } = await runner.query(
+    `SELECT d.id::text AS id, d.amount::text AS amount, d.currency, d.reason,
+            d.created_at, d.authorized_role,
+            u.display_name AS user_name, u.role,
+            a.display_name AS authorized_by_name,
+            s.section, s.location_id::text AS location_id,
+            l.name AS location_name
+       FROM shift_cash_drops d
+       JOIN users u ON u.id = d.user_id
+       JOIN staff_shifts s ON s.id = d.shift_id
+       LEFT JOIN users a ON a.id = d.authorized_by
+       LEFT JOIN supply_locations l ON l.id = s.location_id
+      WHERE d.id = $1 AND d.nightclub_id = $2`,
+    [dropId, nightclubId]);
+  return rows[0] || null;
+}
+
+function renderDrop(t, data, { club, settings }) {
+  header(t, club, settings);
+  t.center().bold().tall('RETIRO DE EFECTIVO').normal().boldOff().left();
+  t.row(`Folio ${folio(data.id)}`, localTime(data.created_at, club.timezone));
+  t.rule();
+  t.line(`${data.user_name} · ${ROLE_LABEL[data.role] || data.role}`);
+  if (data.location_name) t.line(`Caja: ${data.location_name}`);
+  else if (data.section) t.line(`Zona: ${data.section}`);
+  t.blank();
+  t.line(`Motivo: ${data.reason || '—'}`);
+  if (data.authorized_by_name) {
+    t.line(`Autorizó: ${data.authorized_by_name} (${ROLE_LABEL[data.authorized_role] || data.authorized_role || ''})`);
+  }
+  t.rule();
+  t.bold().big(money(data.amount, data.currency)).normal().boldOff();
+  t.blank(2).line('_______________________').line(data.user_name || '');
+  t.blank(2).line('_______________________').line(data.authorized_by_name || '');
+  footer(t, settings);
+  t.blank(2).cut();
+}
+
+/**
+ * El ticket del retiro, después de asentarlo (D81).
+ *
+ * Igual que el corte: fuera de la transacción, porque el retiro ya pasó —el dinero
+ * salió y el gerente lo autorizó— y si la impresora falla se arregla la impresora.
+ * Sale en la impresora de la caja; si no tiene, en la de servicio de su barra o zona.
+ */
+async function printCashDrop(runner, { nightclubId, dropId, userId = null }) {
+  const data = await dropData(runner, { nightclubId, dropId });
+  if (!data) return null;
+  const printer = (data.location_id && await printing.resolvePrinter(runner, {
+    nightclubId, purpose: 'till', locationId: data.location_id,
+  })) || await printing.resolvePrinter(runner, {
+    nightclubId, purpose: 'service', section: data.section, locationId: data.location_id || null,
+  });
+  if (!printer) return null;
+  const club = await clubOf(runner, nightclubId);
+  const settings = await printing.settingsOf(runner, nightclubId);
+  return printing.enqueue(runner, {
+    nightclubId,
+    printer,
+    kind: 'cash_drop',
+    refId: dropId,
+    createdBy: userId,
+    ...build(printer, (t) => renderDrop(t, data, { club, settings })),
+  });
+}
+
 // ---------------------------------------------------------------- armar
 
 /**
@@ -865,5 +935,6 @@ module.exports = {
   billWindow, billData, renderBill, printBill,
   receiptData, renderReceipt, printReceipt,
   cutData, renderCut, printShiftCut, ROLE_LABEL,
+  dropData, renderDrop, printCashDrop,
   build,
 };

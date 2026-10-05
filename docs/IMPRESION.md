@@ -212,7 +212,8 @@ hace que el corte del turno cuadre sin discutir.
 | **Comanda** | Se **paga** un pedido — pagar es lo que lo manda a la barra | `orders` de esa barra | Mesa en grande, cantidades en columna, **sin precios** |
 | **Cuenta** | El mesero pica "Cuenta" | `service` de esa barra | Todo lo de la mesa, lo pagado y lo que falta |
 | **Recibo** | Entra el dinero, por cualquiera de los tres caminos | `service` de esa barra | Método de pago, folio del voucher, "PAGADO" |
-| **Corte de turno** | El empleado cierra su turno, con un gerente autorizando | `service` de esa barra | Cobros por método, propinas aparte, retiros con su motivo, esperado/declarado/contado y las dos firmas |
+| **Retiro de efectivo** (D81) | El cajero retira efectivo con el PIN del gerente | `till` de su caja (si no tiene, `service` de su barra) | Monto, motivo, quién autorizó y las dos firmas |
+| **Corte de turno** | El empleado cierra su turno, con un gerente autorizando | `till` de su caja (si no tiene, `service` de su barra) | Cobros por método, propinas aparte, retiros con su motivo, esperado/declarado/contado y las dos firmas |
 
 ### La comanda lleva precios, y dice si ya se pagó
 

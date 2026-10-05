@@ -605,3 +605,55 @@ describe('El cobro dice si su recibo salió (D79)', () => {
     expect(r2.body.receipt).toMatchObject({ status: 'pending' });
   });
 });
+
+// ============================================================================
+// D81: el retiro parcial y el corte de la caja salen en papel
+// ============================================================================
+
+describe('Los tickets del retiro y del corte de la caja (D81)', () => {
+  const retirar = (body) => api().post(url('/shifts/me/cash-drops')).set(auth(cajero))
+    .send({ amount: 500, reason: 'Retiro para el banco', manager_pin: pinGerente, ...body });
+  const trabajos = async (kind) => (await pool.query(
+    'SELECT printer_id::text AS printer_id, preview FROM print_jobs WHERE kind = $1', [kind])).rows;
+
+  beforeEach(async () => {
+    await asignar(cajero, club.bar_id);
+    await abrirCaja(); // fondo 1000
+  });
+
+  it('el retiro sale en la impresora de la caja, con monto, motivo y quién autorizó', async () => {
+    const caja = (await api().post(url('/printers')).set(auth(manager)).send({
+      location_id: club.bar_id, name: 'Caja PB', purpose: 'till', host: '192.168.1.70',
+    })).body.printer;
+    const res = await retirar();
+    expect(res.status).toBe(201);
+    expect(res.body.ticket).toMatchObject({ status: 'pending' });
+    const [papel] = await trabajos('cash_drop');
+    expect(papel.printer_id).toBe(caja.id);
+    expect(papel.preview).toMatch(/RETIRO DE EFECTIVO/);
+    expect(papel.preview).toMatch(/\$500\.00/);
+    expect(papel.preview).toMatch(/Retiro para el banco/);
+    expect(papel.preview).toMatch(/Autorizó: Gerente/);
+  });
+
+  it('sin impresora el retiro igual queda hecho, y la respuesta dice ticket: null', async () => {
+    const res = await retirar();
+    expect(res.status).toBe(201);
+    expect(res.body.withdrawal.amount).toBe('500.00');
+    expect(res.body.ticket).toBeNull();
+  });
+
+  it('el corte de la caja sale en su impresora y lleva el retiro', async () => {
+    const caja = (await api().post(url('/printers')).set(auth(manager)).send({
+      location_id: club.bar_id, name: 'Caja PB', purpose: 'till', host: '192.168.1.70',
+    })).body.printer;
+    await retirar({ amount: 300 });
+    const res = await cortar({ declared_cash: 700, counted_cash: 700 });
+    expect(res.status).toBe(201);
+    expect(res.body.ticket).not.toBeNull();
+    const [corte] = await trabajos('shift_cut');
+    expect(corte.printer_id).toBe(caja.id);
+    expect(corte.preview).toMatch(/CORTE DE TURNO/);
+    expect(corte.preview).toMatch(/Retiro para el banco/);
+  });
+});

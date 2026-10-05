@@ -9674,6 +9674,14 @@ paths:
                         type: string
                         description: Lo que le queda por entregar después del retiro.
                       authorized_by: { type: string }
+                  ticket:
+                    type: [object, 'null']
+                    description: >-
+                      El ticket del retiro (D81), en la impresora de la caja o de servicio.
+                      `null` si no hay impresora a dónde mandarlo.
+                    properties:
+                      job_id: { type: string, format: uuid }
+                      status: { type: string }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403':
           description: Código de autorización inválido
@@ -14322,7 +14330,7 @@ components:
         nightclub_id: { type: string, format: uuid }
         printer_id: { type: string, format: uuid }
         printer_name: { type: [string, 'null'] }
-        kind: { type: string, enum: [order, bill, receipt, shift_cut, test] }
+        kind: { type: string, enum: [order, bill, receipt, shift_cut, test, cash_drop] }
         ref_id: { type: [string, 'null'], format: uuid }
         copies: { type: integer }
         status: { type: string, enum: [pending, taken, printed, failed] }
