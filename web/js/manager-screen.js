@@ -46,7 +46,8 @@
     // "MX$0.00" mientras carga no es "cargando", es un dato falso, y el gerente que
     // lo alcanza a leer se lleva la idea de que la bodega esta vacia.
     invLoaded: false,
-    invView: 'stock', invSearch: '',
+    invView: 'stock', invSearch: '', invFilter: 'all', invAddOpen: false,
+    staffSearch: '', staffRole: null,
     recipe: null,   // { drink_id, name, price, lines: [{supply_id, quantity}] }
     // El corte de la noche y el rol. `closings` son los cortes GUARDADOS, los
     // unicos que se pueden comparar entre si.
@@ -239,6 +240,7 @@
       get(`/nightclubs/${club}/drivers?include_inactive=true&limit=200`, (d) => { state.drivers = d.drivers || []; }),
       loadTerminals(),
       loadExchangeRate(),
+      loadTills(),
       loadTerminalCharges(),
       loadTips(),
       loadLostFound(),
@@ -304,11 +306,31 @@
 
   // ---------------------------------------------------------------- pintar
 
-  const TABS = ['summary', 'nights', 'staff', 'payouts', 'reports', 'drivers', 'taxi',
-    'parking', 'inventory', 'printing'];
+  // Cada sección del menú y los bloques que enseña (D88). "Salida segura" junta a los
+  // conductores y las tarifas, que eran dos secciones para una misma cosa.
+  const TAB_PANELS = {
+    summary: ['tab-summary'],
+    cash: ['tab-cash'],
+    lost: ['tab-lost'],
+    reports: ['tab-reports'],
+    nights: ['tab-nights'],
+    staff: ['tab-staff'],
+    inventory: ['tab-inventory'],
+    payouts: ['tab-payouts'],
+    club: ['tab-club'],
+    exit: ['tab-drivers', 'tab-taxi'],
+    parking: ['tab-parking'],
+    printing: ['tab-printing'],
+  };
+  // Los nombres viejos siguen sirviendo (un enlace o un pendiente guardado).
+  const TAB_ALIAS = { drivers: 'exit', taxi: 'exit' };
 
   function renderAll() {
-    for (const tab of TABS) $(`tab-${tab}`).hidden = tab !== state.tab;
+    if (!TAB_PANELS[state.tab]) state.tab = TAB_ALIAS[state.tab] || 'summary';
+    const visibles = new Set(TAB_PANELS[state.tab]);
+    for (const panels of Object.values(TAB_PANELS)) {
+      for (const id of panels) if ($(id)) $(id).hidden = !visibles.has(id);
+    }
     document.querySelectorAll('[data-tab]').forEach((b) => {
       b.classList.toggle('active', b.dataset.tab === state.tab);
     });
@@ -629,8 +651,23 @@
     $('st-active').textContent = String(counts.active);
     $('st-inactive').textContent = String(counts.inactive);
 
-    const list = EV2StaffAdmin.sortStaff(state.staff);
-    $('staff-empty').hidden = list.length > 0;
+    // El filtro de puesto se arma con los puestos que de verdad hay.
+    const roles = [...new Set((state.staff || []).map((p) => p.role))];
+    const sel = $('staff-role');
+    if (sel && sel.dataset.roles !== roles.join(',')) {
+      const antes = sel.value;
+      sel.innerHTML = `<option value="">${escape(t('staff.allRoles'))}</option>`
+        + roles.map((r) => `<option value="${escape(r)}">${escape(EV2Roles.describe(r, lang()).label)}</option>`).join('');
+      sel.dataset.roles = roles.join(',');
+      sel.value = roles.includes(antes) ? antes : '';
+    }
+    const q = String(state.staffSearch || '').trim().toLowerCase();
+    const todos = EV2StaffAdmin.sortStaff(state.staff);
+    const list = todos.filter((p) => (!state.staffRole || p.role === state.staffRole)
+      && (!q || [p.display_name, p.first_name, p.last_name, p.email]
+        .some((v) => String(v || '').toLowerCase().includes(q))));
+    $('staff-empty').hidden = todos.length > 0;
+    if ($('staff-nomatch')) $('staff-nomatch').hidden = !(todos.length > 0 && list.length === 0);
     const box = $('staff-list');
     box.innerHTML = '';
 
@@ -638,7 +675,7 @@
       const actions = EV2StaffAdmin.actionsFor(person);
       const names = EV2StaffAdmin.displayFor(person);
       const card = document.createElement('div');
-      card.className = 'card rounded-xl p-3 space-y-2 cursor-pointer';
+      card.className = 'card rounded-xl px-3 py-2.5 space-y-2 cursor-pointer';
       if (person.active === false) card.style.opacity = '.55';
       const isOpen = openStaff.has(person.id);
       card.setAttribute('role', 'button');
@@ -672,10 +709,15 @@
       left.appendChild(sub);
 
       const status = document.createElement('span');
-      status.className = 'text-xs shrink-0';
+      status.className = 'text-xs shrink-0 flex items-center gap-2';
       status.style.color = person.on_shift ? 'var(--ev2-lime)'
         : person.active === false ? 'rgba(255,255,255,.4)' : 'rgba(255,255,255,.6)';
       status.textContent = t(EV2StaffAdmin.statusOf(person));
+      // Las acciones (contraseña, PIN, baja) viven dentro de la ficha (D88): se abren con
+      // un toque. Antes eran tres botones grandes en cada persona.
+      const more = document.createElement('i');
+      more.className = `fa-solid ${isOpen ? 'fa-xmark' : 'fa-bars'} text-white/40`;
+      status.appendChild(more);
       head.append(left, status);
       card.appendChild(head);
 
@@ -717,10 +759,13 @@
           (b) => patchEmployee(person, { active: true }, 'staff.reactivated', b));
       }
       if (isOpen) card.appendChild(staffDetail(person));
-      if (row.children.length) card.appendChild(row);
+      if (isOpen && row.children.length) card.appendChild(row);
       box.appendChild(card);
     }
   }
+
+  if ($('staff-search')) $('staff-search').oninput = (e) => { state.staffSearch = e.target.value; renderStaff(); };
+  if ($('staff-role')) $('staff-role').onchange = (e) => { state.staffRole = e.target.value || null; renderStaff(); };
 
   async function patchEmployee(person, body, message, button) {
     button.disabled = true;
@@ -835,6 +880,68 @@
    * el error salía en inglés al fondo de la tarjeta, fuera de la pantalla del teléfono.
    * Cada toque ahora dice qué está haciendo mientras espera, y en qué terminó.
    */
+  // ---------------------------------------------------------------- las cajas de la noche (D88)
+
+  async function loadTills() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/tills`);
+      state.tills = data.tills || [];
+    } catch { state.tills = []; }
+    renderTills();
+  }
+
+  const TONE_PILL = { ok: 'pill-ok', bad: 'pill-bad', wait: 'pill-wait', on: 'pill-on' };
+
+  function tillCard(c) {
+    const st = EV2Manager.tillState(c);
+    const usd = Number(c.usd_received) > 0
+      ? `<div class="flex justify-between text-xs"><span class="text-white/50">${escape(t('mgr.tillUsd'))}</span><span>US$${escape(Number(c.usd_to_hand).toFixed(2))}</span></div>` : '';
+    const dif = c.closed && Number(c.difference || 0) !== 0
+      ? `<p class="text-xs text-red-300">${escape(t('mgr.tillDiff', { amount: money(Math.abs(Number(c.difference)), c.currency) }))}</p>` : '';
+    return `
+      <div class="rounded-xl p-3 space-y-1.5" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <p class="font-semibold truncate">${escape(c.location_name)}</p>
+            <p class="text-xs text-white/50 truncate">${escape(c.user_name || '')}</p>
+          </div>
+          <span class="pill ${TONE_PILL[st.tone] || 'pill-off'} shrink-0">${escape(t(st.key, { n: c.pending_orders }))}</span>
+        </div>
+        <div class="flex justify-between text-xs"><span class="text-white/50">${escape(t('mgr.tillCollected'))}</span><span>${escape(money(c.collected, c.currency))}</span></div>
+        <div class="flex justify-between text-sm"><span class="text-white/60">${escape(t('mgr.tillToHand'))}</span><span class="font-semibold">${escape(money(c.cash_to_hand, c.currency))}</span></div>
+        ${usd}${dif}
+      </div>`;
+  }
+
+  function renderTills() {
+    const list = state.tills || [];
+    for (const [box, empty] of [['s-tills', 's-tills-empty'], ['c-tills', 'c-tills-empty']]) {
+      if (!$(box)) continue;
+      $(box).innerHTML = list.map(tillCard).join('');
+      $(empty).hidden = list.length > 0;
+    }
+  }
+
+  function renderTonight() {
+    const hoy = EV2Manager.tonightNight(state.nights, new Date());
+    $('s-night').hidden = !hoy;
+    $('s-no-night').hidden = Boolean(hoy);
+    if (!hoy) return;
+    const n = hoy.night;
+    $('s-night-when').textContent = t(hoy.live ? 'mgr.nightLive' : 'mgr.nightToday');
+    $('s-night-name').textContent = n.name || '';
+    const partes = [EV2Format.dateTime(n.doors_open_at)];
+    if (Number(n.ticket_price) > 0) partes.push(t('mgr.nightCover', { amount: money(n.ticket_price, n.currency) }));
+    if (n.reservations_count != null) {
+      const c = Number(n.reservations_count);
+      partes.push(c === 1 ? t('mgr.nightBooking1') : t('mgr.nightBookings', { n: c }));
+    }
+    $('s-night-info').textContent = partes.join(' · ');
+  }
+
+  $('s-night-go').onclick = () => goTab('nights');
+  $('s-tills-go').onclick = () => goTab('cash');
+
   // ---------------------------------------------------------------- tipo de cambio (D86)
 
   async function loadExchangeRate() {
@@ -1256,11 +1363,6 @@
     }
   }
 
-  $('btn-tch-reload').onclick = async () => {
-    const listo = ocupado($('btn-tch-reload'), 'tch.reload');
-    try { await loadTerminalCharges(); } finally { listo(); }
-  };
-
   // ---------------------------------------------------------------- objetos perdidos (D67)
 
   /**
@@ -1414,11 +1516,6 @@
     }
   }
 
-  $('btn-lfm-reload').onclick = async () => {
-    const listo = ocupado($('btn-lfm-reload'), 'tip.reload');
-    try { await loadLostFound(); } finally { listo(); }
-  };
-
   // ---------------------------------------------------------------- propinas (D66)
 
   /**
@@ -1508,6 +1605,7 @@
         package_label: $('sup-label').value.trim() || undefined,
       });
       $('sup-name').value = '';
+      state.invAddOpen = false;
       $('sup-size').value = '';
       $('sup-label').value = '';
       toast(t('sup.added'), 'ok');
@@ -1518,16 +1616,6 @@
       showError(err, error);
     } finally { listo(); }
     return undefined;
-  };
-
-  $('btn-zb-reload').onclick = async () => {
-    const listo = ocupado($('btn-zb-reload'), 'prn.reload');
-    try { await loadPrinting(); } finally { listo(); }
-  };
-
-  $('btn-tip-reload').onclick = async () => {
-    const listo = ocupado($('btn-tip-reload'), 'tip.reload');
-    try { await loadTips(); } finally { listo(); }
   };
 
   // ---------------------------------------------------------------- cortes de turno (D51)
@@ -1683,11 +1771,6 @@
       listo();
     }
   }
-
-  $('btn-cuts-reload').onclick = async () => {
-    const listo = ocupado($('btn-cuts-reload'), 'cuts.reload');
-    try { await loadShiftCuts(); } finally { listo(); }
-  };
 
   // ---------------------------------------------------------------- impresoras (D52)
 
@@ -2535,15 +2618,6 @@
     renderPairing();
   }
 
-  $('btn-prn-reload').onclick = async () => {
-    const listo = ocupado($('btn-prn-reload'), 'prn.reload');
-    try { await loadPrinting(); } finally { listo(); }
-  };
-  $('btn-jobs-reload').onclick = async () => {
-    const listo = ocupado($('btn-jobs-reload'), 'prn.reload');
-    try { await loadPrinting(); } finally { listo(); }
-  };
-
   $('prn-order-tickets').onchange = async () => {
     const nota = $('prn-settings-error');
     nota.hidden = true;
@@ -2750,7 +2824,8 @@
 
       const count = document.createElement('p');
       count.className = 'text-[11px] text-white/50';
-      count.textContent = t('night.reservations', { count: actions.booked });
+      count.textContent = Number(actions.booked) === 1
+        ? t('mgr.nightBooking1') : t('night.reservations', { count: actions.booked });
       card.appendChild(count);
 
       const row = document.createElement('div');
@@ -2781,8 +2856,10 @@
       }
       // El corte y el rol viven en la noche a la que pertenecen, no en una pestaña
       // aparte: el gerente piensa "cómo salió el viernes", no "abre el reporte".
-      add('cut.open', 'card rounded-lg px-3 py-2 text-sm flex-1', () => openCut(night));
+      add('night.cutOpen', 'card rounded-lg px-3 py-2 text-sm flex-1', () => openCut(night));
       add('roster.open', 'card rounded-lg px-3 py-2 text-sm flex-1', () => openRoster(night));
+      // Duplicar (D88): la misma noche una semana después, en el formulario para revisarla.
+      add('night.duplicate', 'card rounded-lg px-3 py-2 text-sm flex-1', () => duplicateNight(night));
 
       if (row.children.length) card.appendChild(row);
       box.appendChild(card);
@@ -2900,7 +2977,7 @@
         ${fila(t('cut.showedUp'), String(s.staff.showed_up),
     s.staff.showed_up < s.staff.assigned ? 'text-amber-200' : '')}
         ${(s.tips.by_person || []).slice(0, 5).map((p) => fila(
-    `${p.display_name} · ${t('cut.tips')}`, money(p.total, cur), 'text-white/50',
+    `${p.display_name} · ${t('night.cutTips')}`, money(p.total, cur), 'text-white/50',
   )).join('')}
       </section>`;
 
@@ -3050,6 +3127,39 @@
     }
     renderRoster();
   }
+
+  /**
+   * Copiar el rol de la noche anterior (D88). Se manda asignación por asignación: el
+   * servidor revisa cada una, y lo que rechace (alguien dado de baja, una barra que ya
+   * no existe) se cuenta y se dice, sin tumbar las demás.
+   */
+  async function copyPreviousRoster() {
+    const r = state.roster;
+    if (!r) return;
+    const anterior = EV2Manager.previousNight(state.nights, r.night);
+    if (!anterior) { toast(t('roster.noPrevious'), 'error'); return; }
+    const boton = $('btn-roster-copy');
+    boton.disabled = true;
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/nights/${anterior.id}/roster`);
+      const plan = EV2Roster.copyPlan(data.roster || [], r.roster);
+      if (plan.length === 0) { toast(t('roster.copyNothing', { name: anterior.name }), 'info'); return; }
+      let ok = 0; let fallaron = 0;
+      for (const body of plan) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await api.post(`/nightclubs/${clubId()}/nights/${r.night.id}/roster`, body);
+          ok += 1;
+        } catch { fallaron += 1; }
+      }
+      toast(t(fallaron ? 'roster.copiedSome' : 'roster.copied', { n: ok, failed: fallaron, name: anterior.name }),
+        fallaron ? 'info' : 'ok');
+      await reloadRoster();
+    } catch (err) {
+      showError(err, $('roster-error'));
+    } finally { boton.disabled = false; }
+  }
+  if ($('btn-roster-copy')) $('btn-roster-copy').onclick = copyPreviousRoster;
 
   function closeRoster() {
     state.roster = null;
@@ -3254,6 +3364,23 @@
   };
   $('btn-night-cancel').onclick = () => { $('night-form').hidden = true; clearNightErrors(); };
 
+  /** Llena el formulario de "Abrir una noche" con la misma noche una semana después. */
+  function duplicateNight(night) {
+    const v = EV2Manager.duplicateNight(night);
+    if (!v) return;
+    $('n-name').value = v.name;
+    $('n-date').value = v.event_date;
+    $('n-doors').value = v.doors_open_at;
+    $('n-closes').value = v.closes_at;
+    $('n-price').value = v.ticket_price;
+    if (v.arrival_deadline_minutes) $('n-deadline').value = v.arrival_deadline_minutes;
+    $('n-deposit').value = v.deposit_pct;
+    clearNightErrors();
+    $('night-form').hidden = false;
+    $('night-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    toast(t('night.duplicated'), 'info');
+  }
+
   const NIGHT_FIELDS = {
     name: 'n-name', event_date: 'n-date', doors_open_at: 'n-doors',
     closes_at: 'n-closes', ticket_price: 'n-price', deposit_pct: 'n-deposit',
@@ -3311,9 +3438,24 @@
     } catch (err) { showError(err); }
   };
 
+  /**
+   * Lo que se vuelve a pedir al abrir cada sección (D88). Antes había un botón
+   * "Actualizar" en siete tarjetas; los avisos en vivo ya refrescan todo, y al entrar a
+   * una sección se pide lo suyo por si la conexión estuvo caída.
+   */
+  const TAB_LOADERS = {
+    summary: () => Promise.all([loadTills()]),
+    cash: () => Promise.all([loadShiftCuts(), loadTerminalCharges(), loadTips(), loadTills()]),
+    lost: () => loadLostFound(),
+    club: () => Promise.all([loadExchangeRate(), loadTerminals(), loadPrinting()]),
+    printing: () => loadPrinting(),
+  };
+
   function goTab(tab) {
-    state.tab = tab;
+    state.tab = TAB_ALIAS[tab] || tab;
     renderAll();
+    const cargar = TAB_LOADERS[state.tab];
+    if (cargar) cargar().then(renderAll).catch(() => {});
     // Al cambiar de seccion se empieza arriba, y en el telefono la pestana elegida se
     // asoma completa aunque estuviera al final del renglon.
     const main = document.querySelector('.mgr-main');
@@ -3361,6 +3503,8 @@
   }
 
   function renderSummary() {
+    renderTonight();
+    renderTills();
     const s = EV2Manager.summary(state.dashboard, state.currency);
     $('s-occupancy').textContent = `${s.occupancy.occupied}/${s.occupancy.total}`;
     $('s-orders').textContent = s.orders.inProgress + s.orders.ready;
@@ -3673,9 +3817,19 @@
       b.classList.toggle('on', b.dataset.inv === state.invView);
     }
 
-    // Cada formulario de alta solo se ve en la vista donde tiene sentido.
-    if ($('menu-add')) $('menu-add').hidden = state.invView !== 'menu';
-    if ($('sup-add')) $('sup-add').hidden = state.invView !== 'stock';
+    // El alta se abre con su botón (D88), solo en la vista donde tiene sentido, y los
+    // filtros solo existen en Existencias.
+    const puedeAlta = state.invView === 'stock' || state.invView === 'menu';
+    if ($('btn-inv-add')) {
+      $('btn-inv-add').hidden = !puedeAlta;
+      $('btn-inv-add-label').textContent = t(state.invView === 'menu' ? 'inv.menuNew' : 'sup.new');
+    }
+    if ($('menu-add')) $('menu-add').hidden = !(state.invAddOpen && state.invView === 'menu');
+    if ($('sup-add')) $('sup-add').hidden = !(state.invAddOpen && state.invView === 'stock');
+    if ($('inv-filters')) $('inv-filters').hidden = state.invView !== 'stock';
+    for (const b of document.querySelectorAll('[data-invf]')) {
+      b.classList.toggle('on', b.dataset.invf === state.invFilter);
+    }
 
     if (state.invView === 'recipes') return renderRecipeList();
     if (state.invView === 'kardex') return renderKardex();
@@ -3692,69 +3846,79 @@
   const invMatches = (text) => !state.invSearch
     || String(text || '').toLowerCase().includes(state.invSearch);
 
-  /** Existencias: el total del club y el desglose por estante, en presentaciones. */
+  /**
+   * Existencias (D88): un renglón por insumo, compacto. El total, cada estante con lo
+   * que tiene, y su mínimo ahí mismo — se guarda al salir del campo. Antes eran 88
+   * tarjetas grandes con un botón "Mínimo" que preguntaba el estante con un número.
+   */
   function renderStockList() {
-    const list = state.supplies.filter((x) => invMatches(x.name) || invMatches(x.category));
-    if (list.length === 0) return invEmpty(t('inv.emptyStock'));
+    let list = state.supplies.filter((x) => invMatches(x.name) || invMatches(x.category));
+    if (state.invFilter === 'low') list = list.filter((x) => x.low);
+    if (state.invFilter === 'unconfirmed') list = list.filter((x) => x.size_confirmed === false);
+    if (list.length === 0) {
+      return invEmpty(t(state.invFilter === 'all' ? 'inv.emptyStock' : 'inv.emptyFilter'));
+    }
     $('inv-empty').hidden = true;
+    const estantes = (state.locations || []).filter((l) => l.kind === 'bar' || l.kind === 'warehouse');
 
     $('inv-list').innerHTML = EV2Warehouse.byCategory(list).map((group) => `
-      <section class="mb-3">
-        <h3 class="text-xs uppercase tracking-widest text-white/40 mb-1 px-1">${escape(group.category)}</h3>
-        <div class="space-y-2">
+      <section class="mb-2">
+        <h3 class="text-xs uppercase tracking-widest text-white/40 mb-1 px-1">${escape(group.category)} · ${group.items.length}</h3>
+        <div class="card rounded-xl divide-y divide-white/5">
           ${group.items.map((supply) => `
-            <article class="card rounded-xl px-3 py-2 ${supply.low ? 'border-l-4 border-amber-400' : ''}">
-              <div class="flex items-start justify-between gap-2">
-                <div class="min-w-0">
-                  <p class="text-sm font-semibold truncate">${escape(supply.name)}
-                    ${supply.size_confirmed === false ? `<span class="text-pink-300 text-[11px]">· ${escape(t('inv.confirmSize'))}</span>` : ''}</p>
-                  <p class="text-xs text-white/60">${escape(EV2Warehouse.describeStock(supply, supply.stock, lang()))}</p>
-                  <p class="text-[11px] text-white/40">${(supply.locations || []).map((l) => `${escape(l.name)}: <b>${EV2Warehouse.packagesOf(l.stock, supply.package_size)}</b>`).join(' · ') || escape(t('inv.noStock'))}</p>
-                </div>
-                <div class="text-right shrink-0">
-                  <p class="text-sm">${escape(money(supply.stock_value, 'MXN'))}</p>
-                  <p class="text-[11px] text-white/40">${escape(t('inv.atCost'))}</p>
-                  <button class="chip tap px-2 mt-1" data-min="${escape(supply.id)}">${escape(t('inv.setMin'))}</button>
-                </div>
+            <div class="px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 ${supply.low ? 'border-l-4 border-amber-400' : ''}">
+              <div class="min-w-[12rem] flex-1">
+                <p class="text-sm font-semibold leading-tight">${escape(supply.name)}
+                  ${supply.size_confirmed === false ? `<span class="text-pink-300 text-[11px]">· ${escape(t('inv.confirmSize'))}</span>` : ''}</p>
+                <p class="text-[11px] text-white/50">${escape(EV2Warehouse.describeStock(supply, supply.stock, lang()))} · ${escape(money(supply.stock_value, 'MXN'))}</p>
               </div>
-            </article>`).join('')}
+              <div class="flex flex-wrap gap-2">
+                ${estantes.map((place) => {
+                  const aqui = (supply.locations || []).find((l) => l.location_id === place.id);
+                  const hay = aqui ? EV2Warehouse.packagesOf(aqui.stock, supply.package_size) : 0;
+                  const min = aqui ? EV2Warehouse.packagesOf(aqui.min_stock, supply.package_size) : 0;
+                  const bajo = aqui && Number(aqui.min_stock) > 0 && Number(aqui.stock) < Number(aqui.min_stock);
+                  return `
+                  <label class="text-[11px] rounded-lg px-2 py-1 flex items-center gap-1.5 ${bajo ? 'bg-amber-500/15 text-amber-200' : 'bg-white/5 text-white/60'}" title="${escape(t('inv.minHint'))}">
+                    <span class="truncate max-w-[7rem]">${escape(place.name)}</span>
+                    <b class="text-white">${escape(String(hay))}</b>
+                    <span class="text-white/40">${escape(t('inv.minShort'))}</span>
+                    <input type="number" min="0" step="1" inputmode="decimal" value="${escape(String(min))}"
+                           data-min-supply="${escape(supply.id)}" data-min-place="${escape(place.id)}"
+                           class="w-12 bg-transparent border-b border-white/20 text-center text-white outline-none focus:border-cyan-400">
+                  </label>`;
+                }).join('')}
+              </div>
+            </div>`).join('')}
         </div>
       </section>`).join('');
 
-    for (const button of $('inv-list').querySelectorAll('[data-min]')) {
-      button.onclick = () => setMinimum(button.dataset.min);
+    for (const input of $('inv-list').querySelectorAll('[data-min-supply]')) {
+      input.onchange = () => saveMinimum(input);
     }
   }
 
   /**
-   * El minimo por estante.
-   *
-   * Se pregunta en presentaciones porque es como se piensa ("surte cuando baje de dos
-   * botellas"), y se manda en unidad base, que es lo que entiende el inventario.
+   * Guarda un mínimo desde su campo. Se escribe en presentaciones ("dos botellas") y se
+   * manda en unidad base, que es lo que entiende el inventario.
    */
-  async function setMinimum(supplyId) {
-    const supply = state.supplies.find((x) => x.id === supplyId);
+  async function saveMinimum(input) {
+    const supply = state.supplies.find((x) => x.id === input.dataset.minSupply);
     if (!supply) return;
-    const bars = state.locations.filter((l) => l.kind === 'bar' || l.kind === 'warehouse');
-    if (bars.length === 0) return;
-    const nombres = bars.map((b, i) => `${i + 1}) ${b.name}`).join('  ');
-    const cual = (await askText(t('inv.askPlace', { list: nombres }), '1'));
-    const place = bars[Number(cual) - 1];
-    if (!place) return;
-    const actual = (supply.locations || []).find((l) => l.location_id === place.id);
-    const previo = actual ? EV2Warehouse.packagesOf(actual.min_stock, supply.package_size) : 0;
-    const raw = (await askText(t('inv.askMin', { name: supply.name, place: place.name }), String(previo)));
-    if (raw === null) return;
-    const packages = Number(raw);
+    const packages = Number(input.value);
     if (!Number.isFinite(packages) || packages < 0) { toast(t('inv.badMin'), 'error'); return; }
+    input.disabled = true;
     try {
       const { supply: updated } = await api.put(
-        `/nightclubs/${clubId()}/supplies/${supplyId}/min-stock`,
-        { location_id: place.id, min_stock: packages * Number(supply.package_size) });
+        `/nightclubs/${clubId()}/supplies/${supply.id}/min-stock`,
+        { location_id: input.dataset.minPlace, min_stock: packages * Number(supply.package_size) });
       state.supplies = state.supplies.map((x) => (x.id === updated.id ? updated : x));
       toast(t('inv.minSaved'), 'ok');
       renderInventory();
-    } catch (err) { showError(err); }
+    } catch (err) {
+      showError(err);
+      input.disabled = false;
+    }
   }
 
   /** Recetas: primero lo que no tiene, despues lo de menor margen. */
@@ -4022,6 +4186,7 @@
       await api.post(`/nightclubs/${clubId()}/drinks`,
         { name: nombre, category: categoria, price: precio });
       $('menu-name').value = '';
+      state.invAddOpen = false;
       $('menu-price').value = '';
       // La categoría se queda: dar de alta la carta es teclear diez tragos de la misma.
       toast(t('inv.menuAdded'), 'ok');
@@ -4041,6 +4206,20 @@
       state.invSearch = '';
       if ($('inv-search')) $('inv-search').value = '';
       renderInventory();
+    };
+  }
+  for (const b of document.querySelectorAll('[data-invf]')) {
+    b.onclick = () => { state.invFilter = b.dataset.invf; renderInventory(); };
+  }
+  if ($('btn-inv-add')) {
+    $('btn-inv-add').onclick = () => {
+      state.invAddOpen = !state.invAddOpen;
+      renderInventory();
+      const form = $(state.invView === 'menu' ? 'menu-add' : 'sup-add');
+      if (state.invAddOpen && form) {
+        const first = form.querySelector('input');
+        if (first) first.focus();
+      }
     };
   }
   if ($('inv-search')) {
@@ -4083,7 +4262,12 @@
     lastConnection.key = key;
     lastConnection.vars = vars || null;
     $('rt-dot').className = `dot ${on === true ? 'dot-on' : on === null ? 'dot-wait' : 'dot-off'}`;
-    $('rt-text').textContent = vars && vars.text ? vars.text : t(key);
+    // Conectado: basta el punto verde (D88). Sin conexión sí se dice, sin la cuenta
+    // regresiva que cambiaba cada segundo: los números pueden estar viejos.
+    $('rt-text').textContent = on === null ? t('realtime.reconnecting') : t(key);
+    $('rt-text').classList.toggle('sr-only', on === true);
+    const box = $('rt-text').parentElement;
+    if (box) box.title = vars && vars.text ? vars.text : t(key);
   }
 
   function connectRealtime() {

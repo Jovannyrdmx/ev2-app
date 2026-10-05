@@ -367,6 +367,64 @@ router.post('/nightclubs/:nightclubId/till/payments',
     });
   }));
 
+/**
+ * Las cajas de la noche, para el gerente (D88).
+ *
+ * Solo lectura: cada caja que abrió en las últimas 18 horas, con su barra, quién la
+ * tiene, el fondo, lo cobrado hasta ahora y lo que debe tener en el cajón — pesos y,
+ * aparte, dólares —, y si ya hizo corte, con su diferencia. Es la pregunta que el
+ * gerente se hace a media noche y que antes solo podía contestar yendo a cada barra.
+ */
+router.get('/nightclubs/:nightclubId/tills',
+  requireRole('manager'),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const { rows } = await pool.query(
+      `SELECT s.id, s.user_id, s.section, s.started_at, s.ended_at, s.location_id,
+              s.opening_float::text AS opening_float, s.float_currency AS currency,
+              u.display_name AS user_name, l.name AS location_name,
+              c.id AS closing_id, c.difference::text AS difference,
+              c.difference_usd::text AS difference_usd, c.confirmed_at
+         FROM staff_shifts s
+         JOIN users u ON u.id = s.user_id
+         JOIN supply_locations l ON l.id = s.location_id
+         LEFT JOIN shift_closings c ON c.shift_id = s.id
+        WHERE s.nightclub_id = $1 AND s.location_id IS NOT NULL
+          AND s.started_at > now() - interval '18 hours'
+        ORDER BY l.name, s.started_at`,
+      [nightclubId]);
+    const tills = [];
+    for (const s of rows) {
+      // Una caja tras otra: son pocas por noche y así no se acapara el pool.
+      const resumen = await cuts.shiftSummary(pool, { nightclubId, shift: s });
+      tills.push({
+        shift_id: s.id,
+        location_id: s.location_id,
+        location_name: s.location_name,
+        user_id: s.user_id,
+        user_name: s.user_name,
+        started_at: s.started_at,
+        ended_at: s.ended_at,
+        currency: s.currency || resumen.totals.currency,
+        opening_float: resumen.opening_float,
+        collected: resumen.totals.total_collected,
+        cash_collected: resumen.totals.cash_collected,
+        cash_to_hand: resumen.cash_to_hand,
+        usd_received: resumen.totals.usd.received,
+        usd_to_hand: resumen.usd_to_hand,
+        drops_received: resumen.drops_received,
+        pending_orders: (resumen.pending_orders || []).length,
+        pending_total: resumen.pending_total,
+        closed: Boolean(s.closing_id),
+        difference: s.difference,
+        difference_usd: s.difference_usd,
+        closed_at: s.confirmed_at,
+      });
+    }
+    res.json({ tills });
+  }));
+
 // ---------------------------------------------------------------- el corte
 
 /**

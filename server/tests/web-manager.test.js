@@ -561,3 +561,103 @@ describe('Pendientes del gerente (D75)', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------- el tablero de la noche (D88)
+
+describe('La noche de hoy, en el resumen', () => {
+  const NOW = new Date('2026-10-10T20:00:00');
+  const noche = (id, abre, extra = {}) => ({ id, status: 'published', doors_open_at: new Date(abre).toISOString(), ...extra });
+
+  it('si ya abrió, es la noche en curso', () => {
+    const r = M.tonightNight([noche('a', '2026-10-10T19:00:00')], NOW);
+    expect(r.night.id).toBe('a');
+    expect(r.live).toBe(true);
+  });
+
+  it('si abre en unas horas, es la próxima, todavía no en curso', () => {
+    const r = M.tonightNight([noche('b', '2026-10-10T22:00:00')], NOW);
+    expect(r.night.id).toBe('b');
+    expect(r.live).toBe(false);
+  });
+
+  it('ignora las canceladas, los borradores, las pasadas y las lejanas', () => {
+    expect(M.tonightNight([
+      noche('c', '2026-10-10T21:00:00', { status: 'cancelled' }),
+      noche('d', '2026-10-10T21:00:00', { status: 'draft' }),
+      noche('e', '2026-10-09T21:00:00', { ends_at: new Date('2026-10-10T04:00:00').toISOString() }),
+      noche('f', '2026-10-17T21:00:00'),
+    ], NOW)).toBeNull();
+  });
+
+  it('entre dos, la que abre primero', () => {
+    const r = M.tonightNight([noche('tarde', '2026-10-10T23:00:00'), noche('pronto', '2026-10-10T21:00:00')], NOW);
+    expect(r.night.id).toBe('pronto');
+  });
+
+  it('sin noches, nada', () => {
+    expect(M.tonightNight(null, NOW)).toBeNull();
+  });
+});
+
+describe('El estado de cada caja', () => {
+  it('cortada y cuadrada, cortada con diferencia, con pendientes, abierta', () => {
+    expect(M.tillState({ closed: true, difference: '0.00' })).toEqual({ key: 'mgr.tillClosed', tone: 'ok' });
+    expect(M.tillState({ closed: true, difference: '-50.00' })).toEqual({ key: 'mgr.tillClosedDiff', tone: 'bad' });
+    expect(M.tillState({ closed: true, difference: '0.00', difference_usd: '5.00' }).tone).toBe('bad');
+    expect(M.tillState({ closed: false, pending_orders: 2 })).toEqual({ key: 'mgr.tillPending', tone: 'wait' });
+    expect(M.tillState({ closed: false, pending_orders: 0 })).toEqual({ key: 'mgr.tillOpen', tone: 'on' });
+    expect(M.tillState(null)).toBeNull();
+  });
+
+  it('cada estado tiene su texto en los dos idiomas', () => {
+    // eslint-disable-next-line global-require
+    const F = require('../../web/js/format.js');
+    for (const key of ['mgr.tillClosed', 'mgr.tillClosedDiff', 'mgr.tillPending', 'mgr.tillOpen']) {
+      expect(F.STRINGS.es[key]).toBeTruthy();
+      expect(F.STRINGS.en[key]).toBeTruthy();
+    }
+  });
+});
+
+describe('La noche anterior, para copiar su rol', () => {
+  const noches = [
+    { id: 'n1', event_date: '2026-10-03', doors_open_at: '2026-10-03T22:00:00' },
+    { id: 'n2', event_date: '2026-10-09', doors_open_at: '2026-10-09T22:00:00', status: 'cancelled' },
+    { id: 'n3', event_date: '2026-10-10', doors_open_at: '2026-10-10T22:00:00' },
+    { id: 'n4', event_date: '2026-10-17', doors_open_at: '2026-10-17T22:00:00' },
+  ];
+
+  it('es la más reciente antes de esta, sin contar las canceladas', () => {
+    expect(M.previousNight(noches, noches[2]).id).toBe('n1');
+  });
+
+  it('la primera noche no tiene anterior', () => {
+    expect(M.previousNight(noches, noches[0])).toBeNull();
+    expect(M.previousNight(noches, null)).toBeNull();
+  });
+});
+
+describe('Duplicar una noche', () => {
+  const noche = {
+    name: 'Sábado Neón', event_date: '2026-10-10',
+    doors_open_at: new Date('2026-10-10T22:00:00').toISOString(),
+    closes_at: new Date('2026-10-11T05:00:00').toISOString(),
+    ticket_price: '250.00', arrival_deadline_minutes: 60, deposit_pct: 30,
+  };
+
+  it('la misma noche una semana después, a la misma hora', () => {
+    expect(M.duplicateNight(noche)).toEqual({
+      name: 'Sábado Neón', event_date: '2026-10-17',
+      doors_open_at: '2026-10-17T22:00', closes_at: '2026-10-18T05:00',
+      ticket_price: '250', arrival_deadline_minutes: '60', deposit_pct: '30',
+    });
+  });
+
+  it('lo que la noche no tiene se queda vacío, no inventado', () => {
+    const r = M.duplicateNight({ name: 'X', event_date: '2026-10-10' });
+    expect(r.doors_open_at).toBe('');
+    expect(r.closes_at).toBe('');
+    expect(r.ticket_price).toBe('0');
+    expect(r.deposit_pct).toBe('');
+  });
+});

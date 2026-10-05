@@ -210,3 +210,29 @@ describe('El corte con dólares', () => {
     });
   });
 });
+
+describe('Las cajas de la noche, para el gerente (D88)', () => {
+  it('cada caja abierta con su barra, cajero, fondo, lo cobrado y lo que debe tener', async () => {
+    const tipo = await fijarTipo(17.35);
+    await pagar(await pedido(), { method: 'cash_usd', usd_received: 10, exchange_rate_id: tipo });
+    const res = await api().get(url('/tills')).set(auth(manager));
+    expect(res.status).toBe(200);
+    expect(res.body.tills).toHaveLength(1);
+    expect(res.body.tills[0]).toMatchObject({
+      location_id: club.bar_id, user_name: 'Caja Ana', opening_float: '1000.00',
+      cash_to_hand: '947.00', usd_received: '10.00', usd_to_hand: '10.00',
+      closed: false, pending_orders: 0,
+    });
+  });
+
+  it('al cortar queda marcada como cerrada, con su diferencia', async () => {
+    await cortar({ counted_cash: 990, difference_reason: 'Faltó un billete de 10' });
+    const res = await api().get(url('/tills')).set(auth(manager));
+    expect(res.body.tills[0]).toMatchObject({ closed: true, difference: '-10.00' });
+  });
+
+  it('solo el gerente la ve', async () => {
+    expect((await api().get(url('/tills')).set(auth(cajero))).status).toBe(403);
+    expect((await api().get(url('/tills')).set(auth(waiter))).status).toBe(403);
+  });
+});

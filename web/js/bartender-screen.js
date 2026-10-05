@@ -351,7 +351,7 @@
           </p>
           <p class="text-sm text-white/70 mt-1 break-words">${escape(EV2Bar.itemsSummary(order))}</p>
           <p class="text-xs text-white/45 mt-1">${who}</p>
-          ${(order.substitutions || []).map((c) => `<p class="text-xs font-semibold text-amber-300 mt-1"><i class="fa-solid fa-right-left mr-1"></i>${escape(t('sub.serve', { from: c.from, to: c.to }))}</p>`).join('')}
+          ${(order.substitutions || []).map((c) => `<p class="text-xs font-semibold text-amber-300 mt-1"><i class="fa-solid fa-rotate mr-1"></i>${escape(t('sub.serve', { from: c.from, to: c.to }))}</p>`).join('')}
           ${order.message ? `<p class="text-xs text-amber-200/80 mt-1">${escape(t('bar.note'))}: ${escape(order.message)}</p>` : ''}
           ${order.status === 'pos_error' ? `<p class="text-xs text-red-300 mt-1">${escape(t('bar.posError'))}${order.pos_error ? ` ${escape(order.pos_error)}` : ''}</p>` : ''}
           ${paid ? '' : (ready

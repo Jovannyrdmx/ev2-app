@@ -9894,6 +9894,55 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/nightclubs/{nightclubId}/tills:
+    get:
+      operationId: listTonightTills
+      tags: [Cortes de turno]
+      summary: Las cajas de la noche (gerente)
+      description: |
+        Requiere rol `manager` (D88). Cada caja abierta en las últimas 18 horas: barra,
+        cajero, cuánto lleva cobrado, cuánto debe tener en caja (en pesos y en dólares
+        aparte), pedidos de esa barra sin cobrar y, si ya cortó, la diferencia del corte.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Las cajas de la noche
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tills]
+                properties:
+                  tills:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        shift_id: { type: string, format: uuid }
+                        location_id: { type: string, format: uuid }
+                        location_name: { type: string }
+                        user_id: { type: string, format: uuid }
+                        user_name: { type: string }
+                        started_at: { type: string, format: date-time }
+                        ended_at: { type: [string, 'null'], format: date-time }
+                        currency: { $ref: '#/components/schemas/Currency' }
+                        opening_float: { $ref: '#/components/schemas/Money' }
+                        collected: { $ref: '#/components/schemas/Money' }
+                        cash_collected: { $ref: '#/components/schemas/Money' }
+                        cash_to_hand: { $ref: '#/components/schemas/Money' }
+                        usd_received: { $ref: '#/components/schemas/Money' }
+                        usd_to_hand: { $ref: '#/components/schemas/Money' }
+                        drops_received: { $ref: '#/components/schemas/Money' }
+                        pending_orders: { type: integer }
+                        pending_total: { $ref: '#/components/schemas/Money' }
+                        closed: { type: boolean }
+                        difference: { type: [string, 'null'] }
+                        difference_usd: { type: [string, 'null'] }
+                        closed_at: { type: [string, 'null'], format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/nightclubs/{nightclubId}/till/open:
     post:
       operationId: openTill

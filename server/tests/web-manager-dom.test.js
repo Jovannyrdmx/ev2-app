@@ -44,19 +44,30 @@ describe('el controlador y el HTML se encuentran', () => {
     expect(faltantes).toEqual([]);
   });
 
-  it('cada pestaña con botón tiene su panel, y viceversa', () => {
+  // D88: una sección del menú puede mostrar varios paneles (Salida = choferes + taxis).
+  const panelesPorPestana = () => {
+    const cuerpo = /const TAB_PANELS = \{([^}]+)\}/.exec(controlador)[1];
+    const mapa = {};
+    for (const m of cuerpo.matchAll(/(\w+):\s*\[([^\]]*)\]/g)) {
+      mapa[m[1]] = m[2].split(',').map((x) => x.trim().replace(/'/g, '')).filter(Boolean);
+    }
+    return mapa;
+  };
+
+  it('cada pestaña con botón tiene sus paneles, y cada panel tiene su pestaña', () => {
     const doc = documento();
-    const botones = [...doc.querySelectorAll('[data-tab]')].map((b) => b.dataset.tab);
-    const paneles = [...doc.querySelectorAll('[id^="tab-"]')].map((p) => p.id.slice(4));
-    expect(botones.sort()).toEqual(paneles.sort());
+    const mapa = panelesPorPestana();
+    const botones = [...new Set([...doc.querySelectorAll('[data-tab]')].map((b) => b.dataset.tab))];
+    const paneles = [...doc.querySelectorAll('[id^="tab-"]')].map((p) => p.id);
+    expect(botones.filter((t) => !mapa[t])).toEqual([]);
+    expect(Object.keys(mapa).filter((t) => !botones.includes(t))).toEqual([]);
+    const declarados = Object.values(mapa).flat();
+    expect(declarados.filter((id) => !doc.getElementById(id))).toEqual([]);
+    expect(paneles.filter((id) => !declarados.includes(id))).toEqual([]);
   });
 
-  it('cada pestaña está declarada en TABS: si no, nunca se muestra', () => {
-    const doc = documento();
-    const declaradas = /const TABS = \[([^\]]+)\]/.exec(controlador)[1]
-      .split(',').map((x) => x.trim().replace(/'/g, ''));
-    const botones = [...doc.querySelectorAll('[data-tab]')].map((b) => b.dataset.tab);
-    expect(botones.filter((t) => !declaradas.includes(t))).toEqual([]);
+  it('los nombres viejos de pestaña (choferes, taxis) llevan a Salida', () => {
+    expect(controlador).toMatch(/const TAB_ALIAS = \{\s*drivers: 'exit', taxi: 'exit'\s*\}/);
   });
 });
 
@@ -88,17 +99,16 @@ describe('la pestaña de inventario', () => {
   // Esta pestaña solo MIRA el inventario. Recibir mercancía, surtir las barras y contar
   // se hace en `almacen.html`, y hasta ahora nada en esta pantalla decía que esa
   // pantalla existe: el gerente tenía que teclear la URL para entrar a su propio
-  // almacén. Son dos puertas a propósito: una en el encabezado, siempre a la vista, y
-  // otra dentro de la pestaña, donde la duda aparece.
-  it('hay una puerta al almacén, en el encabezado y en la pestaña', () => {
+  // almacén. Desde D88 es UNA puerta, con su nombre, dentro de la pestaña: el ícono
+  // del encabezado hacía lo mismo sin decir qué era.
+  it('hay una puerta al almacén en la pestaña, y no está repetida', () => {
     const doc = documento();
-    for (const id of ['btn-warehouse', 'btn-open-warehouse']) {
-      const puerta = doc.getElementById(id);
-      expect(puerta).not.toBeNull();
-      expect(puerta.tagName).toBe('A');
-      expect(puerta.getAttribute('href')).toBe('almacen.html');
-      expect(puerta.hasAttribute('hidden')).toBe(false);
-    }
+    const puerta = doc.getElementById('btn-open-warehouse');
+    expect(puerta).not.toBeNull();
+    expect(puerta.tagName).toBe('A');
+    expect(puerta.getAttribute('href')).toBe('almacen.html');
+    expect(puerta.hasAttribute('hidden')).toBe(false);
+    expect(doc.querySelectorAll('a[href="almacen.html"]')).toHaveLength(1);
   });
 
   it('el almacén tiene la vuelta al panel, y nace escondida hasta saber quién entró', () => {

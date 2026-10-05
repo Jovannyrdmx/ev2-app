@@ -42,6 +42,24 @@ afterEach(() => {
 describe('Catálogo de textos', () => {
   const { F } = loadFormat();
 
+  it('ninguna clave está escrita dos veces en el mismo idioma (la segunda pisa a la primera sin avisar)', () => {
+    // D88: "cut.open" estaba dos veces y el botón de la noche mostraba el texto del corte de caja.
+    const src = fs.readFileSync(path.join(WEB, 'js', 'format.js'), 'utf8');
+    const corte = src.indexOf('\n    en: {');
+    const repetidas = (bloque) => {
+      const vistas = new Set();
+      const dobles = [];
+      for (const m of bloque.matchAll(/^ {6}'([^']+)':/gm)) {
+        if (vistas.has(m[1])) dobles.push(m[1]);
+        vistas.add(m[1]);
+      }
+      return dobles;
+    };
+    expect(corte).toBeGreaterThan(0);
+    expect(repetidas(src.slice(0, corte))).toEqual([]);
+    expect(repetidas(src.slice(corte))).toEqual([]);
+  });
+
   it('el inglés no tiene huecos: ninguna clave se queda sin traducir', () => {
     // Esta es la prueba que evita una pantalla a medio traducir, que es peor que una
     // que no se traduce: el usuario ve mitad y mitad y no sabe si algo falló.

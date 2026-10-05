@@ -544,6 +544,72 @@
    * recorrer diez pestanas para saber si habia algo. Esto lo junta, en orden de lo que
    * mas urge, y dice a que pestana ir. Solo cuenta lo que pide una accion suya.
    */
+  /**
+   * La noche que el gerente está trabajando (D88): la que está en curso, o la próxima
+   * que abre en las siguientes 20 horas. Null si no hay ninguna así.
+   */
+  function tonightNight(nights, now, { nightHours = 10, aheadHours = 20 } = {}) {
+    const when = new Date(now || Date.now()).getTime();
+    const list = (Array.isArray(nights) ? nights : [])
+      .filter((n) => n && n.doors_open_at && n.status !== 'cancelled' && n.status !== 'draft')
+      .filter((n) => {
+        const opens = new Date(n.doors_open_at).getTime();
+        const ends = n.ends_at ? new Date(n.ends_at).getTime() : opens + nightHours * 3600e3;
+        return ends > when && opens - when <= aheadHours * 3600e3;
+      })
+      .sort((a, b) => new Date(a.doors_open_at) - new Date(b.doors_open_at));
+    if (!list.length) return null;
+    return { night: list[0], live: new Date(list[0].doors_open_at).getTime() <= when };
+  }
+
+  /**
+   * Cómo va una caja, en una palabra: 'closed' (ya cortó), 'pending' (tiene pedidos sin
+   * cobrar) u 'open'. Y si su corte no cuadró.
+   */
+  function tillState(till) {
+    if (!till) return null;
+    const dif = Number(till.difference || 0) !== 0 || Number(till.difference_usd || 0) !== 0;
+    if (till.closed) return { key: dif ? 'mgr.tillClosedDiff' : 'mgr.tillClosed', tone: dif ? 'bad' : 'ok' };
+    if (Number(till.pending_orders) > 0) return { key: 'mgr.tillPending', tone: 'wait' };
+    return { key: 'mgr.tillOpen', tone: 'on' };
+  }
+
+  /** La noche anterior a `night` (por fecha), que no esté cancelada. Para copiar su rol. */
+  function previousNight(nights, night) {
+    if (!night) return null;
+    const fecha = (n) => new Date(n.doors_open_at || `${String(n.event_date).slice(0, 10)}T12:00:00`).getTime();
+    const yo = fecha(night);
+    return (Array.isArray(nights) ? nights : [])
+      .filter((n) => n && n.id !== night.id && n.status !== 'cancelled' && fecha(n) < yo)
+      .sort((a, b) => fecha(b) - fecha(a))[0] || null;
+  }
+
+  /**
+   * Duplicar una noche (D88): los mismos datos una semana después — mismo día de la
+   * semana, misma hora. Devuelve los valores del formulario, para que el gerente los
+   * revise antes de crearla; nada se crea solo.
+   */
+  function duplicateNight(night, { days = 7 } = {}) {
+    if (!night) return null;
+    const pad = (n) => String(n).padStart(2, '0');
+    const shift = (iso) => {
+      if (!iso) return '';
+      const d = new Date(new Date(iso).getTime() + days * 86400e3);
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    const base = new Date(`${String(night.event_date).slice(0, 10)}T12:00:00`);
+    const fecha = new Date(base.getTime() + days * 86400e3);
+    return {
+      name: night.name || '',
+      event_date: `${fecha.getFullYear()}-${pad(fecha.getMonth() + 1)}-${pad(fecha.getDate())}`,
+      doors_open_at: shift(night.doors_open_at),
+      closes_at: shift(night.closes_at),
+      ticket_price: night.ticket_price != null ? String(Number(night.ticket_price)) : '0',
+      arrival_deadline_minutes: night.arrival_deadline_minutes != null ? String(night.arrival_deadline_minutes) : '',
+      deposit_pct: night.deposit_pct != null ? String(night.deposit_pct) : '',
+    };
+  }
+
   function pendingWork(input) {
     const i = input || {};
     const now = i.now ? new Date(i.now) : new Date();
@@ -557,9 +623,9 @@
     add('inbox.reports', reports.length - urgentReports, 'reports', false);
     add('inbox.posErrors', Number(i.posErrors) || 0, 'summary', true);
     add('inbox.withdrawals', list(i.withdrawals).filter((w) => w.status === 'pending').length, 'payouts', false);
-    add('inbox.tips', list(i.tips).length, 'payouts', false);
+    add('inbox.tips', list(i.tips).length, 'cash', false);
     add('inbox.accounts', list(i.accounts).filter((a) => a && a.id && !(a.verified_at || a.verified === true)).length, 'payouts', false);
-    add('inbox.lostFound', list(i.lostFound).filter((x) => x.status === 'matched').length, 'payouts', false);
+    add('inbox.lostFound', list(i.lostFound).filter((x) => x.status === 'matched').length, 'lost', false);
 
     // Una noche en borrador que es en los proximos siete dias nadie la puede reservar.
     const week = new Date(now.getTime() + 7 * 86400000);
@@ -574,6 +640,10 @@
   }
 
   return {
+    previousNight,
+    duplicateNight,
+    tonightNight,
+    tillState,
     revenueFor,
     recipeMargin,
     sortRecipes,

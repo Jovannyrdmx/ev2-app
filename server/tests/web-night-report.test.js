@@ -573,6 +573,34 @@ describe('EV2Roster.assignBody', () => {
   });
 });
 
+describe('EV2Roster.copyPlan (D88)', () => {
+  const anterior = [
+    { user_id: 'u1', targets: [{ section: 'ZONA ROJA' }] },
+    { user_id: 'u2', targets: [{ location_id: 'bar1' }, { section: 'VIP' }] },
+  ];
+
+  it('copia cada asignación de la noche anterior', () => {
+    expect(Roster.copyPlan(anterior, [])).toEqual([
+      { user_id: 'u1', section: 'ZONA ROJA' },
+      { user_id: 'u2', location_id: 'bar1' },
+      { user_id: 'u2', section: 'VIP' },
+    ]);
+  });
+
+  it('no repite lo que ya está asignado esta noche', () => {
+    const hoy = [{ user_id: 'u2', targets: [{ location_id: 'bar1' }] }];
+    expect(Roster.copyPlan(anterior, hoy)).toEqual([
+      { user_id: 'u1', section: 'ZONA ROJA' },
+      { user_id: 'u2', section: 'VIP' },
+    ]);
+  });
+
+  it('sin noche anterior no hay nada que copiar', () => {
+    expect(Roster.copyPlan(null, null)).toEqual([]);
+    expect(Roster.copyPlan([], [])).toEqual([]);
+  });
+});
+
 // ===========================================================================
 // Las reglas coinciden con el servidor
 // ===========================================================================

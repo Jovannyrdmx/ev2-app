@@ -187,6 +187,28 @@
     };
   }
 
+  /**
+   * Copiar el rol de otra noche (D88): lo que había allá y todavía no está aquí. Cada
+   * renglón es el cuerpo de una asignación; el servidor sigue revisando cada una (alguien
+   * dado de baja o una barra que ya no existe se rechazan ahí, no aquí).
+   */
+  function copyPlan(previous, current) {
+    const ya = new Set();
+    for (const p of current || []) {
+      for (const tg of p.targets || []) ya.add(`${p.user_id}|${tg.section || ''}|${tg.location_id || ''}`);
+    }
+    const plan = [];
+    for (const p of previous || []) {
+      for (const tg of p.targets || []) {
+        const key = `${p.user_id}|${tg.section || ''}|${tg.location_id || ''}`;
+        if (ya.has(key)) continue;
+        ya.add(key);
+        plan.push(assignBody({ userId: p.user_id, section: tg.section || null, locationId: tg.location_id || null }));
+      }
+    }
+    return plan;
+  }
+
   /** Lo que ve el empleado al llegar: a qué quedó asignado, en una línea. */
   function describeMine(assignments, { lang = 'es' } = {}) {
     const lista = assignments || [];
@@ -206,6 +228,7 @@
   }
 
   return {
+    copyPlan,
     ASSIGNABLE,
     ASSIGNABLE_ROLES,
     ruleFor,
