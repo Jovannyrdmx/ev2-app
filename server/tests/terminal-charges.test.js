@@ -121,6 +121,16 @@ function fakeFetch(url, opts = {}) {
   if (method === 'POST' && eventos) {
     const order = mpFake.orders.get(decodeURIComponent(eventos[1]));
     if (!order) return Promise.resolve(respuesta(404, { message: 'not found' }));
+    // Como el simulador real: solo motivos documentados, y cancelado/vencido van solos.
+    const MOTIVOS = { processed: ['accredited'], failed: ['bad_filled_card_data',
+      'required_call_for_authorize', 'card_disabled', 'high_risk', 'insufficient_amount',
+      'invalid_installments', 'max_attempts_exceeded', 'rejected_other_reason', 'processing_error'] };
+    const invalido = MOTIVOS[body.status]
+      ? (body.status_detail && !MOTIVOS[body.status].includes(body.status_detail))
+      : Object.keys(body).some((k) => k !== 'status');
+    if (invalido) {
+      return Promise.resolve(respuesta(400, { errors: [{ message: 'Invalid value for property' }] }));
+    }
     Object.assign(order, {
       status: body.status,
       status_detail: body.status_detail,
@@ -1060,6 +1070,33 @@ describe('Una cuenta de prueba sin ninguna Point vinculada', () => {
     expect(visto.body.charge.status).toBe('processed');
     expect((await estadoDe(tx.id)).status).toBe('paid');
   });
+  it('simular rechazada manda un motivo que Mercado Pago acepta, y NO da nada por pagado', async () => {
+    const alta = await api().post(`/api/nightclubs/${club.id}/payment-terminals`)
+      .set(await tokenDe(manager)).send({ external_id: 'NEWLAND_N950__SBX0000001', label: 'Prueba' });
+    const tx = await cobroPendiente();
+    const cobro = await empezar(tx, alta.body.terminal);
+    const sim = await api()
+      .post(`/api/nightclubs/${club.id}/terminal-charges/${cobro.body.charge.id}/simulate`)
+      .set(await tokenDe(manager)).send({ status: 'failed' });
+    expect(sim.status).toBe(202);
+    const visto = await api().get(`/api/nightclubs/${club.id}/terminal-charges/${cobro.body.charge.id}`)
+      .set(await tokenDe(manager));
+    expect(visto.body.charge.status).toBe('failed');
+    expect((await estadoDe(tx.id)).status).toBe('pending');
+  });
+
+  it('simular cancelado o vencido va solo con el estado', async () => {
+    const alta = await api().post(`/api/nightclubs/${club.id}/payment-terminals`)
+      .set(await tokenDe(manager)).send({ external_id: 'NEWLAND_N950__SBX0000001', label: 'Prueba' });
+    for (const status of ['canceled', 'expired']) {
+      const tx = await cobroPendiente();
+      const cobro = await empezar(tx, alta.body.terminal);
+      const sim = await api()
+        .post(`/api/nightclubs/${club.id}/terminal-charges/${cobro.body.charge.id}/simulate`)
+        .set(await tokenDe(manager)).send({ status });
+      expect({ status, http: sim.status }).toEqual({ status, http: 202 });
+    }
+  });
 });
 
 // ---------------------------------------------------------------- dos formas de pago (D79)
@@ -1122,5 +1159,56 @@ describe('La terminal cobra solo una parte (D79)', () => {
     const t = await altaTerminal();
     const tx = await cobroPendiente('450.00');
     expect((await empezarParte(tx, t, 100, cobrador)).status).toBe(403);
+  });
+});
+
+// ============================================================================
+// D82: el aviso de aprobado o rechazado lleva lo que la pantalla necesita
+// ============================================================================
+
+describe('El aviso del resultado de la terminal (D82)', () => {
+  async function cobroEsperando() {
+    const t = await altaTerminal();
+    const tx = await cobroPendiente('450.00');
+    const res = await empezar(tx, t);
+    const { rows } = await pool.query(
+      'SELECT external_order_id FROM terminal_charges WHERE id = $1', [res.body.charge.id]);
+    return { tx, charge: res.body.charge, orderId: rows[0].external_order_id };
+  }
+  const ultimoAviso = async () => (await pool.query(
+    `SELECT payload FROM events WHERE type = 'terminal_charge_updated' ORDER BY id DESC LIMIT 1`))
+    .rows[0].payload;
+
+  it('aprobado: dice quién lo empezó, cuánto, en qué terminal y con qué tarjeta', async () => {
+    const { orderId, charge } = await cobroEsperando();
+    resolverOrden(orderId, 'processed');
+    expect((await notificar(orderId)).status).toBe(200);
+    const p = await ultimoAviso();
+    expect(p).toMatchObject({
+      charge_id: charge.id,
+      status: 'processed',
+      started_by: cobrador.id,
+      amount: '450.00',
+      currency: 'MXN',
+      terminal: expect.any(String),
+    });
+  });
+
+  it('si ya hay una terminal esperando, el 409 dice cuál cobro es', async () => {
+    const t = await altaTerminal();
+    const tx = await cobroPendiente('450.00');
+    const primero = await empezar(tx, t);
+    const segundo = await empezar(tx, t);
+    expect(segundo.status).toBe(409);
+    expect(segundo.body.error.details).toEqual({ charge_id: primero.body.charge.id });
+  });
+
+  it('rechazado: también avisa, con el motivo de Mercado Pago', async () => {
+    const { orderId } = await cobroEsperando();
+    resolverOrden(orderId, 'failed', { status_detail: 'insufficient_amount' });
+    await notificar(orderId, { action: 'order.failed' });
+    const p = await ultimoAviso();
+    expect(p.status).toBe('failed');
+    expect(p.amount).toMatch(/^\d+\.\d{2}$/);
   });
 });

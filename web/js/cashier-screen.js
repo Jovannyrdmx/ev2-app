@@ -508,6 +508,9 @@
         await loadTill();
       }
     } catch (err) {
+      // Ese renglón ya tenía una terminal esperando (D82): se vuelve a mostrar ESE cobro
+      // para seguirlo o cancelarlo, en vez de dejar al cajero atorado.
+      if (await resumeLiveCharge(err)) { closeCharge(); return; }
       // Una parte pudo quedar asentada y la otra no: la lista recargada dice cuánto
       // falta de verdad, y el cuadro se queda abierto para cobrarlo.
       showError(err, $('charge-error'));
@@ -546,6 +549,23 @@
       showError(err);
     }
     await loadTill();
+  }
+
+  /**
+   * Si el servidor contestó "ya hay una terminal esperando" y dijo cuál (D82), se abre
+   * el cuadro de ESE cobro: el cajero ve si pasó, o lo cancela. Devuelve si lo hizo.
+   */
+  async function resumeLiveCharge(err) {
+    const id = err && err.status === 409 && err.details && err.details.charge_id;
+    if (!id) return false;
+    try {
+      const res = await api.get(`/nightclubs/${clubId()}/terminal-charges/${id}`);
+      if (!res.charge || EV2TerminalCharge.isFinal(res.charge.status)) return false;
+      sheet().watch(res.charge);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   let terminalSheet = null;
@@ -719,6 +739,7 @@
       closeSale();
       await loadTill();
     } catch (err) {
+      if (await resumeLiveCharge(err)) { closeSale(); return; }
       showError(err, $('sale-error'));
       await loadTill();
     } finally {
@@ -760,6 +781,26 @@
     $('rt-text').textContent = vars && vars.text ? vars.text : t(key);
   }
 
+  /**
+   * Aprobado o rechazado en la terminal, aunque el cuadro esté cerrado (D82). Si el
+   * cuadro está mirando ese mismo cobro, ya lo dice él y aquí no se repite.
+   */
+  function avisoTerminal(message) {
+    const visto = terminalSheet && terminalSheet.open ? terminalSheet.chargeId : null;
+    const aviso = EV2TerminalCharge.notice(message, {
+      userId: api.session && api.session.user ? api.session.user.id : null,
+      watchingChargeId: visto,
+    });
+    if (!aviso) return;
+    const v = aviso.vars;
+    toast(t(aviso.key, {
+      terminal: v.terminal,
+      amount: money(v.amount, v.currency),
+      card: v.card ? ` (${v.card})` : '',
+      what: t(v.what),
+    }), aviso.tone === 'ok' ? 'ok' : 'error', 9000);
+  }
+
   let refreshTimer = null;
   function refreshSoon() {
     // Una ronda de cinco pedidos son cinco eventos: se junta en una sola consulta.
@@ -781,6 +822,7 @@
     rt.on('resync_required', () => refreshSoon());
     rt.on('event', (message) => {
       if (terminalSheet) terminalSheet.onEvent(message);
+      avisoTerminal(message);
       if (EV2Cashier.shouldRefresh(message, { locationId: barId() })) refreshSoon();
     });
     api.on('auth:expired', () => {

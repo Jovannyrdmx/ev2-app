@@ -363,3 +363,34 @@ describe('Salir del cobro cuando la terminal no contesta (D65)', () => {
     expect(T.FALLOS_PARA_SALIR).toBe(3);
   });
 });
+
+describe('El aviso de aprobado o rechazado con el cuadro cerrado (D82)', () => {
+  const msg = (payload) => ({ type: 'terminal_charge_updated', payload });
+  const base = { charge_id: 'c1', started_by: 'yo', amount: '30.00', currency: 'MXN', terminal: 'Barra' };
+
+  it('aprobado: avisa a quien lo empezó, con la terminal y el monto', () => {
+    const a = T.notice(msg({ ...base, status: 'processed', payment_method_id: 'visa' }), { userId: 'yo' });
+    expect(a).toMatchObject({ key: 'pay.noticePaid', tone: 'ok' });
+    expect(a.vars).toMatchObject({ terminal: 'Barra', amount: '30.00', card: 'visa' });
+  });
+
+  it('rechazado o vencido: avisa que NO se cobró', () => {
+    for (const status of ['failed', 'expired', 'canceled']) {
+      expect(T.notice(msg({ ...base, status }), { userId: 'yo' })).toMatchObject({ key: 'pay.noticeBad', tone: 'bad' });
+    }
+  });
+
+  it('no avisa a otro cajero, ni mientras sigue esperando, ni si el cuadro ya lo está diciendo', () => {
+    expect(T.notice(msg({ ...base, status: 'processed' }), { userId: 'otro' })).toBeNull();
+    expect(T.notice(msg({ ...base, status: 'waiting' }), { userId: 'yo' })).toBeNull();
+    expect(T.notice(msg({ ...base, status: 'processed' }), { userId: 'yo', watchingChargeId: 'c1' })).toBeNull();
+    expect(T.notice({ type: 'order_paid', payload: base }, { userId: 'yo' })).toBeNull();
+  });
+
+  it('los textos existen en los dos idiomas', () => {
+    for (const lang of ['es', 'en']) {
+      catalogo.setLanguage(lang);
+      for (const k of ['pay.noticePaid', 'pay.noticeBad']) expect(catalogo.t(k)).not.toBe(k);
+    }
+  });
+});

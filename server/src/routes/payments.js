@@ -1033,15 +1033,42 @@ router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/refund',
     });
   }));
 
+const SIMULATED_FAILURES = ['bad_filled_card_data', 'required_call_for_authorize', 'card_disabled',
+  'high_risk', 'insufficient_amount', 'invalid_installments', 'max_attempts_exceeded',
+  'rejected_other_reason', 'processing_error'];
+
+/**
+ * El cuerpo que acepta el simulador de Point, según el estado. Pagado y rechazado
+ * llevan tarjeta y motivo; cancelado, vencido y "requiere acción" van solo con el
+ * estado: mandarles más campos es lo que hace que Mercado Pago conteste
+ * "Invalid value for property".
+ */
+function simulatedEvent(b) {
+  if (b.status === 'processed' || b.status === 'failed') {
+    const evento = {
+      status: b.status,
+      status_detail: b.status === 'processed'
+        ? 'accredited' : (b.status_detail || 'rejected_other_reason'),
+      payment_method_type: b.payment_method_type,
+      payment_method_id: b.payment_method_id,
+    };
+    if (b.payment_method_type === 'credit_card') evento.installments = 1;
+    return evento;
+  }
+  return { status: b.status };
+}
+
 router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/simulate',
   requireRole('manager'),
   validate({
     params: z.object({ nightclubId: uuid, chargeId: uuid }),
     body: z.object({
       status: z.enum(['processed', 'failed', 'canceled', 'expired', 'action_required']),
-      status_detail: z.string().trim().max(60).optional(),
-      payment_method_id: z.string().trim().max(30).default('visa'),
-      payment_method_type: z.string().trim().max(30).default('credit_card'),
+      // Solo los motivos que acepta el simulador de Point (guía "Test the integration");
+      // cualquier otro lo rechaza Mercado Pago con "Invalid value for property".
+      status_detail: z.enum(SIMULATED_FAILURES).optional(),
+      payment_method_id: z.enum(['visa', 'master', 'amex', 'debvisa', 'debmaster']).default('visa'),
+      payment_method_type: z.enum(['credit_card', 'debit_card']).default('credit_card'),
     }),
   }),
   asyncHandler(async (req, res) => {
@@ -1053,14 +1080,8 @@ router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/simulate',
     if (!found.rows[0].external_order_id) {
       throw ApiError.conflict('Ese cobro nunca llegó a Mercado Pago: no hay nada que simular');
     }
-    await mercadopago.simulateOrderEvent(found.rows[0].external_order_id, {
-      status: req.body.status,
-      status_detail: req.body.status_detail
-        || (req.body.status === 'processed' ? 'accredited' : 'simulated'),
-      payment_method_type: req.body.payment_method_type,
-      payment_method_id: req.body.payment_method_id,
-      installments: 1,
-    });
+    await mercadopago.simulateOrderEvent(found.rows[0].external_order_id,
+      simulatedEvent(req.body));
     res.status(202).json({ simulated: req.body.status });
   }));
 

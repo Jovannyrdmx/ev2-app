@@ -37,6 +37,7 @@ const { ApiError } = require('../middleware/errors');
 const mp = require('./mercadopago');
 const payments = require('./payments');
 const events = require('./events');
+const { pool } = require('../db/pool');
 
 /** Lo que el libro admite cobrar. Igual que el pago manual. */
 const OPEN_TX_STATUSES = payments.OPEN_TX_STATUSES;
@@ -202,8 +203,16 @@ async function reserve(client, {
     // El índice parcial. Dos meseros tocaron cobrar en el mismo renglón: el segundo se
     // entera aquí y no despertando una segunda terminal.
     if (err.code === '23505') {
+      // Se dice CUÁL cobro está esperando (D82), para que la pantalla lo vuelva a
+      // mostrar y se pueda seguir o cancelar, en vez de quedarse atorada. Se consulta
+      // fuera de esta transacción, que ya quedó abortada por el choque.
+      const vivo = await pool.query(
+        `SELECT id::text AS id FROM terminal_charges
+          WHERE transaction_id = $1 AND status IN ('creating','waiting','action_required')
+          LIMIT 1`, [tx.id]).catch(() => ({ rows: [] }));
       throw ApiError.conflict('Ese cobro ya tiene una terminal esperando. Revisa la pantalla '
-        + 'o cancélalo antes de empezar otro.');
+        + 'o cancélalo antes de empezar otro.',
+      vivo.rows[0] ? { charge_id: vivo.rows[0].id } : undefined);
     }
     throw err;
   }
@@ -715,6 +724,15 @@ async function refundsOf(runner, chargeIds) {
 
 /** El aviso a las pantallas, después de que la base ya quedó consistente. */
 async function announce({ nightclubId, chargeId, status, outcome, startedBy }) {
+  // Lo que la pantalla necesita para avisar aunque nadie esté mirando el cuadro de la
+  // terminal (D82): quién lo empezó, cuánto, en qué terminal y con qué tarjeta.
+  const { rows } = await pool.query(
+    `SELECT c.amount::text AS amount, c.currency, c.started_by::text AS started_by,
+            c.status_detail, c.payment_method_id, c.transaction_id::text AS transaction_id,
+            t.label AS terminal_label
+       FROM terminal_charges c JOIN payment_terminals t ON t.id = c.terminal_id
+      WHERE c.id = $1`, [chargeId]);
+  const c = rows[0] || {};
   await events.publish({
     nightclubId,
     type: 'terminal_charge_updated',
@@ -722,7 +740,17 @@ async function announce({ nightclubId, chargeId, status, outcome, startedBy }) {
       roles: ['manager', 'cashier', 'hostess'],
       userIds: [startedBy, outcome && outcome.tx ? outcome.tx.payer_user_id : null].filter(Boolean),
     },
-    payload: { charge_id: chargeId, status },
+    payload: {
+      charge_id: chargeId,
+      status,
+      started_by: c.started_by || startedBy || null,
+      amount: c.amount || null,
+      currency: c.currency || null,
+      terminal: c.terminal_label || null,
+      status_detail: c.status_detail || null,
+      payment_method_id: c.payment_method_id || null,
+      transaction_id: c.transaction_id || null,
+    },
   });
   if (outcome && outcome.partial) {
     // La terminal cobró su parte y falta la otra (D79): la caja tiene que enterarse

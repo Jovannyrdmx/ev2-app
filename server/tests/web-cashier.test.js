@@ -230,6 +230,12 @@ describe('caja.html y su controlador', () => {
     expect(controlador).toMatch(/chargedToast\(t\('till\.saleDone'/);
   });
 
+  it('con una terminal ya esperando, vuelve a mostrar ese cobro en vez de atorarse (D82)', () => {
+    expect(controlador).toMatch(/err\.details && err\.details\.charge_id/);
+    expect(controlador).toMatch(/resumeLiveCharge\(err\)/);
+    expect(controlador).toMatch(/avisoTerminal\(message\)/);
+  });
+
   it('se esconde todo detrás de la puerta de la contraseña', () => {
     expect(controlador).toMatch(/PASSWORD_GATE_HIDES\s*=\s*\[[^\]]*'sale-sheet'[^\]]*'charge-sheet'/);
   });

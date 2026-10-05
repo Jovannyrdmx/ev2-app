@@ -310,11 +310,40 @@
       },
       close() { parar(); caja.hidden = true; },
       get chargeId() { return estado.chargeId; },
+      get open() { return !caja.hidden; },
+    };
+  }
+
+  /**
+   * El aviso de un cobro que terminó, para quien lo empezó (D82).
+   *
+   * El cuadro de la terminal ya dice el resultado mientras está abierto; esto cubre el
+   * caso en que se cerró (o se recargó la página) y la tarjeta pasó o se rechazó
+   * después. Solo avisa a quien empezó el cobro, y solo cuando terminó.
+   */
+  function notice(message, { userId = null, watchingChargeId = null } = {}) {
+    const kind = message && (message.event_type || message.type);
+    if (kind !== 'terminal_charge_updated') return null;
+    const p = (message && message.payload) || {};
+    if (!isFinal(p.status) || String(p.status) === 'refunded') return null;
+    if (!userId || !p.started_by || p.started_by !== userId) return null;
+    if (watchingChargeId && p.charge_id === watchingChargeId) return null;
+    return {
+      key: isPaid(p.status) ? 'pay.noticePaid' : 'pay.noticeBad',
+      tone: isPaid(p.status) ? 'ok' : 'bad',
+      vars: {
+        what: headline(p.status).key,
+        terminal: p.terminal || '',
+        amount: p.amount || '',
+        currency: p.currency || 'MXN',
+        card: p.payment_method_id || '',
+        detail: p.status_detail || '',
+      },
     };
   }
 
   return {
     FINAL, REMEMBER_KEY, FALLOS_PARA_SALIR, isFinal, isPaid, headline, secondsLeft, pollDelay, canCancel,
-    pickTerminal, recordar, recordada, createSheet, DETAIL_KEYS, detailKey,
+    pickTerminal, recordar, recordada, createSheet, DETAIL_KEYS, detailKey, notice,
   };
 }));

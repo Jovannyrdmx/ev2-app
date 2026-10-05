@@ -98,8 +98,47 @@ function norm(value) {
  * `-c preserve_interword_spaces=1` mantiene los espacios largos entre columnas, que
  * es la única pista de dónde acaba la descripción y empiezan los números.
  */
-function ocrText(imagePath, { langs = LANGS, timeoutMs = OCR_TIMEOUT_MS } = {}) {
-  const args = [imagePath, 'stdout', '-l', langs, '--psm', '6',
+/**
+ * Los idiomas que de verdad tiene instalados este servidor (D83).
+ *
+ * Tesseract con un idioma que falta no lee "con los que hay": no lee nada. Y en Alpine
+ * cada idioma es un paquete aparte, así que un `spa+eng` con solo `spa` instalado
+ * hacía fallar TODAS las fotos. Se pregunta una vez y se recuerda.
+ */
+const idiomasCache = new Map();
+function installedLangs() {
+  const bin = tesseractBin();
+  if (idiomasCache.has(bin)) return idiomasCache.get(bin);
+  const pregunta = new Promise((resolve) => {
+    execFile(bin, ['--list-langs'], { timeout: 10000 }, (err, stdout, stderr) => {
+      if (err) { idiomasCache.delete(bin); resolve(null); return; }
+      // La lista sale en stdout (versiones nuevas) o en stderr (las viejas).
+      const texto = `${stdout || ''}\n${stderr || ''}`;
+      const langs = texto.split(/\r?\n/).map((l) => l.trim())
+        .filter((l) => /^[a-z_]{3,10}$/i.test(l) && l !== 'osd');
+      resolve(langs);
+    });
+  });
+  idiomasCache.set(bin, pregunta);
+  return pregunta;
+}
+
+/** De los idiomas pedidos, los que hay. Si no hay ninguno, se dice cuál falta. */
+async function usableLangs(wanted) {
+  const hay = await installedLangs();
+  if (!hay) return wanted; // no se pudo preguntar: se intenta tal cual y el error lo dice
+  const pedidos = String(wanted).split('+').filter(Boolean);
+  const sirven = pedidos.filter((l) => hay.includes(l));
+  if (!sirven.length) {
+    throw new Error(`Falta el idioma "${wanted}" en el servidor `
+      + `(instalados: ${hay.join(', ') || 'ninguno'})`);
+  }
+  return sirven.join('+');
+}
+
+async function ocrText(imagePath, { langs = LANGS, timeoutMs = OCR_TIMEOUT_MS } = {}) {
+  const idiomas = await usableLangs(langs);
+  const args = [imagePath, 'stdout', '-l', idiomas, '--psm', '6',
     '-c', 'preserve_interword_spaces=1'];
   const bin = tesseractBin();
   return new Promise((resolve, reject) => {
@@ -118,9 +157,18 @@ function ocrText(imagePath, { langs = LANGS, timeoutMs = OCR_TIMEOUT_MS } = {}) 
           reject(new Error(`La lectura tardó más de ${Math.round(timeoutMs / 1000)}s`));
           return;
         }
-        const detalle = String(stderr || err.message || '').trim().split('\n')[0];
-        if (/failed loading language|Could not initialize tesseract/i.test(detalle)) {
-          reject(new Error(`Falta el idioma "${langs}" en el servidor: ${detalle}`));
+        const todo = String(stderr || err.message || '').trim();
+        const detalle = todo.split('\n')[0];
+        // El aviso del idioma no viene en la primera línea ("Error opening data file…"
+        // va antes), así que se busca en todo lo que dijo.
+        if (/failed loading language|Could not initialize tesseract/i.test(todo)) {
+          reject(new Error(`Falta el idioma "${idiomas}" en el servidor: ${detalle}`));
+          return;
+        }
+        // Una foto en un formato que el lector de imágenes no entiende (HEIC de iPhone).
+        if (/pixRead|Unsupported image|image file not found|Leptonica/i.test(todo)) {
+          reject(new Error('No se pudo abrir la imagen: tómala de nuevo como JPG '
+            + '(en iPhone: Ajustes → Cámara → Formatos → "Más compatible")'));
           return;
         }
         reject(new Error(detalle || 'Tesseract falló sin decir por qué'));

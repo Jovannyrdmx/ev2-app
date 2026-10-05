@@ -22,7 +22,9 @@ WORKDIR /app
 # solo, las palabras acentuadas se leen mal y la mitad de los renglones se pierden.
 # Sin esto instalado la subida sigue funcionando: la foto se guarda como comprobante,
 # el renglon queda `failed` diciendo que falta el programa, y la captura sigue a mano.
-RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-spa
+# El ingles va instalado aparte: en Alpine `tesseract-ocr` NO trae ningun idioma, y el
+# servicio pide `spa+eng`; con uno faltante Tesseract no lee NADA (D83).
+RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-spa tesseract-ocr-data-eng
 
 # Las fotos viven en un volumen, no en la base. Se crea AQUI, y no se deja que Docker
 # lo cree al montar: un volumen nombrado sobre una ruta que no existe en la imagen

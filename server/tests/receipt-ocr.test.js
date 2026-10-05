@@ -502,3 +502,60 @@ describe('Guardar la imagen', () => {
     expect(() => ocr.checkUpload({ buffer, mimetype: 'image/jpeg' })).not.toThrow();
   });
 });
+
+// ============================================================================
+// D83: un idioma que falta en el servidor no tumba la lectura
+// ============================================================================
+
+describe('Los idiomas que hay en el servidor (D83)', () => {
+  const os = require('os');
+  let dir; let antes;
+
+  /** Un "tesseract" de mentira: dice qué idiomas tiene y falla si le piden otro. */
+  function falso(idiomas) {
+    const bin = path.join(dir, `tess-${idiomas.join('-')}`);
+    fs.writeFileSync(bin, `#!/bin/sh
+if [ "$1" = "--list-langs" ]; then
+  echo 'List of available languages in "/x/tessdata/" (${idiomas.length}):'
+  ${idiomas.map((l) => `echo ${l}`).join('\n  ')}
+  exit 0
+fi
+langs=""; prev=""
+for a in "$@"; do [ "$prev" = "-l" ] && langs="$a"; prev="$a"; done
+for l in $(echo "$langs" | tr '+' ' '); do
+  case " ${idiomas.join(' ')} " in *" $l "*) ;; *)
+    echo "Error opening data file /x/tessdata/$l.traineddata" >&2
+    echo "Failed loading language '$l'" >&2
+    exit 1;;
+  esac
+done
+echo "LEIDO CON $langs"
+`, { mode: 0o755 });
+    return bin;
+  }
+
+  beforeAll(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ev2-tess-'));
+    antes = process.env.TESSERACT_BIN;
+  });
+  afterAll(() => {
+    if (antes === undefined) delete process.env.TESSERACT_BIN; else process.env.TESSERACT_BIN = antes;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('pide spa+eng, el servidor solo tiene spa: lee con spa en vez de fallar', async () => {
+    process.env.TESSERACT_BIN = falso(['spa']);
+    await expect(ocr.ocrText(FIXTURE, { langs: 'spa+eng' })).resolves.toMatch(/LEIDO CON spa\b/);
+  });
+
+  it('con los dos instalados usa los dos', async () => {
+    process.env.TESSERACT_BIN = falso(['eng', 'spa']);
+    await expect(ocr.ocrText(FIXTURE, { langs: 'spa+eng' })).resolves.toMatch(/LEIDO CON spa\+eng/);
+  });
+
+  it('sin ninguno de los pedidos lo dice claro, con lo que sí hay', async () => {
+    process.env.TESSERACT_BIN = falso(['fra']);
+    await expect(ocr.ocrText(FIXTURE, { langs: 'spa+eng' }))
+      .rejects.toThrow(/Falta el idioma "spa\+eng".*instalados: fra/);
+  });
+});
