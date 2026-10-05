@@ -110,3 +110,18 @@ describe('EV2UI.toast', () => {
     expect(d.querySelector('.ev2-toasts').getAttribute('aria-live')).toBe('polite');
   });
 });
+
+describe('Cerrar sesión lleva al inicio, no al login del rol', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const pantallas = ['bartender', 'cashier', 'driver', 'employee', 'index', 'manager', 'staff',
+    'valet', 'warehouse'];
+  for (const p of pantallas) {
+    it(`${p}-screen.js`, () => {
+      const src = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'js', `${p}-screen.js`), 'utf8');
+      const salir = src.slice(src.indexOf('function signOut'), src.indexOf('function signOut') + 400);
+      expect(salir).toMatch(/location\.replace\('index\.html'\)/);
+      expect(salir).not.toMatch(/location\.reload\(\)/);
+    });
+  }
+});

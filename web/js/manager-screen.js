@@ -126,7 +126,9 @@
   async function signOut() {
     if (state.realtime) state.realtime.close();
     await api.logout();
-    location.reload();
+    // Al inicio, no al login de este rol: desde ahí entra cualquiera y el inicio lo
+    // manda a su pantalla.
+    location.replace('index.html');
   }
   $('btn-logout').onclick = signOut;
   $('btn-wrong-logout').onclick = signOut;

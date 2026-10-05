@@ -84,7 +84,7 @@
     } catch (err) { showError(err, $('auth-error'), { context: 'login' }); }
   };
 
-  async function signOut() { await api.logout(); location.reload(); }
+  async function signOut() { await api.logout(); location.replace('index.html'); }
   $('btn-logout').onclick = signOut;
   $('btn-wrong-logout').onclick = signOut;
   $('btn-pw-logout').onclick = signOut;
