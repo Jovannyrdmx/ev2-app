@@ -90,6 +90,8 @@ router.post('/nightclubs/:nightclubId/shifts/me/cash-drops',
     params: z.object({ nightclubId: uuid }),
     body: z.object({
       amount: z.number().positive().max(1_000_000),
+      // Pesos o dólares (D86): cada moneda sale de lo que hay de esa moneda.
+      currency: z.enum(['MXN', 'USD']).default('MXN'),
       reason: z.string().trim().min(3).max(200),
       manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos'),
     }),
@@ -115,6 +117,7 @@ router.post('/nightclubs/:nightclubId/shifts/me/cash-drops',
         nightclubId,
         shift,
         amount: req.body.amount,
+        currency: req.body.currency,
         reason: req.body.reason,
         authorizer: autoriza,
       });
@@ -145,6 +148,7 @@ router.post('/nightclubs/:nightclubId/shifts/me/cash-drops',
         user_id: req.user.id,
         user_name: req.user.display_name || null,
         amount: hecho.amount,
+        currency: hecho.currency,
         reason: req.body.reason,
         authorized_by: autoriza.name,
       },
@@ -282,12 +286,17 @@ router.post('/nightclubs/:nightclubId/till/payments',
     params: z.object({ nightclubId: uuid }),
     body: z.object({
       transaction_id: uuid,
-      method: z.enum(['cash', 'card_terminal']),
-      amount: z.number().positive().max(1_000_000),
+      method: z.enum(['cash', 'cash_usd', 'card_terminal']),
+      // En dólares (D86) el monto lo calcula el servidor con el tipo de cambio.
+      amount: z.number().positive().max(1_000_000).optional(),
       reference: z.string().trim().min(3).max(60).optional(),
       cash_received: z.number().positive().max(1_000_000).optional(),
+      usd_received: z.number().positive().max(100_000).optional(),
+      // El tipo de cambio que el cajero vio: si ya no es el vigente, 409.
+      exchange_rate_id: z.union([z.string().regex(/^\d+$/), z.number().int().positive()]).optional(),
       client_request_id: uuid.optional(),
-    }),
+    }).refine((b) => b.method === 'cash_usd' || b.amount !== undefined,
+      { message: 'Indica el monto a cobrar', path: ['amount'] }),
   }),
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
@@ -298,6 +307,7 @@ router.post('/nightclubs/:nightclubId/till/payments',
       const ya = await pool.query(
         `SELECT p.id, p.transaction_id, p.method, p.amount::text AS amount,
                 p.cash_received::text AS cash_received, p.change_given::text AS change_given,
+                p.usd_received::text AS usd_received, p.exchange_rate::text AS exchange_rate,
                 t.status AS transaction_status
            FROM manual_payments p JOIN transactions t ON t.id = p.transaction_id
           WHERE p.client_request_id = $1 AND p.nightclub_id = $2`,
@@ -317,9 +327,11 @@ router.post('/nightclubs/:nightclubId/till/payments',
         user: req.user,
         transactionId: b.transaction_id,
         method: b.method,
-        amount: b.amount,
+        amount: b.amount ?? null,
         reference: b.reference || null,
         cashReceived: b.cash_received ?? null,
+        usdReceived: b.usd_received ?? null,
+        exchangeRateId: b.exchange_rate_id === undefined ? null : String(b.exchange_rate_id),
         clientRequestId: b.client_request_id || null,
       });
       await client.query('COMMIT');
@@ -349,6 +361,8 @@ router.post('/nightclubs/:nightclubId/till/payments',
       paid_amount: hecho.paid,
       remaining: hecho.remaining,
       change_given: hecho.payment.change_given,
+      usd_received: hecho.payment.usd_received || null,
+      exchange_rate: hecho.payment.exchange_rate || null,
       receipt: hecho.receipt ? { job_id: hecho.receipt.id, status: hecho.receipt.status } : null,
     });
   }));
@@ -373,6 +387,8 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
     body: z.object({
       declared_cash: z.number().min(0).max(1_000_000),
       counted_cash: z.number().min(0).max(1_000_000),
+      // Los dólares del cajón (D86). Obligatorio solo si el turno recibió dólares.
+      counted_usd: z.number().min(0).max(1_000_000).optional(),
       difference_reason: z.string().trim().max(280).optional(),
       notes: z.string().trim().max(280).optional(),
       manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos'),
@@ -404,6 +420,7 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
         notes: req.body.notes,
         authorizer: autoriza,
         acknowledgePending: req.body.acknowledge_pending,
+        countedUsd: req.body.counted_usd ?? null,
       });
       await client.query('COMMIT');
     } catch (err) {
@@ -424,6 +441,7 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
         expected_cash: hecho.expected_cash,
         counted_cash: hecho.counted_cash,
         difference: hecho.difference,
+        difference_usd: hecho.difference_usd,
         opening_float: hecho.opening_float,
         pending_orders: hecho.pending_orders,
         pending_total: hecho.pending_total,
@@ -459,6 +477,9 @@ const CLOSING_SELECT = `
          c.authorized_at, c.authorized_role, c.ticket_job_id,
          c.location_id, l.name AS location_name, c.opening_float::text AS opening_float,
          c.pending_orders, c.pending_total::text AS pending_total,
+         c.usd_collected::text AS usd_collected, c.usd_change_given::text AS usd_change_given,
+         c.usd_drops_total::text AS usd_drops_total, c.expected_usd::text AS expected_usd,
+         c.counted_usd::text AS counted_usd, c.difference_usd::text AS difference_usd,
          u.display_name AS user_name, m.display_name AS confirmed_by_name,
          a.display_name AS authorized_by_name
     FROM shift_closings c

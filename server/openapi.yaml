@@ -9789,6 +9789,7 @@ paths:
               required: [amount, reason, manager_pin]
               properties:
                 amount: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+                currency: { type: string, enum: [MXN, USD], default: MXN, description: 'Pesos o dólares (D86): cada moneda sale de lo que hay de esa moneda.' }
                 reason:
                   type: string
                   minLength: 3
@@ -9956,6 +9957,12 @@ paths:
           que completar exacto. Máximo dos partes, nunca dos con la misma forma.
         - **Recibo**: al completar el pago se imprime solo en la impresora `till` de la
           barra, siempre, aunque el club tenga apagados los recibos.
+        - **Dólares (D86)**: con `method=cash_usd` se mandan `usd_received` y el
+          `exchange_rate_id` que vio el cajero; `amount` no se manda. El servidor convierte
+          con el tipo de cambio vigente (`round(usd × tipo, 2)`), aplica lo que falte del
+          cobro y da el cambio en pesos redondeado hacia abajo al peso. Si los dólares no
+          alcanzan quedan como primera parte. Si el tipo de cambio ya no es el vigente
+          contesta `409` con `details.exchange_rate` (el nuevo).
 
         `client_request_id` hace la petición idempotente: repetirla devuelve el mismo
         pago con `200` y `Idempotent-Replay: true`.
@@ -9967,11 +9974,24 @@ paths:
           application/json:
             schema:
               type: object
-              required: [transaction_id, method, amount]
+              required: [transaction_id, method]
               properties:
                 transaction_id: { type: string, format: uuid }
-                method: { type: string, enum: [cash, card_terminal] }
-                amount: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+                method: { type: string, enum: [cash, cash_usd, card_terminal] }
+                amount:
+                  type: number
+                  exclusiveMinimum: 0
+                  maximum: 1000000
+                  description: Obligatorio salvo con `cash_usd`, donde lo calcula el servidor.
+                usd_received:
+                  type: number
+                  exclusiveMinimum: 0
+                  maximum: 100000
+                  description: Solo con `cash_usd`. Los dólares que entregó el cliente.
+                exchange_rate_id:
+                  type: string
+                  pattern: '^\d+$'
+                  description: Solo con `cash_usd`. El tipo de cambio que vio el cajero.
                 reference:
                   type: string
                   minLength: 3
@@ -10005,14 +10025,18 @@ paths:
                     properties:
                       id: { type: string, format: uuid }
                       transaction_id: { type: string, format: uuid }
-                      method: { type: string, enum: [cash, card_terminal] }
+                      method: { type: string, enum: [cash, cash_usd, card_terminal] }
                       amount: { type: string }
                       cash_received: { type: [string, 'null'] }
                       change_given: { type: [string, 'null'] }
+                      usd_received: { type: [string, 'null'] }
+                      exchange_rate: { type: [string, 'null'] }
                   paid: { type: boolean, description: '`false` si falta la segunda parte.' }
                   paid_amount: { type: string }
                   remaining: { type: string }
-                  change_given: { type: [string, 'null'] }
+                  change_given: { type: [string, 'null'], description: Siempre en pesos. }
+                  usd_received: { type: [string, 'null'] }
+                  exchange_rate: { type: [string, 'null'] }
                   receipt:
                     type: [object, 'null']
                     description: El trabajo de impresión del recibo, si se completó el pago.
@@ -10074,6 +10098,13 @@ paths:
                   minimum: 0
                   maximum: 1000000
                   description: Lo que el gerente contó de verdad.
+                counted_usd:
+                  type: number
+                  minimum: 0
+                  maximum: 1000000
+                  description: |
+                    Los dólares del cajón (D86). Obligatorio si el turno recibió dólares; se
+                    compara contra los dólares recibidos menos los retiros en dólares.
                 difference_reason:
                   type: string
                   maxLength: 280

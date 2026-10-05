@@ -187,6 +187,21 @@
             <span id="charge-change" class="font-display text-2xl" style="color:var(--ev2-gold)">—</span>
           </div>
         </div>
+        <!-- Dólares (D86): lo que entregó, en cuánto queda a este tipo de cambio, y el cambio en pesos. -->
+        <div id="charge-usd" class="space-y-1" hidden>
+          <p id="charge-usd-rate" class="text-xs text-white/50">—</p>
+          <label for="charge-usd-received" class="text-xs text-white/50" data-i18n="till.usdReceived">Dólares recibidos</label>
+          <input id="charge-usd-received" type="number" min="0" step="1" inputmode="decimal" class="field text-center text-xl"
+                 placeholder="US$" data-i18n-placeholder="till.usdReceived">
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-white/60" data-i18n="till.usdCovers">Equivale a</span>
+            <span id="charge-usd-covers">—</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-white/60" data-i18n="till.changeMxn">Cambio en pesos</span>
+            <span id="charge-usd-change" class="font-display text-2xl" style="color:var(--ev2-gold)">—</span>
+          </div>
+        </div>
       </div>
 
       <!-- Parte B: la segunda forma de pago, por el resto. -->
@@ -205,6 +220,21 @@
           <div class="flex items-center justify-between">
             <span class="text-sm text-white/60" data-i18n="till.change">Cambio</span>
             <span id="charge-b-change" class="font-display text-2xl" style="color:var(--ev2-gold)">—</span>
+          </div>
+        </div>
+        <!-- Dólares (D86): lo que entregó, en cuánto queda a este tipo de cambio, y el cambio en pesos. -->
+        <div id="charge-b-usd" class="space-y-1" hidden>
+          <p id="charge-b-usd-rate" class="text-xs text-white/50">—</p>
+          <label for="charge-b-usd-received" class="text-xs text-white/50" data-i18n="till.usdReceived">Dólares recibidos</label>
+          <input id="charge-b-usd-received" type="number" min="0" step="1" inputmode="decimal" class="field text-center text-xl"
+                 placeholder="US$" data-i18n-placeholder="till.usdReceived">
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-white/60" data-i18n="till.usdCovers">Equivale a</span>
+            <span id="charge-b-usd-covers">—</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-white/60" data-i18n="till.changeMxn">Cambio en pesos</span>
+            <span id="charge-b-usd-change" class="font-display text-2xl" style="color:var(--ev2-gold)">—</span>
           </div>
         </div>
       </div>

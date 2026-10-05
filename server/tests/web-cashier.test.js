@@ -279,7 +279,9 @@ describe('EV2Cashier: el cobro con cambio y dos formas de pago (D79)', () => {
 
   it('una forma ya usada no se ofrece otra vez, y no se divide dos veces', () => {
     const conParte = pedido({ remaining: '150', parts: [{ method: 'cash', amount: '300' }] });
-    expect(Cashier.methodsFor(pedido())).toEqual(Cashier.METHOD_KEYS);
+    // Sin tipo de cambio los dólares no se ofrecen (D86); con él, todas.
+    expect(Cashier.methodsFor(pedido())).toEqual(Cashier.METHOD_KEYS.filter((m) => m !== 'cash_usd'));
+    expect(Cashier.methodsFor(pedido(), { usdRate: { id: '1', rate: '17.5' } })).toEqual(Cashier.METHOD_KEYS);
     expect(Cashier.methodsFor(conParte)).not.toContain('cash');
     expect(Cashier.canSplit(conParte)).toBe(false);
     expect(Cashier.planCharge({ order: conParte, split: true, a: { method: 'card_terminal', amount: 50 },
@@ -339,5 +341,73 @@ describe('EV2Cashier: el cobro con cambio y dos formas de pago (D79)', () => {
   it('un pedido ya pagado no se cobra', () => {
     expect(Cashier.planCharge({ order: pedido({ remaining: '0' }), a: { method: 'cash' } }))
       .toEqual({ error: 'till.errNothingDue' });
+  });
+});
+
+// ============================================================================
+// D86: cobrar en dólares, el cambio en pesos
+// ============================================================================
+
+describe('EV2Cashier: cobrar en dólares (D86)', () => {
+  const tipo = { id: '7', rate: '17.350000' };
+  const pedido = (extra = {}) => ({ transaction_id: 't1', subtotal: '450.00', ...extra });
+
+  it('convierte como Postgres: al centavo, la mitad hacia arriba, sin errores de flotante', () => {
+    expect(Cashier.usdToCents(10, '17.35')).toBe(17350);
+    // 17.355 × 100 en flotante es 1735.4999…; Postgres redondea a 17.36.
+    expect(Cashier.usdToCents(1, '17.355')).toBe(1736);
+    expect(Cashier.usdToCents(0, '17.35')).toBeNull();
+    expect(Cashier.usdToCents(10, null)).toBeNull();
+  });
+
+  it('el cambio sale en pesos, redondeado hacia abajo al peso', () => {
+    expect(Cashier.usdQuote(10, '17.35', '120.00'))
+      .toEqual({ covers: '173.50', applied: '120.00', change: '53.00', short: null });
+    expect(Cashier.usdQuote(5, '17.35', '120.00'))
+      .toEqual({ covers: '86.75', applied: '86.75', change: '0.00', short: '33.25' });
+    expect(Cashier.usdFor('120.00', '17.35')).toBe('6.92');
+  });
+
+  it('un solo pago en dólares: tiene que alcanzar, y manda dólares y tipo de cambio, no pesos', () => {
+    const p = pedido({ subtotal: '120.00', remaining: '120.00' });
+    expect(Cashier.planCharge({ order: p, a: { method: 'cash_usd', usd: '5' }, usdRate: tipo }))
+      .toEqual({ error: 'till.errUsdShort' });
+    const r = Cashier.planCharge({ order: p, a: { method: 'cash_usd', usd: '10' }, usdRate: tipo });
+    expect(r.steps[0]).toMatchObject({
+      method: 'cash_usd', amount: '120.00', change: '53.00', usd_received: '10.00', exchange_rate_id: '7',
+    });
+    expect(Cashier.paymentPayload(p, r.steps[0], 'k')).toEqual({
+      transaction_id: 't1', method: 'cash_usd', usd_received: 10, exchange_rate_id: '7', client_request_id: 'k',
+    });
+  });
+
+  it('sin tipo de cambio no hay dólares', () => {
+    const p = pedido();
+    expect(Cashier.planCharge({ order: p, a: { method: 'cash_usd', usd: '100' } }))
+      .toEqual({ error: 'till.errNoRate' });
+  });
+
+  it('dólares como primera de dos partes: los dólares fijan cuánto paga cada una', () => {
+    const p = pedido({ subtotal: '120.00', remaining: '120.00' });
+    const r = Cashier.planCharge({
+      order: p, split: true, a: { method: 'cash_usd', usd: '5' }, b: { method: 'cash' }, usdRate: tipo,
+    });
+    expect(r.steps.map((s) => [s.method, s.amount])).toEqual([['cash_usd', '86.75'], ['cash', '33.25']]);
+    // Si los dólares ya pagan todo, no se divide.
+    expect(Cashier.planCharge({
+      order: p, split: true, a: { method: 'cash_usd', usd: '10' }, b: { method: 'cash' }, usdRate: tipo,
+    })).toEqual({ error: 'till.errUsdCoversAll' });
+  });
+
+  it('dólares como segunda parte: tienen que completar', () => {
+    const p = pedido({ subtotal: '120.00', remaining: '120.00' });
+    const corto = Cashier.planCharge({
+      order: p, split: true, a: { method: 'cash', amount: '20' }, b: { method: 'cash_usd', usd: '5' }, usdRate: tipo,
+    });
+    expect(corto).toEqual({ error: 'till.errUsdShort' });
+    const ok = Cashier.planCharge({
+      order: p, split: true, a: { method: 'cash', amount: '20' }, b: { method: 'cash_usd', usd: '10' }, usdRate: tipo,
+    });
+    expect(ok.steps[1]).toMatchObject({ method: 'cash_usd', amount: '100.00', change: '73.00' });
   });
 });

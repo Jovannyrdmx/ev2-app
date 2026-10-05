@@ -170,3 +170,48 @@ describe('La hoja, contra el DOM de verdad', () => {
     expect(doc.getElementById('cut-error').textContent).toBe('sin red');
   });
 });
+
+// ============================================================================
+// D86: los dólares se cuentan aparte
+// ============================================================================
+
+describe('El corte con dólares (D86)', () => {
+  const conDolares = (over = {}) => corteAbierto({
+    totals: {
+      ...corteAbierto().totals,
+      by_method: [
+        { method: 'cash', currency: 'MXN', amount: '3000.00', count: 6 },
+        { method: 'cash_usd', currency: 'MXN', amount: '120.00', count: 1 },
+      ],
+      usd: { received: '10.00', change_given_mxn: '53.00', count: 1 },
+    },
+    cash_to_hand: '2947.00',
+    usd_to_hand: '10.00',
+    ...over,
+  });
+
+  it('enseña el cambio en pesos que salió del cajón', () => {
+    const lineas = Cut.lines(conDolares(), t);
+    expect(lineas.find((l) => l.key === 'usd_change')).toMatchObject({ value: '-53.00', cash: true });
+    expect(Cut.hasUsd(conDolares())).toBe(true);
+    expect(Cut.hasUsd(corteAbierto())).toBe(false);
+  });
+
+  it('con dólares, no se cierra sin contarlos; una diferencia en dólares pide motivo', () => {
+    const c = conDolares();
+    expect(Cut.closeBlocker('2947', c, { pin: '123456' })).toBe('cut.errUsdCounted');
+    expect(Cut.closeBlocker('2947', c, { pin: '123456', countedUsd: '10' })).toBeNull();
+    expect(Cut.closeBlocker('2947', c, { pin: '123456', countedUsd: '5' })).toBe('cut.errDiffReason');
+    expect(Cut.closeBlocker('2947', c, { pin: '123456', countedUsd: '5', reason: 'billete falso' })).toBeNull();
+    // Sin dólares en el turno, no se piden.
+    expect(Cut.closeBlocker('3000', corteAbierto(), { pin: '123456' })).toBeNull();
+  });
+
+  it('el retiro en dólares sale de los dólares', () => {
+    const c = conDolares();
+    const base = { reason: 'Al banco', pin: '123456' };
+    expect(Cut.dropBlocker(20, c, { ...base, currency: 'USD' })).toBe('cut.errTooMuch');
+    expect(Cut.dropBlocker(6, c, { ...base, currency: 'USD' })).toBeNull();
+    expect(Cut.dropBlocker(2947, c, base)).toBeNull();
+  });
+});

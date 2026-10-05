@@ -57,7 +57,7 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
   const hasta = to || new Date();
   const params = [nightclubId, userId, from, hasta];
 
-  const [manuales, terminal, puerta, propinas] = await Promise.all([
+  const [manuales, terminal, puerta, propinas, dolares] = await Promise.all([
     // 1. Pagos que esa persona registró: efectivo en la mesa y vouchers de terminal.
     runner.query(
       `SELECT p.method, p.currency,
@@ -96,6 +96,16 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
         WHERE t.nightclub_id = $1 AND t.to_user_id = $2
           AND t.created_at >= $3 AND t.created_at <= $4
         GROUP BY t.currency`, params),
+    // Los dólares que recibió (D86): se quedan en el cajón como dólares, y el cambio
+    // que dio salió del cajón en pesos.
+    runner.query(
+      `SELECT count(*)::int AS count,
+              COALESCE(sum(p.usd_received), 0)::numeric(12,2)::text AS usd,
+              COALESCE(sum(p.change_given), 0)::numeric(12,2)::text AS change_mxn
+         FROM manual_payments p
+        WHERE p.nightclub_id = $1 AND p.declared_by = $2 AND p.status = 'confirmed'
+          AND p.method = 'cash_usd'
+          AND p.created_at >= $3 AND p.created_at <= $4`, params),
   ]);
 
   const porMetodo = new Map();
@@ -137,6 +147,11 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
     door_people: puerta.rows.reduce((n, r) => n + Number(r.people || 0), 0),
     cash_collected: money(efectivo),
     total_collected: money(total),
+    usd: {
+      received: dolares.rows[0].usd,
+      change_given_mxn: dolares.rows[0].change_mxn,
+      count: dolares.rows[0].count,
+    },
     tips: {
       amount: money(propinas.rows.reduce((n, r) => round2(n + Number(r.amount)), 0)),
       count: propinas.rows.reduce((n, r) => n + r.count, 0),
@@ -183,8 +198,8 @@ async function dropsOf(runner, shiftId) {
  * hasta que alguien lo cuenta, ese dinero sigue siendo responsabilidad de quien lo
  * trae.
  */
-const receivedTotal = (drops) => money(drops
-  .filter((d) => d.status === 'received')
+const receivedTotal = (drops, currency = 'MXN') => money(drops
+  .filter((d) => d.status === 'received' && (d.currency || 'MXN') === currency)
   .reduce((n, d) => round2(n + Number(d.counted_amount || 0)), 0));
 
 const pendingDrops = (drops) => drops.filter((d) => d.status === 'declared');
@@ -196,9 +211,12 @@ async function shiftSummary(runner, { nightclubId, shift }) {
   });
   const drops = await dropsOf(runner, shift.id);
   const entregado = receivedTotal(drops);
+  const entregadoUsd = receivedTotal(drops, 'USD');
   const { rows } = await runner.query(
     `SELECT id, status, declared_cash::text AS declared_cash, counted_cash::text AS counted_cash,
             difference::text AS difference, difference_reason, declared_at, confirmed_at,
+            expected_usd::text AS expected_usd, counted_usd::text AS counted_usd,
+            difference_usd::text AS difference_usd,
             opening_float::text AS opening_float, pending_orders, pending_total::text AS pending_total
        FROM shift_closings WHERE shift_id = $1`, [shift.id]);
 
@@ -223,8 +241,12 @@ async function shiftSummary(runner, { nightclubId, shift }) {
     drops_received: entregado,
     drops_pending: pendingDrops(drops).length,
     // Lo que tiene que entregar ahora mismo: el fondo, más el efectivo cobrado, menos
-    // lo que ya salió en retiros.
-    cash_to_hand: money(round2(fondo + Number(totals.cash_collected) - Number(entregado))),
+    // el cambio en pesos que dio por cobros en dólares, menos lo que ya salió en retiros.
+    cash_to_hand: money(round2(fondo + Number(totals.cash_collected)
+      - Number(totals.usd.change_given_mxn) - Number(entregado))),
+    // Los dólares van aparte (D86): se cuentan como dólares, no se convierten.
+    usd_drops_received: entregadoUsd,
+    usd_to_hand: money(round2(Number(totals.usd.received) - Number(entregadoUsd))),
     pending_orders: pendientes,
     // Lo que FALTA por cobrar (D79): un pedido con una parte pagada solo debe el resto.
     pending_total: money(pendientes.reduce((n, o) => round2(n + Number(o.remaining)), 0)),
@@ -249,7 +271,8 @@ async function withdraw(client, {
   if (resumen.closing) throw ApiError.conflict('Ese turno ya tiene su corte hecho');
 
   const monto = round2(Number(amount));
-  const disponible = Number(resumen.cash_to_hand);
+  const enDolares = currency === 'USD';
+  const disponible = Number(enDolares ? resumen.usd_to_hand : resumen.cash_to_hand);
   if (!Number.isFinite(monto) || monto <= 0) {
     throw ApiError.unprocessable('El monto del retiro tiene que ser mayor que cero');
   }
@@ -257,7 +280,9 @@ async function withdraw(client, {
   // es del club. Las dos cosas se paran antes de que alguien suelte los billetes.
   if (monto > disponible) {
     throw ApiError.unprocessable(
-      `Solo trae ${money(disponible)} en efectivo del club; no se pueden retirar ${money(monto)}.`,
+      enDolares
+        ? `Solo trae US$${money(disponible)} en dólares; no se pueden retirar US$${money(monto)}.`
+        : `Solo trae ${money(disponible)} en efectivo del club; no se pueden retirar ${money(monto)}.`,
       { available: money(disponible) });
   }
 
@@ -274,6 +299,7 @@ async function withdraw(client, {
   return {
     id: rows[0].id,
     amount: money(monto),
+    currency,
     remaining: money(round2(disponible - monto)),
     authorized_by: authorizer.name,
   };
@@ -297,7 +323,7 @@ async function withdraw(client, {
  */
 async function close(client, {
   nightclubId, shift, role, declaredCash, countedCash, reason, notes, authorizer,
-  acknowledgePending = false,
+  acknowledgePending = false, countedUsd = null,
 }) {
   const resumen = await shiftSummary(client, { nightclubId, shift });
   if (resumen.closing) {
@@ -324,11 +350,35 @@ async function close(client, {
   const esperado = Number(resumen.cash_to_hand);
   const contado = round2(Number(countedCash));
   const diferencia = round2(contado - esperado);
-  if (diferencia !== 0 && (!reason || String(reason).trim().length < 5)) {
+
+  // Los dólares (D86): solo se cuentan si hubo dólares en el turno. Si los hubo, no se
+  // cierra sin contarlos: "no los conté" no es lo mismo que "conté cero".
+  const huboDolares = Number(resumen.totals.usd.received) > 0;
+  const esperadoUsd = Number(resumen.usd_to_hand);
+  if (huboDolares && (countedUsd === null || countedUsd === undefined)) {
     throw ApiError.unprocessable(
-      `${diferencia < 0 ? 'Falta' : 'Sobra'} dinero (${money(Math.abs(diferencia))}). `
+      `Este turno recibió dólares: cuenta los dólares del cajón (se esperan US$${money(esperadoUsd)}).`,
+      { expected_usd: money(esperadoUsd) });
+  }
+  const contadoUsd = huboDolares ? round2(Number(countedUsd)) : null;
+  const diferenciaUsd = huboDolares ? round2(contadoUsd - esperadoUsd) : null;
+
+  const faltas = [];
+  if (diferencia !== 0) {
+    faltas.push(`${diferencia < 0 ? 'Falta' : 'Sobra'} dinero (${money(Math.abs(diferencia))})`);
+  }
+  if (diferenciaUsd) {
+    faltas.push(`${diferenciaUsd < 0 ? 'Faltan' : 'Sobran'} dólares (US$${money(Math.abs(diferenciaUsd))})`);
+  }
+  if (faltas.length && (!reason || String(reason).trim().length < 5)) {
+    throw ApiError.unprocessable(
+      `${faltas.join(' y ')}. `
       + 'Escribe el motivo: un faltante sin explicación es lo que este corte existe para evitar.',
-      { difference: money(diferencia), expected: money(esperado) });
+      {
+        difference: money(diferencia),
+        expected: money(esperado),
+        ...(huboDolares ? { difference_usd: money(diferenciaUsd), expected_usd: money(esperadoUsd) } : {}),
+      });
   }
 
   const { rows } = await client.query(
@@ -338,10 +388,12 @@ async function close(client, {
                                  counted_cash, difference, difference_reason,
                                  status, confirmed_by, confirmed_at,
                                  authorized_by, authorized_at, authorized_role,
-                                 location_id, opening_float, pending_orders, pending_total)
+                                 location_id, opening_float, pending_orders, pending_total,
+                                 usd_collected, usd_change_given, usd_drops_total,
+                                 expected_usd, counted_usd, difference_usd)
      VALUES ($1,$2,$3,$4::text,$5,COALESCE($6, now()),$7::text,$8::jsonb,$9,$10,$11,$12,$13,
              $14,$15,$16::text,'confirmed',$17, now(), $17, now(), $18::text,
-             $19,$20,$21::jsonb,$22)
+             $19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28)
      RETURNING id`,
     [nightclubId, shift.id, shift.user_id, role, shift.started_at, shift.ended_at,
       resumen.totals.currency, JSON.stringify(resumen.totals), resumen.totals.cash_collected,
@@ -360,7 +412,11 @@ async function close(client, {
         currency: o.currency,
         created_at: o.created_at,
       }))),
-      resumen.pending_total]);
+      resumen.pending_total,
+      resumen.totals.usd.received, resumen.totals.usd.change_given_mxn, resumen.usd_drops_received,
+      huboDolares ? money(esperadoUsd) : null,
+      huboDolares ? money(contadoUsd) : null,
+      huboDolares ? money(diferenciaUsd) : null]);
 
   // El corte es el último paso del turno: al cerrarlo, el turno queda cerrado.
   await client.query(
@@ -374,6 +430,9 @@ async function close(client, {
     opening_float: resumen.opening_float,
     pending_orders: porCobrar.length,
     pending_total: resumen.pending_total,
+    expected_usd: huboDolares ? money(esperadoUsd) : null,
+    counted_usd: huboDolares ? money(contadoUsd) : null,
+    difference_usd: huboDolares ? money(diferenciaUsd) : null,
     authorized_by: authorizer.name,
   };
 }

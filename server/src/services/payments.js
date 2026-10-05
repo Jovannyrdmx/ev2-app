@@ -115,6 +115,18 @@ async function applySideEffects(client, tx, nightclubId) {
   return { reservation: null, order: null };
 }
 
+/**
+ * El tipo de cambio USD->MXN vigente (pesos por un dólar), o null si el gerente nunca
+ * fijó uno. Es UNO para todo el sistema: la caja (D86) y los retiros de ganancias.
+ */
+async function currentRate(runner) {
+  const { rows } = await runner.query(
+    `SELECT id, rate, effective_from, source, set_by FROM exchange_rates
+      WHERE base = 'USD' AND quote = 'MXN' AND effective_from <= now()
+      ORDER BY effective_from DESC, id DESC LIMIT 1`);
+  return rows[0] || null;
+}
+
 /** El máximo de formas de pago para un mismo cobro (D79). */
 const MAX_PARTS = 2;
 
@@ -131,17 +143,18 @@ async function partsOf(client, transactionId, { exceptPaymentId = null, exceptCh
     `SELECT 'manual' AS source, p.id::text AS id, p.method AS kind, p.method,
             p.amount::text AS amount, p.reference,
             p.cash_received::text AS cash_received, p.change_given::text AS change_given,
+            p.usd_received::text AS usd_received, p.exchange_rate::text AS exchange_rate,
             p.created_at
        FROM manual_payments p
       WHERE p.transaction_id = $1 AND p.status = 'confirmed'
         AND ($2::uuid IS NULL OR p.id <> $2::uuid)
      UNION ALL
      SELECT 'terminal', c.id::text, 'mercadopago_point', 'mercadopago_point',
-            c.amount::text, c.external_order_id, NULL, NULL, c.created_at
+            c.amount::text, c.external_order_id, NULL, NULL, NULL, NULL, c.created_at
        FROM terminal_charges c
       WHERE c.transaction_id = $1 AND c.status = 'processed'
         AND ($3::uuid IS NULL OR c.id <> $3::uuid)
-      ORDER BY 9`,
+      ORDER BY 11`,
     [transactionId, exceptPaymentId, exceptChargeId]);
   return rows;
 }
@@ -241,7 +254,7 @@ async function settle(client, {
       // Con dos partes, el proveedor del libro es el de la parte que completó; el
       // detalle de cada parte vive en su propio renglón (pago manual o cobro con
       // terminal), que es donde lo lee el corte.
-      provider || (CASH_METHODS.includes(payment.method) ? 'cash' : 'manual'),
+      provider || ([...CASH_METHODS, 'cash_usd'].includes(payment.method) ? 'cash' : 'manual'),
       reviewerId, providerRef]);
 
   const { reservation, order } = await applySideEffects(client, tx, nightclubId);
@@ -261,6 +274,8 @@ async function settle(client, {
     reference: payment.reference || providerRef || null,
     cash_received: payment.cash_received || null,
     change_given: payment.change_given || null,
+    usd_received: payment.usd_received || null,
+    exchange_rate: payment.exchange_rate || null,
   };
   const receipt = await tickets.printReceipt(client, {
     nightclubId,
@@ -325,6 +340,6 @@ async function publishConfirmed({ nightclubId, payment, tx, reservation, order }
 }
 
 module.exports = {
-  METHODS, CASH_METHODS, ON_THE_SPOT_METHODS, OPEN_TX_STATUSES, PAYMENT_SELECT,
+  METHODS, CASH_METHODS, ON_THE_SPOT_METHODS, OPEN_TX_STATUSES, PAYMENT_SELECT, currentRate,
   MAX_PARTS, present, settle, partsOf, paidSoFar, applySideEffects, publishConfirmed,
 };

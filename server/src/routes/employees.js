@@ -18,6 +18,7 @@ const { authenticate, requireRole, sameNightclub } = require('../middleware/auth
 const banking = require('../services/banking');
 const { temporaryPassword } = require('../services/credentials');
 const pins = require('../services/pins');
+const payments = require('../services/payments');
 
 const router = express.Router({ mergeParams: true });
 
@@ -490,12 +491,8 @@ router.post('/nightclubs/:nightclubId/employees/:userId/bank-accounts/:accountId
 // ---------------------------------------------------------------- exchange rate
 
 /** Latest USD->MXN rate (MXN per 1 USD), or null when the manager has never set one. */
-async function currentRate(runner = pool) {
-  const { rows } = await runner.query(
-    `SELECT id, rate, effective_from, source, set_by FROM exchange_rates
-      WHERE base = 'USD' AND quote = 'MXN' AND effective_from <= now()
-      ORDER BY effective_from DESC, id DESC LIMIT 1`);
-  return rows[0] || null;
+function currentRate(runner = pool) {
+  return payments.currentRate(runner);
 }
 
 function convert(amount, from, to, rate) {

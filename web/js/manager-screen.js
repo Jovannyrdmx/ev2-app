@@ -238,6 +238,7 @@
       }),
       get(`/nightclubs/${club}/drivers?include_inactive=true&limit=200`, (d) => { state.drivers = d.drivers || []; }),
       loadTerminals(),
+      loadExchangeRate(),
       loadTerminalCharges(),
       loadTips(),
       loadLostFound(),
@@ -834,6 +835,63 @@
    * el error salía en inglés al fondo de la tarjeta, fuera de la pantalla del teléfono.
    * Cada toque ahora dice qué está haciendo mientras espera, y en qué terminó.
    */
+  // ---------------------------------------------------------------- tipo de cambio (D86)
+
+  async function loadExchangeRate() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/exchange-rate`);
+      state.fx = { current: data.current || null, history: data.history || [] };
+    } catch { state.fx = { current: null, history: [] }; }
+    renderExchangeRate();
+  }
+
+  function renderExchangeRate() {
+    const fx = state.fx || { current: null, history: [] };
+    const actual = fx.current;
+    $('fx-current').textContent = actual ? `$${Number(actual.rate).toFixed(2)}` : '—';
+    $('fx-none').hidden = Boolean(actual);
+    const ultimo = fx.history[0];
+    $('fx-since').textContent = actual
+      ? t('fx.since', {
+        when: EV2Format.dateTime(actual.effective_from),
+        who: (ultimo && String(ultimo.id) === String(actual.id) && ultimo.set_by_name) || '—',
+      })
+      : '';
+    $('fx-history').innerHTML = fx.history.length
+      ? fx.history.map((r) => `
+        <div class="flex justify-between text-xs">
+          <span class="text-white/50">${escape(EV2Format.dateTime(r.effective_from))} · ${escape(r.set_by_name || '—')}</span>
+          <span>$${escape(Number(r.rate).toFixed(2))}</span>
+        </div>`).join('')
+      : `<p class="text-xs text-white/40">${escape(t('fx.noHistory'))}</p>`;
+  }
+
+  $('btn-fx-save').onclick = async () => {
+    const valor = Number($('fx-rate').value);
+    const error = $('fx-error');
+    error.hidden = true;
+    // Un tipo de cambio fuera de rango es casi siempre un dedazo (175 en vez de 17.5):
+    // se para aquí, y el servidor lo vuelve a revisar.
+    if (!(valor >= 1 && valor <= 1000)) {
+      avisar(error, t('fx.errRate'));
+      return;
+    }
+    const actual = state.fx && state.fx.current;
+    if (!(await ask(t('fx.confirm', {
+      from: actual ? `$${Number(actual.rate).toFixed(2)}` : '—',
+      to: `$${valor.toFixed(2)}`,
+    })))) return;
+    const listo = ocupado($('btn-fx-save'), 'fx.saving');
+    try {
+      await api.put(`/nightclubs/${clubId()}/exchange-rate`, { rate: valor });
+      $('fx-rate').value = '';
+      toast(t('fx.saved', { rate: `$${valor.toFixed(2)}` }), 'ok');
+      await loadExchangeRate();
+    } catch (err) {
+      avisar(error, EV2Format.errorMessage(err));
+    } finally { listo(); }
+  };
+
   async function loadTerminals() {
     try {
       const data = await api.get(`/nightclubs/${clubId()}/payment-terminals`);

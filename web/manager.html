@@ -337,6 +337,32 @@
       -->
       <div id="tab-payouts" class="space-y-3" hidden>
         <!--
+          El tipo de cambio (D86). Uno para todo el club: con este cobra la caja cuando
+          el cliente paga en dólares (el cambio se da en pesos) y con este se pagan los
+          retiros de ganancias en otra moneda. Cada cambio queda en el historial con
+          quién lo puso, porque "¿a cuánto lo cobraron anoche?" se pregunta.
+        -->
+        <div class="card rounded-xl p-4 space-y-3" id="fx-box">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="fx.title">Tipo de cambio USD → MXN</p>
+            <span id="fx-current" class="font-display text-2xl" style="color:var(--ev2-gold)">—</span>
+          </div>
+          <p id="fx-since" class="text-xs text-white/50"></p>
+          <p id="fx-none" class="text-sm text-amber-300" data-i18n="fx.none" hidden>Todavía no hay tipo de cambio: la caja no puede cobrar en dólares.</p>
+          <div class="flex gap-2">
+            <input id="fx-rate" type="number" min="1" max="1000" step="0.01" inputmode="decimal"
+                   class="field text-center flex-1" placeholder="17.50" aria-label="Pesos por dólar" data-i18n-placeholder="fx.placeholder">
+            <button id="btn-fx-save" class="ev2-button rounded-lg px-4 text-sm" data-i18n="fx.save">Guardar</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="fx.hint">Pesos por un dólar. Aplica desde que lo guardas, en la caja y en los retiros de ganancias.</p>
+          <p id="fx-error" class="text-sm text-red-300" hidden></p>
+          <details>
+            <summary class="text-xs text-white/50 cursor-pointer" data-i18n="fx.history">Historial</summary>
+            <div id="fx-history" class="space-y-1 pt-2"></div>
+          </details>
+        </div>
+
+        <!--
           Las terminales del club (D47). Va ARRIBA de todo lo demas en esta pestana a
           proposito: es lo primero que hay que hacer para poder cobrar con tarjeta, y
           una terminal sin dar de alta no da ningun error visible -- simplemente no

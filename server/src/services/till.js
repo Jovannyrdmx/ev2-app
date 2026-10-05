@@ -305,8 +305,8 @@ async function assertCanCollect(runner, { nightclubId, user, transactionId }) {
  * en efectivo: eso no es "dar cambio", es cobrar de menos.
  */
 async function collect(client, {
-  nightclubId, user, transactionId, method, amount, reference = null, cashReceived = null,
-  clientRequestId = null,
+  nightclubId, user, transactionId, method, amount = null, reference = null, cashReceived = null,
+  usdReceived = null, exchangeRateId = null, clientRequestId = null,
 }) {
   const till = await assertCanCollect(client, { nightclubId, user, transactionId });
 
@@ -340,6 +340,25 @@ async function collect(client, {
     throw ApiError.unprocessable('Las dos partes de un cobro tienen que ser formas de pago distintas');
   }
 
+  // Dólares (D86): lo que cubren se calcula aquí, no se teclea. El tipo de cambio es
+  // el vigente, y tiene que ser el mismo que el cajero vio en su pantalla: si el
+  // gerente lo cambió mientras tanto, se para y se le enseña el nuevo.
+  if (method === 'cash_usd') {
+    const usd = await usdPart(client, {
+      transactionId: tx.id, txAmount: tx.amount, usdReceived, exchangeRateId,
+    });
+    return insertAndSettle(client, {
+      nightclubId, till, user, tx, method, amount: usd.amount, reference: null,
+      clientRequestId, cashReceived: null, change: usd.change, usd,
+    });
+  }
+  if (usdReceived !== null && usdReceived !== undefined) {
+    throw ApiError.unprocessable('Los dólares recibidos solo aplican al pago en dólares');
+  }
+  if (amount === null || amount === undefined) {
+    throw ApiError.unprocessable('Indica el monto a cobrar');
+  }
+
   const monto = round2(amount);
   let recibido = null;
   let cambio = null;
@@ -359,19 +378,74 @@ async function collect(client, {
     throw ApiError.unprocessable('Captura el folio del voucher de la terminal');
   }
 
+  return insertAndSettle(client, {
+    nightclubId, till, user, tx, method, amount: money(monto), reference, clientRequestId,
+    cashReceived: recibido === null ? null : money(recibido),
+    change: cambio === null ? null : money(cambio), usd: null,
+  });
+}
+
+/**
+ * Cuánto cubren los dólares que entregó el cliente (D86).
+ *
+ * La cuenta la hace Postgres con NUMERIC, la misma aritmética que la regla de la
+ * tabla: pesos = dólares × tipo de cambio redondeado al centavo; se aplica lo que
+ * falte del cobro (o todo, si no alcanza: entonces la otra forma de pago paga el
+ * resto), y el cambio es lo que sobra, redondeado HACIA ABAJO al peso. Los centavos se
+ * quedan en el club, como pidió el dueño.
+ */
+async function usdPart(client, { transactionId, txAmount, usdReceived, exchangeRateId }) {
+  if (usdReceived === null || usdReceived === undefined || !(Number(usdReceived) > 0)) {
+    throw ApiError.unprocessable('Captura cuántos dólares te entregó el cliente');
+  }
+  const rate = await payments.currentRate(client);
+  if (!rate) {
+    throw ApiError.unprocessable(
+      'El gerente no ha fijado el tipo de cambio: por ahora no se puede cobrar en dólares.');
+  }
+  if (!exchangeRateId || String(exchangeRateId) !== String(rate.id)) {
+    throw ApiError.conflict(
+      `El tipo de cambio cambió a ${Number(rate.rate).toFixed(2)}. Revisa el cobro con el nuevo valor.`,
+      { exchange_rate: { id: String(rate.id), rate: rate.rate } });
+  }
+  const pendiente = round2(Number(txAmount) - await payments.paidSoFar(client, transactionId));
+  const { rows } = await client.query(
+    `SELECT round($1::numeric * $2::numeric, 2) AS mxn,
+            LEAST(round($1::numeric * $2::numeric, 2), $3::numeric) AS amount,
+            floor(round($1::numeric * $2::numeric, 2)
+                  - LEAST(round($1::numeric * $2::numeric, 2), $3::numeric)) AS change`,
+    [money(usdReceived), String(rate.rate), money(pendiente)]);
+  const r = rows[0];
+  if (!(Number(r.amount) > 0)) throw ApiError.conflict('Ese cobro ya está pagado');
+  return {
+    usdReceived: money(usdReceived),
+    rate: String(rate.rate),
+    rateId: String(rate.id),
+    mxn: money(r.mxn),
+    amount: money(r.amount),
+    change: money(r.change),
+  };
+}
+
+async function insertAndSettle(client, {
+  nightclubId, till, user, tx, method, amount, reference, clientRequestId, cashReceived, change, usd,
+}) {
   let created;
   try {
     const { rows } = await client.query(
       `INSERT INTO manual_payments (nightclub_id, transaction_id, method, declared_by, amount,
                                     currency, reference, status, reviewed_by, reviewed_at,
-                                    client_request_id, cash_received, change_given)
-       VALUES ($1,$2,$3::text,$4,$5,$6,$7,'confirmed',$4,now(),$8,$9,$10)
+                                    client_request_id, cash_received, change_given,
+                                    usd_received, exchange_rate, exchange_rate_id)
+       VALUES ($1,$2,$3::text,$4,$5,$6,$7,'confirmed',$4,now(),$8,$9,$10,$11,$12,$13)
        RETURNING id, transaction_id, method, amount::text AS amount, currency, status,
                  declared_by, reference, cash_received::text AS cash_received,
-                 change_given::text AS change_given`,
-      [nightclubId, tx.id, method, user.id, money(monto), tx.currency,
+                 change_given::text AS change_given, usd_received::text AS usd_received,
+                 exchange_rate::text AS exchange_rate`,
+      [nightclubId, tx.id, method, user.id, amount, tx.currency,
         reference ? String(reference).trim() : null, clientRequestId,
-        recibido === null ? null : money(recibido), cambio === null ? null : money(cambio)]);
+        cashReceived, change,
+        usd ? usd.usdReceived : null, usd ? usd.rate : null, usd ? usd.rateId : null]);
     created = rows[0];
   } catch (err) {
     if (err.code === '23505') {

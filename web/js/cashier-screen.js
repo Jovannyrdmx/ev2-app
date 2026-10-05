@@ -31,6 +31,7 @@
   const state = {
     till: null,          // lo que contesta GET /till
     terminals: [],
+    usdRate: null,       // el tipo de cambio vigente (D86): { id, rate } o null
     drinks: [],
     realtime: null,
     charge: { open: false, order: null, sending: false, split: false, keys: [], pending: [] },
@@ -188,7 +189,7 @@
     $('screen-wrong-role').hidden = true;
     $('screen-till').hidden = false;
     $('me-name').textContent = (api.session.user && api.session.user.display_name) || '';
-    await Promise.all([loadTill(), loadTerminals()]);
+    await Promise.all([loadTill(), loadTerminals(), loadUsdRate()]);
     connectRealtime();
     // El "hace 12 min" de cada pedido avanza solo.
     setInterval(render, 60000);
@@ -209,6 +210,17 @@
       const data = await api.get(`/nightclubs/${clubId()}/payment-terminals`);
       state.terminals = data.terminals || [];
     } catch { state.terminals = []; }
+  }
+
+  /**
+   * El tipo de cambio que fijó el gerente (D86). Sin él, los dólares no se ofrecen; un
+   * fallo aquí tampoco tumba nada: la caja sigue cobrando en pesos.
+   */
+  async function loadUsdRate() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/exchange-rate`);
+      state.usdRate = data.current ? { id: String(data.current.id), rate: data.current.rate } : null;
+    } catch { state.usdRate = null; }
   }
 
   const barId = () => (state.till && state.till.till && state.till.till.location_id) || null;
@@ -328,12 +340,15 @@
       pending: [],
     };
     for (const id of ['charge-reference', 'charge-received', 'charge-amount',
-      'charge-b-reference', 'charge-b-received']) $(id).value = '';
+      'charge-b-reference', 'charge-b-received', 'charge-usd-received',
+      'charge-b-usd-received']) $(id).value = '';
     $('charge-split').checked = false;
     $('charge-error').hidden = true;
     renderChargeMethods();
     renderCharge();
     $('charge-sheet').hidden = false;
+    // El tipo de cambio pudo cambiar desde que se abrió la caja: se pregunta otra vez.
+    loadUsdRate().then(() => { if (state.charge.open) { renderChargeMethods(); renderCharge(); } });
   }
 
   function closeCharge() {
@@ -347,7 +362,7 @@
 
   /** Las formas que se ofrecen: sin terminal activa, Mercado Pago ni aparece. */
   const hayTerminal = () => (state.terminals || []).some((x) => x && x.active !== false);
-  const ofrecidas = (order) => EV2Cashier.methodsFor(order)
+  const ofrecidas = (order) => EV2Cashier.methodsFor(order, { usdRate: state.usdRate })
     .filter((m) => m !== 'mercadopago_point' || hayTerminal());
 
   function renderChargeMethods() {
@@ -378,13 +393,16 @@
         amount: $('charge-amount').value,
         reference: $('charge-reference').value,
         received: $('charge-received').value,
+        usd: $('charge-usd-received').value,
       },
       b: {
         method: $('charge-b-method').value,
         reference: $('charge-b-reference').value,
         received: $('charge-b-received').value,
+        usd: $('charge-b-usd-received').value,
       },
       terminals: state.terminals,
+      usdRate: state.usdRate,
     };
   }
 
@@ -414,26 +432,66 @@
     if (!puedeDividir) c.split = false;
 
     $('part-a-title').textContent = t(c.split ? 'till.payment1' : 'till.payment');
-    $('charge-amount-row').hidden = !c.split;
+    const a = $('charge-method').value;
+    // En dólares la primera parte no se teclea en pesos: la fijan los dólares (D86).
+    $('charge-amount-row').hidden = !c.split || a === 'cash_usd';
     $('part-b').hidden = !c.split;
 
     const plan = EV2Cashier.planCharge(chargeInput());
-    const a = $('charge-method').value;
     $('charge-reference').hidden = a !== 'card_terminal';
     $('charge-cash').hidden = a !== 'cash';
-    const montoA = c.split ? $('charge-amount').value : falta;
-    pintarCambio('charge-change', montoA ? EV2Cashier.change($('charge-received').value, montoA) : null);
+    $('charge-usd').hidden = a !== 'cash_usd';
+    let montoA = c.split ? $('charge-amount').value : falta;
+    if (a === 'cash_usd') {
+      const q = pintarDolares('charge', $('charge-usd-received').value, falta, { partial: c.split });
+      if (c.split) montoA = q ? q.applied : '0';
+    } else {
+      pintarCambio('charge-change', montoA ? EV2Cashier.change($('charge-received').value, montoA) : null);
+    }
 
     if (c.split) {
-      const resto = (Math.round(Number(falta) * 100) - Math.round(Number($('charge-amount').value || 0) * 100)) / 100;
+      const resto = (Math.round(Number(falta) * 100) - Math.round(Number(montoA || 0) * 100)) / 100;
       $('charge-b-amount').textContent = money(resto > 0 ? resto : 0, order.currency);
       const b = $('charge-b-method').value;
       $('charge-b-reference').hidden = b !== 'card_terminal';
       $('charge-b-cash').hidden = b !== 'cash';
-      pintarCambio('charge-b-change', EV2Cashier.change($('charge-b-received').value, resto));
+      $('charge-b-usd').hidden = b !== 'cash_usd';
+      if (b === 'cash_usd') pintarDolares('charge-b', $('charge-b-usd-received').value, resto, { partial: false });
+      else pintarCambio('charge-b-change', EV2Cashier.change($('charge-b-received').value, resto));
     }
 
     $('btn-charge').disabled = c.sending || Boolean(plan.error);
+  }
+
+  /**
+   * Los dólares de una parte (D86): el tipo de cambio y cuántos dólares son, en cuánto
+   * quedan los que entregó, y el cambio en pesos (o cuánto falta, en rojo). Si es la
+   * primera de dos partes, quedarse corto no es error: el resto lo paga la segunda.
+   */
+  function pintarDolares(prefix, usd, due, { partial }) {
+    const rate = state.usdRate;
+    $(`${prefix}-usd-rate`).textContent = rate
+      ? t('till.usdRateLine', {
+        rate: Number(rate.rate).toFixed(2),
+        usd: EV2Cashier.usdFor(due, rate.rate),
+      })
+      : t('till.errNoRate');
+    const q = rate ? EV2Cashier.usdQuote(usd, rate.rate, due) : null;
+    $(`${prefix}-usd-covers`).textContent = q ? money(q.covers) : '—';
+    const el = $(`${prefix}-usd-change`);
+    if (!q) { el.textContent = '—'; el.style.color = 'var(--ev2-gold)'; return null; }
+    if (q.short && partial) {
+      // Primera de dos partes: no hay cambio; el resto lo dice la segunda forma de pago.
+      el.textContent = money(0);
+      el.style.color = 'var(--ev2-gold)';
+    } else if (q.short) {
+      el.textContent = t('till.short', { amount: money(q.short) });
+      el.style.color = '#fca5a5';
+    } else {
+      el.textContent = money(q.change);
+      el.style.color = 'var(--ev2-gold)';
+    }
+    return q;
   }
 
   /** El cambio, en dorado; si lo recibido no alcanza, en rojo y diciendo cuánto falta. */
@@ -453,7 +511,8 @@
   $('charge-method').onchange = () => { renderMethodB(); renderCharge(); };
   $('charge-b-method').onchange = renderCharge;
   for (const id of ['charge-amount', 'charge-reference', 'charge-received',
-    'charge-b-reference', 'charge-b-received']) $(id).oninput = renderCharge;
+    'charge-b-reference', 'charge-b-received', 'charge-usd-received',
+    'charge-b-usd-received']) $(id).oninput = renderCharge;
 
   /**
    * Manda las partes en orden. La terminal va primero (`planCharge` la pone ahí): si
@@ -513,6 +572,10 @@
       // Ese renglón ya tenía una terminal esperando (D82): se vuelve a mostrar ESE cobro
       // para seguirlo o cancelarlo, en vez de dejar al cajero atorado.
       if (await resumeLiveCharge(err)) { closeCharge(); return; }
+      // El gerente cambió el tipo de cambio (D86): se toma el nuevo y la hoja se
+      // recalcula con él antes de volver a cobrar.
+      const nuevoTipo = err && err.details && err.details.exchange_rate;
+      if (nuevoTipo) state.usdRate = { id: String(nuevoTipo.id), rate: nuevoTipo.rate };
       // Una parte pudo quedar asentada y la otra no: la lista recargada dice cuánto
       // falta de verdad, y el cuadro se queda abierto para cobrarlo.
       showError(err, $('charge-error'));

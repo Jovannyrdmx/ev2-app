@@ -72,6 +72,7 @@ const folio = (id) => String(id || '').replace(/-/g, '').slice(-6).toUpperCase()
 
 const METHOD_LABEL = {
   cash: 'Efectivo',
+  cash_usd: 'Efectivo en dólares',
   card_terminal: 'Tarjeta (terminal)',
   zelle: 'Zelle',
   cash_app: 'Cash App',
@@ -557,6 +558,12 @@ function renderReceipt(t, data, { club, settings }) {
       t.row('  Recibido', money(p.cash_received, data.currency));
       t.row('  Cambio', money(p.change_given || 0, data.currency));
     }
+    // Dólares (D86): lo que entregó, a qué tipo de cambio, y el cambio en pesos.
+    if (p.usd_received) {
+      t.row('  Recibido', money(p.usd_received, 'USD'));
+      t.row('  Tipo de cambio', Number(p.exchange_rate).toFixed(2));
+      t.row('  Cambio', money(p.change_given || 0, data.currency));
+    }
   }
   if (data.collected_by) t.row('Atendió', data.collected_by);
 
@@ -673,7 +680,10 @@ async function cutData(runner, { nightclubId, closingId }) {
             s.section,
             c.location_id::text AS location_id, l.name AS location_name,
             c.opening_float::text AS opening_float,
-            c.pending_orders, c.pending_total::text AS pending_total
+            c.pending_orders, c.pending_total::text AS pending_total,
+            c.usd_collected::text AS usd_collected, c.usd_change_given::text AS usd_change_given,
+            c.usd_drops_total::text AS usd_drops_total, c.expected_usd::text AS expected_usd,
+            c.counted_usd::text AS counted_usd, c.difference_usd::text AS difference_usd
        FROM shift_closings c
        JOIN users u ON u.id = c.user_id
        LEFT JOIN users a ON a.id = c.authorized_by
@@ -685,7 +695,7 @@ async function cutData(runner, { nightclubId, closingId }) {
   if (!corte) return null;
 
   const { rows: retiros } = await runner.query(
-    `SELECT d.amount::text AS amount, d.reason, d.created_at, d.authorized_role,
+    `SELECT d.amount::text AS amount, d.currency, d.reason, d.created_at, d.authorized_role,
             a.display_name AS authorized_by
        FROM shift_cash_drops d
        LEFT JOIN users a ON a.id = d.authorized_by
@@ -738,7 +748,7 @@ function renderCut(t, data, { club, settings }) {
     t.blank().rule();
     t.bold().line('RETIROS PARCIALES').boldOff();
     for (const r of data.withdrawals) {
-      t.row(localTime(r.created_at, club.timezone).slice(-5), money(r.amount, data.currency));
+      t.row(localTime(r.created_at, club.timezone).slice(-5), money(r.amount, r.currency || data.currency));
       // Sangrados con `raw`: el motivo y el nombre cuelgan del importe de arriba, y
       // `line` juntaría los espacios que forman esa sangría.
       for (const l of escpos.wrap(r.reason || 'sin motivo', t.width - 2)) t.raw(`  ${l}`);
@@ -746,6 +756,7 @@ function renderCut(t, data, { club, settings }) {
     }
     t.bold();
     t.row('Total retirado', money(data.drops_total, data.currency));
+    if (Number(data.usd_drops_total) > 0) t.row('Total retirado', money(data.usd_drops_total, 'USD'));
     t.boldOff();
   }
 
@@ -758,6 +769,10 @@ function renderCut(t, data, { club, settings }) {
     t.row('Fondo de caja', money(data.opening_float, data.currency));
   }
   t.row('Efectivo cobrado', money(data.cash_collected, data.currency));
+  // El cambio en pesos que se dio por cobros en dólares salió de este cajón (D86).
+  if (Number(data.usd_change_given) > 0) {
+    t.row('Cambio por dólares', `-${money(data.usd_change_given, data.currency)}`);
+  }
   if (Number(data.drops_total) > 0) {
     t.row('Menos retiros', `-${money(data.drops_total, data.currency)}`);
   }
@@ -775,7 +790,25 @@ function renderCut(t, data, { club, settings }) {
   t.raw(escpos.twoColumns(dif === 0 ? 'CUADRA' : (dif < 0 ? 'FALTA' : 'SOBRA'),
     money(Math.abs(dif), data.currency), Math.floor(t.width / 2)));
   t.normal().boldOff();
-  if (dif !== 0 && data.difference_reason) {
+
+  // ---- los dólares, aparte y sin convertir (D86)
+  if (data.expected_usd !== null && data.expected_usd !== undefined) {
+    t.blank().rule();
+    t.bold().line('DÓLARES').boldOff();
+    t.row('Dólares recibidos', money(data.usd_collected, 'USD'));
+    if (Number(data.usd_drops_total) > 0) t.row('Menos retiros', `-${money(data.usd_drops_total, 'USD')}`);
+    t.bold();
+    t.row('Debía entregar', money(data.expected_usd, 'USD'));
+    t.boldOff();
+    t.row('Contado', money(data.counted_usd, 'USD'));
+    const difUsd = Number(data.difference_usd);
+    t.rule();
+    t.bold().tall();
+    t.raw(escpos.twoColumns(difUsd === 0 ? 'CUADRA' : (difUsd < 0 ? 'FALTA' : 'SOBRA'),
+      money(Math.abs(difUsd), 'USD'), Math.floor(t.width / 2)));
+    t.normal().boldOff();
+  }
+  if ((dif !== 0 || Number(data.difference_usd || 0) !== 0) && data.difference_reason) {
     t.line(`Motivo: ${data.difference_reason}`);
   }
   if (data.declared_notes) t.line(`Nota: ${data.declared_notes}`);

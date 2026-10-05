@@ -136,8 +136,55 @@
 
   // ---------------------------------------------------------------- el cobro (D79)
 
-  const METHOD_KEYS = ['cash', 'mercadopago_point', 'card_terminal'];
+  const METHOD_KEYS = ['cash', 'cash_usd', 'mercadopago_point', 'card_terminal'];
   const isCash = (m) => m === 'cash';
+  const isUsd = (m) => m === 'cash_usd';
+
+  // ---------------------------------------------------------------- dólares (D86)
+
+  /**
+   * Cuántos centavos de peso cubren `usd` dólares al tipo de cambio `rate`, redondeado
+   * al centavo (la mitad hacia arriba), con enteros: igual que `round(usd * rate, 2)`
+   * en Postgres. Con flotantes, 17.355 × 100 da 1735.4999… y el peso de diferencia
+   * terminaría en una discusión con el servidor.
+   */
+  function usdToCents(usd, rate) {
+    const u = Number(usd);
+    const r = Number(rate);
+    if (!(u > 0) || !(r > 0)) return null;
+    const usdCents = BigInt(Math.round(u * 100));
+    const rateMicro = BigInt(Math.round(r * 1e6));
+    const scaled = usdCents * rateMicro; // centavos × 1e6
+    const UNIT = 1000000n;
+    return Number((scaled + UNIT / 2n) / UNIT);
+  }
+
+  /**
+   * Lo que pasa con unos dólares contra lo que falta cobrar: cuántos pesos cubren, cuánto
+   * se aplica, y el cambio en pesos REDONDEADO HACIA ABAJO al peso (los centavos se
+   * quedan en el club, D86). `short` dice cuánto falta si no alcanzan. Todo en pesos con
+   * dos decimales, o null si todavía no hay dólares capturados.
+   */
+  function usdQuote(usd, rate, dueAmount) {
+    const cubre = usdToCents(usd, rate);
+    if (cubre === null) return null;
+    const falta = toCents(dueAmount);
+    const aplica = Math.min(cubre, falta);
+    const cambio = cubre > falta ? Math.floor((cubre - falta) / 100) * 100 : 0;
+    return {
+      covers: fromCents(cubre),
+      applied: fromCents(aplica),
+      change: fromCents(cambio),
+      short: cubre < falta ? fromCents(falta - cubre) : null,
+    };
+  }
+
+  /** Los dólares que equivalen a un monto en pesos, redondeados al centavo hacia arriba. */
+  function usdFor(amount, rate) {
+    const r = Number(rate);
+    if (!(r > 0)) return null;
+    return (Math.ceil((toCents(amount) / r) - 1e-9) / 100).toFixed(2);
+  }
   const isTerminal = (m) => m === 'mercadopago_point';
   const needsReference = (m) => m === 'card_terminal';
 
@@ -155,9 +202,10 @@
    * Con qué se puede cobrar lo que falta. Una forma ya usada no se repite: las dos
    * partes de un cobro son formas de pago distintas.
    */
-  function methodsFor(order) {
+  function methodsFor(order, { usdRate } = {}) {
     const usadas = usedMethods(order);
-    return METHOD_KEYS.filter((m) => !usadas.includes(m));
+    // Sin tipo de cambio fijado por el gerente, los dólares ni se ofrecen.
+    return METHOD_KEYS.filter((m) => !usadas.includes(m) && (!isUsd(m) || Boolean(usdRate)));
   }
 
   /** Solo se divide un pedido que todavía no tiene ninguna parte pagada. */
@@ -185,23 +233,41 @@
    * `a` y `b` son `{ method, amount, reference, received }`. Sin `split`, `a` paga
    * todo lo que falta y su monto no se teclea.
    */
-  function planCharge({ order, split = false, a = {}, b = {}, terminals } = {}) {
+  function planCharge({ order, split = false, a = {}, b = {}, terminals, usdRate = null } = {}) {
     const falta = toCents(remainingOf(order));
     if (falta <= 0) return { error: 'till.errNothingDue' };
-    const permitidos = methodsFor(order);
+    const permitidos = methodsFor(order, { usdRate });
     if (split && !canSplit(order)) return { error: 'till.errSplitTwice' };
 
+    // En dólares, la primera parte no se teclea en pesos: la fijan los dólares (D86).
+    let montoA = a.amount;
+    if (split && isUsd(a.method)) {
+      const q = usdRate ? usdQuote(a.usd, usdRate.rate, fromCents(falta)) : null;
+      if (!q) return { error: 'till.errUsd' };
+      // Si los dólares ya pagan todo, no hay segunda forma de pago que cobrar.
+      if (!q.short) return { error: 'till.errUsdCoversAll' };
+      montoA = q.applied;
+    }
+
     const partes = split
-      ? [{ ...a, amount: a.amount }, { ...b, amount: fromCents(falta - toCents(a.amount)) }]
+      ? [{ ...a, amount: montoA }, { ...b, amount: fromCents(falta - toCents(montoA)) }]
       : [{ ...a, amount: fromCents(falta) }];
 
     if (split) {
-      const ca = toCents(a.amount);
-      if (!(Number(a.amount) > 0) || ca <= 0 || ca >= falta) return { error: 'till.errSplitAmount' };
+      const ca = toCents(montoA);
+      if (!(Number(montoA) > 0) || ca <= 0 || ca >= falta) return { error: 'till.errSplitAmount' };
       if (!a.method || !b.method || a.method === b.method) return { error: 'till.errSplitSame' };
     }
 
-    for (const p of partes) {
+    for (const [i, p] of partes.entries()) {
+      if (isUsd(p.method)) {
+        if (!usdRate) return { error: 'till.errNoRate' };
+        const q = usdQuote(p.usd, usdRate.rate, p.amount);
+        if (!q) return { error: 'till.errUsd' };
+        // La primera parte en dólares puede quedarse corta (paga el resto la segunda);
+        // la que cierra el cobro tiene que alcanzar.
+        if (q.short && !(split && i === 0)) return { error: 'till.errUsdShort' };
+      }
       if (!p.method || !permitidos.includes(p.method)) return { error: 'till.errMethod' };
       if (needsReference(p.method) && !String(p.reference == null ? '' : p.reference).trim()) {
         return { error: 'take.blocked.no_reference' };
@@ -218,15 +284,23 @@
     }
 
     const steps = partes
-      .map((p) => ({
-        method: p.method,
-        amount: fromCents(toCents(p.amount)),
-        reference: needsReference(p.method) ? String(p.reference).trim() : null,
-        cash_received: isCash(p.method) && p.received !== '' && p.received !== undefined && p.received !== null
-          ? fromCents(toCents(p.received)) : null,
-        change: isCash(p.method) ? change(p.received, p.amount) : null,
-        terminal: isTerminal(p.method),
-      }))
+      .map((p) => {
+        const q = isUsd(p.method) ? usdQuote(p.usd, usdRate.rate, p.amount) : null;
+        const step = {
+          method: p.method,
+          amount: fromCents(toCents(p.amount)),
+          reference: needsReference(p.method) ? String(p.reference).trim() : null,
+          cash_received: isCash(p.method) && p.received !== '' && p.received !== undefined && p.received !== null
+            ? fromCents(toCents(p.received)) : null,
+          change: isCash(p.method) ? change(p.received, p.amount) : (q ? q.change : null),
+          terminal: isTerminal(p.method),
+        };
+        if (q) {
+          step.usd_received = fromCents(toCents(p.usd));
+          step.exchange_rate_id = String(usdRate.id);
+        }
+        return step;
+      })
       .sort((x, y) => Number(y.terminal) - Number(x.terminal));
     return { steps };
   }
@@ -236,8 +310,14 @@
     const body = {
       transaction_id: order.transaction_id,
       method: step.method,
-      amount: Number(step.amount),
     };
+    // En dólares el monto lo calcula el servidor con el tipo de cambio que se vio aquí.
+    if (isUsd(step.method)) {
+      body.usd_received = Number(step.usd_received);
+      body.exchange_rate_id = step.exchange_rate_id;
+    } else {
+      body.amount = Number(step.amount);
+    }
     if (step.reference) body.reference = step.reference;
     if (step.cash_received !== null && step.cash_received !== undefined) {
       body.cash_received = Number(step.cash_received);
@@ -248,6 +328,9 @@
 
   return {
     METHOD_KEYS,
+    usdToCents,
+    usdQuote,
+    usdFor,
     remainingOf,
     methodsFor,
     canSplit,

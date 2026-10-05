@@ -32,6 +32,7 @@
   /** Cada método de pago con su nombre; el club los lee, no los códigos. */
   const METHOD_KEY = {
     cash: 'cut.mCash',
+    cash_usd: 'cut.mCashUsd',
     card_terminal: 'cut.mCard',
     zelle: 'cut.mZelle',
     cash_app: 'cut.mCashApp',
@@ -45,18 +46,25 @@
   /** Solo el efectivo se entrega: lo demás ya está en la cuenta del club. */
   const isCash = (method) => String(method) === 'cash';
 
+  /** Si este turno recibió dólares (D86): entonces el corte cuenta dólares aparte. */
+  const hasUsd = (cut) => Boolean(cut && cut.totals && cut.totals.usd
+    && Number(cut.totals.usd.received) > 0);
+  const usdText = (n) => `US$${money(n)}`;
+
   /**
    * Por qué no se puede hacer ese retiro. Devuelve la clave del motivo o null.
    *
    * Retirar de más no es un descuido: o el número está mal tecleado, o ese dinero no
    * es del club. Las dos cosas se paran antes de que alguien suelte los billetes.
    */
-  function dropBlocker(amount, cut, { reason = '', pin = '' } = {}) {
+  function dropBlocker(amount, cut, { reason = '', pin = '', currency = 'MXN' } = {}) {
     const n = Number(amount);
     if (!Number.isFinite(n) || n <= 0) return 'cut.errAmount';
     if (!cut || !cut.shift) return 'cut.errNoShift';
     if (cut.shift.ended_at) return 'cut.errShiftClosed';
-    if (n > Number(cut.cash_to_hand)) return 'cut.errTooMuch';
+    // Pesos y dólares salen cada uno de lo que hay de esa moneda (D86).
+    const hay = currency === 'USD' ? cut.usd_to_hand : cut.cash_to_hand;
+    if (n > Number(hay || 0)) return 'cut.errTooMuch';
     // El motivo y el código no son formalidades: son la función entera. Un retiro sin
     // ellos es exactamente el hueco que esto vino a tapar.
     if (String(reason).trim().length < 3) return 'cut.errReason';
@@ -71,7 +79,7 @@
    * persona DEBÍA entregar —no contra lo que declaró—, igual que en el servidor.
    */
   function closeBlocker(declared, cut, {
-    counted = null, reason = '', pin = '', acknowledgePending = false,
+    counted = null, reason = '', pin = '', acknowledgePending = false, countedUsd = null,
   } = {}) {
     const n = Number(declared);
     if (!Number.isFinite(n) || n < 0) return 'cut.errAmount';
@@ -84,8 +92,22 @@
     if (!Number.isFinite(contado) || contado < 0) return 'cut.errCounted';
     if (!/^\d{6}$/.test(String(pin))) return 'cut.errPin';
     const diferencia = Math.round((contado - Number(cut.cash_to_hand)) * 100) / 100;
-    if (diferencia !== 0 && String(reason).trim().length < 5) return 'cut.errDiffReason';
+    // Con dólares en el turno, se cuentan: "no los conté" no es "conté cero" (D86).
+    let difUsd = 0;
+    if (hasUsd(cut)) {
+      if (countedUsd === null || countedUsd === '') return 'cut.errUsdCounted';
+      const u = Number(countedUsd);
+      if (!Number.isFinite(u) || u < 0) return 'cut.errUsdCounted';
+      difUsd = usdDifference(u, cut);
+    }
+    if ((diferencia !== 0 || difUsd !== 0) && String(reason).trim().length < 5) return 'cut.errDiffReason';
     return null;
+  }
+
+  /** Cuánto se desvían los dólares contados de los que debía entregar. */
+  function usdDifference(counted, cut) {
+    if (!cut) return 0;
+    return Math.round((Number(counted) - Number(cut.usd_to_hand || 0)) * 100) / 100;
   }
 
   /** Cuántos pedidos de su barra le quedan sin cobrar a una caja (D77). */
@@ -115,13 +137,21 @@
         key: 'float', label: t('cut.float'), value: cut.opening_float, count: 0, cash: true,
       });
     }
-    return out.concat(cut.totals.by_method.map((l) => ({
+    const out2 = out.concat(cut.totals.by_method.map((l) => ({
       key: l.method,
       label: t(methodKey(l.method)),
       value: l.amount,
       count: l.count,
       cash: isCash(l.method),
-    })), tipsLine(cut, t));
+    })));
+    // El cambio en pesos que se dio por cobros en dólares salió del cajón (D86).
+    if (hasUsd(cut) && Number(cut.totals.usd.change_given_mxn) > 0) {
+      out2.push({
+        key: 'usd_change', label: t('cut.usdChange'), value: money(-Number(cut.totals.usd.change_given_mxn)),
+        count: 0, cash: true,
+      });
+    }
+    return out2.concat(tipsLine(cut, t));
   }
 
   function tipsLine(cut, t) {
@@ -176,6 +206,11 @@
             <span class="font-display" id="cut-tohand-label">—</span>
             <span id="cut-tohand" class="font-display text-2xl" style="color:var(--ev2-gold)">—</span>
           </div>
+          <!-- Los dólares, aparte y sin convertir (D86). -->
+          <div id="cut-usd-row" class="flex justify-between items-baseline" hidden>
+            <span class="font-display" id="cut-usd-label">—</span>
+            <span id="cut-usd" class="font-display text-2xl" style="color:var(--ev2-gold)">—</span>
+          </div>
         </div>
         <div id="cut-drops" class="space-y-1"></div>
         <!-- Los pedidos de la barra que la caja no ha cobrado (D77). -->
@@ -192,6 +227,10 @@
                  class="px-3 py-3 rounded-xl bg-white/5 border border-white/10 outline-none text-center col-span-2">
           <input id="cut-counted" type="number" min="0" step="50" inputmode="decimal"
                  class="px-3 py-3 rounded-xl bg-white/5 border border-white/10 outline-none text-center col-span-2">
+          <input id="cut-usd-counted" type="number" min="0" step="1" inputmode="decimal" hidden
+                 class="px-3 py-3 rounded-xl bg-white/5 border border-white/10 outline-none text-center col-span-2">
+          <select id="cut-currency" hidden
+                  class="px-3 py-3 rounded-xl bg-white/5 border border-white/10 outline-none col-span-2"></select>
           <input id="cut-reason" type="text" maxlength="200"
                  class="px-3 py-3 rounded-xl bg-white/5 border border-white/10 outline-none col-span-2">
           <!--
@@ -227,6 +266,7 @@
       $('cut-declare').textContent = t('cut.declare');
       $('cut-amount').placeholder = t('cut.amount');
       $('cut-counted').placeholder = t('cut.counted');
+      $('cut-usd-counted').placeholder = t('cut.usdCounted');
       $('cut-reason').placeholder = t('cut.reason');
       $('cut-pin').placeholder = t('cut.pin');
       $('cut-pin-hint').textContent = t('cut.pinHint');
@@ -239,7 +279,7 @@
         fila.innerHTML = '<span></span><span></span>';
         fila.firstChild.textContent = `${l.label}${l.count ? ` · ${l.count}` : ''}`;
         fila.firstChild.className = l.aside ? 'text-white/40' : 'text-white/60';
-        fila.lastChild.textContent = dinero(l.value);
+        fila.lastChild.textContent = Number(l.value) < 0 ? `-${dinero(Math.abs(Number(l.value)))}` : dinero(l.value);
         if (l.aside) fila.lastChild.className = 'text-white/40';
         box.appendChild(fila);
       }
@@ -254,6 +294,17 @@
 
       $('cut-handed').textContent = dinero(cut && cut.drops_received);
       $('cut-tohand').textContent = dinero(cut && cut.cash_to_hand);
+      const dolares = hasUsd(cut);
+      $('cut-usd-row').hidden = !dolares;
+      $('cut-usd-label').textContent = t('cut.usdToHand');
+      $('cut-usd').textContent = usdText(cut && cut.usd_to_hand);
+      $('cut-usd-counted').hidden = !dolares;
+      // El retiro escoge moneda solo cuando hay dólares que retirar.
+      const antes = $('cut-currency').value || 'MXN';
+      $('cut-currency').innerHTML = `<option value="MXN">${t('cut.curMxn')}</option>`
+        + `<option value="USD">${t('cut.curUsd')}</option>`;
+      $('cut-currency').value = dolares ? antes : 'MXN';
+      $('cut-currency').hidden = !dolares;
 
       const drops = $('cut-drops');
       drops.innerHTML = '';
@@ -262,8 +313,9 @@
         p.className = 'text-[11px]';
         p.style.color = d.status === 'received' ? 'var(--ev2-lime)'
           : d.status === 'rejected' ? '#fca5a5' : '#fcd34d';
+        const cuanto = d.status === 'received' ? d.counted_amount : d.amount;
         p.textContent = t(`cut.drop.${d.status}`, {
-          amount: dinero(d.status === 'received' ? d.counted_amount : d.amount),
+          amount: d.currency === 'USD' ? usdText(cuanto) : dinero(cuanto),
         });
         drops.appendChild(p);
       }
@@ -271,7 +323,8 @@
       const puede = Boolean(cut && cut.shift && !cut.closing);
       $('cut-drop').disabled = !puede || Boolean(cut.shift.ended_at);
       $('cut-declare').disabled = !puede;
-      for (const id of ['cut-amount', 'cut-counted', 'cut-reason', 'cut-pin', 'cut-ack']) {
+      for (const id of ['cut-amount', 'cut-counted', 'cut-reason', 'cut-pin', 'cut-ack',
+        'cut-usd-counted', 'cut-currency']) {
         $(id).disabled = !puede;
       }
     }
@@ -293,16 +346,28 @@
       const motivo = $('cut-reason').value;
       const pin = $('cut-pin').value;
       const contado = $('cut-counted').value;
+      const contadoUsd = $('cut-usd-counted').value;
+      const moneda = $('cut-currency').hidden ? 'MXN' : ($('cut-currency').value || 'MXN');
 
       const bloqueo = tipo === 'drop'
-        ? dropBlocker(monto, estado.cut, { reason: motivo, pin })
+        ? dropBlocker(monto, estado.cut, { reason: motivo, pin, currency: moneda })
         : closeBlocker(monto, estado.cut, {
           counted: contado, reason: motivo, pin, acknowledgePending: $('cut-ack').checked,
+          countedUsd: contadoUsd,
         });
       if (bloqueo) {
-        avisar(t(bloqueo, bloqueo === 'cut.errDiffReason'
-          ? { amount: dinero(Math.abs(difference(contado === '' ? monto : contado, estado.cut))) }
-          : undefined));
+        let vars;
+        if (bloqueo === 'cut.errDiffReason') {
+          const difPesos = Math.abs(difference(contado === '' ? monto : contado, estado.cut));
+          vars = {
+            amount: difPesos > 0 || !hasUsd(estado.cut)
+              ? dinero(difPesos)
+              : usdText(Math.abs(usdDifference(contadoUsd, estado.cut))),
+          };
+        } else if (bloqueo === 'cut.errUsdCounted') {
+          vars = { amount: usdText(estado.cut.usd_to_hand) };
+        }
+        avisar(t(bloqueo, vars));
         return;
       }
       if (tipo === 'declare'
@@ -316,7 +381,7 @@
       try {
         if (tipo === 'drop') {
           const hecho = await api.post(`/nightclubs/${clubId()}/shifts/me/cash-drops`, {
-            amount: monto, reason: motivo.trim(), manager_pin: pin,
+            amount: monto, currency: moneda, reason: motivo.trim(), manager_pin: pin,
           });
           if (deps.toast) {
             // El ticket del retiro (D81): si no salió, se dice junto con el aviso.
@@ -331,6 +396,7 @@
             counted_cash: contado === '' ? monto : Number(contado),
             ...(motivo.trim() ? { difference_reason: motivo.trim() } : {}),
             ...(pendingCount(estado.cut) > 0 ? { acknowledge_pending: $('cut-ack').checked } : {}),
+            ...(hasUsd(estado.cut) ? { counted_usd: Number(contadoUsd) } : {}),
             manager_pin: pin,
           });
           if (deps.toast) {
@@ -339,6 +405,7 @@
         }
         $('cut-amount').value = '';
         $('cut-counted').value = '';
+        $('cut-usd-counted').value = '';
         $('cut-reason').value = '';
         $('cut-ack').checked = false;
         await refrescar();
@@ -375,7 +442,7 @@
   }
 
   return {
-    METHOD_KEY, methodKey, isCash, money, lines, statusKey,
+    METHOD_KEY, methodKey, isCash, money, lines, statusKey, hasUsd, usdDifference,
     dropBlocker, closeBlocker, difference, pendingCount, isTill, createSheet,
   };
 }));
