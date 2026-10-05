@@ -225,6 +225,11 @@ describe('caja.html y su controlador', () => {
     expect(controlador).toMatch(/finally \{[^}]*\$\('open-pin'\)\.value = ''/);
   });
 
+  it('si el cobro entró pero el recibo no salió, lo avisa en vez de felicitar (D79)', () => {
+    expect(controlador).toMatch(/receipt === null[\s\S]{0,120}till\.noReceipt/);
+    expect(controlador).toMatch(/chargedToast\(t\('till\.saleDone'/);
+  });
+
   it('se esconde todo detrás de la puerta de la contraseña', () => {
     expect(controlador).toMatch(/PASSWORD_GATE_HIDES\s*=\s*\[[^\]]*'sale-sheet'[^\]]*'charge-sheet'/);
   });

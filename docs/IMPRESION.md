@@ -47,6 +47,11 @@ un **propósito**:
 |---|---|---|
 | `orders` | Comandas | PC del bartender |
 | `service` | Cuentas y recibos de cobro | PC de meseros |
+| `till` | Recibos de cobro de la caja y el corte del cajero | Caja de esa barra |
+
+El recibo de lo que cobra un cajero sale **siempre** en la impresora `till` de su caja,
+aunque los recibos del club estén apagados (D79). Cada caja tiene la suya; si faltara,
+el recibo no se desvía a otra impresora y la pantalla de caja le avisa al cajero que no salió.
 
 Un papel dice de qué zona viene. `zone_bars` dice qué barra atiende esa zona —y el
 gerente la reasigna a media noche sin tocar nada de impresión—, y el propósito escoge

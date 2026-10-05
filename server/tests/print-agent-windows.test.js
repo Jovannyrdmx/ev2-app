@@ -120,6 +120,8 @@ describe('El agente dice a qué barra atiende (D61)', () => {
       .toBe('Barra planta baja · comandas de barra');
     expect(agent.areaLabel({ location_name: 'Barra planta alta', purpose: 'service' }))
       .toBe('Barra planta alta · comandas de meseros');
+    expect(agent.areaLabel({ location_name: 'Barra planta baja', purpose: 'till' }))
+      .toBe('Barra planta baja · recibos de caja');
   });
 
   it('con barra y sin propósito dice que imprime todo lo de esa barra', async () => {

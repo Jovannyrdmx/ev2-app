@@ -565,3 +565,43 @@ describe('Cobrar en caja: cambio y dos formas de pago (D79)', () => {
     expect(poquito.status).toBe(422);
   });
 });
+
+// ============================================================================
+// D79: cuando el recibo de la caja no sale, la respuesta lo dice
+// ============================================================================
+
+describe('El cobro dice si su recibo salió (D79)', () => {
+  beforeEach(async () => {
+    await asignar(cajero, club.bar_id);
+    await abrirCaja();
+  });
+
+  it('sin impresora de caja, el cobro entra y la respuesta trae receipt: null', async () => {
+    const pedido = await pedidoDelMesero();
+    const res = await api().post(url('/till/payments')).set(auth(cajero))
+      .send({ transaction_id: pedido.transaction_id, method: 'cash', amount: 120, cash_received: 200 });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ paid: true, change_given: '80.00', receipt: null });
+  });
+
+  it('la venta directa también dice si su recibo salió', async () => {
+    const venta = (o) => api().post(url('/orders')).set(auth(cajero)).send({
+      client_request_id: randomUUID(), bar_location_id: club.bar_id,
+      items: [{ drink_id: beer.id, quantity: 1 }], ...o,
+    });
+    const sinPapel = await venta();
+    expect(sinPapel.status).toBe(201);
+    const r1 = await cobrar(sinPapel.body.order);
+    expect(r1.status).toBe(201);
+    expect(r1.body.receipt).toBeNull();
+
+    await api().post(url('/printers')).set(auth(manager)).send({
+      location_id: club.bar_id, name: 'Caja PB', purpose: 'till',
+      connection: 'network', host: '192.168.1.70',
+    });
+    const conPapel = await venta();
+    const r2 = await cobrar(conPapel.body.order);
+    expect(r2.status).toBe(201);
+    expect(r2.body.receipt).toMatchObject({ status: 'pending' });
+  });
+});

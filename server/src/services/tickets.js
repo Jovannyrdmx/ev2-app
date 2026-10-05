@@ -813,8 +813,6 @@ async function printShiftCut(runner, { nightclubId, closingId, userId = null }) 
   const data = await cutData(runner, { nightclubId, closingId });
   if (!data) return null;
 
-  // El corte de una caja sale en la barra de esa caja (D77); el de la puerta, por su
-  // zona, como siempre.
   // El corte de una caja sale en la impresora de esa caja (D79), y si no tiene, en la
   // de servicio de su barra; el de la puerta, por su zona, como siempre.
   const printer = (data.location_id && await printing.resolvePrinter(runner, {

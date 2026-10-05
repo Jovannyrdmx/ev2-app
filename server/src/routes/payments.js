@@ -562,6 +562,9 @@ router.post('/nightclubs/:nightclubId/manual-payments/register',
     res.status(201).json({
       payment: payments.present(full.rows[0], 'manager'),
       reservation_confirmed: outcome.reservation ? outcome.reservation.id : null,
+      // El papel del cobro (D79): null si no hay a dónde mandarlo, para que la pantalla
+      // lo diga en vez de dejar al cajero buscando un recibo que no va a salir.
+      receipt: outcome.receipt ? { job_id: outcome.receipt.id, status: outcome.receipt.status } : null,
     });
   }));
 

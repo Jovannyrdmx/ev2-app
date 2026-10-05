@@ -7795,6 +7795,14 @@ paths:
                 properties:
                   payment: { $ref: '#/components/schemas/ManualPayment' }
                   reservation_confirmed: { type: [string, 'null'], format: uuid }
+                  receipt:
+                    type: [object, 'null']
+                    description: >-
+                      El trabajo de impresión del recibo (D79). `null` cuando no hay
+                      impresora a dónde mandarlo o los recibos están apagados.
+                    properties:
+                      job_id: { type: string, format: uuid }
+                      status: { type: string }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/Unprocessable' }

@@ -46,14 +46,30 @@
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   let toastTimer = null;
-  function toast(message, kind = 'info') {
+  function toast(message, kind = 'info', ms = 4000) {
     const el = $('toast');
     el.textContent = message;
     el.className = 'fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50 '
-      + (kind === 'error' ? 'bg-red-500/90' : kind === 'ok' ? 'bg-emerald-500/90' : 'bg-slate-700/95');
+      + (kind === 'error' ? 'bg-red-500/90'
+        : kind === 'warn' ? 'bg-amber-400/95 text-black'
+          : kind === 'ok' ? 'bg-emerald-500/90' : 'bg-slate-700/95');
     el.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.hidden = true; }, 4000);
+    toastTimer = setTimeout(() => { el.hidden = true; }, ms);
+  }
+
+  /**
+   * El aviso del cobro, y si el recibo no salió, lo dice junto (D79). El dinero ya
+   * entró; lo que falta es el papel, y el cajero tiene que saberlo antes de que el
+   * cliente se lo pida. `receipt` viene `null` solo cuando el servidor no encoló
+   * nada; una respuesta repetida por doble toque no lo trae y no avisa de más.
+   */
+  function chargedToast(message, response) {
+    if (response && response.receipt === null) {
+      toast(`${message} ${t('till.noReceipt')}`, 'warn', 9000);
+    } else {
+      toast(message, 'ok');
+    }
   }
 
   function banner(message) {
@@ -447,6 +463,7 @@
     // encima, el cajero no vería cuánto entregar de la primera.
     let cambio = 0;
     let pagado = false;
+    let ultimo = null;
     for (let i = 0; i < steps.length; i += 1) {
       const step = steps[i];
       if (step.terminal) {
@@ -464,10 +481,10 @@
       const res = await api.post(`/nightclubs/${clubId()}/till/payments`,
         EV2Cashier.paymentPayload(order, step, keys[i]));
       if (res.change_given && Number(res.change_given) > 0) cambio += Number(res.change_given);
-      if (res.paid) pagado = true;
+      if (res.paid) { pagado = true; ultimo = res; }
     }
-    if (cambio > 0) toast(t('till.giveChange', { amount: money(cambio) }), 'ok');
-    else if (pagado) toast(t('take.charged'), 'ok');
+    if (cambio > 0) chargedToast(t('till.giveChange', { amount: money(cambio) }), ultimo);
+    else if (pagado) chargedToast(t('take.charged'), ultimo);
     return { waiting: false };
   }
 
@@ -676,6 +693,7 @@
         requestId: cart.requestKey(EV2.uuid),
       });
       const { order } = await api.post(`/nightclubs/${clubId()}/orders`, body);
+      let cobro = null;
       if (order.transaction_id) {
         const chargeBlocker = EV2OrderTaking.chargeBlocker({
           order, method, reference, terminals: state.terminals,
@@ -694,10 +712,10 @@
           sheet().watch(res.charge);
           return;
         }
-        await api.post(`/nightclubs/${clubId()}/manual-payments/register`,
+        cobro = await api.post(`/nightclubs/${clubId()}/manual-payments/register`,
           EV2OrderTaking.chargePayload({ order, method, reference }));
       }
-      toast(t('till.saleDone', { total: money(order.subtotal, order.currency) }), 'ok');
+      chargedToast(t('till.saleDone', { total: money(order.subtotal, order.currency) }), cobro);
       closeSale();
       await loadTill();
     } catch (err) {

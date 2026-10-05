@@ -588,7 +588,9 @@ function probePrinter(host, port, cfg) {
  */
 function areaLabel(agent) {
   if (!agent || !agent.location_name) return 'imprime todo lo del club';
-  const papel = { orders: 'comandas de barra', service: 'comandas de meseros' }[agent.purpose];
+  const papel = {
+    orders: 'comandas de barra', service: 'comandas de meseros', till: 'recibos de caja',
+  }[agent.purpose];
   return papel ? `${agent.location_name} · ${papel}` : `${agent.location_name} · todo`;
 }
 
