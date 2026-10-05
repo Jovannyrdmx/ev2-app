@@ -178,9 +178,10 @@ describe('Color de la mesa', () => {
     expect(Map.tableFill(t, {})).toBe('#FF2D2D');
   });
 
-  it('una mesa ocupada se pinta en rojo aunque su zona sea de otro color', () => {
+  it('una mesa ocupada se pinta en gris aunque su zona sea de otro color (D87: el rojo es de la Zona Roja)', () => {
     const full = table({ capacity: 1, occupants: [{ user_id: 'a' }] });
-    expect(Map.tableFill(full, {})).toBe(Map.COLORS.red);
+    expect(Map.tableFill(full, {})).toBe(Map.COLORS.occupied);
+    expect(Map.COLORS.occupied).not.toBe(Map.COLORS.red);
   });
 
   it('tu mesa gana sobre la selección: siempre sabes dónde estás sentado', () => {

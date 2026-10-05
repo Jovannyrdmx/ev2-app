@@ -34,6 +34,9 @@
     muted: '#8892A6',
     selected: '#FFFF00',
     mine: '#00FF00',
+    // Ocupada (D87): gris con un tache, porque el rojo es el de la Zona Roja y el
+    // cliente leía "ocupada" donde había una mesa libre de esa zona.
+    occupied: '#4B5263',
   };
 
   const LANDMARK_STYLE = {
@@ -207,7 +210,7 @@
     const v = view || {};
     if (v.myTableId && table.id === v.myTableId) return COLORS.mine;
     if (v.selectedId && table.id === v.selectedId) return COLORS.selected;
-    if (!isFree(table)) return COLORS.red;
+    if (!isFree(table)) return COLORS.occupied;
     return table.color || COLORS.cyan;
   }
 
@@ -271,6 +274,18 @@
       ctx.lineWidth = selected ? Math.max(2, 3 * l.scale) : Math.max(1, 1.5 * l.scale);
       ctx.strokeStyle = tableStroke(table, opts);
       ctx.stroke();
+
+      // El tache de la ocupada: se ve aunque el color no se distinga bien.
+      const mine = opts.myTableId && table.id === opts.myTableId;
+      if (!isFree(table) && !mine) {
+        const k = r * 0.55;
+        ctx.beginPath();
+        ctx.moveTo(at.x - k, at.y - k); ctx.lineTo(at.x + k, at.y + k);
+        ctx.moveTo(at.x + k, at.y - k); ctx.lineTo(at.x - k, at.y + k);
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = Math.max(1, 1.5 * l.scale);
+        ctx.stroke();
+      }
 
       // El número de la mesa es lo que la gente dice en voz alta ("la 39"), así que se
       // dibuja siempre que quepa.

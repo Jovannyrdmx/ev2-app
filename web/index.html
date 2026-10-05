@@ -189,13 +189,15 @@
   <!-- ============================ APP (INVITADO) ============================ -->
   <section id="screen-app" class="flex-1 flex flex-col" hidden>
     <header class="px-4 py-3 flex items-center justify-between border-b border-white/10 sticky top-0 backdrop-blur bg-black/70 z-20">
-      <div>
-        <p class="font-display text-lg ev2-gradient leading-none">EV2</p>
-        <p class="text-xs text-white/50"><span id="me-name">—</span> · <span id="me-table">sin mesa</span></p>
+      <div class="flex items-center gap-2 min-w-0">
+        <img src="images/ev2-clandestinoz.webp" alt="EV2 Clandestinoz" width="480" height="350" class="h-8 w-auto">
+        <span id="me-table" class="text-xs text-white/60 truncate">—</span>
+        <span id="me-name" hidden></span>
       </div>
       <div class="flex items-center gap-3">
-        <span class="text-xs text-white/50 flex items-center gap-1">
-          <span id="rt-dot" class="dot dot-off"></span><span id="rt-text">Conectando…</span>
+        <!-- La conexión en vivo (D87): un punto; el texto solo se lee si se toca o con lector de pantalla. -->
+        <span class="text-xs text-white/50 flex items-center gap-1" id="rt-box">
+          <span id="rt-dot" class="dot dot-off"></span><span id="rt-text" class="sr-only">Conectando…</span>
         </span>
         <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
         <button id="btn-logout" class="text-xs text-white/60 px-2" title="Salir" data-i18n-title="top.signOut"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
@@ -204,7 +206,7 @@
 
     <div id="banner" class="px-4 py-2 text-sm text-center bg-amber-500/20 text-amber-100" hidden></div>
 
-    <main class="flex-1 overflow-y-auto pb-28">
+    <main class="flex-1 pb-28">
 
       <!-- ---------------------------- INICIO (D74) ----------------------------
         Lo que el cliente necesita AHORA, segun el momento de su noche: sin mesa, elegir
@@ -212,29 +214,45 @@
         abria en el plano con cuatro contadores, que es lo que menos se usa adentro. -->
       <div id="view-home" class="p-4 space-y-3">
         <div class="pt-1">
-          <p class="text-sm text-white/50" data-i18n="home.hello">Hola</p>
-          <p id="home-name" class="font-display text-2xl leading-tight">—</p>
+          <p id="home-hello" class="font-display text-2xl leading-tight">—</p>
           <p id="home-where" class="text-sm text-white/60 mt-1">—</p>
         </div>
 
-        <button id="home-seat" class="card rounded-2xl p-4 w-full text-left flex items-center gap-4">
-          <span class="w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0" style="background:rgba(30,200,255,.14);color:var(--ev2-cyan)"><i class="fa-solid fa-map-location-dot"></i></span>
-          <span class="flex-1 min-w-0">
-            <span class="block font-semibold" data-i18n="home.seatTitle">Elige tu mesa o reserva</span>
-            <span class="block text-xs text-white/50 mt-0.5" data-i18n="home.seatHint">Tócala en el plano. Para otra noche, apártala desde ahí.</span>
-          </span>
-          <i class="fa-solid fa-chevron-right text-white/30"></i>
-        </button>
+        <!--
+          La noche de hoy (D87): la que está en curso o la que abre en unas horas. Es lo
+          primero que alguien quiere saber cuando abre la app de un antro.
+        -->
+        <div id="home-night" class="rounded-2xl p-4 space-y-1" style="background:linear-gradient(135deg,rgba(0,191,255,.16),rgba(255,20,147,.16));border:1px solid rgba(255,255,255,.12)" hidden>
+          <p id="home-night-when" class="text-[11px] uppercase tracking-wider" style="color:var(--ev2-cyan)">—</p>
+          <p id="home-night-name" class="font-display text-xl leading-tight">—</p>
+          <p id="home-night-info" class="text-sm text-white/70">—</p>
+        </div>
 
-        <div class="grid grid-cols-2 gap-2">
-          <button id="home-menu" class="ev2-button col-span-2 rounded-2xl py-4 font-display text-lg">
+        <!--
+          Sin mesa: aquí no se "elige" mesa. En este club la mesa la asigna la puerta al
+          escanear el pase, así que lo que se ofrece es el pase (si ya reservó) o
+          reservar, y una línea que dice cómo funciona.
+        -->
+        <div id="home-arrive" class="space-y-2" hidden>
+          <button id="home-pass" class="ev2-button w-full rounded-2xl py-4 font-display text-lg" hidden>
+            <i class="fa-solid fa-qrcode mr-2"></i><span data-i18n="home.myPass">Mi pase</span>
+          </button>
+          <button id="home-book" class="ev2-button w-full rounded-2xl py-4 font-display text-lg" hidden>
+            <i class="fa-solid fa-calendar-days mr-2"></i><span data-i18n="home.book">Reservar mesa</span>
+          </button>
+          <p id="home-how" class="text-sm text-white/60 px-1">—</p>
+          <button id="home-browse" class="btn-secondary w-full rounded-2xl py-3 text-sm">
+            <i class="fa-solid fa-martini-glass mr-1"></i><span data-i18n="home.browse">Ver la carta</span>
+          </button>
+        </div>
+
+        <!-- Sentado: pedir es lo principal. -->
+        <div id="home-seated" class="space-y-2" hidden>
+          <button id="home-menu" class="ev2-button w-full rounded-2xl py-4 font-display text-lg">
             <i class="fa-solid fa-martini-glass mr-2"></i><span data-i18n="home.order">Pedir algo</span>
           </button>
-          <button id="home-repeat" class="btn-secondary rounded-2xl py-3 text-sm" hidden>
+          <button id="home-repeat" class="btn-secondary w-full rounded-2xl py-3 text-sm" hidden>
             <i class="fa-solid fa-rotate-left mr-1"></i><span data-i18n="home.repeat">Repetir lo último</span>
-          </button>
-          <button id="home-orders" class="btn-secondary rounded-2xl py-3 text-sm">
-            <i class="fa-solid fa-receipt mr-1"></i><span data-i18n="nav.orders">Pedidos</span>
           </button>
         </div>
 
@@ -254,19 +272,30 @@
         <div class="grid grid-cols-2 gap-2">
           <button id="home-show" class="card rounded-2xl p-4 text-left">
             <i class="fa-solid fa-music text-xl" style="color:var(--ev2-pink)"></i>
-            <span class="block font-semibold mt-2" data-i18n="home.show">Propinas y canciones</span>
+            <span class="block font-semibold mt-2" data-i18n="home.show">DJ y propinas</span>
+            <span class="block text-[11px] text-white/45 mt-0.5" data-i18n="home.showHint">Pide una canción</span>
           </button>
           <button id="home-flirt" class="card rounded-2xl p-4 text-left relative">
             <i class="fa-solid fa-heart text-xl" style="color:var(--ev2-pink)"></i>
             <span class="block font-semibold mt-2" data-i18n="nav.flirt">Conecta</span>
+            <span class="block text-[11px] text-white/45 mt-0.5" data-i18n="home.flirtHint">Manda un trago</span>
           </button>
         </div>
+
+        <button id="home-seat" class="card rounded-2xl p-4 w-full text-left flex items-center gap-4">
+          <span class="w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0" style="background:rgba(30,200,255,.14);color:var(--ev2-cyan)"><i class="fa-solid fa-map-location-dot"></i></span>
+          <span class="flex-1 min-w-0">
+            <span id="home-seat-title" class="block font-semibold" data-i18n="home.mapTitle">El plano y tus reservas</span>
+            <span id="home-seat-hint" class="block text-xs text-white/50 mt-0.5" data-i18n="home.mapHint">Mira las zonas y aparta para otra noche.</span>
+          </span>
+          <i class="fa-solid fa-chevron-right text-white/30"></i>
+        </button>
 
         <button id="home-exit" class="card rounded-2xl p-4 w-full text-left flex items-center gap-4">
           <span class="w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0" style="background:rgba(74,222,128,.14);color:var(--ev2-lime)"><i class="fa-solid fa-taxi"></i></span>
           <span class="flex-1 min-w-0">
             <span class="block font-semibold" data-i18n="home.exitTitle">Salida segura</span>
-            <span id="home-exit-hint" class="block text-xs text-white/50 mt-0.5" data-i18n="home.exitHint">Pide un taxi del club cuando te vayas.</span>
+            <span id="home-exit-hint" class="block text-xs text-white/50 mt-0.5" data-i18n="home.exitHint">Taxi del club o tu comprobante de salida.</span>
           </span>
           <i class="fa-solid fa-chevron-right text-white/30"></i>
         </button>
@@ -372,15 +401,23 @@
       </div>
 
       <!-- ---------------------------- MENÚ ---------------------------- -->
-      <div id="view-menu" class="p-4" hidden>
-        <input id="menu-search" type="search" class="field mb-3" placeholder="Buscar en la carta" data-i18n-placeholder="menu.search" autocomplete="off">
-        <div id="menu-categories" class="flex gap-2 overflow-x-auto pb-3 -mx-1 px-1"></div>
-        <div id="menu-list" class="space-y-2"></div>
+      <div id="view-menu" class="px-4 pb-4" hidden>
+        <!-- Buscar y las categorías se quedan arriba al bajar (D87). -->
+        <div id="menu-sticky" class="sticky z-10 -mx-4 px-4 pt-4 pb-2 bg-[#0b0b14]/95 backdrop-blur" style="top:var(--app-header, 0px)">
+          <input id="menu-search" type="search" class="field mb-3" placeholder="Buscar en la carta" data-i18n-placeholder="menu.search" autocomplete="off">
+          <div id="menu-categories" class="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1"></div>
+        </div>
+        <p id="menu-need-table" class="text-xs text-white/50 mt-2 px-1" data-i18n="menu.needTable" hidden>Puedes armar tu pedido; se manda cuando ya estés en tu mesa.</p>
+        <div id="menu-list" class="space-y-2 mt-2"></div>
       </div>
 
       <!-- ---------------------------- PEDIDOS ---------------------------- -->
       <div id="view-orders" class="p-4 space-y-3" hidden>
-        <p id="orders-empty" class="text-sm text-white/50 text-center py-10" data-i18n="orders.empty" hidden>Todavía no has pedido nada.</p>
+        <div id="orders-empty" class="text-center py-12 space-y-4" hidden>
+          <i class="fa-solid fa-receipt text-4xl text-white/20"></i>
+          <p class="text-sm text-white/50" data-i18n="orders.empty">Todavía no has pedido nada.</p>
+          <button id="orders-browse" class="ev2-button rounded-xl px-6 py-3 font-display text-sm" data-i18n="home.browse">Ver la carta</button>
+        </div>
         <div id="orders-list" class="space-y-3"></div>
       </div>
 
@@ -665,6 +702,11 @@
           <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50" data-i18n="profile.club">Club</span><span id="profile-club">—</span></div>
           <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50" data-i18n="profile.account">Cuenta</span><span id="profile-role">—</span></div>
         </div>
+        <!-- Lo que más se busca aquí va primero (D87): el pase y las reservas, la salida. -->
+        <div class="grid grid-cols-2 gap-2">
+          <button id="profile-map" class="btn-secondary rounded-xl py-3 text-sm"><i class="fa-solid fa-qrcode mr-1"></i><span data-i18n="home.myTable">Reservas y pase</span></button>
+          <button id="profile-taxi" class="btn-secondary rounded-xl py-3 text-sm"><i class="fa-solid fa-taxi mr-1"></i><span data-i18n="home.exitTitle">Salida segura</span></button>
+        </div>
         <!--
           Objetos perdidos (D67). Vive en el perfil y no en una pestaña propia: se usa
           una vez cada muchas noches, y el nav de abajo ya lleva siete.
@@ -752,11 +794,6 @@
           <p id="social-panel-error" class="text-sm text-red-300" hidden></p>
         </div>
 
-        <div class="grid grid-cols-2 gap-2">
-          <button id="profile-taxi" class="btn-secondary rounded-xl py-3 text-sm"><i class="fa-solid fa-taxi mr-1"></i><span data-i18n="home.exitTitle">Salida segura</span></button>
-          <button id="profile-map" class="btn-secondary rounded-xl py-3 text-sm"><i class="fa-solid fa-map-location-dot mr-1"></i><span data-i18n="home.myTable">Mesa y reservas</span></button>
-        </div>
-
         <button id="btn-profile-logout" class="w-full py-3 rounded-xl card text-sm text-red-300" data-i18n="profile.signOut">Cerrar sesión</button>
 
         <!--
@@ -799,6 +836,21 @@
     </main>
 
     <!-- CARRITO -->
+    <!--
+      Pedir sin mesa (D87). Antes mandaba al plano con "elige tu mesa", y en el plano no
+      se puede elegir: la mesa la asigna la puerta. Ahora se explica y se ofrece lo que
+      sí sirve. El carrito se queda armado.
+    -->
+    <div id="need-table-sheet" class="fixed inset-0 z-50 flex items-end justify-center bg-black/80" hidden>
+      <div class="w-full max-w-md rounded-t-2xl p-5 space-y-3" style="background:#12121f;border-top:1px solid rgba(255,255,255,.12)">
+        <p class="font-display text-lg" data-i18n="needTable.title">Para pedir, ya tienes que estar en tu mesa</p>
+        <p class="text-sm text-white/70" data-i18n="needTable.body">Al llegar, enseña tu pase en la entrada y ahí te asignan tu mesa. Tu pedido se queda guardado: lo mandas en cuanto te sienten.</p>
+        <button id="need-pass" class="ev2-button w-full rounded-xl py-3 font-display" hidden><i class="fa-solid fa-qrcode mr-2"></i><span data-i18n="home.myPass">Mi pase</span></button>
+        <button id="need-book" class="ev2-button w-full rounded-xl py-3 font-display" hidden><i class="fa-solid fa-calendar-days mr-2"></i><span data-i18n="home.book">Reservar mesa</span></button>
+        <button id="need-close" class="btn-secondary w-full rounded-xl py-3 text-sm" data-i18n="needTable.keep">Seguir viendo la carta</button>
+      </div>
+    </div>
+
     <div id="cart-bar" class="fixed bottom-16 left-0 right-0 max-w-md mx-auto px-4 z-10" hidden>
       <button id="btn-order" class="ev2-button w-full py-3 rounded-xl font-display flex items-center justify-between px-5">
         <span><span id="cart-count">0</span> · <span id="cart-total">$0.00</span></span>
@@ -811,7 +863,7 @@
       <button data-view="home" class="nav-tab py-2.5 text-[11px] tab-active"><i class="fa-solid fa-house block text-lg mb-1"></i><span data-i18n="nav.home">Inicio</span><span id="taxi-badge" class="ml-1 px-1.5 rounded-full bg-emerald-500 text-[10px]" hidden></span></button>
       <button data-view="menu" class="nav-tab py-2.5 text-[11px] text-white/50"><i class="fa-solid fa-martini-glass block text-lg mb-1"></i><span data-i18n="nav.menu">Carta</span></button>
       <button data-view="orders" class="nav-tab py-2.5 text-[11px] text-white/50"><i class="fa-solid fa-receipt block text-lg mb-1"></i><span data-i18n="nav.orders">Pedidos</span><span id="orders-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
-      <button data-view="show" class="nav-tab py-2.5 text-[11px] text-white/50"><i class="fa-solid fa-music block text-lg mb-1"></i><span data-i18n="nav.show">Show</span><span id="flirt-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
+      <button data-view="show" class="nav-tab py-2.5 text-[11px] text-white/50"><i class="fa-solid fa-music block text-lg mb-1"></i><span data-i18n="nav.show">DJ</span><span id="flirt-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
       <button data-view="profile" class="nav-tab py-2.5 text-[11px] text-white/50"><i class="fa-solid fa-user block text-lg mb-1"></i><span data-i18n="nav.profile">Cuenta</span></button>
     </nav>
   </section>

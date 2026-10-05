@@ -541,3 +541,52 @@ describe('La carta del cliente (D74)', () => {
     expect(C.lastRepeatable(undefined)).toBeNull();
   });
 });
+
+// ============================================================================
+// D87: la carta legible y la noche de hoy
+// ============================================================================
+
+describe('La carta para el cliente (D87)', () => {
+  const C = require('../../web/js/client.js');
+
+  it('los nombres en MAYÚSCULAS se leen en formato normal; siglas y medidas se quedan', () => {
+    expect(C.displayName('BACARDI - COCA COLA')).toBe('Bacardi - Coca Cola');
+    expect(C.displayName('AZULITO S/A')).toBe('Azulito S/A');
+    expect(C.displayName('AGUA DE JAMAICA')).toBe('Agua de Jamaica');
+    expect(C.displayName("BUCHANAN'S 12 750ML")).toBe("Buchanan's 12 750ML");
+    expect(C.displayName('XO CAFE')).toBe('XO Cafe');
+    expect(C.displayName('PIÑA COLADA')).toBe('Piña Colada');
+    // Lo que ya viene escrito con cuidado no se toca.
+    expect(C.displayName('Michelada Clásica')).toBe('Michelada Clásica');
+    expect(C.displayName(null)).toBe('');
+  });
+
+  it('la carta va por secciones y lo agotado al final de cada una', () => {
+    const drinks = [
+      { id: 1, name: 'Corona', category: 'Cervezas', stock: 0 },
+      { id: 2, name: 'Tecate', category: 'Cervezas', stock: 5 },
+      { id: 3, name: 'Azulito', category: 'Drinks', stock: 3 },
+    ];
+    const secciones = C.menuSections(drinks, {});
+    expect(secciones.map((s) => s.category)).toEqual(['Drinks', 'Cervezas']);
+    expect(secciones[1].items.map((d) => d.name)).toEqual(['Tecate', 'Corona']);
+    expect(C.menuSections(drinks, { category: 'Drinks' }).map((s) => s.category)).toEqual(['Drinks']);
+    expect(C.isSoldOut({ available: false, stock: 9 })).toBe(true);
+  });
+});
+
+describe('La noche de hoy en Inicio (D87)', () => {
+  const C = require('../../web/js/client.js');
+  const now = new Date('2026-10-05T20:00:00Z');
+  const ends = (e) => new Date(new Date(e.doors_open_at).getTime() + 8 * 3600e3);
+
+  it('la que está en curso, o la que abre en las próximas horas; nunca una de otro día', () => {
+    const enCurso = { id: 'a', doors_open_at: '2026-10-05T19:00:00Z' };
+    const viernes = { id: 'b', doors_open_at: '2026-10-09T03:00:00Z' };
+    expect(C.tonight([viernes, enCurso], now, ends)).toEqual({ event: enCurso, live: true });
+    const masTarde = { id: 'c', doors_open_at: '2026-10-06T04:00:00Z' };
+    expect(C.tonight([masTarde], now, ends)).toEqual({ event: masTarde, live: false });
+    expect(C.tonight([viernes], now, ends)).toBeNull();
+    expect(C.tonight([{ ...enCurso, status: 'cancelled' }], now, ends)).toBeNull();
+  });
+});

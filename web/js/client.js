@@ -248,6 +248,81 @@
     });
   }
 
+  // ---------------------------------------------------------------- la carta (D87)
+
+  /** Si un producto se puede pedir ahora. */
+  const isSoldOut = (d) => Boolean(d) && (d.available === false || Number(d.stock) <= 0);
+
+  // Palabras que en un nombre van en minúscula ("Agua de Jamaica"), salvo al inicio.
+  const SMALL_WORDS = new Set(['de', 'del', 'la', 'las', 'el', 'los', 'y', 'con', 'sin', 'en', 'a', 'al', 'o']);
+
+  /**
+   * El nombre como se lee en una carta. Los nombres vienen de la caja en MAYÚSCULAS
+   * ("BACARDI - COCA COLA"); gritarle 129 renglones al cliente cansa. Solo se cambia lo
+   * que viene TODO en mayúsculas — si alguien ya lo escribió con cuidado, se respeta—
+   * y se dejan como están las siglas y medidas: "S/A", "XO", "750ML", "1L".
+   */
+  function displayName(name) {
+    const text = String(name == null ? '' : name).trim();
+    if (!text || text !== text.toUpperCase() || text === text.toLowerCase()) return text;
+    let first = true;
+    return text.split(/(\s+)/).map((token) => {
+      if (/^\s+$/.test(token) || token === '-') return token;
+      const keep = /[\/\d]/.test(token) || (token.length <= 2 && !SMALL_WORDS.has(token.toLowerCase()));
+      const lower = token.toLowerCase();
+      let out;
+      if (keep) out = token;
+      else if (!first && SMALL_WORDS.has(lower)) out = lower;
+      else out = lower.replace(/(^|[-(])(\p{L})/gu, (m, sep, ch) => sep + ch.toUpperCase());
+      first = false;
+      return out;
+    }).join('');
+  }
+
+  /**
+   * La carta en secciones, una por categoría y en el orden de la barra. Dentro de cada
+   * una, lo que se puede pedir va primero y lo agotado al final: el cliente no tiene que
+   * esquivar diez renglones apagados para encontrar algo que sí hay.
+   */
+  function menuSections(drinks, opts) {
+    const list = filterMenu(drinks, opts);
+    const order = orderCategories(list.map((d) => d.category));
+    const by = new Map(order.map((c) => [c, []]));
+    for (const d of list) {
+      const key = by.has(d.category) ? d.category : null;
+      if (!by.has(key)) by.set(key, []);
+      by.get(key).push(d);
+    }
+    return [...by.entries()]
+      .filter(([, items]) => items.length)
+      .map(([category, items]) => ({
+        category,
+        items: items.filter((d) => !isSoldOut(d)).concat(items.filter(isSoldOut)),
+      }));
+  }
+
+  // ---------------------------------------------------------------- la noche (D87)
+
+  /**
+   * La noche que le importa al cliente que abre la app: la que está en curso, o la que
+   * abre en las próximas horas. Si no hay ninguna así, null — la tarjeta no se inventa.
+   * `nightEnd(e)` dice cuándo termina cada una (lo sabe EV2Booking).
+   */
+  function tonight(events, now, nightEnd, { aheadHours = 20 } = {}) {
+    const when = new Date(now || Date.now()).getTime();
+    const candidates = (events || []).filter((e) => e && e.doors_open_at
+      && e.status !== 'cancelled' && e.status !== 'finished')
+      .filter((e) => {
+        const opens = new Date(e.doors_open_at).getTime();
+        const ends = nightEnd ? new Date(nightEnd(e)).getTime() : opens + 8 * 3600e3;
+        return ends > when && opens - when <= aheadHours * 3600e3;
+      })
+      .sort((a, b) => new Date(a.doors_open_at) - new Date(b.doors_open_at));
+    const e = candidates[0];
+    if (!e) return null;
+    return { event: e, live: new Date(e.doors_open_at).getTime() <= when };
+  }
+
   /** El ultimo pedido que vale la pena repetir: con renglones y que no se cancelo. */
   function lastRepeatable(orders) {
     return (orders || []).find((o) => o && o.status !== 'cancelled'
@@ -256,6 +331,7 @@
 
   return {
     orderCategories, filterMenu, lastRepeatable, CATEGORY_ORDER,
+    isSoldOut, displayName, menuSections, tonight,
     createCart, orderLabel, orderProgress, isOpenOrder, groupFloorPlan,
     tableIsFull, tableIsSelectable, seatedCount, myTable, floorLabel, applyEvent,
     toCents, fromCents,

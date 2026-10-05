@@ -47,6 +47,7 @@
     state.rules = rules.rules || {};
     state.events = EV2Booking.bookableEvents(events.events, new Date());
     renderEvents();
+    avisarInicio();
   }
 
   async function loadMine() {
@@ -55,6 +56,12 @@
     const data = await ctx.api.get(`/nightclubs/${club}/reservations/mine?limit=20`);
     state.mine = data.reservations || [];
     renderMine();
+    avisarInicio();
+  }
+
+  /** Inicio (D87) enseña la noche de hoy y el pase: se le avisa cuando cambian. */
+  function avisarInicio() {
+    if (EV2Screen.emit) EV2Screen.emit('booking', { events: state.events, mine: state.mine });
   }
 
   async function loadTables() {
@@ -578,6 +585,14 @@
     // "Mis reservaciones" vacío por un fallo de red se ve igual que "no tienes
     // ninguna", y el cliente puede creer que la suya se perdió.
     loadMine().catch((err) => ctx.showError(err));
+    // Las noches también, sin esperar a abrir el panel: Inicio dice cuál es la de hoy.
+    loadEvents().catch(() => {});
   });
+
+  // Inicio abre el pase y el panel de reservar desde sus propios botones (D87).
+  window.EV2BookingScreen = {
+    openPass: (reservation) => openPass(reservation),
+    openBooking: () => { const b = $('btn-book-open'); if (b && $('book-panel').hidden) b.click(); },
+  };
   EV2Screen.on('language', () => { if (ctx) { renderTables(); renderQuote(); renderMine(); } });
 }());

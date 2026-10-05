@@ -33,6 +33,9 @@
     taxi: { availability: null, ride: null, rides: [], fares: [], pickup: null,
       settings: null, contacts: [], certificate: null, certificateFor: null,
       departure: null, departureCertificate: null },
+    // Las noches y mis reservaciones, para Inicio (D87). Los carga booking-screen.js.
+    booking: { events: [], mine: [] },
+    view: 'home',
   };
   const cart = EV2Client.createCart();
 
@@ -822,7 +825,7 @@
 
     const table = state.myTable;
     $('me-table').textContent = table
-      ? `${t('top.table')} ${table.table_number || table.code}` : t('top.noTable');
+      ? `${t('map.table')} ${table.table_number || table.code}` : '';
     $('profile-table').textContent = table
       ? `${table.section || ''} ${table.table_number || table.code}`.trim() : t('top.noTable');
   }
@@ -856,7 +859,7 @@
   function renderLegend() {
     const items = EV2Map.zones(tablesOnFloor())
       .map((z) => ({ name: z.name, color: z.color }))
-      .concat([{ name: t('map.occupied'), color: EV2Map.COLORS.red },
+      .concat([{ name: t('map.occupied'), color: EV2Map.COLORS.occupied },
         { name: t('map.mine'), color: EV2Map.COLORS.mine }]);
     $('legend').innerHTML = items.map((z) => `
       <span class="flex items-center gap-1.5">
@@ -982,17 +985,19 @@
       b.onclick = () => { state.category = b.dataset.cat || null; renderMenu(); };
     });
 
-    const list = EV2Client.filterMenu(state.drinks, { category: state.category, search: state.search });
-    $('menu-list').innerHTML = list.map((d) => {
+    // En secciones por categoría, lo agotado al final de cada una (D87). Con una
+    // categoría escogida es una sola sección y no lleva encabezado.
+    const secciones = EV2Client.menuSections(state.drinks, { category: state.category, search: state.search });
+    const conEncabezado = secciones.length > 1 || (!state.category && !state.search);
+    const fila = (d) => {
       const qty = cart.quantityOf(d.id);
-      const out = d.available === false || Number(d.stock) <= 0;
+      const out = EV2Client.isSoldOut(d);
       return `
-      <div class="card rounded-xl p-3 flex items-center gap-3 ${out ? 'opacity-50' : ''}">
+      <div class="card rounded-xl p-3 flex items-center gap-3 ${out ? 'opacity-45' : ''}">
         ${thumb(d)}
         <div class="flex-1 min-w-0">
-          <p class="font-semibold">${escape(d.name)}</p>
-          ${state.category && !out ? '' : `<p class="text-xs text-white/50">${state.category ? '' : escape(d.category || '')}${out ? `${state.category ? '' : ' · '}${escape(t('menu.soldOut'))}` : ''}</p>`}
-          <p class="text-sm mt-1">${money(d.price, d.currency)}</p>
+          <p class="font-semibold leading-snug">${escape(EV2Client.displayName(d.name))}</p>
+          <p class="text-sm mt-0.5 ${out ? 'text-white/50' : ''}">${money(d.price, d.currency)}${out ? ` · <span class="text-xs">${escape(t('menu.soldOut'))}</span>` : ''}</p>
         </div>
         ${out ? '' : `
         <div class="flex items-center gap-2">
@@ -1001,7 +1006,12 @@
           <button data-more="${d.id}" class="w-11 h-11 rounded-full ev2-button text-lg" aria-label="+">+</button>
         </div>`}
       </div>`;
-    }).join('') || `<p class="text-white/40 text-sm text-center py-10">${escape(t(state.search ? 'menu.noMatch' : 'menu.empty'))}</p>`;
+    };
+    $('menu-list').innerHTML = secciones.map((sec) => `
+      ${conEncabezado ? `<p class="text-xs uppercase tracking-wider text-white/45 pt-3 pb-1 px-1">${escape(sec.category || t('menu.other'))} · ${sec.items.length}</p>` : ''}
+      ${sec.items.map(fila).join('')}`).join('')
+      || `<p class="text-white/40 text-sm text-center py-10">${escape(t(state.search ? 'menu.noMatch' : 'menu.empty'))}</p>`;
+    $('menu-need-table').hidden = Boolean(state.myTable);
 
     $('menu-list').querySelectorAll('[data-more]').forEach((b) => {
       b.onclick = () => {
@@ -1016,9 +1026,17 @@
     });
   }
 
+  // La barra de "Pedir" solo donde se arma el pedido: en el plano o en la salida tapaba
+  // lo que el cliente estaba leyendo (D87).
+  const CART_VIEWS = ['home', 'menu', 'orders'];
+
   function renderCart() {
     const has = cart.count > 0;
-    $('cart-bar').hidden = !has;
+    const visible = has && CART_VIEWS.includes(state.view);
+    $('cart-bar').hidden = !visible;
+    // Espacio abajo para que la barra no tape el último renglón.
+    const main = document.querySelector('#screen-app main');
+    if (main) main.style.paddingBottom = visible ? '11rem' : '';
     if (!has) return;
     $('cart-count').textContent = cart.count;
     $('cart-total').textContent = money(cart.total, cart.currency);
@@ -1026,8 +1044,12 @@
 
   $('btn-order').onclick = async () => {
     if (!state.myTable) {
-      toast(t('orders.needTable'));
-      showView('map');
+      // Sin mesa no se manda, y el plano no deja elegir una (D87): se explica por qué y
+      // se ofrece el pase o reservar. El carrito se queda como está.
+      const pase = passReservation();
+      $('need-pass').hidden = !pase;
+      $('need-book').hidden = Boolean(pase);
+      $('need-table-sheet').hidden = false;
       return;
     }
     const button = $('btn-order');
@@ -1065,7 +1087,7 @@
 
     $('orders-list').innerHTML = state.orders.map((o) => {
       const pct = Math.round(EV2Client.orderProgress(o.status) * 100);
-      const items = (o.items || []).map((i) => `${i.quantity}× ${escape(i.name || i.drink_name || '')}`).join(', ');
+      const items = (o.items || []).map((i) => `${i.quantity}× ${escape(EV2Client.displayName(i.name || i.drink_name || ''))}`).join(', ');
       // Un pedido sin pagar no lo está preparando nadie. Decirlo aquí evita la espera
       // más frustrante que hay: la de un trago que nunca se empezó a servir.
       const porPagar = o.payment_status === 'pending' || o.payment_status === 'pending_manual';
@@ -1464,8 +1486,22 @@
   // Las vistas que no tienen pestaña propia encienden la de donde se llega a ellas.
   const TAB_OF = { map: 'home', taxi: 'home', flirt: 'show' };
 
+  /**
+   * La barra de búsqueda de la carta se pega DEBAJO del encabezado, que también es fijo:
+   * pegada en 0 quedaba escondida detrás de él. Se mide en lugar de adivinarse, porque
+   * el alto cambia con el tamaño de letra del teléfono.
+   */
+  function medirEncabezado() {
+    const header = document.querySelector('#screen-app > header');
+    if (header) document.documentElement.style.setProperty('--app-header', `${header.offsetHeight}px`);
+  }
+  window.addEventListener('resize', medirEncabezado);
+
   function showView(name) {
+    medirEncabezado();
+    state.view = name;
     for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
+    renderCart();
     const tab = TAB_OF[name] || name;
     document.querySelectorAll('.nav-tab').forEach((b) => {
       const on = b.dataset.view === tab;
@@ -1473,8 +1509,8 @@
       if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     });
     if (name === 'home') renderHome();
-    const main = document.querySelector('#screen-app main');
-    if (main) main.scrollTop = 0;
+    // Desde D87 se desplaza la página, no <main>: cada vista empieza arriba.
+    window.scrollTo(0, 0);
     // El lienzo se mide al mostrarse: dibujarlo mientras estaba oculto lo deja en blanco.
     if (name === 'map') drawMap();
     hub.emit('view', name);
@@ -1545,7 +1581,7 @@
       <div class="card rounded-xl p-3 flex items-center gap-3">
         ${thumb(d)}
         <div class="flex-1 min-w-0">
-          <p class="font-semibold">${escape(d.name)}</p>
+          <p class="font-semibold">${escape(EV2Client.displayName(d.name))}</p>
           ${preview.category ? '' : `<p class="text-xs text-white/50">${escape(d.category || '')}</p>`}
         </div>
         <p class="text-sm font-semibold">${money(d.price, d.currency)}</p>
@@ -1562,22 +1598,79 @@
   };
   $('preview-search').addEventListener('input', (e) => { preview.search = e.target.value; renderPreview(); });
 
-  // ---------------------------------------------------------------- inicio (D74)
+  // ---------------------------------------------------------------- inicio (D74, D87)
+
+  hub.on('booking', (data) => {
+    state.booking = { events: (data && data.events) || [], mine: (data && data.mine) || [] };
+    renderHome();
+  });
+
+  const nightEnd = (e) => (window.EV2Booking && window.EV2Booking.nightEnd
+    ? window.EV2Booking.nightEnd(e) : new Date(new Date(e.doors_open_at).getTime() + 8 * 3600e3));
+
+  /** La noche de hoy, o null. */
+  const tonight = () => EV2Client.tonight(state.booking.events, new Date(), nightEnd);
+
+  /**
+   * La reservación cuyo pase sirve ahora: la de la noche de hoy si hay, o la próxima.
+   * Solo cuenta si tiene pase y sigue viva.
+   */
+  function passReservation() {
+    const vivas = (window.EV2Booking ? window.EV2Booking.upcoming(state.booking.mine, new Date())
+      : state.booking.mine)
+      .filter((r) => r.pass_code && ['confirmed', 'pending_payment', 'seated'].includes(r.status));
+    const hoy = tonight();
+    return (hoy && vivas.find((r) => r.event_id === hoy.event.id)) || null;
+  }
+
+  const timeOf = (iso) => new Date(iso).toLocaleTimeString(lang() === 'en' ? 'en-US' : 'es-MX',
+    { hour: 'numeric', minute: '2-digit' });
+
+  function openPass() {
+    const r = passReservation();
+    if (r && window.EV2BookingScreen) window.EV2BookingScreen.openPass(r);
+  }
+  function openBooking() {
+    showView('map');
+    if (window.EV2BookingScreen) window.EV2BookingScreen.openBooking();
+    setTimeout(() => {
+      const panel = $('book-panel');
+      if (panel && !panel.hidden) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  }
 
   function renderHome() {
     if (!$('view-home')) return;
     const user = api.session.user || {};
-    $('home-name').textContent = user.display_name || '';
+    const nombre = (user.first_name || String(user.display_name || '').split(' ')[0] || '').trim();
+    $('home-hello').textContent = nombre ? t('home.helloName', { name: nombre }) : t('home.hello');
     const table = state.myTable;
-    $('home-where').textContent = table ? t('home.atTable', { code: table.code }) : t('home.noTable');
-    // La tarjeta de la mesa cambia de trabajo: sin mesa invita a elegir; con mesa, lleva al plano.
-    const seat = $('home-seat').querySelectorAll('span span');
-    seat[0].textContent = table ? t('home.seatedTitle', { code: table.code }) : t('home.seatTitle');
-    seat[1].textContent = table ? t('home.seatedHint') : t('home.seatHint');
+    $('home-where').textContent = table ? t('home.atTable', { code: table.table_number || table.code })
+      : t('home.noTable');
+
+    // La noche de hoy.
+    const hoy = tonight();
+    $('home-night').hidden = !hoy;
+    if (hoy) {
+      const e = hoy.event;
+      $('home-night-when').textContent = t(hoy.live ? 'home.nightLive' : 'home.nightSoon');
+      $('home-night-name').textContent = e.name || '';
+      const partes = [hoy.live ? t('home.nightUntil', { time: timeOf(nightEnd(e)) })
+        : t('home.nightOpens', { time: timeOf(e.doors_open_at) })];
+      if (Number(e.ticket_price) > 0) partes.push(t('preview.cover', { amount: money(e.ticket_price, e.currency) }));
+      $('home-night-info').textContent = partes.join(' · ');
+    }
+
+    // Sin mesa: el pase o reservar. Sentado: pedir.
+    const pase = passReservation();
+    $('home-arrive').hidden = Boolean(table);
+    $('home-seated').hidden = !table;
+    $('home-pass').hidden = !pase;
+    $('home-book').hidden = Boolean(pase);
+    $('home-how').textContent = t(pase ? 'home.howPass' : 'home.howBook');
 
     const last = EV2Client.lastRepeatable(state.orders);
-    $('home-repeat').hidden = !last;
-    $('home-orders').classList.toggle('col-span-2', !last);
+    $('home-repeat').hidden = !last || !table;
 
     const live = state.orders.filter((o) => EV2Client.isOpenOrder(o.status));
     $('home-live').hidden = live.length === 0;
@@ -1585,11 +1678,15 @@
       const o = live[0];
       $('home-live-status').textContent = EV2Client.orderLabel(o.status, lang());
       $('home-live-items').textContent = (o.items || [])
-        .map((i) => `${i.quantity}× ${i.name || i.drink_name || ''}`).join(', ');
+        .map((i) => `${i.quantity}× ${EV2Client.displayName(i.name || i.drink_name || '')}`).join(', ');
       $('home-live-bar').style.width = `${Math.round(EV2Client.orderProgress(o.status) * 100)}%`;
       $('home-live-count').hidden = live.length < 2;
       $('home-live-count').textContent = t('home.liveMore', { n: live.length - 1 });
     }
+
+    $('home-seat-title').textContent = t(table ? 'home.seatedTitle' : 'home.mapTitle',
+      { code: table ? (table.table_number || table.code) : '' });
+    $('home-seat-hint').textContent = t(table ? 'home.seatedHint' : 'home.mapHint');
 
     const ride = state.taxi.ride;
     const rideLive = Boolean(ride && EV2Taxi.isLive(ride.status));
@@ -1597,9 +1694,17 @@
     $('home-exit').style.borderColor = rideLive ? 'var(--ev2-lime)' : '';
   }
 
+  $('home-pass').onclick = openPass;
+  $('home-book').onclick = openBooking;
+  $('home-browse').onclick = () => showView('menu');
+  $('orders-browse').onclick = () => showView('menu');
+  $('need-pass').onclick = () => { $('need-table-sheet').hidden = true; openPass(); };
+  $('need-book').onclick = () => { $('need-table-sheet').hidden = true; openBooking(); };
+  $('need-close').onclick = () => { $('need-table-sheet').hidden = true; };
+  $('need-table-sheet').onclick = (e) => { if (e.target === $('need-table-sheet')) $('need-table-sheet').hidden = true; };
+
   $('home-seat').onclick = () => showView('map');
   $('home-menu').onclick = () => showView('menu');
-  $('home-orders').onclick = () => showView('orders');
   $('home-live').onclick = () => showView('orders');
   $('home-show').onclick = () => showView('show');
   $('home-flirt').onclick = () => showView('flirt');
@@ -1641,7 +1746,11 @@
     lastConnection.key = key;
     lastConnection.vars = vars || null;
     $('rt-dot').className = `dot ${on === true ? 'dot-on' : on === null ? 'dot-wait' : 'dot-off'}`;
-    $('rt-text').textContent = vars && vars.text ? vars.text : t(key);
+    const texto = vars && vars.text ? vars.text : t(key);
+    $('rt-text').textContent = texto;
+    // El cliente no necesita leer "Reconectando…" a cada rato (D87): el punto basta, y
+    // el texto queda para quien lo toque o use lector de pantalla.
+    $('rt-box').title = texto;
   }
 
   function connectRealtime() {
@@ -1749,5 +1858,5 @@
 
   // Se publica al final, ya con todo armado: un archivo que se cargue antes encontraría
   // la mitad de las funciones sin definir.
-  window.EV2Screen = { on: hub.on, context };
+  window.EV2Screen = { on: hub.on, emit: hub.emit, context };
 }());
