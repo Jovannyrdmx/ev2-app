@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v40';
+const VERSION = 'ev2-v41';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -71,7 +71,7 @@ const SHELL = [
   'fonts/inter-latin-600-normal.woff2', 'fonts/inter-latin-700-normal.woff2',
   'fonts/poppins-latin-500-normal.woff2', 'fonts/poppins-latin-600-normal.woff2',
   'fonts/poppins-latin-700-normal.woff2',
-  'images/favicon-32x32.png', 'images/ev2-logo.svg.png',
+  'images/favicon-32x32.png', 'images/ev2-logo.svg.png', 'images/ev2-clandestinoz.webp',
 ];
 
 self.addEventListener('install', (event) => {
