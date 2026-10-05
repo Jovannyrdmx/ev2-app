@@ -1926,7 +1926,8 @@
     }
 
     caja.innerHTML = '';
-    const yaDadas = new Set((printing.printers || [])
+    // Solo cuentan las prendidas: una apagada se puede volver a registrar (D80).
+    const yaDadas = new Set((printing.printers || []).filter((p) => p.active)
       .map((p) => `${p.connection}|${p.host || p.windows_name}`));
     // Desde D61 una USB se abre por su nombre; el compartido es de instalaciones viejas.
     const yaEsta = (h) => (h.kind === 'windows'

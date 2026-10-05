@@ -335,7 +335,7 @@ function testTicket({ clubName, printerName, purpose, columns, codepage, hasCutt
   t.line(clubName || 'EV2').blank();
   t.left().rule();
   t.row('Impresora', printerName || '—');
-  t.row('Para', purpose === 'orders' ? 'Comandas (barra)' : 'Cuentas y recibos');
+  t.row('Para', { orders: 'Comandas (barra)', till: 'Recibos de caja' }[purpose] || 'Cuentas y recibos');
   t.row('Ancho', `${columns} columnas`);
   t.row('Codigos', codepage);
   t.rule();

@@ -144,6 +144,7 @@ describe('El ticket de prueba', () => {
   it('dice para qué es esa impresora, para no confundir las cuatro del club', () => {
     expect(prueba({ purpose: 'orders' }).text).toContain('Comandas');
     expect(prueba({ purpose: 'service' }).text).toContain('Cuentas y recibos');
+    expect(prueba({ purpose: 'till' }).text).toContain('Recibos de caja');
   });
 
   it('a 58 mm todo sigue cabiendo', () => {
