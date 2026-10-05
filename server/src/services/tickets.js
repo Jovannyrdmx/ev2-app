@@ -123,7 +123,7 @@ function footer(t, settings) {
 async function orderData(runner, { nightclubId, orderId }) {
   const { rows } = await runner.query(
     `SELECT o.id::text AS id, o.created_at, o.message, o.status,
-            o.bar_location_id::text AS bar_location_id,
+            o.bar_location_id::text AS bar_location_id, o.substitutions,
             t.code AS table_code, t.section AS table_section, t.floor AS table_floor,
             dp.name AS delivery_point_name,
             wu.display_name AS taken_by_name,
@@ -260,6 +260,15 @@ function renderOrder(t, data, { club, settings, reprint = false }) {
     // La nota va sangrada bajo el nombre, por `raw` y por lo mismo: es una columna.
     if (it.notes) for (const n of escpos.wrap(it.notes, t.width - QTY_COLUMN - 2)) t.raw(`${' '.repeat(QTY_COLUMN + 2)}${n}`);
   }
+  // Lo que se sirve con otro insumo (D84), en grande: es lo que el bartender tiene
+  // que ver antes de agarrar la botella de siempre.
+  const cambios = Array.isArray(data.substitutions) ? data.substitutions : [];
+  if (cambios.length) {
+    t.blank().rule();
+    t.bold().line('SUSTITUCION').boldOff();
+    for (const c of cambios) t.line(`${c.from} -> ${c.to}`);
+  }
+
   // El total y en qué quedó el cobro (D59).
   //
   // Este papel acaba en la mesa del cliente, junto con los tragos. Por eso lleva

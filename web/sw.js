@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v38';
+const VERSION = 'ev2-v39';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -58,7 +58,7 @@ const SHELL = [
   // lleno y la senal peor que nunca. Sin el guardado, no puede ni ver cuanto entrega.
   'js/shift-cut.js',
   // La caja de cada barra (D77): el cajero abre, cobra y corta desde aquí toda la noche.
-  'caja.html', 'js/cashier.js', 'js/cashier-screen.js',
+  'caja.html', 'js/cashier.js', 'js/cashier-screen.js', 'js/substitutions.js',
   // El nombre del logo lleva la extension doble ('...svg.png') porque el archivo que
   // se puso es un PNG. Apuntar a 'ev2-logo.svg' -- que no existe -- dejaba la app sin
   // icono grande al agregarla a la pantalla de inicio, y el service worker fallaba al

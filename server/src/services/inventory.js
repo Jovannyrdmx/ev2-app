@@ -28,6 +28,7 @@
 'use strict';
 
 const { ApiError } = require('../middleware/errors');
+const substitutions = require('./substitutions');
 
 /** Las tres unidades base. Todo -saldo, receta y costo- habla en una de ellas. */
 const UNITS = ['ml', 'g', 'pza'];
@@ -199,10 +200,44 @@ async function consume(client, { nightclubId, locationId, items, orderId, userId
   if (needed.size === 0) return [];
   if (!locationId) throw ApiError.unprocessable('Este pedido no tiene barra asignada');
 
-  const stock = await lockStock(client, { supplyIds: needed.keys(), locationId });
+  // Los insumos agotados que tienen sustituto en esta barra (D84). Se bloquean
+  // también los sustitutos, en el mismo orden estable, antes de decidir nada.
+  const subs = await substitutions.liveFor(client, {
+    nightclubId, locationId, supplyIds: [...needed.keys()],
+  });
+  const stock = await lockStock(client, {
+    supplyIds: [...new Set([...needed.keys(), ...[...subs.values()].map((x) => x.substitute_id)])],
+    locationId,
+  });
+
+  // Con el original basta, se usa el original (y si tenía sustituto, ya volvió: se
+  // cierra). Si no basta y hay sustituto, la cantidad completa sale del sustituto.
+  const finales = new Map();
+  const sumar = (supplyId, supply, quantity) => {
+    const prev = finales.get(supplyId);
+    if (prev) prev.quantity = round3(prev.quantity + quantity);
+    else finales.set(supplyId, { supply, quantity });
+  };
+  const cambiados = [];
+  const volvieron = [];
+  for (const [supplyId, want] of needed) {
+    const have = stock.has(supplyId) ? round3(stock.get(supplyId)) : 0;
+    const sub = subs.get(supplyId);
+    if (want.supply.active && have >= want.quantity) {
+      sumar(supplyId, want.supply, want.quantity);
+      if (sub) volvieron.push(sub.id);
+    } else if (sub && sub.active) {
+      sumar(sub.substitute_id, {
+        supply_id: sub.substitute_id, name: sub.substitute_name, unit: sub.unit, active: true,
+      }, want.quantity);
+      cambiados.push({ from: sub.supply_name, to: sub.substitute_name, substitution_id: sub.id });
+    } else {
+      sumar(supplyId, want.supply, want.quantity);
+    }
+  }
 
   const short = [];
-  for (const [supplyId, want] of needed) {
+  for (const [supplyId, want] of finales) {
     const have = stock.has(supplyId) ? round3(stock.get(supplyId)) : 0;
     if (!want.supply.active) {
       short.push({ supply_id: supplyId, name: want.supply.name, reason: 'unavailable' });
@@ -223,13 +258,26 @@ async function consume(client, { nightclubId, locationId, items, orderId, userId
   }
 
   const applied = [];
-  for (const supplyId of [...needed.keys()].sort()) {
-    const want = needed.get(supplyId);
+  for (const supplyId of [...finales.keys()].sort()) {
+    const want = finales.get(supplyId);
     const mov = await move(client, {
       nightclubId, supplyId, locationId, kind: 'consumption', quantity: -want.quantity,
       referenceType: 'drink_order', referenceId: orderId, userId,
     });
     applied.push({ supply_id: supplyId, quantity: want.quantity, movement_id: mov.id });
+  }
+
+  // Lo que se cambió queda en el pedido: la comanda lo imprime y el bartender sirve
+  // el correcto. Y lo que volvió a alcanzar cierra su sustitución.
+  if (cambiados.length) {
+    await client.query('UPDATE drink_orders SET substitutions = $2::jsonb WHERE id = $1',
+      [orderId, JSON.stringify(cambiados)]);
+  }
+  if (volvieron.length) {
+    await client.query(
+      `UPDATE supply_substitutions SET ended_at = now(), ended_reason = 'restocked', ended_by = $2
+        WHERE id = ANY($1::uuid[]) AND ended_at IS NULL`,
+      [volvieron, userId || null]);
   }
   return applied;
 }

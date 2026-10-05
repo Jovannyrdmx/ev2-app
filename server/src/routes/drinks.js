@@ -65,13 +65,23 @@ router.get('/nightclubs/:nightclubId/drinks',
               COALESCE(r.low, false) AS low_stock
          FROM drinks d
          LEFT JOIN LATERAL (
+           -- Un insumo agotado con sustituto vivo en esta barra (D84) sigue sirviendo:
+           -- alcanza lo que quede del original MÁS lo que haya del sustituto.
            SELECT count(*)::int AS lines,
-                  count(*) FILTER (WHERE s.active)::int AS active_lines,
-                  min(floor(COALESCE(ss.stock, 0) / ds.quantity)) FILTER (WHERE s.active) AS servings,
+                  count(*) FILTER (WHERE s.active OR t.id IS NOT NULL)::int AS active_lines,
+                  min(
+                    (CASE WHEN s.active THEN floor(COALESCE(ss.stock, 0) / ds.quantity) ELSE 0 END)
+                    + (CASE WHEN t.id IS NOT NULL THEN floor(COALESCE(ts.stock, 0) / ds.quantity) ELSE 0 END)
+                  ) FILTER (WHERE s.active OR t.id IS NOT NULL) AS servings,
                   bool_or(COALESCE(ss.stock, 0) <= ss.min_stock AND ss.min_stock > 0) AS low
              FROM drink_supplies ds
              JOIN supplies s ON s.id = ds.supply_id
              LEFT JOIN supply_stock ss ON ss.supply_id = s.id AND ss.location_id = $5::uuid
+             LEFT JOIN supply_substitutions x
+                    ON x.location_id = $5::uuid AND x.supply_id = ds.supply_id
+                   AND x.ended_at IS NULL AND x.expires_at > now()
+             LEFT JOIN supplies t ON t.id = x.substitute_id AND t.active
+             LEFT JOIN supply_stock ts ON ts.supply_id = t.id AND ts.location_id = $5::uuid
             WHERE ds.drink_id = d.id
          ) r ON true
         WHERE d.nightclub_id = $1

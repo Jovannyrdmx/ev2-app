@@ -31,7 +31,7 @@ const TRANSITIONS = {
   pos_error: ['confirmed', 'cancelled'],
 };
 
-const { createOrder, ORDER_SELECT } = require('../services/orders');
+const { createOrder, ORDER_SELECT, STAFF_ORDER_SELECT } = require('../services/orders');
 
 const STAFF_ROLES = ['bartender', 'waiter', 'cashier', 'manager', 'admin'];
 // Quién levanta pedidos (D77): el mesero en el piso, el cajero en la venta directa
@@ -253,7 +253,7 @@ router.get('/nightclubs/:nightclubId/orders',
   asyncHandler(async (req, res) => {
     const q = req.query;
     const { rows } = await pool.query(
-      `${ORDER_SELECT}
+      `${STAFF_ORDER_SELECT}
         WHERE o.nightclub_id = $1
           AND ($2::text IS NULL OR o.status = $2::text)
           AND ($3::boolean IS FALSE OR o.status IN ('pending','confirmed','preparing','ready','pos_error'))

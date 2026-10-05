@@ -105,7 +105,7 @@
     setConnection(lastConnection.on, lastConnection.key, lastConnection.vars);
   }
 
-  const PASSWORD_GATE_HIDES = ['screen-auth', 'screen-wrong-role', 'screen-bar', 'req-sheet'];
+  const PASSWORD_GATE_HIDES = ['screen-auth', 'screen-wrong-role', 'screen-bar', 'req-sheet', 'sub-sheet'];
 
   // ---------------------------------------------------------------- contraseña temporal
 
@@ -196,6 +196,7 @@
     // Lo pedido y todavía no surtido, para que el número del botón avise en cuanto
     // se abre la pantalla y nadie pida dos veces lo mismo.
     await loadMyRequests();
+    contarSustituciones();
     connectRealtime();
     // El reloj de espera avanza solo: sin esto, "hace 2 min" se queda en 2 min toda la
     // noche y el color deja de avisar.
@@ -244,6 +245,7 @@
     loadQueue();
     // Y los pedidos pendientes son de ESA barra, no de la anterior.
     loadMyRequests();
+    contarSustituciones();
   }
 
   function renderBars() {
@@ -347,6 +349,7 @@
           </p>
           <p class="text-sm text-white/70 mt-1 break-words">${escape(EV2Bar.itemsSummary(order))}</p>
           <p class="text-xs text-white/45 mt-1">${who}</p>
+          ${(order.substitutions || []).map((c) => `<p class="text-xs font-semibold text-amber-300 mt-1"><i class="fa-solid fa-right-left mr-1"></i>${escape(t('sub.serve', { from: c.from, to: c.to }))}</p>`).join('')}
           ${order.message ? `<p class="text-xs text-amber-200/80 mt-1">${escape(t('bar.note'))}: ${escape(order.message)}</p>` : ''}
           ${order.status === 'pos_error' ? `<p class="text-xs text-red-300 mt-1">${escape(t('bar.posError'))}${order.pos_error ? ` ${escape(order.pos_error)}` : ''}</p>` : ''}
           ${paid ? '' : (ready
@@ -538,6 +541,11 @@
     });
 
     rt.on('event', async (message) => {
+      if ((message && (message.event_type || message.type)) === 'supply_substitution_changed') {
+        if (subPanel) subPanel.onEvent(message);
+        contarSustituciones();
+        return;
+      }
       const change = EV2Bar.applyEvent(state.orders, message);
       if (!change.changed) return;
       if (change.fetch) {
@@ -791,6 +799,40 @@
   }
 
   $('btn-restock').onclick = openRestock;
+
+  // ---------------------------------------------------------------- sustituir (D84)
+
+  let subPanel = null;
+  function sustituciones() {
+    if (!subPanel) {
+      subPanel = EV2Substitutions.createPanel($('sub-panel'), {
+        api,
+        clubId,
+        t,
+        toast,
+        errorMessage: (err) => EV2Format.errorMessage(err),
+        bars: () => state.bars,
+        barId: () => state.barId,
+        time: (d) => new Date(d).toLocaleTimeString(lang() === 'en' ? 'en-US' : 'es-MX',
+          { hour: '2-digit', minute: '2-digit' }),
+      });
+    }
+    return subPanel;
+  }
+  async function contarSustituciones() {
+    if (!state.barId) { $('sub-count').hidden = true; return; }
+    try {
+      const res = await api.get(`/nightclubs/${clubId()}/supply-substitutions?location_id=${state.barId}`);
+      const n = (res.substitutions || []).length;
+      $('sub-count').textContent = String(n);
+      $('sub-count').hidden = n === 0;
+    } catch { /* el contador es un extra: sin él, la barra sigue */ }
+  }
+  $('btn-substitute').onclick = async () => {
+    $('sub-sheet').hidden = false;
+    await sustituciones().load();
+  };
+  $('btn-sub-close').onclick = () => { $('sub-sheet').hidden = true; contarSustituciones(); };
   $('btn-req-close').onclick = closeRestock;
   $('btn-req-send').onclick = sendRestock;
   for (const tab of document.querySelectorAll('[data-req-tab]')) {

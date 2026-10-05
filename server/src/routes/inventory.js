@@ -25,6 +25,8 @@ const { authenticate, requireRole, sameNightclub } = require('../middleware/auth
 const inventory = require('../services/inventory');
 const receiving = require('../services/receiving');
 const receiptPhotos = require('./receipts');
+const substitutions = require('../services/substitutions');
+const events = require('../services/events');
 
 const router = express.Router({ mergeParams: true });
 
@@ -988,6 +990,122 @@ router.put('/nightclubs/:nightclubId/recipes/:drinkId',
         })),
       },
     });
+  }));
+
+// ============================================================================
+// Sustituir un insumo que se acabó (D84)
+// ============================================================================
+
+const SUBSTITUTE_ROLES = ['bartender', 'manager', 'admin'];
+
+/** El aviso a las pantallas: la carta de esa barra cambia de "agotado" a "hay". */
+async function avisarSustitucion(nightclubId, sub, accion) {
+  await events.publish({
+    nightclubId,
+    type: 'supply_substitution_changed',
+    audience: { roles: ['manager', 'admin', 'bartender', 'cashier', 'waiter'] },
+    payload: {
+      action: accion,
+      substitution_id: sub.id,
+      location_id: sub.location_id,
+      supply: sub.supply_name,
+      substitute: sub.substitute_name,
+    },
+  });
+}
+
+router.get('/nightclubs/:nightclubId/supply-substitutions',
+  requireRole(...SUBSTITUTE_ROLES, 'warehouse', 'cashier'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: z.object({
+      location_id: uuid.optional(),
+      active_only: z.enum(['true', 'false']).default('true'),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const rows = await substitutions.list(pool, {
+      nightclubId: req.params.nightclubId,
+      locationId: req.query.location_id || null,
+      activeOnly: req.query.active_only === 'true',
+    });
+    res.json({ substitutions: rows });
+  }));
+
+/**
+ * Lo que hace falta para escoger: los insumos de las recetas con su existencia en
+ * ESA barra (los agotados primero) y los que pueden sustituirlos (con existencia).
+ */
+router.get('/nightclubs/:nightclubId/supply-substitutions/options',
+  requireRole(...SUBSTITUTE_ROLES),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: z.object({ location_id: uuid }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `SELECT s.id::text AS id, s.name, s.unit, s.category,
+              COALESCE(ss.stock, 0)::float8 AS stock,
+              EXISTS (SELECT 1 FROM drink_supplies ds WHERE ds.supply_id = s.id) AS in_recipes
+         FROM supplies s
+         LEFT JOIN supply_stock ss ON ss.supply_id = s.id AND ss.location_id = $2
+        WHERE s.nightclub_id = $1 AND s.active
+        ORDER BY (COALESCE(ss.stock, 0) <= 0) DESC, s.name`,
+      [req.params.nightclubId, req.query.location_id]);
+    res.json({
+      // Lo que se puede sustituir: lo que llevan las recetas.
+      supplies: rows.filter((r) => r.in_recipes),
+      // Con qué: lo que sí hay en esa barra.
+      substitutes: rows.filter((r) => r.stock > 0),
+    });
+  }));
+
+router.post('/nightclubs/:nightclubId/supply-substitutions',
+  requireRole(...SUBSTITUTE_ROLES),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      location_id: uuid,
+      supply_id: uuid,
+      substitute_id: uuid,
+      note: z.string().trim().max(200).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const client = await pool.connect();
+    let sub;
+    try {
+      await client.query('BEGIN');
+      sub = await substitutions.create(client, {
+        nightclubId,
+        locationId: req.body.location_id,
+        supplyId: req.body.supply_id,
+        substituteId: req.body.substitute_id,
+        note: req.body.note,
+        userId: req.user.id,
+      });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    await avisarSustitucion(nightclubId, sub, 'started');
+    res.status(201).json({ substitution: sub });
+  }));
+
+router.post('/nightclubs/:nightclubId/supply-substitutions/:substitutionId/end',
+  requireRole(...SUBSTITUTE_ROLES),
+  validate({ params: z.object({ nightclubId: uuid, substitutionId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, substitutionId } = req.params;
+    const sub = await substitutions.end(pool, {
+      nightclubId, id: substitutionId, userId: req.user.id,
+    });
+    await avisarSustitucion(nightclubId, sub, 'ended');
+    res.json({ substitution: sub });
   }));
 
 module.exports = router;

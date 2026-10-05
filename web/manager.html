@@ -563,6 +563,13 @@
           <p class="text-pink-200"><span id="inv-unconfirmed-n">0</span> <span data-i18n="inv.unconfirmed">presentaciones sin confirmar: hasta que se confirmen, el conteo de esas botellas no es de fiar.</span></p>
         </div>
 
+        <!-- Insumos agotados que se están sustituyendo por barra (D84). -->
+        <details id="sub-box" class="card rounded-xl p-4">
+          <summary class="text-sm cursor-pointer"><i class="fa-solid fa-right-left mr-2"></i><span data-i18n="sub.title">Sustituir un insumo</span></summary>
+          <p class="text-[11px] text-white/40 pt-2" data-i18n="sub.subtitle">Mismo precio. La comanda dice el cambio.</p>
+          <div id="sub-mgr-panel" class="pt-3"></div>
+        </details>
+
         <nav class="flex gap-2 text-xs">
           <button class="chip tap px-3 on" data-inv="stock" data-i18n="inv.subStock">Existencias</button>
           <button class="chip tap px-3" data-inv="recipes" data-i18n="inv.subRecipes">Recetas y margen</button>
@@ -970,6 +977,7 @@
 <script src="js/payouts.js"></script>
 <script src="js/night-report.js"></script>
 <script src="js/roster.js"></script>
+<script src="js/substitutions.js"></script>
 <script src="js/manager-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

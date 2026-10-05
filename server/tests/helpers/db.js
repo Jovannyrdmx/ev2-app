@@ -12,7 +12,7 @@ const DATA_TABLES = [
   'drivers', 'taxi_fares', 'taxi_settings', 'valet_settings',
   'manual_payments', 'manual_payment_options',
   'reservation_addons', 'reservations', 'reservation_discounts', 'reservation_rules',
-  'drink_order_items', 'drink_orders', 'supply_movements', 'supply_stock', 'drink_supplies',
+  'supply_substitutions', 'drink_order_items', 'drink_orders', 'supply_movements', 'supply_stock', 'drink_supplies',
   'bar_request_lines', 'bar_requests', 'receipt_photos', 'supply_suppliers', 'suppliers',
   'night_closings', 'shift_assignments',
   'supplies', 'supply_locations', 'zone_bars', 'delivery_points', 'drinks',

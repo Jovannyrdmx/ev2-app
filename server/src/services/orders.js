@@ -180,4 +180,10 @@ async function createOrder({ client, nightclubId, senderId, recipientId, tableId
   };
 }
 
-module.exports = { createOrder, ORDER_SELECT };
+// Lo que ve el personal: además, qué insumo se cambió (D84). El cliente no lo ve.
+const STAFF_ORDER_SELECT = ORDER_SELECT.replace(
+  'o.prep_started_at, o.bar_position, o.pay_at_till,',
+  'o.prep_started_at, o.bar_position, o.pay_at_till, o.substitutions,');
+if (STAFF_ORDER_SELECT === ORDER_SELECT) throw new Error('STAFF_ORDER_SELECT no se pudo armar');
+
+module.exports = { createOrder, ORDER_SELECT, STAFF_ORDER_SELECT };

@@ -3993,6 +3993,27 @@
   if ($('btn-recipe-add')) $('btn-recipe-add').onclick = addRecipeLine;
   if ($('btn-recipe-save')) $('btn-recipe-save').onclick = saveRecipe;
 
+  // ---------------------------------------------------------------- sustituir (D84)
+
+  let subMgr = null;
+  $('sub-box').addEventListener('toggle', async () => {
+    if (!$('sub-box').open) return;
+    if (!subMgr) {
+      subMgr = EV2Substitutions.createPanel($('sub-mgr-panel'), {
+        api,
+        clubId,
+        t,
+        toast,
+        errorMessage: (err) => EV2Format.errorMessage(err),
+        bars: () => (state.locations || []).filter((l) => l.kind === 'bar'),
+        barId: () => null,
+        time: (d) => new Date(d).toLocaleTimeString(EV2Format.getLanguage() === 'en' ? 'en-US' : 'es-MX',
+          { hour: '2-digit', minute: '2-digit' }),
+      });
+    }
+    await subMgr.load();
+  });
+
   // ---------------------------------------------------------------- tiempo real
 
   const lastConnection = { on: false, key: 'realtime.reconnecting', vars: null };
@@ -4021,6 +4042,7 @@
     // Un reporte no espera al refresco general de cuatro segundos: puede ser "parece
     // menor de edad", que es lo único de esta lista capaz de cerrarle el club.
     rt.on('event', async (message) => {
+      if (subMgr) subMgr.onEvent(message);
       if (!EV2Manager.affectsModeration(message)) return;
       await loadReports();
       renderReports();

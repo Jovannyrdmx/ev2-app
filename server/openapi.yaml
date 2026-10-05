@@ -10894,6 +10894,102 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
 
+  /api/nightclubs/{nightclubId}/supply-substitutions:
+    get:
+      operationId: listSupplySubstitutions
+      tags: [Inventario]
+      summary: Sustituciones de insumos (D84)
+      description: Las vivas por omisión; con `active_only=false`, también las terminadas.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: location_id, in: query, schema: { type: string, format: uuid } }
+        - { name: active_only, in: query, schema: { type: string, enum: ['true', 'false'], default: 'true' } }
+      responses:
+        '200':
+          description: Lista
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  substitutions: { type: array, items: { $ref: '#/components/schemas/SupplySubstitution' } }
+    post:
+      operationId: createSupplySubstitution
+      tags: [Inventario]
+      summary: Sustituir un insumo agotado en una barra (D84)
+      description: |
+        Requiere rol `bartender`, `manager` o `admin`. Mientras dure, todos los tragos de
+        esa barra que llevan `supply_id` descuentan `substitute_id` en la misma cantidad y
+        al mismo precio; la comanda lo imprime. Termina sola al acabar la noche o cuando
+        vuelve a alcanzar el original. Misma unidad obligatoria; una viva por insumo y barra.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [location_id, supply_id, substitute_id]
+              properties:
+                location_id: { type: string, format: uuid }
+                supply_id: { type: string, format: uuid }
+                substitute_id: { type: string, format: uuid }
+                note: { type: string, maxLength: 200 }
+      responses:
+        '201':
+          description: Activada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  substitution: { $ref: '#/components/schemas/SupplySubstitution' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/supply-substitutions/options:
+    get:
+      operationId: supplySubstitutionOptions
+      tags: [Inventario]
+      summary: Qué se puede sustituir y con qué, en una barra (D84)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: location_id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Insumos de las recetas y posibles sustitutos con existencia
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  supplies: { type: array, items: { type: object } }
+                  substitutes: { type: array, items: { type: object } }
+
+  /api/nightclubs/{nightclubId}/supply-substitutions/{substitutionId}/end:
+    post:
+      operationId: endSupplySubstitution
+      tags: [Inventario]
+      summary: Terminar una sustitución (D84)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: substitutionId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Terminada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  substitution: { $ref: '#/components/schemas/SupplySubstitution' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -11111,6 +11207,26 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   schemas:
+    SupplySubstitution:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        location_id: { type: string, format: uuid }
+        location_name: { type: string }
+        supply_id: { type: string, format: uuid }
+        supply_name: { type: string }
+        unit: { type: string }
+        substitute_id: { type: string, format: uuid }
+        substitute_name: { type: string }
+        note: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        ended_at: { type: [string, 'null'], format: date-time }
+        ended_reason: { type: [string, 'null'], enum: [manual, restocked, expired, null] }
+        created_by_name: { type: string }
+        ended_by_name: { type: [string, 'null'] }
+        supply_stock: { type: number }
+        substitute_stock: { type: number }
 
     LostItemOwner:
       type: object
