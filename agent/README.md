@@ -105,18 +105,13 @@ El `config.json` tiene la llave de esa PC: no lo subas a git ni lo mandes por ch
 
 ## Impresoras por USB (Windows)
 
-Una impresora de red no necesita nada más que su IP. Una conectada por **USB** sí:
-Windows no deja mandarle bytes crudos sin pasar por el spooler, y el spooler quiere
-un recurso compartido.
+**No hace falta compartirla en Windows.** El agente le imprime por su nombre.
 
-1. Panel de control → Dispositivos e impresoras → clic derecho → Propiedades de
-   impresora → pestaña **Compartir** → "Compartir esta impresora".
-2. Ponle un **nombre corto y sin espacios**, por ejemplo `XP80`.
-3. En el panel de EV2, da de alta la impresora con conexión **USB / Windows** y ese
-   mismo nombre.
-
-El agente que imprime en esa impresora tiene que ser el que corre **en esa misma
-PC**.
+1. Conecta la impresora e instala su driver en la PC.
+2. En el panel: **Impresoras → Buscar impresoras**. La impresora aparece bajo el
+   nombre de esa PC.
+3. Pícale **Registrar**. Queda ligada a esa PC (D80): solo ese agente toma sus
+   tickets. Sale una hoja de prueba y el panel pregunta si los acentos se ven bien.
 
 ## Qué hace cuando algo falla
 

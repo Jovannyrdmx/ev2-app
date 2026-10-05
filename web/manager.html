@@ -732,12 +732,21 @@
           <p class="text-[11px] text-white/40" data-i18n="prn.scanWhy">Cada PC busca en su propia red y dice lo que ve. Así también sabes cuál PC alcanza a cuál impresora.</p>
           <p id="prn-scan-status" class="text-[11px]" hidden></p>
           <div id="prn-found" class="space-y-2"></div>
+          <!-- La hoja de prueba que sale sola al registrar (D80): se pregunta aquí si salió bien. -->
+          <div id="prn-test-check" class="rounded-lg p-3 space-y-2" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12)" hidden>
+            <p id="prn-test-text" class="text-xs"></p>
+            <div class="flex gap-2">
+              <button id="btn-prn-test-ok" class="ev2-button rounded-lg px-3 py-2 text-xs flex-1" data-i18n="prn.testOk">Sí, se ve bien</button>
+              <button id="btn-prn-test-retry" class="card rounded-lg px-3 py-2 text-xs flex-1" data-i18n="prn.testRetry">No, probar otros acentos</button>
+            </div>
+          </div>
           <p id="prn-scan-error" class="text-sm text-red-300" hidden></p>
         </div>
 
         <details id="prn-add-box" class="card rounded-xl p-4">
           <summary class="text-sm cursor-pointer" data-i18n="prn.addTitle">Dar de alta una impresora</summary>
           <div class="space-y-3 pt-3">
+            <input type="hidden" id="prn-agent-id" value="">
             <div>
               <label class="label" for="prn-location" data-i18n="prn.location">Barra</label>
               <select id="prn-location" class="field"></select>
@@ -810,6 +819,17 @@
             <button id="btn-agent-add" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.agentAdd">Nueva PC</button>
           </div>
           <p class="text-[11px] text-white/40" data-i18n="prn.agentsWhy">El servidor no alcanza las impresoras del club: un programa en una PC de barra las alcanza por él. Con dos, si apagan una la otra sigue sacando todo el papel.</p>
+          <!-- La barra y el papel de la PC se escogen ANTES del código (D80). -->
+          <div class="flex gap-2">
+            <select id="prn-agent-loc" class="field flex-1" aria-label="Barra"></select>
+            <select id="prn-agent-purpose" class="field flex-1" aria-label="Para qué">
+              <option value="" data-i18n="prn.areaBoth">Comandas y cuentas</option>
+              <option value="orders" data-i18n="prn.pOrders">Comandas (PC del bartender)</option>
+              <option value="service" data-i18n="prn.pService">Cuentas y recibos (PC de meseros)</option>
+              <option value="till" data-i18n="prn.pTill">Recibos de la caja</option>
+            </select>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="prn.agentAreaWhy">Escoge la barra y para qué es esa PC antes de pedir el código: así sus impresoras se registran con un clic.</p>
           <p id="prn-agents-empty" class="text-sm text-white/40" data-i18n="prn.agentsNone" hidden>Ninguna PC está dada de alta todavía. Sin esto no sale ningún papel.</p>
 
           <!--

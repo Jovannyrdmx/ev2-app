@@ -1823,7 +1823,31 @@
     }
     select.disabled = !listas;
     $('btn-prn-add').disabled = !listas;
+
+    // La barra de la PC nueva (D80). Con una sola barra, ya viene escogida.
+    const selPc = $('prn-agent-loc');
+    if (selPc.options.length !== barras.length + 1) {
+      const antes = selPc.value;
+      selPc.innerHTML = '';
+      const todo = document.createElement('option');
+      todo.value = '';
+      todo.textContent = t('prn.areaAll');
+      selPc.appendChild(todo);
+      for (const b of barras) {
+        const opt = document.createElement('option');
+        opt.value = b.id;
+        opt.textContent = b.name;
+        selPc.appendChild(opt);
+      }
+      selPc.value = antes || (barras.length === 1 ? barras[0].id : '');
+    }
+    $('prn-agent-purpose').disabled = !selPc.value;
   }
+
+  $('prn-agent-loc').onchange = () => {
+    if (!$('prn-agent-loc').value) $('prn-agent-purpose').value = '';
+    $('prn-agent-purpose').disabled = !$('prn-agent-loc').value;
+  };
 
   function renderPrintersList() {
     const lista = printing.printers || [];
@@ -1904,6 +1928,10 @@
     caja.innerHTML = '';
     const yaDadas = new Set((printing.printers || [])
       .map((p) => `${p.connection}|${p.host || p.windows_name}`));
+    // Desde D61 una USB se abre por su nombre; el compartido es de instalaciones viejas.
+    const yaEsta = (h) => (h.kind === 'windows'
+      ? yaDadas.has(`windows|${h.name}`) || (h.share && yaDadas.has(`windows|${h.share}`))
+      : yaDadas.has(`network|${h.host}`));
 
     for (const a of conResultado) {
       const bloque = document.createElement('div');
@@ -1944,18 +1972,18 @@
           : `${h.host}:${h.port}`;
         const como = document.createElement('p');
         como.className = 'text-[11px] text-white/40 truncate';
-        como.textContent = h.kind === 'windows'
-          ? (h.share ? t('prn.cWindows') : t('prn.notShared'))
-          : (h.model || t('prn.cNetwork'));
-        if (h.kind === 'windows' && !h.share) como.style.color = '#fcd34d';
+        como.textContent = h.kind === 'windows' ? t('prn.cUsb') : (h.model || t('prn.cNetwork'));
         left.append(que, como);
 
-        const ya = yaDadas.has(`${h.kind === 'windows' ? 'windows' : 'network'}|${h.kind === 'windows' ? h.share : h.host}`);
+        // Si la PC ya tiene barra y propósito (D80), se registra en un clic con eso;
+        // si no, se abre el formulario con lo que se encontró.
+        const ya = yaEsta(h);
+        const directo = Boolean(a.location_id && a.purpose);
         const accion = document.createElement('button');
-        accion.className = 'card rounded-lg px-3 py-2 text-xs shrink-0';
-        accion.textContent = ya ? t('prn.already') : t('prn.useThis');
-        accion.disabled = ya || (h.kind === 'windows' && !h.share);
-        accion.onclick = () => fillFromScan(h);
+        accion.className = `${directo ? 'ev2-button' : 'card'} rounded-lg px-3 py-2 text-xs shrink-0`;
+        accion.textContent = ya ? t('prn.already') : t(directo ? 'prn.register' : 'prn.useThis');
+        accion.disabled = ya;
+        accion.onclick = () => (directo ? registerFound(h, a, accion) : fillFromScan(h, a));
 
         fila.append(left, accion);
         bloque.appendChild(fila);
@@ -1970,13 +1998,17 @@
    * No la da de alta sola: falta decir en qué barra está y para qué es, que es
    * justamente lo que una máquina no puede adivinar.
    */
-  function fillFromScan(hallazgo) {
+  function fillFromScan(hallazgo, agente = null) {
     const caja = $('prn-add-box');
     caja.open = true;
+    if (agente && agente.location_id) $('prn-location').value = agente.location_id;
+    if (agente && agente.purpose) $('prn-purpose').value = agente.purpose;
+    // Una USB solo la alcanza la PC que la encontró: queda ligada a ella (D80).
+    $('prn-agent-id').value = hallazgo.kind === 'windows' && agente ? agente.id : '';
     if (hallazgo.kind === 'windows') {
       $('prn-connection').value = 'windows';
-      $('prn-winname').value = hallazgo.share || '';
-      $('prn-name').value = hallazgo.name || '';
+      $('prn-winname').value = hallazgo.name || hallazgo.share || '';
+      $('prn-name').value = (hallazgo.name || '').slice(0, 60);
     } else {
       $('prn-connection').value = 'network';
       $('prn-host').value = hallazgo.host || '';
@@ -1987,6 +2019,84 @@
     caja.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     $('prn-location').focus();
   }
+
+  /** Lo que se manda para dar de alta lo que encontró una PC (D80). */
+  function foundPayload(h, a) {
+    const base = {
+      location_id: a.location_id,
+      purpose: a.purpose,
+      paper_width: 80,
+      codepage: 'CP850',
+      has_cutter: true,
+      test: true,
+    };
+    if (h.kind === 'windows') {
+      return {
+        ...base,
+        name: (h.name || h.share || 'Impresora USB').slice(0, 60),
+        connection: 'windows',
+        windows_name: h.name || h.share,
+        agent_id: a.id,
+      };
+    }
+    return {
+      ...base,
+      name: (h.model || `Impresora ${h.host}`).slice(0, 60),
+      connection: 'network',
+      host: h.host,
+      port: h.port || 9100,
+    };
+  }
+
+  /** Registrar en un clic, con la barra y el propósito de la PC, y probar. */
+  async function registerFound(h, a, boton) {
+    const listo = ocupado(boton, 'prn.saving');
+    try {
+      const res = await api.post(`/nightclubs/${clubId()}/printers`, foundPayload(h, a));
+      toast(t('prn.registered'), 'ok');
+      askTest(res.printer);
+      await loadPrinting();
+    } catch (err) {
+      listo();
+      showError(err);
+    }
+  }
+
+  // La hoja de prueba: si los acentos salen mal, se cambia la página de códigos y se
+  // vuelve a imprimir, sin buscar el formulario de edición.
+  const CODEPAGES = ['CP850', 'CP1252', 'CP858', 'CP437', 'CP860'];
+  let enPrueba = null;
+  function askTest(printer) {
+    enPrueba = printer;
+    $('prn-test-text').textContent = t('prn.testAsk', { name: printer.name, codepage: printer.codepage });
+    $('btn-prn-test-retry').disabled = false;
+    $('prn-test-check').hidden = false;
+  }
+  $('btn-prn-test-ok').onclick = () => {
+    enPrueba = null;
+    $('prn-test-check').hidden = true;
+  };
+  $('btn-prn-test-retry').onclick = async () => {
+    if (!enPrueba) return;
+    const siguiente = CODEPAGES[CODEPAGES.indexOf(enPrueba.codepage) + 1];
+    if (!siguiente) {
+      $('prn-test-text').textContent = t('prn.testNoMore');
+      $('btn-prn-test-retry').disabled = true;
+      return;
+    }
+    const listo = ocupado($('btn-prn-test-retry'), 'prn.sending');
+    try {
+      const { printer } = await api.patch(`/nightclubs/${clubId()}/printers/${enPrueba.id}`,
+        { codepage: siguiente });
+      await api.post(`/nightclubs/${clubId()}/printers/${printer.id}/test`, {});
+      askTest(printer);
+      await loadPrinting();
+    } catch (err) {
+      showError(err);
+    } finally {
+      listo();
+    }
+  };
 
   $('btn-prn-scan').onclick = async () => {
     const nota = $('prn-scan-error');
@@ -2235,6 +2345,8 @@
       ...(red
         ? { host: $('prn-host').value.trim(), port: Number($('prn-port').value) }
         : { windows_name: $('prn-winname').value.trim() }),
+      ...(!red && $('prn-agent-id').value ? { agent_id: $('prn-agent-id').value } : {}),
+      test: true,
     };
     if (!cuerpo.location_id) { avisar(nota, t('prn.errBar')); return; }
     if (!cuerpo.name) { avisar(nota, t('prn.errName')); return; }
@@ -2243,7 +2355,9 @@
 
     const listo = ocupado($('btn-prn-add'), 'prn.saving');
     try {
-      await api.post(`/nightclubs/${clubId()}/printers`, cuerpo);
+      const alta = await api.post(`/nightclubs/${clubId()}/printers`, cuerpo);
+      askTest(alta.printer);
+      $('prn-agent-id').value = '';
       $('prn-name').value = '';
       $('prn-host').value = '';
       $('prn-winname').value = '';
@@ -2266,12 +2380,12 @@
   $('btn-agent-add').onclick = async () => {
     const listo = ocupado($('btn-agent-add'), 'prn.saving');
     try {
-      // Si el club ya tiene una sola barra, la PC nueva nace asignada a ella sin
-      // preguntar nada: con una barra no hay elección que ofrecer. Con varias, nace
-      // atendiendo todo el club y el gerente le pone su barra en la tarjeta — que es
-      // donde va a estar mirando cuando la PC aparezca (D61).
-      const barras = (state.locations || []).filter((l) => l.kind === 'bar');
-      const cuerpo = barras.length === 1 ? { location_id: barras[0].id } : {};
+      // La PC nace con su barra y su papel, escogidos arriba antes del código (D80);
+      // con una sola barra ya viene escogida. Se puede cambiar después en su tarjeta.
+      const loc = $('prn-agent-loc').value || null;
+      const cuerpo = loc
+        ? { location_id: loc, purpose: $('prn-agent-purpose').value || null }
+        : {};
       const { invite } = await api.post(`/nightclubs/${clubId()}/print-agents/invite`, cuerpo);
       printing.invite = invite;
       printing.pairUntil = new Date(invite.expires_at).getTime();

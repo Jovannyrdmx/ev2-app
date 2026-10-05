@@ -1239,3 +1239,77 @@ describe('La revisión de la impresión (D63)', () => {
     expect((await api().get(url('/printing-health')).set(auth(waiter))).status).toBe(403);
   });
 });
+
+// ============================================================================
+
+describe('Cada impresora con la PC que la atiende (D80)', () => {
+  const encolar = (printer) => printing.enqueue(pool, {
+    nightclubId: club.id, printer, kind: 'order',
+    payload: Buffer.from([0x1b, 0x40]), preview: 'prueba',
+  });
+  const pedirTrabajos = async (agent) => (await comoAgente(agent.token, 'get', '/api/print-agent/jobs')).body.jobs;
+
+  it('una USB sin compartir se registra en un paso, ligada a su PC, y sale su prueba', async () => {
+    const pc = await nuevoAgente('PC caja');
+    const res = await altaImpresora(manager, {
+      name: 'XP-230H', purpose: 'till', connection: 'windows', host: null,
+      windows_name: 'Xprinter XP-230H', agent_id: pc.id, test: true,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.printer).toMatchObject({ agent_id: pc.id, windows_name: 'Xprinter XP-230H' });
+    expect(res.body.test_job).toMatchObject({ kind: 'test', status: 'pending' });
+  });
+
+  it('sin `test` no encola nada, como antes', async () => {
+    const res = await altaImpresora(manager, {});
+    expect(res.status).toBe(201);
+    expect(res.body.test_job).toBeNull();
+  });
+
+  it('su ticket SOLO lo toma esa PC, aunque otra atienda todo el club', async () => {
+    const suya = await nuevoAgente('PC caja');
+    const otra = await nuevoAgente('PC todo el club');
+    const { body } = await altaImpresora(manager, {
+      name: 'USB caja', purpose: 'till', connection: 'windows', host: null,
+      windows_name: 'XP-230H', agent_id: suya.id,
+    });
+    await encolar(body.printer);
+    expect(await pedirTrabajos(otra)).toHaveLength(0);
+    expect(await pedirTrabajos(suya)).toHaveLength(1);
+  });
+
+  it('la PC dueña la toma aunque su área sea otra barra', async () => {
+    const pc = await nuevoAgente('PC arriba');
+    await api().patch(url(`/print-agents/${pc.id}`)).set(auth(manager))
+      .send({ area: { location_id: club.locations['barra-alta'], purpose: 'orders' } });
+    const { body } = await altaImpresora(manager, {
+      name: 'USB abajo', connection: 'windows', host: null, windows_name: 'XP', agent_id: pc.id,
+    });
+    await encolar(body.printer);
+    expect(await pedirTrabajos(pc)).toHaveLength(1);
+  });
+
+  it('las de red sin PC siguen como siempre: las toma cualquiera de su barra', async () => {
+    const pc = await nuevoAgente('PC');
+    const { body } = await altaImpresora(manager, {});
+    expect(body.printer.agent_id).toBeNull();
+    await encolar(body.printer);
+    expect(await pedirTrabajos(pc)).toHaveLength(1);
+  });
+
+  it('no se liga a una PC de otro club ni a una inventada', async () => {
+    const res = await altaImpresora(manager, { agent_id: '00000000-0000-4000-8000-000000000000' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/PC no existe/);
+  });
+
+  it('la PC nace con barra y propósito desde el código', async () => {
+    const { body } = await api().post(url('/print-agents/invite')).set(auth(manager))
+      .send({ location_id: club.bar_id, purpose: 'till' });
+    const res = await emparejar(body.invite.code, 'PC caja');
+    expect(res.status).toBe(201);
+    const { rows } = await pool.query('SELECT location_id::text AS l, purpose FROM print_agents WHERE id = $1',
+      [res.body.agent.id]);
+    expect(rows[0]).toEqual({ l: club.bar_id, purpose: 'till' });
+  });
+});

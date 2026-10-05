@@ -412,6 +412,8 @@ const printerBody = z.object({
   codepage: z.enum(['CP437', 'CP850', 'CP858', 'CP860', 'CP1252']).default('CP850'),
   has_cutter: z.coerce.boolean().default(true),
   fallback_id: uuid.nullish(),
+  // La PC que la atiende (D80). Obligatoria en la práctica para las USB.
+  agent_id: uuid.nullish(),
 });
 
 /** Las columnas que caben, si no las dijeron: 48 a 80 mm, 32 a 58 mm. */
@@ -424,6 +426,15 @@ const defaultColumns = (paperWidth) => (Number(paperWidth) === 58 ? 32 : 48);
  * de la tabla, pero el mensaje que suelta Postgres no le sirve a nadie. Se dicen
  * aquí, con palabras, antes de llegar allá.
  */
+/** Que la PC exista, sea de este club y esté prendida (D80). */
+async function checkAgent(nightclubId, agentId) {
+  if (!agentId) return;
+  const { rows } = await pool.query(
+    'SELECT active FROM print_agents WHERE id = $1 AND nightclub_id = $2', [agentId, nightclubId]);
+  if (!rows[0]) throw ApiError.badRequest('Esa PC no existe');
+  if (!rows[0].active) throw ApiError.badRequest('Esa PC está apagada en el panel');
+}
+
 function checkPrinter(body) {
   if (body.connection === 'network' && !body.host) {
     throw ApiError.badRequest('Una impresora de red necesita su dirección IP');
@@ -449,25 +460,31 @@ router.get('/nightclubs/:nightclubId/printers',
 
 router.post('/nightclubs/:nightclubId/printers',
   requireRole(...MANAGE),
-  validate({ params: z.object({ nightclubId: uuid }), body: printerBody }),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    // `test`: al darla de alta sale de una vez la hoja de prueba (D80).
+    body: printerBody.extend({ test: z.coerce.boolean().default(false) }),
+  }),
   asyncHandler(async (req, res) => {
     checkPrinter(req.body);
     const b = req.body;
+    await checkAgent(req.params.nightclubId, b.agent_id);
     try {
       const { rows } = await pool.query(
         `INSERT INTO printers
            (nightclub_id, location_id, name, purpose, connection, host, port,
-            windows_name, paper_width, columns, codepage, has_cutter, fallback_id)
-         VALUES ($1,$2,$3::text,$4::text,$5::text,$6,$7,$8,$9,$10,$11::text,$12,$13)
+            windows_name, paper_width, columns, codepage, has_cutter, fallback_id, agent_id)
+         VALUES ($1,$2,$3::text,$4::text,$5::text,$6,$7,$8,$9,$10,$11::text,$12,$13,$14)
          RETURNING id::text AS id`,
         [req.params.nightclubId, b.location_id, b.name, b.purpose, b.connection,
           b.host || null, b.port, b.windows_name || null, b.paper_width,
           b.columns || defaultColumns(b.paper_width), b.codepage, b.has_cutter,
-          b.fallback_id || null]);
+          b.fallback_id || null, b.agent_id || null]);
       const printer = await printing.getPrinter(pool, {
         nightclubId: req.params.nightclubId, printerId: rows[0].id,
       });
-      res.status(201).json({ printer });
+      const job = b.test ? await testJob(req, printer) : null;
+      res.status(201).json({ printer, test_job: job });
     } catch (err) {
       if (err.code === '23505') {
         throw ApiError.conflict('Ya hay una impresora activa con ese nombre, '
@@ -492,18 +509,20 @@ router.patch('/nightclubs/:nightclubId/printers/:printerId',
     if (!actual) throw ApiError.notFound('Esa impresora no existe');
     const merged = { ...actual, ...req.body };
     checkPrinter(merged);
+    if (req.body.agent_id) await checkAgent(req.params.nightclubId, req.body.agent_id);
     try {
       await pool.query(
         `UPDATE printers
             SET location_id = $3, name = $4::text, purpose = $5::text,
                 connection = $6::text, host = $7, port = $8, windows_name = $9,
                 paper_width = $10, columns = $11, codepage = $12::text,
-                has_cutter = $13, fallback_id = $14, active = $15
+                has_cutter = $13, fallback_id = $14, active = $15, agent_id = $16
           WHERE id = $1 AND nightclub_id = $2`,
         [req.params.printerId, req.params.nightclubId, merged.location_id, merged.name,
           merged.purpose, merged.connection, merged.host || null, merged.port,
           merged.windows_name || null, merged.paper_width, merged.columns,
-          merged.codepage, merged.has_cutter, merged.fallback_id || null, merged.active]);
+          merged.codepage, merged.has_cutter, merged.fallback_id || null, merged.active,
+          merged.agent_id || null]);
     } catch (err) {
       if (err.code === '23505') {
         throw ApiError.conflict('Ya hay una impresora activa con ese nombre, '
@@ -525,6 +544,18 @@ router.patch('/nightclubs/:nightclubId/printers/:printerId',
  * fabricante no dice en qué página de códigos vino configurada de fábrica, y los
  * acentos solo se comprueban viéndolos salir.
  */
+/** Encola la hoja de prueba de esa impresora. */
+async function testJob(req, printer) {
+  const club = await pool.query('SELECT name FROM nightclubs WHERE id = $1',
+    [req.params.nightclubId]);
+  return printing.enqueueTest(pool, {
+    nightclubId: req.params.nightclubId,
+    printer,
+    clubName: club.rows[0] ? club.rows[0].name : 'EV2',
+    createdBy: req.user.id,
+  });
+}
+
 router.post('/nightclubs/:nightclubId/printers/:printerId/test',
   requireRole(...MANAGE),
   validate({ params: z.object({ nightclubId: uuid, printerId: uuid }) }),
@@ -534,14 +565,7 @@ router.post('/nightclubs/:nightclubId/printers/:printerId/test',
     });
     if (!printer) throw ApiError.notFound('Esa impresora no existe');
     if (!printer.active) throw ApiError.badRequest('Esa impresora está apagada');
-    const club = await pool.query('SELECT name FROM nightclubs WHERE id = $1',
-      [req.params.nightclubId]);
-    const job = await printing.enqueueTest(pool, {
-      nightclubId: req.params.nightclubId,
-      printer,
-      clubName: club.rows[0] ? club.rows[0].name : 'EV2',
-      createdBy: req.user.id,
-    });
+    const job = await testJob(req, printer);
     res.status(202).json({ job });
   }));
 

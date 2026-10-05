@@ -131,6 +131,13 @@ también las impresoras instaladas en ese Windows. Tarda unos segundos. Después
 "Usar esta" deja la dirección puesta y solo falta decir en qué barra está y para qué
 es — que es justo lo que una máquina no puede adivinar.
 
+**En un clic (D80).** Si al pedir el código de la PC (**Nueva PC**) se escogió su barra
+y para qué es, cada impresora que encuentre esa PC sale con el botón **Registrar**: se
+da de alta con esa barra y ese propósito, 80 mm y CP850, y sale la hoja de prueba. El
+panel pregunta si los acentos se ven bien; si no, **"probar otros acentos"** cambia la
+página de códigos y vuelve a imprimir. Una impresora USB queda ligada a la PC que la
+encontró y no hace falta compartirla en Windows.
+
 Una IP tecleada a mano no se descubre mal escrita al guardarla: se descubre cuando el
 ticket no sale, a las dos de la mañana, con la barra llena.
 

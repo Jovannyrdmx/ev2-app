@@ -10109,7 +10109,15 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/PrinterInput' }
+            schema:
+              allOf:
+                - { $ref: '#/components/schemas/PrinterInput' }
+                - type: object
+                  properties:
+                    test:
+                      type: boolean
+                      default: false
+                      description: Si es `true`, encola de una vez la hoja de prueba (D80).
       responses:
         '201':
           description: Impresora dada de alta
@@ -10119,6 +10127,9 @@ paths:
                 type: object
                 properties:
                   printer: { $ref: '#/components/schemas/Printer' }
+                  test_job:
+                    type: [object, 'null']
+                    description: El trabajo de la hoja de prueba, si se pidió con `test`.
         '400':
           description: Falta la IP, falta el nombre de Windows, o el lugar no es una barra
           content:
@@ -14224,7 +14235,9 @@ components:
         port: { type: integer, minimum: 1, maximum: 65535, default: 9100 }
         windows_name:
           type: [string, 'null']
-          description: Obligatorio con `connection=windows`. Es el nombre con el que se compartió.
+          description: |
+            Obligatorio con `connection=windows`. El nombre de la impresora en Windows
+            (no hace falta compartirla); también acepta el nombre compartido.
         paper_width: { type: integer, enum: [58, 80], default: 80 }
         columns:
           type: integer
@@ -14237,6 +14250,12 @@ components:
           type: [string, 'null']
           format: uuid
           description: A dónde se desvía el papel si esta no contesta.
+        agent_id:
+          type: [string, 'null']
+          format: uuid
+          description: |
+            La PC que atiende esta impresora (D80). Si se pone, solo esa PC toma sus
+            trabajos. Para una USB es la PC donde está conectada.
 
     Printer:
       type: object
@@ -14260,6 +14279,7 @@ components:
         has_cutter: { type: boolean }
         fallback_id: { type: [string, 'null'], format: uuid }
         active: { type: boolean }
+        agent_id: { type: [string, 'null'], format: uuid, description: La PC que la atiende (D80). }
 
     PrintAgent:
       type: object

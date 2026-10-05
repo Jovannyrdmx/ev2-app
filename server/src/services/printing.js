@@ -108,7 +108,7 @@ async function saveSettings(runner, { nightclubId, patch, userId }) {
 const PRINTER_COLS = `p.id::text AS id, p.nightclub_id::text AS nightclub_id,
   p.location_id::text AS location_id, p.name, p.purpose, p.connection, p.host, p.port,
   p.windows_name, p.paper_width, p.columns, p.codepage, p.has_cutter,
-  p.fallback_id::text AS fallback_id, p.active`;
+  p.fallback_id::text AS fallback_id, p.active, p.agent_id::text AS agent_id`;
 
 async function listPrinters(runner, { nightclubId, includeInactive = false }) {
   const { rows } = await runner.query(
@@ -300,7 +300,16 @@ async function claim(runner, { nightclubId, agentId, limit = 5 }) {
                        SELECT 1 FROM printers p
                         WHERE p.id = c.printer_id
                           AND p.location_id = a.location_id
-                          AND (a.purpose IS NULL OR p.purpose = a.purpose))))
+                          AND (a.purpose IS NULL OR p.purpose = a.purpose))
+                     -- La PC que atiende la impresora (D80) la toma aunque su
+                     -- área diga otra cosa: es la única que la tiene conectada.
+                     OR EXISTS (
+                       SELECT 1 FROM printers p
+                        WHERE p.id = c.printer_id AND p.agent_id = a.id)))
+           -- Y una impresora con PC asignada no la toma ninguna otra (D80).
+           AND NOT EXISTS (
+             SELECT 1 FROM printers px
+              WHERE px.id = c.printer_id AND px.agent_id IS NOT NULL AND px.agent_id <> $2)
          ORDER BY c.created_at
          FOR UPDATE OF c SKIP LOCKED
          LIMIT $4::int)
