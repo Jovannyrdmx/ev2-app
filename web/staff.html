@@ -75,11 +75,13 @@
     </header>
     <div id="banner" class="px-4 py-2 text-sm text-center bg-amber-500/20 text-amber-100" hidden></div>
 
-    <div id="floor-stats" class="grid grid-cols-4 gap-2 px-4 pt-3">
-      <div class="stat-card"><div class="stat-number" id="s-trays">—</div><div class="stat-label" data-i18n="floor.trays">Charolas</div></div>
-      <div class="stat-card"><div class="stat-number" id="s-items">—</div><div class="stat-label" data-i18n="floor.items">Tragos</div></div>
-      <div class="stat-card"><div class="stat-number" id="s-coming">—</div><div class="stat-label" data-i18n="floor.coming">En la barra</div></div>
-      <div class="stat-card"><div class="stat-number" id="s-oldest">—</div><div class="stat-label" data-i18n="floor.oldest">La más vieja</div></div>
+    <!--
+      Sin turno abierto (D89). Antes esto solo se veía entrando a "Lo mío"; ahora se
+      enseña arriba, con el botón ahí mismo.
+    -->
+    <div id="shift-banner" class="mx-4 mt-3 rounded-xl px-3 py-2 flex items-center justify-between gap-3 bg-amber-500/15 border border-amber-400/30" hidden>
+      <p class="text-sm text-amber-100" data-i18n="floor.offShiftBanner">No has empezado tu turno.</p>
+      <button id="btn-shift-banner" class="ev2-button rounded-lg px-3 py-2 text-xs font-display flex-none" data-i18n="floor.shiftStart">Iniciar turno</button>
     </div>
 
     <nav class="flex px-2 pt-3 border-b border-white/10">
@@ -92,17 +94,34 @@
 
     <main class="flex-1 overflow-y-auto p-4 space-y-3">
       <div id="tab-trays" class="space-y-3">
+        <!--
+          Lo único que queda de los contadores de arriba (D89): cuánto lleva esperando el
+          trago más viejo. Es una línea, no cuatro tarjetas, y cambia de color con la espera.
+        -->
+        <p id="floor-stats" class="text-sm rounded-xl px-3 py-2 flex items-center gap-2 card">
+          <i class="fa-solid fa-clock" aria-hidden="true"></i>
+          <span id="oldest-label" data-i18n="floor.oldestLabel">El trago más viejo lleva</span>
+          <strong id="s-oldest" class="font-display ml-auto">—</strong>
+        </p>
         <p id="trays-empty" class="text-center text-white/40 text-sm py-16" data-i18n="floor.noTrays">No hay nada listo para llevar.</p>
         <div id="trays-list" class="space-y-3"></div>
+        <!-- Lo de otros meseros: existe, pero no es tu viaje. Plegado. -->
+        <details id="trays-others" class="card rounded-xl p-3" hidden>
+          <summary class="text-sm text-white/60 cursor-pointer"><span data-i18n="floor.others">De otros meseros</span> · <span id="count-others">0</span></summary>
+          <div id="trays-others-list" class="space-y-3 mt-3"></div>
+        </details>
       </div>
 
       <div id="tab-tables" class="space-y-3" hidden>
-        <div class="grid grid-cols-3 gap-2">
-          <div class="stat-card"><div class="stat-number" id="o-occupied">—</div><div class="stat-label" data-i18n="floor.occupied">Ocupadas</div></div>
-          <div class="stat-card"><div class="stat-number" id="o-free">—</div><div class="stat-label" data-i18n="floor.free">Libres</div></div>
-          <div class="stat-card"><div class="stat-number" id="o-guests">—</div><div class="stat-label" data-i18n="floor.guests">Personas</div></div>
+        <!-- La ocupación es de la hostess y la gerencia; al mesero no le cambia nada (D89). -->
+        <div id="tables-occupancy" class="space-y-2">
+          <div class="grid grid-cols-3 gap-2">
+            <div class="stat-card"><div class="stat-number" id="o-occupied">—</div><div class="stat-label" data-i18n="floor.occupied">Ocupadas</div></div>
+            <div class="stat-card"><div class="stat-number" id="o-free">—</div><div class="stat-label" data-i18n="floor.free">Libres</div></div>
+            <div class="stat-card"><div class="stat-number" id="o-guests">—</div><div class="stat-label" data-i18n="floor.guests">Personas</div></div>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="floor.seatNote">Se entra por la puerta: el pase se lee ahí y la mesa queda ocupada sola.</p>
         </div>
-        <p class="text-[11px] text-white/40" data-i18n="floor.seatNote">Se entra por la puerta: el pase se lee ahí y la mesa queda ocupada sola.</p>
 
         <!--
           Lo que alguien pidió desde su teléfono y todavía no paga. Va arriba de las
@@ -114,21 +133,27 @@
           <div id="unpaid-list" class="space-y-2"></div>
         </div>
 
-        <!--
-          Lo que la barra ya tiene listo. Va arriba de las mesas a proposito: un trago
-          listo que nadie levanta se calienta, y es la queja mas comun de una noche.
-        -->
-        <div id="ready-block" class="card rounded-xl p-3 space-y-2 border border-emerald-400/30" hidden>
-          <p class="text-xs uppercase tracking-wider text-emerald-300" data-i18n="take.readyTitle">Listos para llevar</p>
-          <div id="ready-list" class="space-y-2"></div>
-        </div>
-
         <!-- En la pista no hay mesa: el pedido se levanta contra un punto de entrega. -->
         <button id="btn-take-floor" class="w-full card rounded-xl py-3 text-sm" data-i18n="take.onFloor">
           Levantar un pedido en la pista
         </button>
 
-        <div id="tables-list" class="space-y-2"></div>
+        <!--
+          Las mesas, en cuadrícula (D89). Antes eran 55 tarjetas con tres botones cada una:
+          ahora un número por mesa, las tuyas primero, y los botones en la hoja de la mesa.
+        -->
+        <div class="space-y-2">
+          <input id="tables-search" type="search" inputmode="search" autocomplete="off"
+                 placeholder="Buscar mesa" data-i18n-placeholder="tables.search"
+                 class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+          <div id="tables-zones" class="flex gap-1 overflow-x-auto pb-1"></div>
+        </div>
+        <p class="text-[11px] text-white/40 flex flex-wrap gap-x-3 gap-y-1">
+          <span><span class="inline-block w-2 h-2 rounded-full align-middle" style="background:var(--ev2-cyan)"></span> <span data-i18n="tables.legendMine">Tuya esta noche</span></span>
+          <span><span class="inline-block w-2 h-2 rounded-full align-middle bg-amber-300"></span> <span data-i18n="tables.legendBusy">Con gente o pedidos</span></span>
+        </p>
+        <p id="tables-empty" class="text-center text-white/40 text-sm py-8" data-i18n="tables.noMatch" hidden>Ninguna mesa con ese número.</p>
+        <div id="tables-grid" class="grid grid-cols-4 sm:grid-cols-6 gap-2"></div>
       </div>
 
       <!--
@@ -336,6 +361,35 @@
   <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50" hidden></div>
 
   <!--
+    ------------------------ LA HOJA DE UNA MESA (D89) ------------------------
+    Lo que antes eran tres botones repetidos en cada una de las mesas. Se abre al tocar
+    el número; lo principal es levantar el pedido, y "Otra ronda" cuando ya pidió.
+  -->
+  <div id="table-sheet" class="fixed inset-0 z-30 bg-black/60 flex items-end justify-center" hidden>
+    <div class="w-full max-w-2xl bg-slate-950 border-t border-white/10 rounded-t-2xl p-4 space-y-3" role="dialog" aria-labelledby="tbl-title">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p id="tbl-title" class="font-display text-2xl">—</p>
+          <p id="tbl-sub" class="text-xs text-white/50">—</p>
+        </div>
+        <button id="btn-tbl-close" class="w-10 h-10 rounded-xl card flex-none" aria-label="Cerrar" data-i18n-title="take.close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <p id="tbl-guests" class="text-sm text-white/70">—</p>
+      <p id="tbl-active" class="text-xs text-amber-200" hidden></p>
+      <button id="btn-tbl-take" class="ev2-button w-full py-4 rounded-xl font-display" data-i18n="take.open">Levantar pedido</button>
+      <button id="btn-tbl-again" class="card w-full py-3 rounded-xl text-sm text-left px-4" hidden>
+        <span class="font-display" data-i18n="take.again">Otra ronda</span>
+        <span id="tbl-again-items" class="block text-xs text-white/50 truncate">—</span>
+      </button>
+      <div class="grid grid-cols-2 gap-2">
+        <button id="btn-tbl-bill" class="card rounded-xl py-3 text-sm"><i class="fa-solid fa-receipt mr-1"></i><span data-i18n="bill.print">Cuenta</span></button>
+        <button id="btn-tbl-reprint" class="card rounded-xl py-3 text-sm"><i class="fa-solid fa-print mr-1"></i><span data-i18n="order.reprint">Comanda otra vez</span></button>
+      </div>
+      <div id="tbl-release" class="flex flex-wrap gap-2"></div>
+    </div>
+  </div>
+
+  <!--
     ------------------------ LEVANTAR UN PEDIDO ------------------------
     Se abre desde una mesa. Ocupa toda la pantalla porque se usa de pie, con una mano,
     en penumbra: la carta arriba, lo que va pidiendo abajo, y el cobro al final sin
@@ -363,9 +417,11 @@
       <select id="take-guest-select" class="w-full mt-1 px-4 py-2 rounded-xl bg-white/5 border border-white/10 outline-none"></select>
     </div>
 
-    <div class="px-4 pt-3">
+    <div id="take-search-wrap" class="px-4 pt-3 space-y-2">
       <input id="take-search" type="search" data-i18n-placeholder="take.search" placeholder="Buscar en la carta"
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+      <!-- Las secciones de la carta (D89): la misma idea que en la app del cliente. -->
+      <div id="take-cats" class="flex gap-1 overflow-x-auto pb-1"></div>
     </div>
 
     <div id="take-menu" class="flex-1 overflow-y-auto px-4 py-3 space-y-2"></div>

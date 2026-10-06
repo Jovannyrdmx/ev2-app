@@ -51,6 +51,13 @@
     // media noche, y pedirlos en cada pedido seria un viaje de mas con el cliente
     // enfrente.
     points: [],
+    // Los pedidos que este mesero levantó esta noche, entregados o no (D89). De aquí
+    // salen "Mis mesas" y "Otra ronda"; la cola activa no sirve porque lo entregado se va.
+    myOrders: [],
+    // La cuadrícula de mesas: búsqueda, zona y la mesa abierta en su hoja.
+    tableSearch: '', tableZone: null, tableSheet: null,
+    // La sección de la carta abierta en la hoja del pedido.
+    takeCat: null,
   };
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
@@ -195,6 +202,7 @@
       canSeeOrders()
         ? get(`/nightclubs/${club}/orders?active=true&limit=100`, (d) => { state.orders = d.orders || []; })
         : Promise.resolve(),
+      canSeeOrders() ? loadMyOrders({ render: false }) : Promise.resolve(),
       get(`/nightclubs/${club}/tables`, (d) => { state.tables = d.tables || []; }),
       get(`/nightclubs/${club}/tables/stats`, (d) => { state.stats = d; }),
       get(`/nightclubs/${club}/staff/me/tips?limit=50`, (d) => { state.tips = d.tips || []; }),
@@ -239,6 +247,20 @@
       state.orders = d.orders || [];
     } catch (err) { showError(err); }
     renderAll();
+  }
+
+  /**
+   * Lo que este mesero levantó en las últimas 18 horas (D89): una noche entera, con su
+   * cierre de madrugada, sin arrastrar la de ayer.
+   */
+  const MY_ORDERS_HOURS = 18;
+  async function loadMyOrders({ render = true } = {}) {
+    if (!canSeeOrders()) return;
+    try {
+      const d = await api.get(`/nightclubs/${clubId()}/orders?mine=true&since_hours=${MY_ORDERS_HOURS}&limit=200`);
+      state.myOrders = d.orders || [];
+    } catch (err) { showError(err); }
+    if (render) renderAll();
   }
 
   async function loadTables() {
@@ -780,8 +802,10 @@
     // Sin charolas, la anfitriona abre en la puerta, que es donde trabaja (D76).
     const traysTab = document.querySelector('[data-tab="trays"]');
     if (traysTab) traysTab.hidden = !canSeeOrders();
-    // Charolas, tragos y barra son numeros del mesero; a la anfitriona no le dicen nada.
+    // La espera de la barra es del mesero; a la anfitriona no le dice nada.
     if ($('floor-stats')) $('floor-stats').hidden = !canSeeOrders();
+    // La ocupación es de quien acomoda gente: la hostess y la gerencia (D89).
+    if ($('tables-occupancy')) $('tables-occupancy').hidden = isWaiter();
     if (state.tab === 'trays' && !canSeeOrders()) state.tab = isDoorRole() ? 'door' : 'tables';
 
     for (const tab of TABS) $(`tab-${tab}`).hidden = tab !== state.tab;
@@ -939,7 +963,7 @@
 
   // ------------------------------------------------- levantar pedido: enganches
 
-  $('btn-take-close').onclick = closeTake;
+  $('btn-take-close').onclick = askCloseTake;
   $('btn-take-floor').onclick = openTakeOnFloor;
   $('take-point').onchange = (ev) => { state.take.pointId = ev.target.value || null; renderTake(); };
   $('btn-take-send').onclick = sendTake;
@@ -978,43 +1002,62 @@
   $('sell-qty').oninput = renderVenta;
   $('sell-price').oninput = renderVenta;
 
-  function renderTrays() {
-    const now = Date.now();
-    const s = EV2Staff.summary(state.orders, now);
-    $('s-trays').textContent = s.trays;
-    $('s-items').textContent = s.items;
-    $('s-coming').textContent = s.coming;
-    $('s-oldest').textContent = s.oldest === null ? '—' : t('bar.minutes', { n: s.oldest });
-    $('count-trays').textContent = s.trays;
+  const URGENCY_TEXT = { late: 'text-red-300', warn: 'text-amber-300', ok: 'text-white/50' };
 
-    const list = EV2Staff.trays(state.orders, now);
-    $('trays-empty').hidden = list.length > 0;
-    $('trays-list').innerHTML = list.map((group) => {
-      const wait = group.waitMinutes === null ? ''
-        : (group.waitMinutes < 1 ? t('bar.justNow') : t('bar.minutes', { n: group.waitMinutes }));
-      const flash = group.orders.some((o) => state.arrived.has(o.id)) ? ' just-arrived' : '';
-      const busy = group.orders.some((o) => state.busy.has(o.id));
-      const detail = group.orders.map((o) => `
-        <p class="text-sm text-white/70">${escape((o.items || []).map((i) => `${i.quantity}× ${i.name || ''}`).join(', '))}
-          <span class="text-white/40">· ${escape(o.recipient_name ? `${t('bar.gift')}: ${o.recipient_name}` : (o.sender_name || ''))}</span></p>`).join('');
-      return `
-      <article class="card wait-${group.urgency}${flash} rounded-xl p-4" data-tray="${escape(group.table_id || '')}">
+  /** A dónde se lleva la charola: la mesa, el punto de la pista, o "sin mesa". */
+  function trayPlace(group) {
+    if (group.table_code) return `${t('floor.tableShort')} ${group.table_code}`;
+    if (group.point_name) return group.point_name;
+    return t('floor.noTable');
+  }
+
+  function trayCard(group) {
+    const wait = group.waitMinutes === null ? ''
+      : (group.waitMinutes < 1 ? t('bar.justNow') : t('bar.minutes', { n: group.waitMinutes }));
+    const flash = group.orders.some((o) => state.arrived.has(o.id)) ? ' just-arrived' : '';
+    const busy = group.orders.some((o) => state.busy.has(o.id));
+    const bars = [...new Set(group.orders.map((o) => o.bar_name).filter(Boolean))];
+    const detail = group.orders.map((o) => `
+        <p class="text-sm text-white/70">${escape((o.items || []).map((i) => `${i.quantity}× ${EV2Client.displayName(i.name || '')}`).join(', '))}
+          <span class="text-white/40">· ${escape(o.recipient_name ? `${t('bar.gift')}: ${o.recipient_name}` : (o.taken_by_name || o.sender_name || ''))}</span></p>`).join('');
+    return `
+      <article class="card wait-${group.urgency}${flash} rounded-xl p-4" data-tray="${escape(group.key)}">
         <div class="flex justify-between items-start gap-3">
           <div class="min-w-0">
-            <p class="font-display text-xl">${group.table_code
-    ? `${escape(t('floor.tableShort'))} ${escape(group.table_code)}`
-    : escape(t('floor.noTable'))}</p>
+            <p class="font-display text-xl">${escape(trayPlace(group))}</p>
+            ${bars.length ? `<p class="text-xs text-white/45">${escape(t('floor.pickAt', { bar: bars.join(', ') }))}</p>` : ''}
             ${detail}
           </div>
-          <p class="text-xs flex-none ${group.urgency === 'late' ? 'text-red-300' : group.urgency === 'warn' ? 'text-amber-300' : 'text-white/50'}">${escape(wait)}</p>
+          <p class="text-xs flex-none ${URGENCY_TEXT[group.urgency] || URGENCY_TEXT.ok}">${escape(wait)}</p>
         </div>
-        <button class="ev2-button w-full rounded-lg py-3 mt-3 font-display" data-deliver="${escape(group.table_id || '')}" ${busy ? 'disabled' : ''}>
+        <button class="ev2-button w-full rounded-lg py-3 mt-3 font-display" data-deliver="${escape(group.key)}" ${busy ? 'disabled' : ''}>
           ${escape(t('floor.deliver'))} · ${group.items}
         </button>
       </article>`;
-    }).join('');
+  }
 
-    $('trays-list').querySelectorAll('[data-deliver]').forEach((b) => {
+  function renderTrays() {
+    const now = Date.now();
+    const meId = isWaiter() ? (api.session.user && api.session.user.id) : null;
+    const { mine, others } = EV2Staff.splitTrays(state.orders, now, meId);
+    $('count-trays').textContent = mine.length;
+
+    // El único contador que queda (D89): cuánto lleva el trago más viejo de los suyos.
+    const oldest = EV2Staff.summary(mine.flatMap((g) => g.orders), now).oldest;
+    const linea = $('floor-stats');
+    const tono = EV2Staff.urgency(oldest);
+    linea.className = `text-sm rounded-xl px-3 py-2 flex items-center gap-2 card wait-${tono}`;
+    $('oldest-label').textContent = t(oldest === null ? 'floor.oldestNone' : 'floor.oldestLabel');
+    $('s-oldest').textContent = oldest === null ? '' : (oldest < 1 ? t('bar.justNow') : t('bar.minutes', { n: oldest }));
+    $('s-oldest').className = `font-display ml-auto ${URGENCY_TEXT[tono] || ''}`;
+
+    $('trays-empty').hidden = mine.length > 0;
+    $('trays-list').innerHTML = mine.map(trayCard).join('');
+    $('trays-others').hidden = others.length === 0;
+    $('count-others').textContent = others.length;
+    $('trays-others-list').innerHTML = others.map(trayCard).join('');
+
+    document.querySelectorAll('#tab-trays [data-deliver]').forEach((b) => {
       b.onclick = () => deliverTray(b.dataset.deliver);
     });
   }
@@ -1023,8 +1066,8 @@
    * Un toque entrega TODA la charola de esa mesa: el mesero hace un viaje, no uno por
    * pedido. Cada pedido es su propia llamada, y si una falla se dice cuál.
    */
-  async function deliverTray(tableId) {
-    const group = EV2Staff.trays(state.orders).find((g) => (g.table_id || '') === tableId);
+  async function deliverTray(key) {
+    const group = EV2Staff.trays(state.orders).find((g) => g.key === key);
     if (!group) return;
     for (const order of group.orders) state.busy.add(order.id);
     renderTrays();
@@ -1038,9 +1081,14 @@
       }
     }
     for (const order of group.orders) state.busy.delete(order.id);
-    await loadOrders();
+    await Promise.all([loadOrders(), loadMyOrders({ render: false })]);
+    renderAll();
     if (!failed) toast(t('floor.delivered'), 'ok');
   }
+
+  const servable = () => EV2OrderTaking.servableTables(state.tables);
+  const myTables = () => EV2Staff.myTableIds(state.myOrders,
+    isWaiter() ? (api.session.user && api.session.user.id) : null);
 
   function renderTables() {
     const o = EV2Staff.occupancy(state.stats);
@@ -1051,50 +1099,94 @@
     renderUnpaid();
 
     // TODAS las mesas que se pueden atender, no solo las que tienen gente registrada:
-    // el cliente de general no está en la app y aun así hay que poder pedirle.
-    const mesas = EV2OrderTaking.servableTables(state.tables);
-    $('tables-list').innerHTML = mesas.map((table) => `
-      <div class="card rounded-xl p-3" data-table="${escape(table.id)}">
-        <div class="flex justify-between items-center gap-2">
-          <div class="min-w-0">
-            <p class="font-display">${escape(t('floor.tableShort'))} ${escape(table.code)}
-              <span class="text-xs text-white/40">${escape(table.section)}</span></p>
-            <p class="text-xs text-white/60">${table.guests.length
-    ? escape(table.guests.map((g) => g.name || '—').join(', '))
-    : escape(t('take.noGuests'))}</p>
-          </div>
-          <span class="pill ${table.guests.length ? 'pill-wait' : ''} flex-none">${table.guests.length}/${table.capacity}</span>
-        </div>
-        <div class="flex flex-wrap gap-2 mt-2">
-          <button class="ev2-button rounded-lg px-3 py-2 text-xs font-display" data-take="1">
-            ${escape(t('take.open'))}
-          </button>
-          <button class="card rounded-lg px-3 py-2 text-xs" data-bill="1">
-            ${escape(t('bill.print'))}
-          </button>
-          <button class="card rounded-lg px-3 py-2 text-xs" data-reprint="1">
-            ${escape(t('order.reprint'))}
-          </button>
-          ${table.guests.map((g) => `
-            <button class="card rounded-lg px-3 py-2 text-xs text-red-300" data-release="${escape(g.id)}">
-              ${escape(t('floor.release'))}: ${escape(g.name || '—')}
-            </button>`).join('')}
-        </div>
-      </div>`).join('');
-
-    $('tables-list').querySelectorAll('[data-table]').forEach((el) => {
-      const mesa = mesas.find((m) => m.id === el.dataset.table);
-      el.querySelectorAll('[data-release]').forEach((b) => {
-        b.onclick = () => releaseGuest(el.dataset.table, b.dataset.release);
-      });
-      const abrir = el.querySelector('[data-take]');
-      if (abrir) abrir.onclick = () => openTake(mesa);
-      const cuenta = el.querySelector('[data-bill]');
-      if (cuenta) cuenta.onclick = () => printBill(el.dataset.table, cuenta);
-      const otraVez = el.querySelector('[data-reprint]');
-      if (otraVez) otraVez.onclick = () => reprintTable(el.dataset.table, otraVez, mesa);
+    // el cliente de general no está en la app y aun así hay que poder pedirle. En
+    // cuadrícula y con las suyas primero (D89).
+    const mesas = servable();
+    const zonas = EV2Staff.zones(mesas);
+    if (state.tableZone && !zonas.includes(state.tableZone)) state.tableZone = null;
+    $('tables-zones').innerHTML = [null, ...zonas].map((z) => `
+      <button type="button" data-zone="${z === null ? '' : escape(z)}"
+        class="px-3 py-1.5 rounded-full text-xs whitespace-nowrap ${state.tableZone === z ? 'ev2-button' : 'card'}">
+        ${escape(z === null ? t('tables.allZones') : z)}</button>`).join('');
+    $('tables-zones').querySelectorAll('[data-zone]').forEach((b) => {
+      b.onclick = () => { state.tableZone = b.dataset.zone || null; renderTables(); };
     });
+
+    const grid = EV2Staff.tableGrid(mesas, {
+      search: state.tableSearch, zone: state.tableZone, mine: myTables(), activeOrders: state.orders,
+    });
+    $('tables-empty').hidden = grid.length > 0;
+    $('tables-grid').innerHTML = grid.map((m) => {
+      const borde = m.mine ? 'border-color:var(--ev2-cyan)' : (m.busy ? 'border-color:rgba(252,211,77,.55)' : '');
+      return `
+      <button type="button" data-table="${escape(m.id)}" class="card rounded-xl py-3 px-1 text-center relative" style="${borde}"
+        aria-label="${escape(`${t('floor.tableShort')} ${m.code}`)}">
+        <span class="block font-display text-xl leading-none">${escape(m.code)}</span>
+        <span class="block text-[10px] text-white/40 mt-1 truncate">${escape(m.section)}</span>
+        ${m.guests.length ? `<span class="block text-[10px] text-white/60">${m.guests.length}/${m.capacity}</span>` : ''}
+        ${m.active ? `<span class="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-300 text-black text-[10px] font-display flex items-center justify-center">${m.active}</span>` : ''}
+      </button>`;
+    }).join('');
+    $('tables-grid').querySelectorAll('[data-table]').forEach((b) => {
+      b.onclick = () => openTableSheet(b.dataset.table);
+    });
+    renderTableSheet();
   }
+
+  // ---------------------------------------------------------------- la hoja de una mesa (D89)
+
+  function openTableSheet(tableId) {
+    state.tableSheet = tableId;
+    $('table-sheet').hidden = false;
+    renderTableSheet();
+    // "Otra ronda" necesita la carta para armarse; se carga una vez y se vuelve a pintar.
+    if (!state.drinks.length) loadDrinks().then(renderTableSheet);
+  }
+
+  function closeTableSheet() {
+    state.tableSheet = null;
+    $('table-sheet').hidden = true;
+  }
+
+  function renderTableSheet() {
+    if (!state.tableSheet) return;
+    const mesa = servable().find((m) => m.id === state.tableSheet);
+    // La mesa dejó de poderse atender (la bloquearon) mientras estaba abierta.
+    if (!mesa) { closeTableSheet(); return; }
+    $('tbl-title').textContent = `${t('floor.tableShort')} ${mesa.code}`;
+    $('tbl-sub').textContent = [mesa.section, mesa.capacity ? t('tables.seats', { n: mesa.capacity }) : null]
+      .filter(Boolean).join(' · ');
+    $('tbl-guests').textContent = mesa.guests.length
+      ? mesa.guests.map((g) => g.name || '—').join(', ') : t('take.noGuests');
+
+    const vivos = (state.orders || []).filter((o) => o.table_id === mesa.id
+      && ['pending', 'confirmed', 'preparing', 'ready'].includes(o.status));
+    $('tbl-active').hidden = vivos.length === 0;
+    $('tbl-active').textContent = t('tables.activeOrders', { n: vivos.length });
+
+    const ronda = EV2Staff.lastRound(state.myOrders, mesa.id, state.drinks);
+    $('btn-tbl-again').hidden = !ronda;
+    $('tbl-again-items').textContent = ronda
+      ? ronda.items.map((i) => `${i.quantity}× ${EV2Client.displayName(i.drink.name)}`).join(', ') : '';
+
+    $('tbl-release').innerHTML = mesa.guests.map((g) => `
+      <button class="card rounded-lg px-3 py-2 text-xs text-red-300" data-release="${escape(g.id)}">
+        ${escape(t('floor.release'))}: ${escape(g.name || '—')}
+      </button>`).join('');
+    $('tbl-release').querySelectorAll('[data-release]').forEach((b) => {
+      b.onclick = () => releaseGuest(mesa.id, b.dataset.release);
+    });
+
+    $('btn-tbl-take').onclick = () => { closeTableSheet(); openTake(mesa); };
+    $('btn-tbl-again').onclick = () => { closeTableSheet(); openTake(mesa, { round: ronda }); };
+    $('btn-tbl-bill').onclick = () => printBill(mesa.id, $('btn-tbl-bill'));
+    $('btn-tbl-reprint').onclick = () => reprintTable(mesa.id, $('btn-tbl-reprint'), mesa);
+  }
+
+  $('btn-tbl-close').onclick = closeTableSheet;
+  // Tocar fuera de la hoja la cierra, como cualquier hoja del teléfono.
+  $('table-sheet').onclick = (ev) => { if (ev.target === $('table-sheet')) closeTableSheet(); };
+  $('tables-search').oninput = (ev) => { state.tableSearch = ev.target.value; renderTables(); };
 
   /**
    * Los pedidos de esta mesa que la barra debería estar preparando.
@@ -1125,7 +1217,8 @@
     const code = (mesa && mesa.code) || '';
     if (!(await ask(t('order.reprintConfirm', { n: pedidos.length, code })))) return;
 
-    const antes = button.textContent;
+    // innerHTML y no textContent: el botón trae su ícono y se perdería al devolverlo.
+    const antes = button.innerHTML;
     button.disabled = true;
     button.textContent = t('order.reprintSending');
     let fallaron = 0;
@@ -1142,7 +1235,7 @@
       }
     }
     button.disabled = false;
-    button.textContent = antes;
+    button.innerHTML = antes;
     if (!fallaron) toast(t('order.reprintOk', { n: pedidos.length }), 'ok');
   }
 
@@ -1155,7 +1248,7 @@
    * con una disculpa.
    */
   async function printBill(tableId, button) {
-    const antes = button.textContent;
+    const antes = button.innerHTML;
     button.disabled = true;
     button.textContent = t('bill.asking');
     try {
@@ -1180,7 +1273,7 @@
       showError(err);
     } finally {
       button.disabled = false;
-      button.textContent = antes;
+      button.innerHTML = antes;
     }
   }
 
@@ -1218,62 +1311,10 @@
         el.querySelector('button').onclick = () => openCharge(order);
       });
     }
-
-    renderReady();
   }
 
-  /**
-   * Lo que la barra ya tiene listo, en el orden en que se enfria.
-   *
-   * Ordenado por la hora en que quedo LISTO y no por la hora en que se pidio: el trago
-   * que lleva mas tiempo en la barra es el que hay que levantar primero, aunque se haya
-   * pedido despues.
-   */
-  function renderReady() {
-    const listos = EV2OrderTaking.readyToDeliver(state.orders,
-      { waiterId: api.session.user && api.session.user.id });
-    $('ready-block').hidden = listos.length === 0;
-    const now = Date.now();
-    $('ready-list').innerHTML = listos.map((order) => {
-      const minutos = EV2OrderTaking.waitingSince(order, now);
-      const donde = order.delivery_point_name && order.delivery_point_kind !== 'table'
-        ? order.delivery_point_name
-        : (order.table_code ? `${t('floor.tableShort')} ${order.table_code}` : t('take.noTable'));
-      return `
-      <div class="flex items-center justify-between gap-2" data-ready="${escape(order.id)}">
-        <div class="min-w-0">
-          <p class="text-sm truncate">${escape(donde)}
-            <span class="text-white/40">${order.bar_name ? escape(`· ${order.bar_name}`) : ''}</span></p>
-          <p class="text-xs text-white/50 truncate">${escape((order.items || []).map((i) => `${i.quantity}× ${i.name}`).join(', '))}</p>
-          <p class="text-[11px] ${minutos >= 5 ? 'text-amber-300' : 'text-white/40'}">
-            ${escape(minutos === null ? '' : t('take.readyFor', { n: minutos }))}
-          </p>
-        </div>
-        <button class="ev2-button rounded-lg px-3 py-2 text-xs font-display flex-none">
-          ${escape(t('take.delivered'))}
-        </button>
-      </div>`;
-    }).join('');
-
-    $('ready-list').querySelectorAll('[data-ready]').forEach((el) => {
-      el.querySelector('button').onclick = () => deliver(el.dataset.ready);
-    });
-  }
-
-  /** Confirmar la entrega. Es el ultimo paso del pedido y lo da quien lo llevo. */
-  async function deliver(orderId) {
-    try {
-      await api.post(`/nightclubs/${clubId()}/orders/${orderId}/status`, { status: 'delivered' });
-      const index = state.orders.findIndex((o) => o.id === orderId);
-      if (index !== -1) state.orders.splice(index, 1);
-      toast(t('take.deliveredOk'), 'ok');
-      renderUnpaid();
-    } catch (err) {
-      showError(err);
-      await loadOrders();
-    }
-  }
-
+  // "Listos para llevar" vivía aquí, repetido con "Por llevar" y con su propio botón de
+  // entregado. Ahora solo existe la lista de "Por llevar" (D89).
 
   // ---------------------------------------------------------------------------
   // Levantar el pedido en la mesa y cobrarlo ahí mismo.
@@ -1283,12 +1324,19 @@
   // fallo de red dejaría dinero recibido sin nada que lo respalde.
   // ---------------------------------------------------------------------------
 
+  // Una sola carga a la vez: la hoja de la mesa y la del pedido pueden pedirla juntas.
+  let drinksLoading = null;
   async function loadDrinks() {
     if (state.drinks.length > 0) return;
-    try {
-      const d = await api.get(`/nightclubs/${clubId()}/drinks`);
-      state.drinks = d.drinks || [];
-    } catch (err) { showError(err); }
+    if (!drinksLoading) {
+      drinksLoading = (async () => {
+        try {
+          const d = await api.get(`/nightclubs/${clubId()}/drinks`);
+          state.drinks = d.drinks || [];
+        } catch (err) { showError(err); } finally { drinksLoading = null; }
+      })();
+    }
+    await drinksLoading;
   }
 
   async function loadPoints() {
@@ -1310,6 +1358,7 @@
       open: true, table: null, guestId: null, cart: EV2Client.createCart(),
       order: null, search: '', sending: false, pointId: null,
     };
+    state.takeCat = null;
     $('take-sheet').hidden = false;
     $('take-search').value = '';
     $('take-reference').value = '';
@@ -1319,18 +1368,33 @@
     renderTake();
   }
 
-  async function openTake(table) {
+  /**
+   * Abre la hoja del pedido de una mesa. Con `round` (D89, "Otra ronda") el carrito
+   * nace con lo último que pidió esa mesa: el mesero lo revisa, quita o agrega, y manda.
+   * Nada sale solo.
+   */
+  async function openTake(table, { round = null } = {}) {
     if (!table) return;
     state.take = {
       open: true, table, guestId: table.guests.length === 1 ? table.guests[0].id : null,
       cart: EV2Client.createCart(), order: null, search: '', sending: false,
     };
+    state.takeCat = null;
     $('take-sheet').hidden = false;
     $('take-search').value = '';
     $('take-reference').value = '';
     renderTakeMethods();
     renderTake();
     await loadDrinks();
+    if (round) {
+      let faltaron = 0;
+      for (const item of round.items) {
+        // Con la carta recién cargada: el precio y la existencia de ahora, no los de entonces.
+        const drink = state.drinks.find((d) => d.id === item.drink.id);
+        if (!drink || !state.take.cart.add(drink, item.quantity)) faltaron += 1;
+      }
+      toast(t(faltaron ? 'take.againPartial' : 'take.againLoaded'), faltaron ? 'error' : 'info');
+    }
     renderTake();
   }
 
@@ -1355,6 +1419,17 @@
     $('take-error').hidden = true;
   }
 
+  /**
+   * El botón "Cerrar" de la hoja. Con algo armado y sin mandar, pregunta antes: un toque
+   * de más con el cliente enfrente borraba el pedido entero sin aviso (D89).
+   */
+  async function askCloseTake() {
+    const take = state.take;
+    const armado = !take.order && take.cart && take.cart.count > 0;
+    if (armado && !(await ask(t('take.discardConfirm'), { danger: true }))) return;
+    closeTake();
+  }
+
   function renderTakeMethods() {
     const sel = $('take-method');
     sel.innerHTML = EV2OrderTaking.methodKeys()
@@ -1367,18 +1442,13 @@
     $('take-reference').hidden = !(method && method.requiresReference);
   }
 
-  function takeMenu() {
-    const q = clave(state.take.search);
-    return state.drinks
-      .filter((d) => d.available !== false)
-      .filter((d) => !q || clave(d.name).includes(q) || clave(d.category || '').includes(q))
-      .slice(0, 60);
-  }
-
-  /** Sin acentos y en mayúsculas: en la carta real hay "Piña" y nadie teclea la tilde. */
-  function clave(texto) {
-    return String(texto == null ? '' : texto)
-      .normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().trim();
+  /**
+   * La carta en secciones, en el orden de la barra (D89). Antes era una lista de 129 en
+   * orden alfabético y solo se pintaban las primeras 60: el resto solo aparecía buscando.
+   */
+  function takeSections() {
+    const disponibles = state.drinks.filter((d) => d.available !== false);
+    return EV2Client.menuSections(disponibles, { category: state.takeCat, search: state.take.search });
   }
 
   function takeThumb(drink) {
@@ -1425,16 +1495,28 @@
     // Con el pedido ya creado, la carta deja de importar: lo que falta es cobrar.
     const cobrando = Boolean(take.order);
     $('take-menu').hidden = cobrando;
-    $('take-search').parentElement.hidden = cobrando;
+    $('take-search-wrap').hidden = cobrando;
     $('btn-take-send').hidden = cobrando;
     $('take-charge').hidden = !cobrando;
 
     if (!cobrando) {
-      $('take-menu').innerHTML = takeMenu().map((drink) => `
+      const orden = EV2Client.orderCategories(state.drinks
+        .filter((d) => d.available !== false).map((d) => d.category));
+      $('take-cats').innerHTML = [null, ...orden].map((c) => `
+        <button type="button" data-cat="${c === null ? '' : escape(c)}"
+          class="px-3 py-1.5 rounded-full text-xs whitespace-nowrap ${state.takeCat === c ? 'ev2-button' : 'card'}">
+          ${escape(c === null ? t('menu.all') : c)}</button>`).join('');
+      $('take-cats').querySelectorAll('[data-cat]').forEach((b) => {
+        b.onclick = () => { state.takeCat = b.dataset.cat || null; renderTake(); $('take-menu').scrollTop = 0; };
+      });
+
+      const secciones = takeSections();
+      const conEncabezado = secciones.length > 1;
+      const fila = (drink) => `
         <div class="card rounded-xl p-2 flex items-center gap-3" data-drink="${escape(drink.id)}">
           ${takeThumb(drink)}
           <div class="min-w-0 flex-1">
-            <p class="text-sm truncate">${escape(drink.name)}</p>
+            <p class="text-sm truncate">${escape(EV2Client.displayName(drink.name))}</p>
             <p class="text-xs text-white/50">${escape(money(drink.price, drink.currency))}</p>
           </div>
           <div class="flex items-center gap-2 flex-none">
@@ -1442,7 +1524,11 @@
             <span class="w-5 text-center text-sm">${take.cart.quantityOf(drink.id)}</span>
             <button class="ev2-button rounded-lg w-9 h-9 text-lg font-display" data-plus="1" aria-label="+">+</button>
           </div>
-        </div>`).join('');
+        </div>`;
+      $('take-menu').innerHTML = secciones.map((sec) => `
+        ${conEncabezado ? `<p class="text-xs uppercase tracking-wider text-white/45 pt-2 px-1">${escape(sec.category || t('menu.other'))} · ${sec.items.length}</p>` : ''}
+        ${sec.items.map(fila).join('')}`).join('')
+        || `<p class="text-white/40 text-sm text-center py-10">${escape(t('menu.noMatch'))}</p>`;
 
       $('take-menu').querySelectorAll('[data-drink]').forEach((el) => {
         const drink = state.drinks.find((d) => d.id === el.dataset.drink);
@@ -1454,7 +1540,7 @@
     const lines = cobrando ? (take.order.items || []).map((i) => ({
       name: i.name, quantity: i.quantity, subtotal: null,
     })) : take.cart.lines.map((l) => ({
-      name: l.drink.name, quantity: l.quantity, subtotal: l.subtotal,
+      name: EV2Client.displayName(l.drink.name), quantity: l.quantity, subtotal: l.subtotal,
     }));
     $('take-cart').innerHTML = lines.map((l) => `
       <div class="flex justify-between text-xs">
@@ -1505,7 +1591,9 @@
       if (res.order && res.order.pay_at_till) {
         toast(t('take.sentToBar', { total: money(res.order.subtotal, res.order.currency) }), 'ok');
         closeTake();
-        await Promise.all([loadOrders(), loadTables()]);
+        // También sus pedidos de la noche: de ahí sale "Otra ronda" y "Mis mesas".
+        await Promise.all([loadOrders(), loadTables(), loadMyOrders({ render: false })]);
+        renderAll();
         return;
       }
       take.order = res.order;
@@ -1596,6 +1684,9 @@
       ? (minutes === null ? t('floor.onShift', { n: 0 }) : t('floor.onShift', { n: minutes }))
       : t('floor.offShift');
     $('btn-shift').textContent = t(onShift ? 'floor.shiftEnd' : 'floor.shiftStart');
+    // Sin turno, el aviso va arriba en todas las pestañas, con su botón (D89). Solo para
+    // el personal de piso: la gerencia no abre turno desde aquí.
+    $('shift-banner').hidden = onShift || !state.employee || !SHIFT_ROLES.includes(api.session.user && api.session.user.role);
     // El mesero ya no tiene corte (D77): no recibe dinero del club.
     $('btn-cut').hidden = isWaiter();
     $('cut-hint').textContent = t(isWaiter() ? 'cut.hintWaiter' : 'cut.hint');
@@ -1639,7 +1730,9 @@
 
   $('btn-cut').onclick = () => corte().open();
 
-  $('btn-shift').onclick = async () => {
+  const SHIFT_ROLES = ['waiter', 'hostess'];
+
+  async function toggleShift() {
     const onShift = Boolean(state.employee && state.employee.on_shift);
     if (onShift && !(await ask(t('floor.confirmEndShift')))) return;
     try {
@@ -1647,14 +1740,17 @@
       const d = await api.get('/employees/me');
       state.employee = d.employee;
       renderMe();
-      toast(t(onShift ? 'floor.shiftEnd' : 'floor.shiftStart'), 'ok');
+      // Lo que pasó, no el nombre del botón que se tocó (D89).
+      toast(t(onShift ? 'floor.shiftEnded' : 'floor.shiftStarted'), 'ok');
     } catch (err) {
       // El servidor no deja cerrar el turno con dinero del club sin corte. En vez de
       // enseñar el error y dejar a la persona buscando dónde, se le abre el corte.
       showError(err);
       if (err && err.status === 422 && !isWaiter()) corte().open();
     }
-  };
+  }
+  $('btn-shift').onclick = toggleShift;
+  $('btn-shift-banner').onclick = toggleShift;
 
   // ---------------------------------------------------------------- tiempo real
 
@@ -1665,15 +1761,18 @@
     lastConnection.key = key;
     lastConnection.vars = vars || null;
     $('rt-dot').className = `dot ${on === true ? 'dot-on' : on === null ? 'dot-wait' : 'dot-off'}`;
-    $('rt-text').textContent = vars && vars.text ? vars.text : t(key);
+    $('rt-text').textContent = t(key);
+    // Conectado, basta el punto; el texto queda para el lector de pantalla (D89).
+    $('rt-text').classList.toggle('sr-only', on === true);
+    $('rt-dot').title = t(key);
   }
 
   function connectRealtime() {
     const rt = api.createRealtime();
     state.realtime = rt;
     rt.on('open', () => { setConnection(true, 'top.live'); banner(null); });
-    rt.on('reconnecting', (i) => setConnection(null, 'realtime.reconnecting',
-      { text: `${t('realtime.reconnecting')} ${Math.round(i.in_ms / 1000)}s` }));
+    // Sin cuenta regresiva: cambiaba cada segundo y no le decía nada a quien trabaja.
+    rt.on('reconnecting', () => setConnection(null, 'realtime.reconnecting'));
     rt.on('close', () => setConnection(false, 'top.offline'));
     rt.on('replaced', () => { setConnection(false, 'top.otherSession'); banner(t('banner.replaced')); });
     rt.on('resync_required', async () => { banner(t('banner.updating')); await loadAll(); banner(null); });

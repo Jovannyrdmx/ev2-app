@@ -49,21 +49,28 @@
   }
 
   /**
-   * Agrupa lo que está listo POR MESA: un viaje por mesa, no uno por pedido. Las mesas
-   * salen ordenadas por el pedido más viejo que tienen esperando.
+   * Agrupa lo que está listo POR DESTINO: un viaje por mesa o por punto de entrega
+   * ("Pista A", "Terraza"), no uno por pedido. Salen ordenados por el pedido más viejo
+   * que tienen esperando.
    *
-   * Los pedidos sin mesa (una invitación a alguien que no está sentado) van juntos al
-   * final, en su propio grupo: no se pueden repartir, pero tampoco desaparecer.
+   * Antes solo se agrupaba por mesa y lo de la pista caía en "Sin mesa": el mesero veía
+   * la charola pero no a dónde llevarla (D89). Lo que no tiene ni mesa ni punto (una
+   * invitación a alguien que no está sentado) va junto al final: no es un destino, pero
+   * tampoco desaparece.
    */
   function trays(orders, now) {
     const groups = new Map();
     for (const order of (orders || [])) {
       if (!isDeliverable(order)) continue;
-      const key = order.table_id || '';
+      const point = !order.table_id && order.delivery_point_id ? order.delivery_point_id : null;
+      const key = order.table_id ? `t:${order.table_id}` : (point ? `p:${point}` : '');
       if (!groups.has(key)) {
         groups.set(key, {
+          key,
           table_id: order.table_id || null,
           table_code: order.table_code || null,
+          point_id: point,
+          point_name: point ? (order.delivery_point_name || null) : null,
           orders: [],
           items: 0,
           oldestReady: null,
@@ -84,13 +91,31 @@
       group.urgency = urgency(group.waitMinutes);
     }
     return list.sort((a, b) => {
-      // Los sin mesa siempre al final: no son un destino.
-      if (!a.table_id && b.table_id) return 1;
-      if (a.table_id && !b.table_id) return -1;
+      // Lo que no tiene destino siempre al final.
+      if (!a.key && b.key) return 1;
+      if (a.key && !b.key) return -1;
       if (a.oldestReady === null) return 1;
       if (b.oldestReady === null) return -1;
       return a.oldestReady - b.oldestReady;
     });
+  }
+
+  /**
+   * ¿Este pedido le toca a este mesero? Lo que él levantó y lo que pidió el cliente desde
+   * su teléfono (no tiene mesero). Lo de otro mesero, no: es su mesa y su propina. Es la
+   * misma regla con la que antes se armaba "Listos para llevar" en Mesas.
+   */
+  const isMine = (order, waiterId) => !waiterId || !order.taken_by || order.taken_by === waiterId;
+
+  /**
+   * Las charolas, partidas en las de este mesero y las de los demás (D89). Antes había
+   * dos listas de lo mismo, una con todo y otra solo con lo suyo, y cada una con su
+   * botón de "Entregado".
+   */
+  function splitTrays(orders, now, waiterId) {
+    const mine = []; const others = [];
+    for (const o of (orders || [])) (isMine(o, waiterId) ? mine : others).push(o);
+    return { mine: trays(mine, now), others: trays(others, now) };
   }
 
   /** Lo que resume el encabezado: cuántas charolas y cuánto lleva la más vieja. */
@@ -141,6 +166,88 @@
         })),
       })),
     };
+  }
+
+  // ---------------------------------------------------------------- las mesas del mesero (D89)
+
+  const fold = (text) => String(text == null ? '' : text)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+  /** Las zonas que hay, en el orden en que aparecen en el plano. */
+  function zones(tables) {
+    return [...new Set((tables || []).map((m) => m.section).filter(Boolean))];
+  }
+
+  /**
+   * Las mesas que este mesero atendió esta noche: las de sus pedidos (entregados o no).
+   * `orders` es lo que devuelve `/orders?mine=true&since_hours=…`.
+   */
+  function myTableIds(orders, waiterId) {
+    const ids = new Set();
+    for (const o of (orders || [])) {
+      if (!o || !o.table_id || o.status === 'cancelled') continue;
+      if (waiterId && o.taken_by && o.taken_by !== waiterId) continue;
+      ids.add(o.table_id);
+    }
+    return ids;
+  }
+
+  /**
+   * La cuadrícula de mesas: primero las suyas, luego las ocupadas o con algo en la
+   * barra, luego el resto. Dentro de cada grupo, el orden del plano. La búsqueda es por
+   * número de mesa (o por el nombre de alguien sentado), sin acentos.
+   *
+   * Cada mesa sale con `mine`, `busy` (gente o pedidos vivos) y `active` (pedidos vivos).
+   */
+  function tableGrid(tables, { search = '', zone = null, mine = new Set(), activeOrders = [] } = {}) {
+    const vivos = new Map();
+    for (const o of (activeOrders || [])) {
+      if (o && o.table_id && ['pending', 'confirmed', 'preparing', 'ready'].includes(o.status)) {
+        vivos.set(o.table_id, (vivos.get(o.table_id) || 0) + 1);
+      }
+    }
+    const q = fold(search);
+    const list = (tables || [])
+      .filter((m) => !zone || m.section === zone)
+      .filter((m) => {
+        if (!q) return true;
+        const code = fold(m.code);
+        // "5" encuentra la 5 antes que la 15: primero el número exacto, luego lo que empiece.
+        return code === q || code.startsWith(q)
+          || (m.guests || []).some((g) => fold(g.name).includes(q));
+      })
+      .map((m, i) => ({
+        ...m,
+        order: i,
+        mine: mine.has(m.id),
+        active: vivos.get(m.id) || 0,
+        busy: (m.guests || []).length > 0 || vivos.has(m.id),
+      }));
+    // Buscando, la mesa con ese número exacto va antes que todo: quien teclea "5"
+    // busca la 5, aunque la 51 sea suya.
+    const exacta = (m) => (q && fold(m.code) === q ? 0 : 1);
+    const rank = (m) => (m.mine ? 0 : m.busy ? 1 : 2);
+    return list.sort((a, b) => (exacta(a) - exacta(b))
+      || (rank(a) - rank(b))
+      || (a.order - b.order));
+  }
+
+  /**
+   * "Otra ronda" (D89): lo último que se pidió para esa mesa, para volver a armarlo de
+   * un toque. Solo los productos que siguen en la carta; el mesero revisa antes de mandar.
+   * Devuelve `{ order, items: [{ drink, quantity }] }` o null.
+   */
+  function lastRound(orders, tableId, drinks) {
+    if (!tableId) return null;
+    const ultimo = (orders || [])
+      .filter((o) => o && o.table_id === tableId && o.status !== 'cancelled')
+      .sort((a, b) => (toTime(b.created_at) || 0) - (toTime(a.created_at) || 0))[0];
+    if (!ultimo) return null;
+    const carta = new Map((drinks || []).filter((d) => d && d.available !== false).map((d) => [d.id, d]));
+    const items = (ultimo.items || [])
+      .filter((i) => carta.has(i.drink_id) && Number(i.quantity) > 0)
+      .map((i) => ({ drink: carta.get(i.drink_id), quantity: Number(i.quantity) }));
+    return items.length ? { order: ultimo, items } : null;
   }
 
   // ---------------------------------------------------------------- turno y propinas
@@ -211,7 +318,13 @@
     readyMinutes,
     urgency,
     trays,
+    isMine,
+    splitTrays,
     summary,
+    zones,
+    myTableIds,
+    tableGrid,
+    lastRound,
     occupancy,
     shiftMinutes,
     tipTotals,

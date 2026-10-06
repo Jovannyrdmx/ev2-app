@@ -63,6 +63,37 @@ describe('el controlador y el HTML se encuentran', () => {
     expect(documento().getElementById('btn-take-send').hasAttribute('disabled')).toBe(true);
   });
 
+  it('ya no hay dos listas de lo mismo: "Listos para llevar" se fue de Mesas (D89)', () => {
+    const doc = documento();
+    expect(doc.getElementById('ready-block')).toBeNull();
+    expect(doc.getElementById('tables-list')).toBeNull();
+    expect(doc.getElementById('trays-list')).not.toBeNull();
+  });
+
+  it('de los contadores de arriba solo queda el del trago más viejo (D89)', () => {
+    const doc = documento();
+    for (const id of ['s-trays', 's-items', 's-coming']) expect(doc.getElementById(id)).toBeNull();
+    expect(doc.getElementById('s-oldest')).not.toBeNull();
+    // Y vive dentro de "Por llevar", no encima de todas las pestañas.
+    expect(doc.getElementById('tab-trays').contains(doc.getElementById('floor-stats'))).toBe(true);
+  });
+
+  it('la hoja de la mesa y el aviso sin turno arrancan cerrados (D89)', () => {
+    const doc = documento();
+    expect(doc.getElementById('table-sheet').hasAttribute('hidden')).toBe(true);
+    expect(doc.getElementById('btn-tbl-again').hasAttribute('hidden')).toBe(true);
+    expect(doc.getElementById('shift-banner').hasAttribute('hidden')).toBe(true);
+  });
+
+  it('cerrar la hoja del pedido pregunta si hay algo armado (D89)', () => {
+    expect(controlador).toMatch(/\$\('btn-take-close'\)\.onclick = askCloseTake/);
+    expect(controlador).toMatch(/take\.discardConfirm/);
+  });
+
+  it('la carta ya no se corta en 60: con 129 productos, el resto solo salía buscando (D89)', () => {
+    expect(controlador).not.toMatch(/\.slice\(0, 60\)/);
+  });
+
   it('carga los módulos que la hoja necesita', () => {
     const doc = documento();
     const srcs = [...doc.querySelectorAll('script')].map((s) => s.getAttribute('src'));

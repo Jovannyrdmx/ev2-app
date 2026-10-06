@@ -1363,6 +1363,14 @@ paths:
           in: query
           description: Solo pedidos sin terminar
           schema: { type: boolean, default: false }
+        - name: mine
+          in: query
+          description: Solo los que levantó quien pregunta (el mesero)
+          schema: { type: boolean, default: false }
+        - name: since_hours
+          in: query
+          description: Solo los creados en las últimas N horas (D89). Sin él, todo el historial.
+          schema: { type: integer, minimum: 1, maximum: 48 }
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/Offset' }
       responses:

@@ -104,6 +104,114 @@ describe('Mesero: qué charolas hay que llevar', () => {
   });
 });
 
+describe('Mesero: una sola lista de lo que hay que llevar (D89)', () => {
+  it('lo de la pista se agrupa por su punto y dice a dónde va, no "sin mesa"', () => {
+    const list = Staff.trays([
+      order({ id: 'a', table_id: null, table_code: null, delivery_point_id: 'pA', delivery_point_name: 'Pista A' }),
+      order({ id: 'b', table_id: null, table_code: null, delivery_point_id: 'pA', delivery_point_name: 'Pista A' }),
+      order({ id: 'c', table_id: null, table_code: null, delivery_point_id: 'pB', delivery_point_name: 'Terraza' }),
+    ], NOW);
+    expect(list).toHaveLength(2);
+    expect(list.find((g) => g.point_name === 'Pista A').orders).toHaveLength(2);
+    expect(list.every((g) => g.key)).toBe(true);
+  });
+
+  it('con mesa, la mesa manda aunque el pedido traiga un punto', () => {
+    const [g] = Staff.trays([order({ delivery_point_id: 'pA', delivery_point_name: 'Pista A' })], NOW);
+    expect(g.table_code).toBe('39');
+    expect(g.point_name).toBeNull();
+  });
+
+  it('lo suyo y lo del cliente arriba; lo de otro mesero aparte', () => {
+    const { mine, others } = Staff.splitTrays([
+      order({ id: 'yo', taken_by: 'w1', table_id: 't1' }),
+      order({ id: 'cliente', taken_by: null, table_id: 't2', table_code: '40' }),
+      order({ id: 'otro', taken_by: 'w2', table_id: 't3', table_code: '41' }),
+    ], NOW, 'w1');
+    expect(mine.flatMap((g) => g.orders.map((o) => o.id)).sort()).toEqual(['cliente', 'yo']);
+    expect(others.flatMap((g) => g.orders.map((o) => o.id))).toEqual(['otro']);
+  });
+
+  it('sin mesero que filtrar (la gerencia), todo es suyo', () => {
+    const { mine, others } = Staff.splitTrays([order({ taken_by: 'w2' })], NOW, null);
+    expect(mine).toHaveLength(1);
+    expect(others).toHaveLength(0);
+  });
+});
+
+describe('Mesero: la cuadrícula de mesas (D89)', () => {
+  const mesas = [
+    { id: 't1', code: '1', section: 'GENERAL', capacity: 4, guests: [] },
+    { id: 't5', code: '5', section: 'GENERAL', capacity: 4, guests: [] },
+    { id: 't51', code: '51', section: 'SUITE', capacity: 8, guests: [] },
+    { id: 't9', code: '9', section: 'VIP', capacity: 6, guests: [{ id: 'g', name: 'Ana Pérez' }] },
+  ];
+
+  it('las suyas primero, luego las ocupadas o con pedidos, luego el plano', () => {
+    const grid = Staff.tableGrid(mesas, {
+      mine: new Set(['t51']),
+      activeOrders: [{ table_id: 't5', status: 'preparing' }, { table_id: 't5', status: 'delivered' }],
+    });
+    expect(grid.map((m) => m.code)).toEqual(['51', '5', '9', '1']);
+    expect(grid.find((m) => m.code === '5')).toMatchObject({ busy: true, active: 1 });
+    expect(grid.find((m) => m.code === '51').mine).toBe(true);
+  });
+
+  it('buscando "5" sale primero la 5, aunque la 51 sea suya', () => {
+    const grid = Staff.tableGrid(mesas, { search: '5', mine: new Set(['t51']) });
+    expect(grid.map((m) => m.code)).toEqual(['5', '51']);
+  });
+
+  it('se encuentra por el nombre de quien está sentado, sin acentos', () => {
+    expect(Staff.tableGrid(mesas, { search: 'perez' }).map((m) => m.code)).toEqual(['9']);
+  });
+
+  it('filtra por zona, y las zonas salen en el orden del plano', () => {
+    expect(Staff.zones(mesas)).toEqual(['GENERAL', 'SUITE', 'VIP']);
+    expect(Staff.tableGrid(mesas, { zone: 'GENERAL' }).map((m) => m.code)).toEqual(['1', '5']);
+  });
+
+  it('"mis mesas" son las de sus pedidos de la noche, no las canceladas ni las de otro', () => {
+    const ids = Staff.myTableIds([
+      { table_id: 't1', status: 'delivered', taken_by: 'w1' },
+      { table_id: 't5', status: 'cancelled', taken_by: 'w1' },
+      { table_id: 't9', status: 'ready', taken_by: 'w2' },
+      { table_id: null, status: 'ready', taken_by: 'w1' },
+    ], 'w1');
+    expect([...ids]).toEqual(['t1']);
+  });
+});
+
+describe('Mesero: otra ronda (D89)', () => {
+  const carta = [
+    { id: 'd1', name: 'Cerveza', price: '60.00', available: true },
+    { id: 'd2', name: 'Tequila', price: '80.00', available: true },
+    { id: 'd3', name: 'Agotado', price: '50.00', available: false },
+  ];
+  const pedidos = [
+    { id: 'viejo', table_id: 't1', status: 'delivered', created_at: agoMin(60), items: [{ drink_id: 'd1', quantity: 5 }] },
+    { id: 'nuevo', table_id: 't1', status: 'delivered', created_at: agoMin(10),
+      items: [{ drink_id: 'd2', quantity: 2 }, { drink_id: 'd3', quantity: 1 }, { drink_id: 'borrado', quantity: 1 }] },
+    { id: 'cancelado', table_id: 't1', status: 'cancelled', created_at: agoMin(1), items: [{ drink_id: 'd1', quantity: 9 }] },
+  ];
+
+  it('es el último pedido de esa mesa, sin contar los cancelados', () => {
+    const r = Staff.lastRound(pedidos, 't1', carta);
+    expect(r.order.id).toBe('nuevo');
+  });
+
+  it('solo trae lo que sigue en la carta: lo agotado o borrado no se arma', () => {
+    const r = Staff.lastRound(pedidos, 't1', carta);
+    expect(r.items.map((i) => [i.drink.id, i.quantity])).toEqual([['d2', 2]]);
+  });
+
+  it('sin pedidos en la mesa, o sin nada que se pueda volver a pedir, no hay ronda', () => {
+    expect(Staff.lastRound(pedidos, 't2', carta)).toBeNull();
+    expect(Staff.lastRound([pedidos[1]], 't1', [carta[2]])).toBeNull();
+    expect(Staff.lastRound(pedidos, null, carta)).toBeNull();
+  });
+});
+
 describe('Mesero: turno y propinas', () => {
   it('el turno abierto se mide hasta ahora; el cerrado, hasta que cerró', () => {
     expect(Staff.shiftMinutes({ started_at: agoMin(125) }, NOW)).toBe(125);

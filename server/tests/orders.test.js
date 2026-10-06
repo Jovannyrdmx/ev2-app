@@ -505,6 +505,33 @@ describe('El mesero levanta el pedido', () => {
     expect(res.body.order.taken_by).toBeNull();
     expect(res.body.order.pay_at_till).toBe(false);
   });
+
+  it('sus pedidos de esta noche, aunque ya se hayan entregado (D89)', async () => {
+    // "Otra ronda" y "Mis mesas" salen de aquí: lo de anoche no cuenta, lo entregado sí.
+    const hoy = await api().post(url('/orders')).set(auth(waiter))
+      .send(newOrder({ table_id: table.id }));
+    const ayer = await api().post(url('/orders')).set(auth(waiter))
+      .send(newOrder({ table_id: table.id }));
+    await pool.query(`UPDATE drink_orders SET created_at = now() - interval '30 hours',
+                             status = 'delivered' WHERE id = $1`, [ayer.body.order.id]);
+    await pool.query("UPDATE drink_orders SET status = 'delivered' WHERE id = $1", [hoy.body.order.id]);
+    const deCliente = await api().post(url('/orders')).set(auth(guest)).send(newOrder());
+
+    const res = await api().get(url('/orders?mine=true&since_hours=18')).set(auth(waiter));
+    expect(res.status).toBe(200);
+    const ids = res.body.orders.map((o) => o.id);
+    expect(ids).toEqual([hoy.body.order.id]);
+    expect(ids).not.toContain(deCliente.body.order.id);
+
+    // Sin el filtro sigue igual que antes: todo su historial.
+    const todo = await api().get(url('/orders?mine=true')).set(auth(waiter));
+    expect(todo.body.orders).toHaveLength(2);
+  });
+
+  it('el filtro de horas tiene tope: no se pide el historial entero por aquí', async () => {
+    const res = await api().get(url('/orders?mine=true&since_hours=500')).set(auth(waiter));
+    expect(res.status).toBe(400);
+  });
 });
 
 /**

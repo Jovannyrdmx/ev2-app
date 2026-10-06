@@ -248,6 +248,9 @@ router.get('/nightclubs/:nightclubId/orders',
       bar_id: uuid.optional(),
       paid_only: z.coerce.boolean().default(false),
       mine: z.coerce.boolean().default(false),
+      // Solo lo de las últimas N horas (D89): "esta noche" para el mesero, sin
+      // depender de que su historial quepa en una página.
+      since_hours: z.coerce.number().int().min(1).max(48).optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
@@ -263,6 +266,7 @@ router.get('/nightclubs/:nightclubId/orders',
           AND ($5::boolean IS FALSE OR o.pay_at_till
                OR COALESCE(tx.status, 'not_required') IN ('paid', 'not_required'))
           AND ($6::boolean IS FALSE OR o.taken_by = $7::uuid)
+          AND ($10::int IS NULL OR o.created_at > now() - make_interval(hours => $10::int))
         ORDER BY
           -- El cantinero puede reacomodar sus tarjetas; lo que reacomoda es esto y
           -- solo esto, porque la hora de creacion y la de pago son la auditoria.
@@ -271,7 +275,7 @@ router.get('/nightclubs/:nightclubId/orders',
           o.created_at ASC
         LIMIT $8 OFFSET $9`,
       [req.params.nightclubId, q.status || null, q.active, q.bar_id || null,
-        q.paid_only, q.mine, req.user.id, q.limit, q.offset],
+        q.paid_only, q.mine, req.user.id, q.limit, q.offset, q.since_hours ?? null],
     );
     res.json({ orders: rows });
   }));
