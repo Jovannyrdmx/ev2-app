@@ -5,7 +5,7 @@
  * y `EV2Roles`. Cubre lo que el dueño dejó para configurar después: conductores, zonas y
  * tarifas del taxi, y los cajones del estacionamiento — más el resumen del turno.
  */
-/* global EV2, EV2Format, EV2Manager, EV2Warehouse, EV2Roles, EV2PasswordGate, EV2StaffAdmin,
+/* global EV2Push, EV2, EV2Format, EV2Manager, EV2Warehouse, EV2Roles, EV2PasswordGate, EV2StaffAdmin,
    EV2Payouts, EV2NightReport, EV2Roster */
 (function () {
   'use strict';
@@ -126,6 +126,8 @@
 
   async function signOut() {
     if (state.realtime) state.realtime.close();
+    // El teléfono deja de recibir los avisos de esta persona (D90); va antes del logout.
+    await EV2Push.forget(api);
     await api.logout();
     // Al inicio, no al login de este rol: desde ahí entra cualquiera y el inicio lo
     // manda a su pantalla.
@@ -208,6 +210,8 @@
     $('me-name').textContent = (api.session.user && api.session.user.display_name) || '';
     await loadAll();
     connectRealtime();
+    // Notificaciones al teléfono (D90): ofrecerlas, o volver a registrar este teléfono.
+    EV2Push.start({ api, box: $('push-box'), toast });
   }
 
   function renderWrongRole() {

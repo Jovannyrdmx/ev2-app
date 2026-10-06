@@ -40,6 +40,7 @@ const paymentRoutes = require('./routes/payments');
 const doorRoutes = require('./routes/door');
 const passRoutes = require('./routes/passes');
 const printingRoutes = require('./routes/printing');
+const pushRoutes = require('./routes/push');
 
 // The OpenAPI contract is the agreement between backend, web and mobile.
 // It is served at /api/docs; a missing file must not stop the API from starting.
@@ -237,6 +238,7 @@ function createApp() {
   app.use('/api', posRoutes);
   app.use('/api', paymentRoutes);
   app.use('/api', printingRoutes);
+  app.use('/api', pushRoutes);
   // El agente de impresión va aparte porque no trae sesión de persona: se
   // identifica con su propio token y solo puede tomar trabajos de su club. Va montado
   // en su propio prefijo y no en `/api` porque su autenticación es un `use()` sin

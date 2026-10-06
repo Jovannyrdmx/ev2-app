@@ -36,12 +36,15 @@ class EventRelay {
    * @param {number} [opts.sweepIntervalMs] safety sweep, independent of notifications
    * @param {number} [opts.leaderRetryMs]   how often a stand-by tries to take over
    * @param {object} [opts.logger]
+   * @param {function} [opts.onEvent] called with every LIVE event the leader relays
+   *        (push notifications, D90). Not awaited: whatever it does cannot slow the relay.
    */
   constructor({
     redis, db = pool, instanceId = `${process.pid}@${require('os').hostname()}`,
-    sweepIntervalMs = 1000, leaderRetryMs = 5000, logger = console,
+    sweepIntervalMs = 1000, leaderRetryMs = 5000, logger = console, onEvent = null,
   }) {
     this.redis = redis;
+    this.onEvent = onEvent;
     this.db = db;
     this.instanceId = instanceId;
     this.sweepIntervalMs = sweepIntervalMs;
@@ -175,6 +178,7 @@ class EventRelay {
             await this.publish(row);
             this.published += 1;
             total += 1;
+            this.notify(row);
           } else {
             this.skippedStale += 1;
           }
@@ -203,6 +207,21 @@ class EventRelay {
       // committed in Postgres and reaches the client through the catch-up read.
       this.logger.error('Relay could not publish to Redis:', err.message);
     }
+  }
+
+  /**
+   * Hands the event to the push notifications. Only the leader gets here, so each
+   * event is notified once for the whole deployment; a stale one (replayed after an
+   * outage) never gets here, so nobody's phone buzzes about something from an hour ago.
+   */
+  notify(row) {
+    if (!this.onEvent) return;
+    Promise.resolve()
+      .then(() => this.onEvent({
+        id: row.event_id, nightclub_id: row.nightclub_id, type: row.type,
+        audience: row.audience, payload: row.payload, created_at: row.created_at,
+      }))
+      .catch((err) => this.logger.error('Relay onEvent failed:', err.message));
   }
 
   detachListeners() {

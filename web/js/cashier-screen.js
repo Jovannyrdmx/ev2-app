@@ -6,7 +6,7 @@
  * (`EV2TerminalCharge`), el corte (`EV2ShiftCut`) y el carrito y los métodos de cobro
  * de la venta (`EV2Client`, `EV2OrderTaking`).
  */
-/* global EV2, EV2Format, EV2Roles, EV2PasswordGate, EV2Client, EV2OrderTaking,
+/* global EV2Push, EV2, EV2Format, EV2Roles, EV2PasswordGate, EV2Client, EV2OrderTaking,
    EV2TerminalCharge, EV2ShiftCut, EV2Cashier */
 (function () {
   'use strict';
@@ -104,6 +104,8 @@
 
   async function signOut() {
     if (state.realtime) state.realtime.close();
+    // El teléfono deja de recibir los avisos de esta persona (D90); va antes del logout.
+    await EV2Push.forget(api);
     await api.logout();
     // Al inicio, no al login de este rol: desde ahí entra cualquiera y el inicio lo
     // manda a su pantalla.
@@ -191,6 +193,8 @@
     $('me-name').textContent = (api.session.user && api.session.user.display_name) || '';
     await Promise.all([loadTill(), loadTerminals(), loadUsdRate()]);
     connectRealtime();
+    // Notificaciones al teléfono (D90): ofrecerlas, o volver a registrar este teléfono.
+    EV2Push.start({ api, box: $('push-box'), toast });
     // El "hace 12 min" de cada pedido avanza solo.
     setInterval(render, 60000);
   }

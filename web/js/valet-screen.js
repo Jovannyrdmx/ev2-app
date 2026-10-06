@@ -4,7 +4,7 @@
  * Conecta el DOM con `EV2` (API y socket), `EV2Valet` (carriles, espera, búsqueda) y
  * `EV2Roles`. Las decisiones viven en `valet-tickets.js` y están probadas ahí.
  */
-/* global EV2, EV2Format, EV2Valet, EV2Roles, EV2PasswordGate */
+/* global EV2Push, EV2, EV2Format, EV2Valet, EV2Roles, EV2PasswordGate */
 (function () {
   'use strict';
 
@@ -77,6 +77,8 @@
 
   async function signOut() {
     if (state.realtime) state.realtime.close();
+    // El teléfono deja de recibir los avisos de esta persona (D90); va antes del logout.
+    await EV2Push.forget(api);
     await api.logout();
     // Al inicio, no al login de este rol: desde ahí entra cualquiera y el inicio lo
     // manda a su pantalla.
@@ -143,6 +145,8 @@
     $('me-name').textContent = (api.session.user && api.session.user.display_name) || '';
     await loadAll();
     connectRealtime();
+    // Notificaciones al teléfono (D90): ofrecerlas, o volver a registrar este teléfono.
+    EV2Push.start({ api, box: $('push-box'), toast });
     setInterval(renderAll, 30000);
   }
 

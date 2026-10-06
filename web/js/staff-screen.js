@@ -4,7 +4,7 @@
  * Conecta el DOM con `EV2` (API y socket), `EV2Staff` (charolas, ocupación, propinas)
  * y `EV2Roles`. Las decisiones viven en `staff-floor.js` y están probadas ahí.
  */
-/* global EV2TerminalCharge, EV2ShiftCut, EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan,
+/* global EV2Push, EV2TerminalCharge, EV2ShiftCut, EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan,
           EV2Client, EV2DrinkArt, EV2OrderTaking */
 (function () {
   'use strict';
@@ -106,6 +106,8 @@
 
   async function signOut() {
     if (state.realtime) state.realtime.close();
+    // El teléfono deja de recibir los avisos de esta persona (D90); va antes del logout.
+    await EV2Push.forget(api);
     await api.logout();
     // Al inicio, no al login de este rol: desde ahí entra cualquiera y el inicio lo
     // manda a su pantalla.
@@ -175,6 +177,8 @@
     $('me-role').textContent = EV2Roles.describe(user.role, lang()).label;
     await loadAll();
     connectRealtime();
+    // Notificaciones al teléfono (D90): ofrecerlas, o volver a registrar este teléfono.
+    EV2Push.start({ api, box: $('push-box'), toast });
     // El reloj de espera avanza solo: si no, "hace 2 min" se queda en 2 min toda la noche.
     setInterval(renderAll, 30000);
   }

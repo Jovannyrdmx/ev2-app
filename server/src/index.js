@@ -12,6 +12,7 @@ const paymentConfig = require('./config/payments');
 const clubNetwork = require('./services/club-network');
 const terminalCharges = require('./services/terminal-charges');
 const pins = require('./services/pins');
+const push = require('./services/push');
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -48,12 +49,18 @@ async function start() {
     console.log(`Redis connected (${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379})`);
     // Committed events reach the sockets through this relay (D26). Exactly one API
     // process leads; the rest stand by and take over if it dies.
-    relay = await new EventRelay({ redis }).start();
+    // Push notifications (D90) ride on the same relay: one leader, one notice per event.
+    relay = await new EventRelay({ redis, onEvent: (event) => push.dispatch(event) }).start();
     app.locals.relay = relay;
     // El caso lider ya lo anuncia relay.start(); aqui solo falta el otro.
     if (!relay.isLeader) {
       console.log('Realtime relay: standing by (another instance is leading)');
     }
+    // Sin las llaves VAPID el sistema funciona igual; solo no salen notificaciones al
+    // teléfono. Se dice al arrancar para que no se descubra a media noche.
+    console.log(push.config().enabled
+      ? 'Push notifications: enabled'
+      : 'Push notifications: DISABLED (set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT)');
   } catch (err) {
     console.error('Startup failed:', err.message);
     process.exit(1);

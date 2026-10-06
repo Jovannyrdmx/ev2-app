@@ -5,7 +5,7 @@
  * `EV2Map` (plano) y `EV2Roles` (a dónde va cada rol). Ninguna decisión de negocio vive
  * aquí: si algo hay que probar, va en esos módulos.
  */
-/* global EV2, EV2Format, EV2Client, EV2Map, EV2Roles, EV2Taxi, EV2DrinkArt, EV2Social,
+/* global EV2Push, EV2, EV2Format, EV2Client, EV2Map, EV2Roles, EV2Taxi, EV2DrinkArt, EV2Social,
    EV2PinPad */
 (function () {
   'use strict';
@@ -644,6 +644,8 @@
 
   async function signOut() {
     if (state.realtime) state.realtime.close();
+    // El teléfono deja de recibir los avisos de esta persona (D90); va antes del logout.
+    await EV2Push.forget(api);
     await api.logout();
     // Al inicio, no al login de este rol: desde ahí entra cualquiera y el inicio lo
     // manda a su pantalla.
@@ -736,6 +738,8 @@
     $('profile-club').textContent = (state.club && state.club.name) || 'EV2 Clandestinoz';
     await Promise.all([loadFloor(), loadMenu(), loadOrders(), loadTaxi()]);
     connectRealtime();
+    // Notificaciones al teléfono (D90): ofrecerlas, o volver a registrar este teléfono.
+    EV2Push.start({ api, box: $('push-box'), toast });
     // El panel de cuentas ligadas no bloquea la entrada al club: si falla, el perfil
     // se queda sin ese recuadro y todo lo demás funciona.
     loadSocialPanel();

@@ -5,7 +5,7 @@
  * abrir esto). Las decisiones —qué carril, qué botón, qué hace un evento— viven en
  * `bar-queue.js` y están probadas ahí.
  */
-/* global EV2, EV2Format, EV2Bar, EV2Receiving, EV2Roles, EV2PasswordGate */
+/* global EV2Push, EV2, EV2Format, EV2Bar, EV2Receiving, EV2Roles, EV2PasswordGate */
 (function () {
   'use strict';
   // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
@@ -86,6 +86,8 @@
 
   async function signOut() {
     if (state.realtime) state.realtime.close();
+    // El teléfono deja de recibir los avisos de esta persona (D90); va antes del logout.
+    await EV2Push.forget(api);
     await api.logout();
     // Al inicio, no al login de este rol: desde ahí entra cualquiera y el inicio lo
     // manda a su pantalla.
@@ -200,6 +202,8 @@
     await loadMyRequests();
     contarSustituciones();
     connectRealtime();
+    // Notificaciones al teléfono (D90): ofrecerlas, o volver a registrar este teléfono.
+    EV2Push.start({ api, box: $('push-box'), toast });
     // El reloj de espera avanza solo: sin esto, "hace 2 min" se queda en 2 min toda la
     // noche y el color deja de avisar.
     setInterval(renderAll, 30000);

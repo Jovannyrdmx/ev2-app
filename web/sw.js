@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v46';
+const VERSION = 'ev2-v47';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -64,6 +64,8 @@ const SHELL = [
   // icono grande al agregarla a la pantalla de inicio, y el service worker fallaba al
   // guardarlo en silencio.
   'js/ui.js',
+  // Las notificaciones (D90): el recuadro para activarlas y el sonido con la app abierta.
+  'js/push.js',
   // La hoja de estilo, las letras y los iconos viven aquí mismo (D71): sin señal la app
   // abre con su diseño, no con los botones grises del navegador.
   'css/ev2.css',
@@ -116,5 +118,53 @@ self.addEventListener('fetch', (event) => {
       if (cached) return cached;
       throw err;
     }
+  })());
+});
+
+// ---------------------------------------------------------------- notificaciones (D90)
+//
+// El servidor manda { title, body, url, tag }. Se enseña SIEMPRE una notificación: iPhone
+// le quita el permiso a la app que recibe un push sin enseñar nada. Si la app está
+// abierta y a la vista, la notificación sale callada y la pantalla toca nuestro sonido
+// (dos sonidos a la vez confunden más de lo que avisan).
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { title: 'EV2', body: event.data ? event.data.text() : '' };
+  }
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const visible = windows.some((c) => c.visibilityState === 'visible' && c.focused);
+    for (const c of windows) c.postMessage({ type: 'ev2-push', payload: data });
+    const options = {
+      body: data.body || '',
+      icon: 'images/ev2-logo.svg.png',
+      badge: 'images/favicon-32x32.png',
+      // Mismo tag = reemplaza al anterior en vez de apilar diez avisos del mismo pedido;
+      // renotify hace que el reemplazo vuelva a sonar.
+      tag: data.tag || undefined,
+      renotify: Boolean(data.tag),
+      silent: visible,
+      data: { url: data.url || 'index.html' },
+    };
+    // Vibrar y callada a la vez es un error para el navegador (TypeError) y la
+    // notificación no sale: la vibración va solo cuando suena.
+    if (!visible) options.vibrate = [200, 100, 200];
+    await self.registration.showNotification(data.title || 'EV2', options);
+  })());
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL((event.notification.data && event.notification.data.url) || 'index.html', self.registration.scope);
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    // Si esa pantalla ya está abierta, se trae al frente en vez de abrir otra.
+    const same = windows.find((c) => new URL(c.url).pathname === target.pathname);
+    if (same) return same.focus();
+    return self.clients.openWindow(target.href);
   })());
 });

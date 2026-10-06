@@ -76,6 +76,10 @@
 
     <div id="banner" class="px-4 py-2 text-sm text-center bg-amber-500/20 text-amber-100" hidden></div>
 
+    <!-- Activar las notificaciones al teléfono (D90): js/push.js lo llena o lo deja oculto. -->
+
+    <div id="push-box" hidden></div>
+
     <!-- La contraseña temporal se muestra UNA vez: no se puede perder en un render. -->
     <div id="secret-box" class="m-4 rounded-xl p-4" style="background:rgba(0,255,0,.08);border:2px solid var(--ev2-lime)" hidden>
       <p class="text-xs uppercase tracking-wider" style="color:var(--ev2-lime)"><span id="secret-who"></span></p>
@@ -1060,6 +1064,7 @@
 <script src="js/night-report.js"></script>
 <script src="js/roster.js"></script>
 <script src="js/substitutions.js"></script>
+<script src="js/push.js"></script>
 <script src="js/manager-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

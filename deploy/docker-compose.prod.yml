@@ -192,6 +192,11 @@ services:
       # ajustarlos sin reconstruir la imagen.
       MERCADOPAGO_ORDER_TTL_S: ${MERCADOPAGO_ORDER_TTL_S:-}
       MERCADOPAGO_SWEEP_MS: ${MERCADOPAGO_SWEEP_MS:-}
+      # Notificaciones al teléfono (D90). Vacías = el sistema funciona igual, solo no
+      # salen notificaciones; la API lo dice al arrancar.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
       # Entrar con Facebook. Vacías = el botón no se pinta y la ruta contesta 501
       # diciendo qué falta; correo y contraseña siguen funcionando igual.
       FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}

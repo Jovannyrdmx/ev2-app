@@ -5,7 +5,7 @@
  * `EV2Roles`. Aquí un error se paga en confianza: enseñar como disponible un dinero
  * que todavía no lo está, o dejar pedir un retiro que el servidor va a rechazar.
  */
-/* global EV2, EV2Format, EV2Earnings, EV2Roles, EV2PasswordGate, EV2Songs, EV2Shift, EV2Roster */
+/* global EV2Push, EV2, EV2Format, EV2Earnings, EV2Roles, EV2PasswordGate, EV2Songs, EV2Shift, EV2Roster */
 (function () {
   'use strict';
   // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
@@ -84,7 +84,12 @@
     } catch (err) { showError(err, $('auth-error'), { context: 'login' }); }
   };
 
-  async function signOut() { await api.logout(); location.replace('index.html'); }
+  async function signOut() {
+    // El teléfono deja de recibir los avisos de esta persona (D90); va antes del logout.
+    await EV2Push.forget(api);
+    await api.logout();
+    location.replace('index.html');
+  }
   $('btn-logout').onclick = signOut;
   $('btn-wrong-logout').onclick = signOut;
   $('btn-pw-logout').onclick = signOut;
@@ -152,6 +157,8 @@
     $('me-role').textContent = EV2Roles.describe(user.role, lang()).label;
     await loadAll();
     connectRealtime();
+    // Notificaciones al teléfono (D90): ofrecerlas, o volver a registrar este teléfono.
+    EV2Push.start({ api, box: $('push-box'), toast });
   }
 
   function renderWrongRole() {

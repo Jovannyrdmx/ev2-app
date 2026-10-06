@@ -148,6 +148,12 @@ tags:
   - name: Pagos
     description: Métodos de pago guardados por el usuario.
 
+  - name: Notificaciones
+    description: |
+      Notificaciones push al teléfono (D90). Cada teléfono que acepta se registra aquí;
+      qué se avisa y a quién lo decide el servidor con los eventos del sistema. Al
+      personal solo en turno, al gerente con una noche en curso.
+
   - name: Impresión
     description: |
       Impresoras térmicas del club, las PCs que imprimen por el servidor y la cola de
@@ -11218,6 +11224,98 @@ paths:
                   substitution: { $ref: '#/components/schemas/SupplySubstitution' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/push/config:
+    get:
+      operationId: getPushConfig
+      tags: [Notificaciones]
+      summary: ¿Hay notificaciones? Y la llave pública para suscribirse
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Estado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  public_key: { type: [string, 'null'], description: Llave VAPID pública }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/nightclubs/{nightclubId}/push/subscriptions:
+    post:
+      operationId: subscribePush
+      tags: [Notificaciones]
+      summary: Registrar este teléfono
+      description: |
+        El mismo `endpoint` es el mismo teléfono: se actualiza en lugar de duplicarse, y
+        si era de otra persona pasa a quien está entrando. Solo se aceptan los servicios de
+        notificaciones de los navegadores (Google, Apple, Mozilla, Microsoft).
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint, keys]
+              properties:
+                endpoint: { type: string, maxLength: 1000 }
+                keys:
+                  type: object
+                  required: [p256dh, auth]
+                  properties:
+                    p256dh: { type: string }
+                    auth: { type: string }
+                lang: { type: string, enum: [es, en], default: es }
+      responses:
+        '201': { description: Registrado }
+        '200': { description: Ya estaba; actualizado }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Las notificaciones no están configuradas en el servidor }
+    delete:
+      operationId: unsubscribePush
+      tags: [Notificaciones]
+      summary: Dejar de recibir en este teléfono (al salir)
+      description: Solo borra un teléfono de quien pregunta.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint]
+              properties:
+                endpoint: { type: string, maxLength: 1000 }
+      responses:
+        '204': { description: Borrado (o no era suyo) }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/nightclubs/{nightclubId}/push/test:
+    post:
+      operationId: testPush
+      tags: [Notificaciones]
+      summary: Mandar un aviso de prueba a mis teléfonos
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Cuántos teléfonos tiene y a cuántos llegó
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  devices: { type: integer }
+                  sent: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { description: Las notificaciones no están configuradas en el servidor }
 
 components:
   securitySchemes:
