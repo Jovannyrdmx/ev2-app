@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v48';
+const VERSION = 'ev2-v49';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -59,10 +59,6 @@ const SHELL = [
   'js/shift-cut.js',
   // La caja de cada barra (D77): el cajero abre, cobra y corta desde aquí toda la noche.
   'caja.html', 'js/cashier.js', 'js/cashier-screen.js', 'js/substitutions.js',
-  // El nombre del logo lleva la extension doble ('...svg.png') porque el archivo que
-  // se puso es un PNG. Apuntar a 'ev2-logo.svg' -- que no existe -- dejaba la app sin
-  // icono grande al agregarla a la pantalla de inicio, y el service worker fallaba al
-  // guardarlo en silencio.
   'js/ui.js',
   // Las notificaciones (D90): el recuadro para activarlas y el sonido con la app abierta.
   'js/push.js',
@@ -73,7 +69,11 @@ const SHELL = [
   'fonts/inter-latin-600-normal.woff2', 'fonts/inter-latin-700-normal.woff2',
   'fonts/poppins-latin-500-normal.woff2', 'fonts/poppins-latin-600-normal.woff2',
   'fonts/poppins-latin-700-normal.woff2',
-  'images/favicon-32x32.png', 'images/ev2-logo.svg.png', 'images/ev2-clandestinoz.webp',
+  // El logo y los íconos (D92). Cada nombre tiene que existir: `cache.add` de un archivo
+  // que no está falla en silencio, y así se quedó la app sin ícono una vez.
+  'images/favicon-32x32.png', 'images/favicon-16x16.png', 'images/favicon.ico',
+  'images/apple-touch-icon.png', 'images/icon-192.png', 'images/icon-512.png',
+  'images/icon-maskable-512.png', 'images/ev2-clandestinoz.webp',
 ];
 
 self.addEventListener('install', (event) => {
@@ -141,7 +141,7 @@ self.addEventListener('push', (event) => {
     for (const c of windows) c.postMessage({ type: 'ev2-push', payload: data });
     const options = {
       body: data.body || '',
-      icon: 'images/ev2-logo.svg.png',
+      icon: 'images/icon-192.png',
       badge: 'images/favicon-32x32.png',
       // Mismo tag = reemplaza al anterior en vez de apilar diez avisos del mismo pedido;
       // renotify hace que el reemplazo vuelva a sonar.

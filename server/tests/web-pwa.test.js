@@ -127,3 +127,40 @@ describe('La cáscara guardada para trabajar sin señal', () => {
     expect(css).toMatch(/\.fa-taxi\{--fa-icon:url\("data:image\/svg\+xml/);
   });
 });
+
+describe('el logo y los íconos de la app (D92)', () => {
+  const manifest = JSON.parse(leer('manifest.json'));
+  const PAGINAS = fs.readdirSync(ROOT).filter((f) => f.endsWith('.html'));
+
+  it('el manifest trae 192, 512 y el recortable (Android lo corta en círculo), y cada uno existe con su tamaño', () => {
+    const porProposito = (p) => manifest.icons.filter((i) => (i.purpose || 'any').split(' ').includes(p));
+    expect(porProposito('any').map((i) => i.sizes).sort()).toEqual(['192x192', '512x512']);
+    expect(porProposito('maskable').map((i) => i.sizes)).toEqual(['512x512']);
+    for (const icono of manifest.icons) {
+      const buf = fs.readFileSync(path.join(ROOT, icono.src));
+      // Ancho y alto vienen en la cabecera IHDR del PNG: bytes 16-23.
+      const tam = `${buf.readUInt32BE(16)}x${buf.readUInt32BE(20)}`;
+      expect([icono.src, tam]).toEqual([icono.src, icono.sizes]);
+    }
+  });
+
+  it('cada página trae favicon e ícono de iPhone, y apuntan a archivos que existen', () => {
+    for (const pagina of PAGINAS) {
+      const html = leer(pagina);
+      const enlaces = [...html.matchAll(/<link rel="(?:icon|apple-touch-icon)" href="([^"]+)"/g)].map((m) => m[1]);
+      expect([pagina, enlaces.includes('images/apple-touch-icon.png'), enlaces.includes('images/favicon-32x32.png')])
+        .toEqual([pagina, true, true]);
+      for (const e of enlaces) expect([pagina, e, fs.existsSync(path.join(ROOT, e))]).toEqual([pagina, e, true]);
+    }
+  });
+
+  it('el logo viejo ya no se usa en ningún lado', () => {
+    for (const f of [...PAGINAS, 'sw.js', 'manifest.json']) {
+      expect([f, /ev2-logo\.svg\.png/.test(leer(f))]).toEqual([f, false]);
+    }
+  });
+
+  it('la notificación usa el ícono nuevo', () => {
+    expect(sw).toMatch(/icon: 'images\/icon-192\.png'/);
+  });
+});
