@@ -210,3 +210,46 @@ describe('el gerente ve por qué no llegan (D91)', () => {
     expect(sh).toMatch(/Push notifications: enabled/);
   });
 });
+
+// ================================================================== D93
+
+describe('los avisos en vivo suenan en la pantalla abierta (D93)', () => {
+  for (const ctrl of Object.values(PANTALLAS)) {
+    it(`${ctrl} escucha sus avisos en vivo`, () => {
+      expect(leer(`js/${ctrl}`)).toContain('EV2Push.listen(rt, { toast });');
+    });
+  }
+
+  it('el texto sale en el idioma de la pantalla, con español de respaldo', () => {
+    const p = { es: { title: 'Trago listo', body: 'Mesa 12' }, en: { title: 'Drink ready', body: 'Table 12' } };
+    expect(Push.noticeText(p, 'en')).toEqual({ title: 'Drink ready', body: 'Table 12' });
+    expect(Push.noticeText(p, 'es')).toEqual({ title: 'Trago listo', body: 'Mesa 12' });
+    expect(Push.noticeText({ es: p.es }, 'en')).toEqual({ title: 'Trago listo', body: 'Mesa 12' });
+  });
+
+  it('el mismo aviso por dos caminos (en vivo y notificación) suena una sola vez', () => {
+    const t0 = 1_000_000;
+    expect(Push.firstTime('order-1', t0)).toBe(true);
+    expect(Push.firstTime('order-1', t0 + 1000)).toBe(false);
+    expect(Push.firstTime('order-2', t0 + 1000)).toBe(true);
+    // Pasado un rato, el mismo pedido puede volver a sonar (otro cambio de estado).
+    expect(Push.firstTime('order-1', t0 + 10_000)).toBe(true);
+  });
+
+  it('con la pantalla abierta suena, vibra y avisa; escondida no (para eso está la notificación)', () => {
+    const handlers = {};
+    const rt = { on: (n, fn) => { handlers[n] = fn; } };
+    const avisos = [];
+    global.document = { visibilityState: 'visible' };
+    try {
+      Push.listen(rt, { toast: (m) => avisos.push(m) });
+      handlers.notice({ tag: 'order-77', es: { title: 'Pedido nuevo', body: 'Mesa 3 · cobrar $90.00' } });
+      expect(avisos).toEqual(['Pedido nuevo · Mesa 3 · cobrar $90.00']);
+      global.document.visibilityState = 'hidden';
+      handlers.notice({ tag: 'order-78', es: { title: 'Pedido nuevo', body: 'Mesa 4' } });
+      expect(avisos).toHaveLength(1);
+    } finally {
+      delete global.document;
+    }
+  });
+});

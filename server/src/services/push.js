@@ -21,7 +21,9 @@
 
 const webpush = require('web-push');
 const { pool } = require('../db/pool');
-const { matchesAudience } = require('./events');
+const events = require('./events');
+
+const { matchesAudience } = events;
 
 // ---------------------------------------------------------------- configuration
 
@@ -84,6 +86,7 @@ const TEXTS = {
     orderReadyWaiter: ['Trago listo', '{place} · recoger en {bar}'],
     orderReadyWaiterNoBar: ['Trago listo', '{place}'],
     orderReadyGuest: ['Tu pedido está listo', 'Ya va en camino.'],
+    orderNewWaiter: ['Pedido nuevo', '{place} · cobrar {total}'],
     orderNewBar: ['Pedido nuevo', '{place} · {items}'],
     orderToCharge: ['Pedido por cobrar', '{place} · {total}'],
     orderReturned: ['Trago devuelto', 'Se devolvió un trago invitado.'],
@@ -117,6 +120,7 @@ const TEXTS = {
     orderReadyWaiter: ['Drink ready', '{place} · pick up at {bar}'],
     orderReadyWaiterNoBar: ['Drink ready', '{place}'],
     orderReadyGuest: ['Your order is ready', "It's on its way."],
+    orderNewWaiter: ['New order', '{place} · collect {total}'],
     orderNewBar: ['New order', '{place} · {items}'],
     orderToCharge: ['Order to collect', '{place} · {total}'],
     orderReturned: ['Drink returned', 'A gifted drink was returned.'],
@@ -300,8 +304,19 @@ const CATALOG = {
   },
 
   // A waiter's order enters the bar when it is taken (D77); the rest when it is paid.
+  // A guest's phone order waits for payment at the table: the waiters of that zone are
+  // the ones who go and collect it (D93) — before, nobody's phone said a table ordered.
   async order_created(db, ev) {
-    if (!ev.payload.pay_at_till) return [];
+    if (!ev.payload.pay_at_till) {
+      if (!ev.payload.awaiting_payment) return [];
+      const g = await loadOrder(db, ev.nightclub_id, ev.payload.order_id);
+      if (!g || g.sender_role !== 'guest') return [];
+      const waiters = await staffFor(db, ev.nightclub_id, { role: 'waiter', section: g.table_section });
+      return waiters.map((u) => ({
+        ...u, key: 'orderNewWaiter', tag: `order-${g.id}`,
+        vars: (lang) => ({ place: place(g, lang), total: money(g.subtotal, g.currency) }),
+      }));
+    }
     const o = await loadOrder(db, ev.nightclub_id, ev.payload.order_id);
     if (!o) return [];
     const bartenders = await staffFor(db, ev.nightclub_id, { role: 'bartender', locationId: o.bar_location_id });
@@ -545,12 +560,53 @@ async function sendTo(db, sub, payload, { sender = webpush, logger = console } =
  * Called by the relay leader for every live event. Never throws: a push service that
  * is down must not slow the relay that feeds every screen in the club.
  */
-async function dispatch(event, { db = pool, sender = webpush, logger = console } = {}) {
+/**
+ * El mismo aviso, por la conexión en vivo (D93): con la pantalla abierta suena, vibra y
+ * sale un letrero, aunque ese teléfono nunca haya activado las notificaciones del
+ * sistema. Un evento `notice` por grupo de destinatarios con el mismo texto, con el
+ * texto en los dos idiomas (la pantalla escoge el suyo). Las mismas reglas que el push:
+ * se publica con lo que ya decidió `noticesFor`.
+ */
+async function publishLive(event, notices, { publish } = {}) {
+  const groups = new Map();
+  for (const n of notices) {
+    const es = payloadFor(n, 'es', event);
+    const en = payloadFor(n, 'en', event);
+    if (!es) continue;
+    const key = JSON.stringify([es.title, es.body, es.url, es.tag]);
+    if (!groups.has(key)) groups.set(key, { ids: [], es, en });
+    groups.get(key).ids.push(n.id);
+  }
+  const doPublish = publish || events.publish;
+  for (const g of groups.values()) {
+    await doPublish({
+      nightclubId: event.nightclub_id, type: 'notice',
+      audience: { userIds: g.ids },
+      payload: {
+        source_type: event.type, tag: g.es.tag, url: g.es.url,
+        es: { title: g.es.title, body: g.es.body },
+        en: { title: g.en.title, body: g.en.body },
+      },
+    });
+  }
+  return groups.size;
+}
+
+async function dispatch(event, { db = pool, sender = webpush, logger = console, publish } = {}) {
   try {
     if (!CATALOG[event.type]) return { sent: 0 };
-    if (sender === webpush && !ensureConfigured()) return { sent: 0, disabled: true };
     const notices = await noticesFor(event, { db });
     if (!notices.length) return { sent: 0 };
+    // En vivo primero, y aunque el servidor no tenga las llaves del push: la pantalla
+    // abierta suena igual (D93).
+    let live = 0;
+    try { live = await publishLive(event, notices, { publish }); } catch (err) {
+      logger.error?.(`Live notice failed for event ${event.id}: ${err.message}`);
+    }
+    if (sender === webpush && !ensureConfigured()) {
+      logger.info?.(`Push ${event.type}: ${notices.length} destinatario(s), en vivo ${live}, push apagado (faltan llaves VAPID)`);
+      return { sent: 0, disabled: true, live };
+    }
     const byUser = new Map(notices.map((n) => [n.id, n]));
     const subs = await subscriptionsOf(db, event.nightclub_id, [...byUser.keys()]);
     const results = await Promise.all(subs.map((sub) => {
@@ -561,7 +617,7 @@ async function dispatch(event, { db = pool, sender = webpush, logger = console }
     // Una línea por aviso en el registro de la API (D91): en producción es la única
     // forma de saber si un aviso salió, a cuántos teléfonos, o si nadie tenía uno.
     logger.info?.(`Push ${event.type}: ${notices.length} destinatario(s), ${subs.length} teléfono(s), ${sent} enviado(s)`);
-    return { sent, results };
+    return { sent, results, live };
   } catch (err) {
     logger.error?.(`Push dispatch failed for event ${event && event.id}: ${err.message}`);
     return { sent: 0, error: err.message };
@@ -613,6 +669,6 @@ async function status({ db = pool, nightclubId, user }) {
 }
 
 module.exports = {
-  config, ensureConfigured, dispatch, noticesFor, payloadFor, render, sendTo, sendTest, status,
+  config, ensureConfigured, dispatch, publishLive, noticesFor, payloadFor, render, sendTo, sendTest, status,
   CATALOG, TEXTS, ROLE_HOME, TTL_SECONDS, MAX_FAILURES,
 };

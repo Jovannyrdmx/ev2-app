@@ -104,8 +104,9 @@
     } catch { return false; }
   };
 
-  const t = (key) => (window.EV2Format ? window.EV2Format.t(key) : key);
-  const lang = () => (window.EV2Format && window.EV2Format.getLanguage() === 'en' ? 'en' : 'es');
+  const fmt = () => (typeof window !== 'undefined' ? window.EV2Format : null);
+  const t = (key) => (fmt() ? fmt().t(key) : key);
+  const lang = () => (fmt() && fmt().getLanguage() === 'en' ? 'en' : 'es');
 
   const DISMISS_KEY = 'ev2.push.dismissed';
   const dismissedFor = (userId) => {
@@ -232,7 +233,7 @@
       window.addEventListener('pointerdown', wakeAudio, { passive: true });
       if (supported()) {
         navigator.serviceWorker.addEventListener('message', (ev) => {
-          if (ev.data && ev.data.type === 'ev2-push') chime();
+          if (ev.data && ev.data.type === 'ev2-push') ringOnce(ev.data.payload && ev.data.payload.tag);
         });
       }
     }
@@ -291,5 +292,44 @@
     } catch { /* salir siempre funciona, con o sin notificaciones */ }
   }
 
-  return { keyBytes, isIos, boxState, start, forget, chime, testHere };
+  // ---------------------------------------------------------------- avisos en vivo (D93)
+
+  // El mismo aviso puede llegar dos veces casi juntas: por la conexión en vivo y por la
+  // notificación del teléfono. Suena una sola vez por aviso.
+  const recientes = new Map();
+  const DEDUPE_MS = 5000;
+  function firstTime(tag, now = Date.now()) {
+    for (const [k, at] of recientes) if (now - at > DEDUPE_MS) recientes.delete(k);
+    if (!tag) return true;
+    if (recientes.has(tag)) return false;
+    recientes.set(tag, now);
+    return true;
+  }
+  function ringOnce(tag) { if (firstTime(tag)) chime(); }
+
+  /** El texto del aviso en el idioma de la pantalla. */
+  function noticeText(payload, language) {
+    const p = payload || {};
+    const t = (language === 'en' && p.en) || p.es || p.en || {};
+    return { title: t.title || '', body: t.body || '' };
+  }
+
+  /**
+   * Cada pantalla, al abrir su conexión en vivo, llama `EV2Push.listen(rt, { toast })`.
+   * Con la pantalla a la vista, cada aviso suena, vibra y sale arriba — aunque este
+   * teléfono no haya activado las notificaciones del sistema. Con la pantalla
+   * escondida no hace nada: para eso está la notificación del teléfono.
+   */
+  function listen(rt, { toast } = {}) {
+    if (!rt || typeof rt.on !== 'function') return;
+    rt.on('notice', (payload) => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      const text = noticeText(payload, lang());
+      if (!firstTime(payload && payload.tag)) return;
+      chime();
+      if (typeof toast === 'function' && text.title) toast(`${text.title} · ${text.body}`, 'ok');
+    });
+  }
+
+  return { keyBytes, isIos, boxState, start, forget, chime, testHere, listen, noticeText, firstTime };
 }));

@@ -1761,6 +1761,8 @@
     const rt = api.createRealtime();
     // Al reconectar o al volver al teléfono tras unos segundos, ponerse al día (D91).
     rt.onCatchUp(() => Promise.all([loadFloor(), loadOrders(), loadTaxi()]));
+    // Cada aviso de este puesto suena, vibra y sale arriba con la pantalla abierta (D93).
+    EV2Push.listen(rt, { toast });
     state.realtime = rt;
 
     rt.on('open', () => { setConnection(true, 'top.live'); banner(null); });

@@ -426,3 +426,83 @@ describe('cada aviso deja su línea en el registro (D91)', () => {
     expect(lineas).toEqual(['Push order_ready: 1 destinatario(s), 1 teléfono(s), 1 enviado(s)']);
   });
 });
+
+// ================================================================== D93
+
+describe('una mesa pide desde su teléfono: le suena al mesero (D93)', () => {
+  async function pedidoDelCliente() {
+    await pool.query('INSERT INTO table_occupants (table_id, user_id) VALUES ($1,$2)', [table.id, guest.id]);
+    const r = await api().post(url('/orders')).set(auth(guest))
+      .send({ client_request_id: randomUUID(), table_id: table.id, items: [{ drink_id: beer.id, quantity: 2 }] });
+    expect(r.status).toBe(201);
+    return r.body.order;
+  }
+
+  it('al mesero en turno: "Pedido nuevo · Mesa 12 · cobrar $120.00"', async () => {
+    await startShift(waiter); await subscribe(waiter, 1);
+    await pedidoDelCliente();
+    const sender = fakeSender();
+    await push.dispatch(await lastEvent('order_created'), { sender, logger: quiet, publish: async () => {} });
+    expect(sender.sent.map((s) => s.body)).toEqual([expect.objectContaining({
+      title: 'Pedido nuevo', body: 'Mesa 12 · cobrar $120.00', url: 'staff.html',
+    })]);
+  });
+
+  it('la barra no se entera todavía: no prepara hasta que se cobre', async () => {
+    await startShift(bartender); await subscribe(bartender, 3);
+    await pedidoDelCliente();
+    const sender = fakeSender();
+    await push.dispatch(await lastEvent('order_created'), { sender, logger: quiet, publish: async () => {} });
+    expect(sender.sent).toHaveLength(0);
+  });
+});
+
+describe('el mismo aviso llega por la conexión en vivo, con sonido en la pantalla (D93)', () => {
+  it('publica un "notice" para quien le toca, con el texto en los dos idiomas', async () => {
+    await startShift(waiter);
+    await waiterOrderReady();
+    const publicados = [];
+    await push.dispatch(await lastEvent('order_ready'),
+      { sender: fakeSender(), logger: quiet, publish: async (e) => publicados.push(e) });
+    expect(publicados).toEqual([expect.objectContaining({
+      nightclubId: club.id, type: 'notice', audience: { userIds: [waiter.id] },
+      payload: expect.objectContaining({
+        source_type: 'order_ready', url: 'staff.html',
+        es: { title: 'Trago listo', body: 'Mesa 12 · recoger en Barra planta baja' },
+        en: { title: 'Drink ready', body: 'Table 12 · pick up at Barra planta baja' },
+      }),
+    })]);
+  });
+
+  it('llega aunque el servidor no tenga las llaves del push, y aunque el teléfono no tenga notificaciones', async () => {
+    const antes = process.env.VAPID_PRIVATE_KEY;
+    delete process.env.VAPID_PRIVATE_KEY;
+    try {
+      await startShift(waiter);
+      await waiterOrderReady();
+      const publicados = [];
+      const r = await push.dispatch(await lastEvent('order_ready'),
+        { logger: quiet, publish: async (e) => publicados.push(e) });
+      expect(r).toMatchObject({ disabled: true, live: 1 });
+      expect(publicados).toHaveLength(1);
+    } finally {
+      if (antes !== undefined) process.env.VAPID_PRIVATE_KEY = antes;
+    }
+  });
+
+  it('fuera de turno tampoco suena en la pantalla: las mismas reglas', async () => {
+    await waiterOrderReady();
+    const publicados = [];
+    await push.dispatch(await lastEvent('order_ready'),
+      { sender: fakeSender(), logger: quiet, publish: async (e) => publicados.push(e) });
+    expect(publicados).toHaveLength(0);
+  });
+
+  it('de verdad queda en los eventos, dirigido solo a esa persona', async () => {
+    await startShift(waiter);
+    await waiterOrderReady();
+    await push.dispatch(await lastEvent('order_ready'), { sender: fakeSender(), logger: quiet });
+    const e = await lastEvent('notice');
+    expect(e.audience).toEqual({ userIds: [waiter.id] });
+  });
+});
