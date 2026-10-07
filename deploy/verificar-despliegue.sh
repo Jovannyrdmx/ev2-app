@@ -203,6 +203,39 @@ else
   else
     verde "${telefonos} teléfono(s) con notificaciones activas"
   fi
+
+  # --------------------------------------------------------------- 9. checador
+  # D94: las huellas se comparan en otro contenedor (`ev2-matcher`). Si no está
+  # arriba, o las llaves no llegaron, el checador de la caja dice "Avisa al gerente".
+  titulo '9. El checador de huella (D94)'
+  if docker ps --format '{{.Names}}' | grep -q '^ev2-matcher$'; then
+    verde "el comparador de huellas (ev2-matcher) está corriendo"
+    if docker logs ev2-matcher 2>&1 | grep -q 'MATCHER_TOKEN is missing'; then
+      rojo "el comparador arrancó SIN MATCHER_TOKEN: rechaza todo"
+    fi
+  else
+    rojo "el contenedor ev2-matcher no está corriendo"
+    aviso "'docker compose ... up -d --build' lo construye (la primera vez tarda unos minutos)."
+  fi
+  llaves=$(docker exec ev2-api sh -c 'test ${#FINGERPRINT_KEY} -ge 32 && test ${#MATCHER_TOKEN} -ge 32 && echo si' 2>/dev/null)
+  if [ "$llaves" = "si" ]; then
+    verde "FINGERPRINT_KEY y MATCHER_TOKEN llegaron a la API"
+  else
+    rojo "faltan FINGERPRINT_KEY o MATCHER_TOKEN (32+ caracteres) en la API"
+    aviso "openssl rand -hex 32 para cada una  →  al .env  →  'up -d' (un restart NO relee el .env)"
+    aviso "FINGERPRINT_KEY va al respaldo del .env: si se pierde, hay que volver a registrar todas las huellas."
+  fi
+  if [ "$(docker exec ev2-api sh -c 'wget -q -O - http://matcher:8090/health 2>/dev/null')" = '{"ok":true}' ]; then
+    verde "la API alcanza al comparador por la red interna"
+  else
+    rojo "la API no alcanza http://matcher:8090/health"
+  fi
+  checadores=$(echo "SELECT count(*) FROM clock_stations WHERE active;" | psql_ev2 | tr -d '[:space:]')
+  if [ "${checadores:-0}" = "0" ]; then
+    aviso "todavía no hay PC checadora: el gerente la da de alta en Checador, en la PC de la caja"
+  else
+    verde "${checadores} PC checadora(s) dada(s) de alta"
+  fi
 fi
 
 # --------------------------------------------------------------- resumen

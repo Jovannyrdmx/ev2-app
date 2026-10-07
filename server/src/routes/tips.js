@@ -19,12 +19,12 @@ const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, currency, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const events = require('../services/events');
-const shiftCuts = require('../services/shift-closings');
+const staffShifts = require('../services/staff-shifts');
 const { createOrder } = require('../services/orders');
 
 const router = express.Router({ mergeParams: true });
 
-const STAFF_ROLES = ['waiter', 'bartender', 'dancer', 'dj', 'light_tech', 'valet', 'hostess'];
+const STAFF_ROLES = staffShifts.SHIFT_ROLES;
 
 // The amounts the club used before this system (tip-dancer-system.js), kept as the
 // starting point. The manager edits them from the app; valet had none and gets the
@@ -117,12 +117,10 @@ router.put('/nightclubs/:nightclubId/tip-presets/:role',
   }));
 
 // ---------------------------------------------------------------- shifts
+// The rules live in services/staff-shifts.js: the fingerprint clock (D94) opens and
+// closes shifts too, and both doors must apply the same cut rule.
 
-async function openShift(userId, runner = pool) {
-  const { rows } = await runner.query(
-    'SELECT id, section, started_at FROM staff_shifts WHERE user_id = $1 AND ended_at IS NULL', [userId]);
-  return rows[0] || null;
-}
+const openShift = (userId, runner = pool) => staffShifts.openShift(userId, runner);
 
 router.post('/nightclubs/:nightclubId/staff/shifts/start',
   requireRole(...STAFF_ROLES),
@@ -131,52 +129,21 @@ router.post('/nightclubs/:nightclubId/staff/shifts/start',
     body: z.object({ section: z.string().trim().max(40).optional() }).default({}),
   }),
   asyncHandler(async (req, res) => {
-    const current = await openShift(req.user.id);
-    if (current) return res.status(200).json({ shift: current, already_open: true });
-    const { rows } = await pool.query(
-      `INSERT INTO staff_shifts (nightclub_id, user_id, section) VALUES ($1,$2,$3)
-       RETURNING id, section, started_at`,
-      [req.params.nightclubId, req.user.id, req.body.section || null]);
-    await events.publish({
-      nightclubId: req.params.nightclubId, type: 'shift_started',
-      audience: { roles: ['manager', 'hostess'] },
-      payload: { user_id: req.user.id, role: req.user.role, section: req.body.section || null },
+    const { shift, alreadyOpen } = await staffShifts.start(pool, {
+      nightclubId: req.params.nightclubId, user: req.user, section: req.body.section || null,
     });
-    return res.status(201).json({ shift: rows[0] });
+    if (alreadyOpen) return res.status(200).json({ shift, already_open: true });
+    return res.status(201).json({ shift });
   }));
 
 router.post('/nightclubs/:nightclubId/staff/shifts/end',
   requireRole(...STAFF_ROLES),
   validate({ params: z.object({ nightclubId: uuid }) }),
   asyncHandler(async (req, res) => {
-    const abierto = await pool.query(
-      `SELECT id, user_id, section, started_at, ended_at FROM staff_shifts
-        WHERE user_id = $1 AND nightclub_id = $2 AND ended_at IS NULL`,
-      [req.user.id, req.params.nightclubId]);
-    if (abierto.rowCount === 0) throw ApiError.conflict('No tienes un turno abierto');
-
-    // Quien cobró dinero no cierra su turno sin corte (D51, D54). Irse con el efectivo
-    // del club en la bolsa y el turno cerrado es exactamente lo que el corte existe
-    // para impedir. Desde D54 el corte se hace en un acto —el gerente cuenta y teclea
-    // su código ahí mismo— y al cerrarlo el turno queda cerrado solo, así que quien
-    // llega aquí con dinero cobrado es alguien que todavía no lo ha hecho.
-    const resumen = await shiftCuts.shiftSummary(pool, {
-      nightclubId: req.params.nightclubId, shift: abierto.rows[0],
+    const shift = await staffShifts.end(pool, {
+      nightclubId: req.params.nightclubId, userId: req.user.id,
     });
-    if (Number(resumen.cash_to_hand) > 0 || Number(resumen.totals.total_collected) > 0) {
-      if (!resumen.closing) {
-        throw ApiError.unprocessable(
-          `Cobraste ${resumen.totals.total_collected} en este turno: haz tu corte antes de `
-          + 'cerrarlo. Al cerrarlo, el turno se cierra solo.',
-          { cash_to_hand: resumen.cash_to_hand, total_collected: resumen.totals.total_collected });
-      }
-    }
-
-    const { rows } = await pool.query(
-      `UPDATE staff_shifts SET ended_at = now() WHERE id = $1 AND ended_at IS NULL
-       RETURNING id, section, started_at, ended_at`, [abierto.rows[0].id]);
-    if (rows.length === 0) throw ApiError.conflict('No tienes un turno abierto');
-    res.json({ shift: rows[0] });
+    res.json({ shift });
   }));
 
 // The manager closes forgotten shifts.

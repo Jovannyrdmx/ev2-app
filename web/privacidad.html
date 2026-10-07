@@ -29,8 +29,8 @@
         <div>
             <p class="font-display text-xl">EV2 Clandestinoz</p>
             <p class="text-xs text-white/40 mt-1">
-                <span data-l="es">Versión 1.0 · 28 de septiembre de 2026</span>
-                <span data-l="en" hidden>Version 1.0 · September 28, 2026</span>
+                <span data-l="es">Versión 1.1 · 7 de octubre de 2026</span>
+                <span data-l="en" hidden>Version 1.1 · October 7, 2026</span>
             </p>
         </div>
         <div class="flex gap-1 shrink-0">
@@ -217,6 +217,37 @@
             fiscales que no dependen de la persona.
         </p>
         <!-- ============================================================ -->
+
+        <!-- ============================================================ -->
+        <h2 id="biometria">Datos biométricos del personal (checador de huella)</h2>
+        <p>
+            Esta sección aplica solo a quienes trabajan en el club. A los clientes no se les
+            pide la huella.
+        </p>
+        <ul>
+            <li><strong>Qué guardamos:</strong> una <strong>plantilla</strong> de la huella de
+                dos dedos, que es un resumen matemático de sus puntos, generada a partir de la
+                imagen que toma el lector. <strong>La imagen no se guarda</strong>: se usa una
+                vez para crear la plantilla o para compararla, y se descarta.</li>
+            <li><strong>Para qué:</strong> únicamente para registrar la hora de entrada y de
+                salida del turno. No se usa para ninguna otra cosa ni se comparte con nadie.</li>
+            <li><strong>Tu consentimiento:</strong> la huella es un dato personal sensible.
+                Solo se registra con tu consentimiento expreso, que das escribiendo
+                <strong>tu propio PIN</strong> delante del gerente. Queda constancia de la
+                fecha y de la versión de este aviso que aceptaste.</li>
+            <li><strong>Cómo se cuida:</strong> la plantilla se guarda <strong>cifrada</strong>
+                en la base de datos, con una llave que no vive en la base. La comparación la
+                hace un servicio interno del servidor que no guarda nada y no está expuesto a
+                internet.</li>
+            <li><strong>Cuánto tiempo:</strong> mientras trabajes en el club. Al terminar la
+                relación laboral, o cuando retires tu consentimiento, la plantilla
+                <strong>se borra en el acto</strong>. El registro de asistencia (las horas de
+                entrada y salida) se conserva como registro laboral y no contiene nada de tu
+                huella.</li>
+            <li><strong>Retirar tu consentimiento:</strong> pídeselo al gerente o escribe a
+                <a href="mailto:info@ev2clandestinoz.com">info@ev2clandestinoz.com</a>. Tus
+                huellas se borran en ese momento.</li>
+        </ul>
 
         <h2>Tus derechos</h2>
         <p>
@@ -434,6 +465,36 @@
         </p>
         <!-- ============================================================ -->
 
+        <!-- ============================================================ -->
+        <h2 id="biometrics">Staff biometric data (fingerprint time clock)</h2>
+        <p>
+            This section applies only to people who work at the club. Guests are never asked
+            for a fingerprint.
+        </p>
+        <ul>
+            <li><strong>What we keep:</strong> a fingerprint <strong>template</strong> for two
+                fingers, which is a mathematical summary of its points, created from the image
+                the reader takes. <strong>The image is not stored</strong>: it is used once to
+                create the template or to compare against it, and then discarded.</li>
+            <li><strong>What for:</strong> only to record when a shift starts and ends. It is
+                not used for anything else and is not shared with anyone.</li>
+            <li><strong>Your consent:</strong> a fingerprint is sensitive personal data. It is
+                enrolled only with your express consent, which you give by typing
+                <strong>your own PIN</strong> in front of the manager. The date and the version
+                of this notice you accepted are recorded.</li>
+            <li><strong>How it is protected:</strong> the template is stored
+                <strong>encrypted</strong> in the database, with a key that does not live in
+                the database. Matching is done by an internal server service that keeps nothing
+                and is not exposed to the internet.</li>
+            <li><strong>For how long:</strong> while you work at the club. When employment ends,
+                or when you withdraw your consent, the template is <strong>deleted right
+                away</strong>. The attendance record (clock-in and clock-out times) is kept as an
+                employment record and contains nothing from your fingerprint.</li>
+            <li><strong>Withdrawing consent:</strong> ask the manager or write to
+                <a href="mailto:info@ev2clandestinoz.com">info@ev2clandestinoz.com</a>. Your
+                fingerprints are deleted at that moment.</li>
+        </ul>
+
         <h2>Your rights</h2>
         <p>
             You may ask to <strong>access</strong> the data we hold about you,
@@ -490,8 +551,8 @@
 (function () {
     'use strict';
     var ancla = (location.hash || '').replace('#', '');
-    var idioma = ancla === 'delete-data' ? 'en'
-        : ancla === 'eliminar-datos' ? 'es'
+    var idioma = (ancla === 'delete-data' || ancla === 'biometrics') ? 'en'
+        : (ancla === 'eliminar-datos' || ancla === 'biometria') ? 'es'
         : (navigator.language || 'es').toLowerCase().indexOf('en') === 0 ? 'en' : 'es';
 
     function poner(lang) {

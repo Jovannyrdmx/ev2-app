@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>EV2 — Checador</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0a0a14">
+    <link rel="icon" href="images/favicon.ico" sizes="any">
+    <link rel="icon" href="images/favicon-32x32.png" type="image/png" sizes="32x32">
+    <link rel="icon" href="images/favicon-16x16.png" type="image/png" sizes="16x16">
+    <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+    <meta name="ev2:api" content="/api">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="stylesheet" href="css/ev2.css">
+</head>
+<!--
+  El checador de huella (D94). Vive en la PC de la caja de la barra de abajo, con el
+  lector DigitalPersona 4500 conectado por USB y el agente de HID instalado.
+
+  No tiene sesión de persona: la PC se identifica con su propio token, que pone aquí
+  el gerente desde su panel (Checador → "Hacer de esta PC el checador"). Cualquiera
+  puede acercarse a esta pantalla; lo único que puede hacer es poner el dedo.
+-->
+<body class="text-white page-checador" data-page="checador">
+<div class="min-h-screen flex flex-col">
+
+  <header class="px-6 py-4 flex items-center justify-between border-b border-white/10">
+    <div class="flex items-center gap-3 min-w-0">
+      <img src="images/ev2-clandestinoz.webp" alt="EV2 Clandestinoz" width="640" height="640" class="h-11 w-11">
+      <div class="min-w-0">
+        <p class="font-display text-lg leading-tight" data-i18n="clk.title">Checador</p>
+        <p class="text-xs text-white/50 truncate"><span id="clk-club"></span> <span id="clk-station" class="text-white/30"></span></p>
+      </div>
+    </div>
+    <button id="btn-lang" class="px-3 py-2 rounded-xl card text-sm" aria-label="Idioma">EN</button>
+  </header>
+
+  <!-- ============================ SIN DAR DE ALTA ============================ -->
+  <section id="clk-setup" class="flex-1 flex flex-col justify-center items-center px-6 py-10 text-center space-y-4" hidden>
+    <p class="font-display text-2xl" data-i18n="clk.setupTitle">Esta PC todavía no es el checador</p>
+    <p id="clk-setup-why" class="text-sm text-red-300"></p>
+    <p class="text-white/60 max-w-md" data-i18n="clk.setupHow">Un gerente entra a su panel EN ESTA PC, abre Checador y toca «Hacer de esta PC el checador». Después vuelve a abrir esta página.</p>
+    <a href="manager.html" class="ev2-button rounded-xl px-5 py-3 font-display" data-i18n="clk.openManager">Abrir el panel del gerente</a>
+  </section>
+
+  <!-- ============================ ESPERANDO DEDOS ============================ -->
+  <main id="clk-main" class="flex-1 flex flex-col items-center justify-center px-6 py-8 text-center space-y-8" hidden>
+    <div>
+      <p id="clk-time" class="font-display text-7xl tracking-wider">--:--</p>
+      <p id="clk-date" class="text-white/50 mt-1"></p>
+    </div>
+
+    <div id="clk-wait" class="space-y-3">
+      <p class="font-display text-3xl" data-i18n="clk.putFinger">Pon tu dedo en el lector</p>
+      <p class="text-white/50" data-i18n="clk.putFingerHelp">Para marcar tu entrada o tu salida.</p>
+    </div>
+
+    <!-- El resultado de la marca: grande, para leerse de pie y a un metro. -->
+    <div id="clk-result" class="card rounded-2xl px-8 py-8 w-full max-w-xl space-y-2 border-2" role="status" aria-live="assertive" hidden>
+      <p id="clk-title" class="font-display text-4xl"></p>
+      <p id="clk-line2" class="text-xl text-white/80"></p>
+    </div>
+
+    <p id="clk-reader" class="text-sm text-white/50" data-state="starting" data-i18n="clk.readerStarting">Buscando el lector…</p>
+    <p id="clk-config" class="text-sm text-amber-300" data-i18n="clk.notConfigured" hidden>El servidor todavía no tiene configurado el checador. Avisa al gerente.</p>
+  </main>
+
+  <footer class="px-6 py-3 text-[11px] text-white/30 text-center">
+    <span data-i18n="clk.privacy">Tu huella se guarda cifrada y solo sirve para marcar tu asistencia.</span>
+    <a href="privacidad.html#biometria" class="underline" data-i18n="clk.privacyLink">Aviso de privacidad</a>
+  </footer>
+</div>
+
+<script src="js/format.js"></script>
+<script src="vendor/digitalpersona/websdk.client.ui.js"></script>
+<script src="vendor/digitalpersona/dp.core.js"></script>
+<script src="vendor/digitalpersona/dp.devices.js"></script>
+<script src="js/checador.js"></script>
+<script src="js/pwa.js"></script>
+</body>
+</html>

@@ -41,6 +41,7 @@ const doorRoutes = require('./routes/door');
 const passRoutes = require('./routes/passes');
 const printingRoutes = require('./routes/printing');
 const pushRoutes = require('./routes/push');
+const clockRoutes = require('./routes/clock');
 
 // The OpenAPI contract is the agreement between backend, web and mobile.
 // It is served at /api/docs; a missing file must not stop the API from starting.
@@ -213,6 +214,16 @@ function createApp() {
     legacyHeaders: false,
   }));
 
+  // El checador de huella (D94). La PC de la caja marca a todo el personal desde una
+  // sola conexión: holgado para el cambio de turno, y suficiente para que nadie la
+  // use para probar imágenes contra las huellas del club a gran velocidad.
+  app.use('/api/clock-station', rateLimit({
+    windowMs: 60 * 1000,
+    limit: Number(process.env.CLOCK_RATE_LIMIT_PER_MIN || 60),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  }));
+
   app.use('/api/auth', authRoutes);
   app.use('/api/auth', accountRoutes);
   app.use('/api', nightclubRoutes);
@@ -244,6 +255,9 @@ function createApp() {
   // en su propio prefijo y no en `/api` porque su autenticación es un `use()` sin
   // ruta: en `/api` correría también en las direcciones que no existen.
   app.use('/api/print-agent', printingRoutes.agentRouter);
+  app.use('/api', clockRoutes);
+  // La PC checadora, igual que el agente: su propio prefijo y su propio token (D94).
+  app.use('/api/clock-station', clockRoutes.stationRouter);
 
   // Interactive API documentation (disable in production with SERVE_API_DOCS=false).
   // Publicar el mapa completo de los 310 endpoints y sus esquemas tiene que ser una

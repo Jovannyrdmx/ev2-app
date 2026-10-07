@@ -6,7 +6,7 @@
  * tarifas del taxi, y los cajones del estacionamiento — más el resumen del turno.
  */
 /* global EV2Push, EV2, EV2Format, EV2Manager, EV2Warehouse, EV2Roles, EV2PasswordGate, EV2StaffAdmin,
-   EV2Payouts, EV2NightReport, EV2Roster */
+   EV2Payouts, EV2NightReport, EV2Roster, EV2Clock */
 (function () {
   'use strict';
   // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
@@ -250,6 +250,7 @@
       loadLostFound(),
       loadShiftCuts(),
       loadPrinting(),
+      loadClock(),
       loadCovers(),
       get(`/nightclubs/${club}/taxi-settings`, (d) => { state.taxiSettings = d.settings; }),
       get(`/nightclubs/${club}/taxi-fares?include_inactive=false`, (d) => { state.fares = d.fares || []; }),
@@ -325,6 +326,7 @@
     exit: ['tab-drivers', 'tab-taxi'],
     parking: ['tab-parking'],
     printing: ['tab-printing'],
+    clock: ['tab-clock'],
   };
   // Los nombres viejos siguen sirviendo (un enlace o un pendiente guardado).
   const TAB_ALIAS = { drivers: 'exit', taxi: 'exit' };
@@ -350,6 +352,7 @@
     renderParking();
     renderInventory();
     renderPrinting();
+    renderClock();
     renderSecret();
   }
 
@@ -2638,6 +2641,283 @@
       avisar(nota, EV2Format.errorMessage(err));
     }
   };
+
+  // ---------------------------------------------------------------- checador de huella (D94)
+
+  /**
+   * Qué PC es el checador, las huellas del personal y la asistencia.
+   *
+   * El registro de huellas habla con el lector a través de `EV2Clock.createReader`, y
+   * por eso solo funciona en la PC que tiene el lector (la de la caja de abajo). El
+   * lector se prende al abrir la hoja de registro y se apaga al cerrarla: el resto del
+   * tiempo este panel no le habla.
+   */
+  const clock = {
+    data: null, events: [], search: '',
+    enroll: { person: null, images: [], capturing: false, reader: null, sending: false },
+  };
+  const STATION_ID_KEY = `${EV2Clock.STATION_KEY}.id`;
+  const localStore = (() => { try { return window.localStorage; } catch { return null; } })();
+  const thisPcStation = () => (localStore && localStore.getItem(STATION_ID_KEY)) || null;
+
+  async function loadClock() {
+    const club = clubId();
+    try {
+      clock.data = await api.get(`/nightclubs/${club}/clock`);
+      const ev = await api.get(`/nightclubs/${club}/clock/events`);
+      clock.events = ev.events || [];
+    } catch (err) {
+      if (state.tab === 'clock') showError(err);
+    }
+    renderClock();
+  }
+
+  function renderClock() {
+    const d = clock.data;
+    if (!d || !$('tab-clock')) return;
+    $('clk-problem').hidden = d.configured;
+    $('clk-problem').textContent = d.configured ? '' : (d.problem || t('clk.notConfigured'));
+
+    // Esta PC.
+    const mine = thisPcStation();
+    const activa = (d.stations || []).find((s) => s.id === mine && s.active);
+    $('clk-this-pc').textContent = activa ? t('clk.thisPcIs', { name: activa.name }) : t('clk.thisPcIsNot');
+    $('btn-clk-make').hidden = Boolean(activa);
+    $('clk-open').hidden = !activa;
+
+    $('clk-stations').innerHTML = (d.stations || []).filter((s) => s.active).map((s) => `
+      <div class="flex items-center justify-between gap-2 text-sm rounded-lg bg-white/5 px-3 py-2">
+        <div class="min-w-0">
+          <p class="truncate">${escape(s.name)}${s.id === mine ? ` <span class="text-[11px] text-lime-300">· ${escape(t('clk.thisPc'))}</span>` : ''}</p>
+          <p class="text-[11px] text-white/40">${escape(s.last_seen_at ? t('clk.lastSeen', { when: EV2Format.dateTime(s.last_seen_at) }) : t('clk.neverSeen'))}</p>
+        </div>
+        <button class="clk-revoke text-xs text-red-300 px-2 py-1" data-id="${escape(s.id)}">${escape(t('clk.revokeStation'))}</button>
+      </div>`).join('');
+
+    // El personal.
+    const q = clock.search.trim().toLowerCase();
+    const gente = (d.employees || []).filter((p) => !q || String(p.name || '').toLowerCase().includes(q));
+    $('clk-people').innerHTML = gente.map((p) => {
+      const dedos = (p.fingers || []).map((f) => t(EV2Clock.fingerKey(f.finger)));
+      const estado = !p.consent_at ? t('clk.noConsent')
+        : (dedos.length ? dedos.join(' · ') : t('clk.noFingers'));
+      const completo = dedos.length >= (d.fingers_per_person || 2);
+      return `
+      <button class="clk-person w-full text-left flex items-center justify-between gap-2 rounded-lg bg-white/5 px-3 py-2" data-id="${escape(p.user_id)}">
+        <div class="min-w-0">
+          <p class="text-sm truncate">${escape(p.name)} <span class="text-[11px] text-white/40">${escape(EV2Roles.describe(p.role, lang()).label)}</span></p>
+          <p class="text-[11px] ${completo ? 'text-lime-300' : 'text-white/40'}">${escape(estado)}</p>
+        </div>
+        <span class="text-xs text-white/60 shrink-0">${escape(t(completo ? 'clk.manage' : 'clk.enroll'))}</span>
+      </button>`;
+    }).join('');
+
+    // La asistencia.
+    $('clk-events-empty').hidden = clock.events.length > 0;
+    $('clk-events').innerHTML = clock.events.map((e) => `
+      <div class="flex items-center justify-between gap-2 py-2 text-sm">
+        <span class="truncate">${escape(e.name)}</span>
+        <span class="shrink-0 ${e.kind === 'in' ? 'text-lime-300' : 'text-sky-300'}">${escape(t(e.kind === 'in' ? 'clk.in' : 'clk.out'))} · ${escape(EV2Format.time(e.created_at))}</span>
+      </div>`).join('');
+
+    if (clock.enroll.person) renderEnroll();
+  }
+
+  $('clk-search').oninput = (e) => { clock.search = e.target.value; renderClock(); };
+  $('btn-clk-reload').onclick = () => loadClock();
+
+  $('btn-clk-make').onclick = async () => {
+    const nombre = await askText(t('clk.stationName'), t('clk.stationDefault'));
+    if (!nombre) return;
+    const listo = ocupado($('btn-clk-make'), 'prn.saving');
+    try {
+      const r = await api.post(`/nightclubs/${clubId()}/clock/stations`, { name: String(nombre).trim().slice(0, 60) });
+      // El token se queda en ESTA PC y no se vuelve a ver: la base guarda su huella.
+      localStore.setItem(EV2Clock.STATION_KEY, r.token);
+      localStore.setItem(STATION_ID_KEY, r.station.id);
+      toast(t('clk.stationReady'), 'ok');
+      await loadClock();
+    } catch (err) {
+      showError(err);
+    } finally {
+      listo();
+    }
+  };
+
+  $('clk-stations').onclick = async (e) => {
+    const b = e.target.closest('.clk-revoke');
+    if (!b) return;
+    if (!(await ask(t('clk.revokeStationAsk')))) return;
+    try {
+      await api.del(`/nightclubs/${clubId()}/clock/stations/${b.dataset.id}`);
+      if (b.dataset.id === thisPcStation()) {
+        localStore.removeItem(EV2Clock.STATION_KEY);
+        localStore.removeItem(STATION_ID_KEY);
+      }
+      await loadClock();
+    } catch (err) { showError(err); }
+  };
+
+  // ---- registrar huellas
+
+  const enrollPerson = () => {
+    const id = clock.enroll.person;
+    return clock.data && (clock.data.employees || []).find((p) => p.user_id === id);
+  };
+
+  function enrollMsg(text, kind) {
+    const el = $('enr-msg');
+    el.textContent = text || '';
+    el.hidden = !text;
+    el.className = `text-sm text-center ${kind === 'error' ? 'text-red-300' : kind === 'ok' ? 'text-lime-300' : 'text-white/60'}`;
+  }
+
+  function renderEnroll() {
+    const p = enrollPerson();
+    if (!p) { closeEnroll(); return; }
+    const total = (clock.data && clock.data.captures_per_finger) || 3;
+    const tope = (clock.data && clock.data.fingers_per_person) || 2;
+    const tiene = (p.fingers || []).map((f) => f.finger);
+    $('enr-name').textContent = p.name;
+    $('enr-consent').hidden = Boolean(p.consent_at);
+    $('enr-capture').hidden = !p.consent_at || tiene.length >= tope;
+    $('enr-done').hidden = !p.consent_at;
+
+    const sel = $('enr-finger');
+    const elegido = sel.value;
+    sel.innerHTML = EV2Clock.FINGERS.filter((f) => !tiene.includes(f))
+      .map((f) => `<option value="${f}">${escape(t(EV2Clock.fingerKey(f)))}</option>`).join('');
+    if (elegido && !tiene.includes(elegido)) sel.value = elegido;
+    sel.disabled = clock.enroll.capturing;
+
+    const n = clock.enroll.images.length;
+    $('enr-steps').innerHTML = Array.from({ length: total }, (_, i) => `
+      <span class="w-4 h-4 rounded-full ${i < n ? 'bg-lime-400' : 'bg-white/15'}"></span>`).join('');
+    $('enr-preview').innerHTML = clock.enroll.images.map((img) => `
+      <img src="data:image/png;base64,${img}" alt="" class="h-20 w-auto rounded bg-white">`).join('');
+    $('btn-enr-start').hidden = clock.enroll.capturing;
+
+    $('enr-fingers').innerHTML = tiene.length ? (p.fingers || []).map((f) => `
+      <div class="flex items-center justify-between text-sm rounded-lg bg-white/5 px-3 py-2">
+        <span>${escape(t(EV2Clock.fingerKey(f.finger)))}</span>
+        <button class="enr-del text-xs text-red-300 px-2" data-finger="${escape(f.finger)}">${escape(t('clk.deleteFinger'))}</button>
+      </div>`).join('') : `<p class="text-sm text-white/40">${escape(t('clk.noFingers'))}</p>`;
+  }
+
+  async function openEnroll(userId) {
+    clock.enroll = { person: userId, images: [], capturing: false, reader: null, sending: false };
+    $('enr-pin').value = '';
+    $('enr-reader').textContent = '';
+    enrollMsg('');
+    $('enroll-sheet').hidden = false;
+    renderEnroll();
+  }
+
+  async function closeEnroll() {
+    const r = clock.enroll.reader;
+    clock.enroll = { person: null, images: [], capturing: false, reader: null, sending: false };
+    if (r) await r.stop();
+    $('enroll-sheet').hidden = true;
+  }
+
+  const READER_KEYS = {
+    starting: 'clk.readerStarting', ready: 'clk.readerReadyEnroll', 'no-reader': 'clk.readerMissing',
+    'no-agent': 'clk.agentMissingHere', error: 'clk.readerError',
+  };
+
+  async function sendFinger() {
+    const p = enrollPerson();
+    const finger = $('enr-finger').value;
+    clock.enroll.sending = true;
+    enrollMsg(t('clk.saving'));
+    try {
+      const r = await api.post(`/nightclubs/${clubId()}/employees/${p.user_id}/fingerprints`,
+        { finger, images: clock.enroll.images });
+      enrollMsg(t('clk.saved', { finger: t(EV2Clock.fingerKey(r.fingerprint.finger)) }), 'ok');
+      toast(t('clk.saved', { finger: t(EV2Clock.fingerKey(r.fingerprint.finger)) }), 'ok');
+    } catch (err) {
+      enrollMsg(EV2Format.errorMessage(err), 'error');
+    } finally {
+      clock.enroll.sending = false;
+      clock.enroll.capturing = false;
+      clock.enroll.images = [];
+      if (clock.enroll.reader) { await clock.enroll.reader.stop(); clock.enroll.reader = null; }
+      // El lector ya se apagó: no debe seguir diciendo "pon el dedo".
+      $('enr-reader').textContent = '';
+      await loadClock();
+    }
+  }
+
+  $('btn-enr-start').onclick = async () => {
+    if (!$('enr-finger').value) return;
+    const total = (clock.data && clock.data.captures_per_finger) || 3;
+    clock.enroll.images = [];
+    clock.enroll.capturing = true;
+    enrollMsg(t('clk.captureN', { n: 1, total }));
+    renderEnroll();
+    clock.enroll.reader = EV2Clock.createReader({
+      onStatus: (s) => {
+        $('enr-reader').textContent = t(READER_KEYS[s] || 'clk.readerError');
+        if (s === 'no-agent' || s === 'no-reader') {
+          clock.enroll.capturing = false;
+          renderEnroll();
+        }
+      },
+      onQuality: () => enrollMsg(t('clk.badQuality'), 'error'),
+      onSample: (png) => {
+        if (!clock.enroll.capturing || clock.enroll.sending) return;
+        clock.enroll.images.push(png);
+        renderEnroll();
+        if (clock.enroll.images.length >= total) { sendFinger(); return; }
+        enrollMsg(t('clk.captureN', { n: clock.enroll.images.length + 1, total }));
+      },
+    });
+    await clock.enroll.reader.start();
+  };
+
+  $('btn-enr-accept').onclick = async () => {
+    const p = enrollPerson();
+    const pin = $('enr-pin').value.trim();
+    if (!/^\d{6}$/.test(pin)) { enrollMsg(t('clk.pinSix'), 'error'); return; }
+    const listo = ocupado($('btn-enr-accept'), 'prn.saving');
+    try {
+      await api.post(`/nightclubs/${clubId()}/employees/${p.user_id}/biometric-consent`, { pin });
+      $('enr-pin').value = '';
+      enrollMsg(t('clk.consentOk'), 'ok');
+      await loadClock();
+    } catch (err) {
+      enrollMsg(EV2Format.errorMessage(err), 'error');
+    } finally {
+      listo();
+    }
+  };
+
+  $('enr-fingers').onclick = async (e) => {
+    const b = e.target.closest('.enr-del');
+    if (!b) return;
+    const p = enrollPerson();
+    if (!(await ask(t('clk.deleteFingerAsk', { finger: t(EV2Clock.fingerKey(b.dataset.finger)) })))) return;
+    try {
+      await api.del(`/nightclubs/${clubId()}/employees/${p.user_id}/fingerprints/${b.dataset.finger}`);
+      await loadClock();
+    } catch (err) { showError(err); }
+  };
+
+  $('btn-enr-revoke').onclick = async () => {
+    const p = enrollPerson();
+    if (!(await ask(t('clk.revokeConsentAsk', { name: p.name })))) return;
+    try {
+      await api.del(`/nightclubs/${clubId()}/employees/${p.user_id}/biometric-consent`);
+      toast(t('clk.consentRevoked'), 'ok');
+      await loadClock();
+    } catch (err) { showError(err); }
+  };
+
+  $('clk-people').onclick = (e) => {
+    const b = e.target.closest('.clk-person');
+    if (b) openEnroll(b.dataset.id);
+  };
+  $('btn-enr-close').onclick = () => closeEnroll();
 
   // ---------------------------------------------------------------- pagos
 

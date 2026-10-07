@@ -19,6 +19,7 @@ const banking = require('../services/banking');
 const { temporaryPassword } = require('../services/credentials');
 const pins = require('../services/pins');
 const payments = require('../services/payments');
+const fingerprints = require('../services/fingerprints');
 
 const router = express.Router({ mergeParams: true });
 
@@ -310,6 +311,9 @@ router.patch('/nightclubs/:nightclubId/employees/:userId',
         await client.query(`UPDATE users SET status = 'blocked', updated_at = now() WHERE id = $1`, [userId]);
         await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [userId]);
         await client.query('UPDATE staff_shifts SET ended_at = now() WHERE user_id = $1 AND ended_at IS NULL', [userId]);
+        // Su huella es un dato sensible que ya no hace falta (D94, LFPDPPP): se borra
+        // con la baja. La asistencia se queda; no contiene nada de la huella.
+        await fingerprints.revokeAndErase(client, { userId, revokedBy: req.user.id, reason: 'terminated' });
       } else if (b.active === true) {
         await client.query(
           `UPDATE employee_profiles SET active = true, deactivated_at = NULL, updated_at = now() WHERE user_id = $1`,

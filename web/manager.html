@@ -125,6 +125,7 @@
       <button data-tab="exit" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-taxi mgr-icon"></i><span data-i18n="mgr.tabExit">Salida segura</span></button>
       <button data-tab="parking" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-car mgr-icon"></i><span data-i18n="mgr.tabValet">Valet</span></button>
       <button data-tab="printing" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-print mgr-icon"></i><span data-i18n="prn.tab">Impresoras</span></button>
+      <button data-tab="clock" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-clock mgr-icon"></i><span data-i18n="clk.tab">Checador</span></button>
     </nav>
 
     <main class="flex-1 min-w-0 overflow-y-auto p-4 lg:p-8 space-y-4 mgr-main">
@@ -806,6 +807,43 @@
         impresoras hay, qué PCs están vivas, qué tickets se quedaron sin salir, y si
         la comanda por pedido está prendida.
       -->
+      <!-- ---------------------------- CHECADOR (D94) ---------------------------- -->
+      <!--
+        El checador de huella. Tres cosas: qué PC es el checador, las huellas del
+        personal (con su consentimiento) y la asistencia. El registro de huellas solo
+        funciona en la PC que tiene el lector conectado: la de la caja de abajo.
+      -->
+      <div id="tab-clock" class="space-y-4" hidden>
+        <p id="clk-problem" class="card rounded-xl p-4 text-sm text-amber-300" hidden></p>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="clk.stations">PC checadora</p>
+          <p id="clk-this-pc" class="text-sm"></p>
+          <div class="flex flex-wrap gap-2">
+            <button id="btn-clk-make" class="ev2-button rounded-lg px-3 py-2 text-xs" data-i18n="clk.makeThisPc">Hacer de esta PC el checador</button>
+            <a id="clk-open" href="checador.html" class="btn-secondary rounded-lg px-3 py-2 text-xs" data-i18n="clk.openClock" hidden>Abrir el checador</a>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="clk.stationsHelp">Hazlo en la PC de la caja de abajo, la que tiene el lector. Esa PC queda marcando entradas y salidas sin sesión de nadie.</p>
+          <div id="clk-stations" class="space-y-2"></div>
+        </div>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="clk.people">Huellas del personal</p>
+          <p class="text-[11px] text-white/40" data-i18n="clk.peopleHelp">Dos dedos por persona. El registro se hace en la PC que tiene el lector, con el empleado presente: primero acepta el aviso de privacidad con su PIN.</p>
+          <input id="clk-search" type="search" class="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm" placeholder="Buscar" data-i18n-placeholder="clk.search">
+          <div id="clk-people" class="space-y-2"></div>
+        </div>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="clk.attendance">Asistencia de las últimas 24 horas</p>
+            <button id="btn-clk-reload" class="btn-secondary rounded-lg px-3 py-2 text-xs" data-i18n="prn.reload">Actualizar</button>
+          </div>
+          <p id="clk-events-empty" class="text-sm text-white/40" data-i18n="clk.noEvents" hidden>Nadie ha marcado en las últimas 24 horas.</p>
+          <div id="clk-events" class="divide-y divide-white/5"></div>
+        </div>
+      </div>
+
       <div id="tab-printing" class="space-y-4" hidden>
 
         <!--
@@ -1053,6 +1091,46 @@
     </div>
   </div>
 
+  <!-- Registrar la huella de un empleado (D94). Primero su consentimiento con SU PIN,
+       después tres capturas de cada dedo. -->
+  <div id="enroll-sheet" class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur flex flex-col" hidden>
+    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
+      <div class="min-w-0">
+        <p class="font-display text-lg" data-i18n="clk.enrollTitle">Registrar huella</p>
+        <p id="enr-name" class="text-xs text-white/50 truncate">—</p>
+      </div>
+      <button id="btn-enr-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="manager.close">Cerrar</button>
+    </header>
+    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4 max-w-xl w-full mx-auto">
+
+      <section id="enr-consent" class="card rounded-xl p-4 space-y-3" hidden>
+        <p class="font-display" data-i18n="clk.consentTitle">Aviso de privacidad: datos biométricos</p>
+        <p class="text-sm text-white/70" data-i18n="clk.consentText">EV2 Clandestinoz usará la huella de este empleado solo para registrar su entrada y salida. Se guarda cifrada, nunca como imagen, y se borra al terminar la relación laboral o cuando el empleado lo pida.</p>
+        <a href="privacidad.html#biometria" target="_blank" rel="noopener" class="text-xs underline text-white/60" data-i18n="clk.privacyLink">Aviso de privacidad</a>
+        <label class="block text-xs text-white/50" for="enr-pin" data-i18n="clk.consentPin">El empleado escribe SU PIN para aceptar</label>
+        <input id="enr-pin" type="password" inputmode="numeric" autocomplete="off" maxlength="6" pattern="[0-9]*"
+               class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-center tracking-[0.5em] font-display text-xl">
+        <button id="btn-enr-accept" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="clk.consentAccept">El empleado acepta</button>
+      </section>
+
+      <section id="enr-capture" class="card rounded-xl p-4 space-y-3" hidden>
+        <label class="block text-xs text-white/50" for="enr-finger" data-i18n="clk.whichFinger">Dedo</label>
+        <select id="enr-finger" class="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm"></select>
+        <p id="enr-reader" class="text-sm text-white/60"></p>
+        <div id="enr-steps" class="flex justify-center gap-3 py-2"></div>
+        <div id="enr-preview" class="flex justify-center gap-2"></div>
+        <p id="enr-msg" class="text-sm text-center" hidden></p>
+        <button id="btn-enr-start" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="clk.startCapture">Empezar a capturar</button>
+      </section>
+
+      <section id="enr-done" class="card rounded-xl p-4 space-y-2" hidden>
+        <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="clk.registered">Registrados</p>
+        <div id="enr-fingers" class="space-y-2"></div>
+        <button id="btn-enr-revoke" class="w-full mt-2 px-3 py-2 rounded-lg text-xs text-red-300 border border-red-400/30" data-i18n="clk.revokeConsent">Retirar consentimiento y borrar sus huellas</button>
+      </section>
+    </div>
+  </div>
+
   <!-- Elegir a quién poner en un destino. Nace vacío: se llena con los candidatos
        del puesto que ese destino necesita. -->
   <div id="pick-backdrop" class="fixed inset-0 bg-black/70 z-40" hidden></div>
@@ -1083,6 +1161,12 @@
 <script src="js/roster.js"></script>
 <script src="js/substitutions.js"></script>
 <script src="js/push.js"></script>
+<!-- El lector de huella (D94): la librería oficial de HID y el checador. Solo hablan
+     con el lector cuando se abre el registro de huellas. -->
+<script src="vendor/digitalpersona/websdk.client.ui.js"></script>
+<script src="vendor/digitalpersona/dp.core.js"></script>
+<script src="vendor/digitalpersona/dp.devices.js"></script>
+<script src="js/checador.js"></script>
 <script src="js/manager-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

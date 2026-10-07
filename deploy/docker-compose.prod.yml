@@ -197,6 +197,16 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      # Checador de huella (D94). Vacías = el checador dice en el panel qué falta y no
+      # registra ni marca; todo lo demás funciona igual. FINGERPRINT_KEY cifra las
+      # plantillas en la base: SI SE PIERDE, hay que volver a registrar todas las huellas.
+      # Va en el respaldo del .env, igual que BANK_ENCRYPTION_KEY.
+      FINGERPRINT_KEY: ${FINGERPRINT_KEY:-}
+      MATCHER_URL: http://matcher:8090
+      MATCHER_TOKEN: ${MATCHER_TOKEN:-}
+      FINGERPRINT_THRESHOLD: ${FINGERPRINT_THRESHOLD:-}
+      FINGERPRINT_DPI: ${FINGERPRINT_DPI:-}
+      CLOCK_RATE_LIMIT_PER_MIN: ${CLOCK_RATE_LIMIT_PER_MIN:-}
       # Entrar con Facebook. Vacías = el botón no se pinta y la ruta contesta 501
       # diciendo qué falta; correo y contraseña siguen funcionando igual.
       FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
@@ -258,6 +268,24 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: always
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+    networks: [ev2]
+
+  # El comparador de huellas (D94): SourceAFIS en Java. Solo lo alcanza la API, por la
+  # red interna: SIN `ports`, y cada petición lleva MATCHER_TOKEN. No guarda nada; la
+  # imagen de la huella y las plantillas llegan en cada petición y se olvidan.
+  matcher:
+    build:
+      context: ../matcher
+    container_name: ev2-matcher
+    environment:
+      MATCHER_TOKEN: ${MATCHER_TOKEN:-}
+      MATCHER_PORT: 8090
     restart: always
     logging: *logging
     deploy:
