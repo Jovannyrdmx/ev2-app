@@ -557,7 +557,11 @@ async function dispatch(event, { db = pool, sender = webpush, logger = console }
       const payload = payloadFor(byUser.get(sub.user_id), sub.lang, event);
       return payload ? sendTo(db, sub, payload, { sender, logger }) : 'skipped';
     }));
-    return { sent: results.filter((r) => r === 'sent').length, results };
+    const sent = results.filter((r) => r === 'sent').length;
+    // Una línea por aviso en el registro de la API (D91): en producción es la única
+    // forma de saber si un aviso salió, a cuántos teléfonos, o si nadie tenía uno.
+    logger.info?.(`Push ${event.type}: ${notices.length} destinatario(s), ${subs.length} teléfono(s), ${sent} enviado(s)`);
+    return { sent, results };
   } catch (err) {
     logger.error?.(`Push dispatch failed for event ${event && event.id}: ${err.message}`);
     return { sent: 0, error: err.message };
@@ -574,7 +578,41 @@ async function sendTest({ db = pool, nightclubId, userId, sender = webpush, logg
   return { devices: subs.length, sent: results.filter((r) => r === 'sent').length };
 }
 
+/**
+ * El estado para la pantalla (D91): si el servidor tiene notificaciones, cuántos
+ * teléfonos tiene esta persona y si AHORA MISMO le llegarían los avisos de su puesto —
+ * con el porqué cuando no: sin teléfonos, fuera de turno, o (gerente) sin noche en curso.
+ * Para la gerencia, además, cuántos teléfonos hay por puesto.
+ */
+async function status({ db = pool, nightclubId, user }) {
+  const c = config();
+  const mine = await db.query(
+    'SELECT count(*)::int AS n FROM push_subscriptions WHERE user_id = $1 AND nightclub_id = $2',
+    [user.id, nightclubId]);
+  const devices = mine.rows[0].n;
+  let reason = null;
+  if (!c.enabled) reason = 'server_disabled';
+  else if (!devices) reason = 'no_devices';
+  else if (MANAGER_ROLES.includes(user.role)) {
+    if (!(await nightInProgress(db, nightclubId))) reason = 'no_night';
+  } else if (user.role !== 'guest') {
+    if (!(await onShift(db, nightclubId, [user.id])).has(user.id)) reason = 'off_shift';
+  }
+  const out = { enabled: c.enabled, mine: { devices, receiving_now: reason === null, reason } };
+  if (MANAGER_ROLES.includes(user.role)) {
+    const { rows } = await db.query(
+      `SELECT u.role, count(*)::int AS devices, count(DISTINCT u.id)::int AS people,
+              max(s.last_sent_at) AS last_sent_at
+         FROM push_subscriptions s JOIN users u ON u.id = s.user_id
+        WHERE s.nightclub_id = $1
+        GROUP BY u.role ORDER BY u.role`,
+      [nightclubId]);
+    out.by_role = rows;
+  }
+  return out;
+}
+
 module.exports = {
-  config, ensureConfigured, dispatch, noticesFor, payloadFor, render, sendTo, sendTest,
+  config, ensureConfigured, dispatch, noticesFor, payloadFor, render, sendTo, sendTest, status,
   CATALOG, TEXTS, ROLE_HOME, TTL_SECONDS, MAX_FAILURES,
 };

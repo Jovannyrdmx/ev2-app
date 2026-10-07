@@ -472,6 +472,21 @@
         barra atiende cada zona del plano. -->
       <div id="tab-club" class="space-y-3" hidden>
         <!--
+          Las notificaciones al teléfono (D91). Cuando "no llega nada", aquí se ve por qué:
+          si el servidor las tiene encendidas, cuántos teléfonos hay por puesto, y si a ti
+          te llegarían ahora. El botón deja registrado ESTE teléfono y manda uno de prueba.
+        -->
+        <div class="card rounded-xl p-4 space-y-3" id="push-status-card">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40"><i class="fa-solid fa-bell mr-1"></i><span data-i18n="ps.title">Notificaciones</span></p>
+            <span id="ps-pill" class="pill">—</span>
+          </div>
+          <p id="ps-state" class="text-sm text-white/70">—</p>
+          <div id="ps-roles" class="grid grid-cols-2 sm:grid-cols-3 gap-2"></div>
+          <p id="ps-mine" class="text-xs text-white/50"></p>
+          <button id="btn-ps-test" type="button" class="ev2-button w-full rounded-xl py-3 font-display text-sm" data-i18n="ps.test">Probar en este teléfono</button>
+        </div>
+        <!--
           El tipo de cambio (D86). Uno para todo el club: con este cobra la caja cuando
           el cliente paga en dólares (el cambio se da en pesos) y con este se pagan los
           retiros de ganancias en otra moneda. Cada cambio queda en el historial con

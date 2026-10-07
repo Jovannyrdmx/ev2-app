@@ -11297,6 +11297,44 @@ paths:
         '204': { description: Borrado (o no era suyo) }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /api/nightclubs/{nightclubId}/push/status:
+    get:
+      operationId: getPushStatus
+      tags: [Notificaciones]
+      summary: ¿Me llegan los avisos ahora? (y, a la gerencia, teléfonos por puesto)
+      description: |
+        D91. `mine.reason` dice por qué no: `server_disabled` (faltan las claves VAPID),
+        `no_devices`, `off_shift` (personal sin turno abierto) o `no_night` (gerente sin
+        noche en curso). `by_role` solo viene para gerente y administrador.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Estado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  mine:
+                    type: object
+                    properties:
+                      devices: { type: integer }
+                      receiving_now: { type: boolean }
+                      reason: { type: [string, 'null'], enum: [server_disabled, no_devices, off_shift, no_night, null] }
+                  by_role:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        role: { type: string }
+                        devices: { type: integer }
+                        people: { type: integer }
+                        last_sent_at: { type: [string, 'null'], format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/nightclubs/{nightclubId}/push/test:
     post:
       operationId: testPush

@@ -3,6 +3,7 @@
 //   anyone signed in  GET    /push/config                       is push on, and the public key
 //                     POST   /nightclubs/:id/push/subscriptions this device, for me
 //                     DELETE /nightclubs/:id/push/subscriptions this device, no more (sign-out)
+//                     GET    /nightclubs/:id/push/status        do my notices arrive now, and why not
 //                     POST   /nightclubs/:id/push/test          one notice to my devices now
 //
 // What gets notified, and to whom, lives in services/push.js; this file only keeps
@@ -94,6 +95,14 @@ router.delete('/nightclubs/:nightclubId/push/subscriptions',
     await pool.query('DELETE FROM push_subscriptions WHERE endpoint = $1::text AND user_id = $2',
       [req.body.endpoint, req.user.id]);
     res.status(204).end();
+  }));
+
+// Para la pantalla: ¿me llegan los avisos ahora? Y, a la gerencia, cuántos teléfonos
+// hay por puesto (D91). Antes, cuando no llegaba nada, no había forma de saber por qué.
+router.get('/nightclubs/:nightclubId/push/status',
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    res.json(await push.status({ nightclubId: req.params.nightclubId, user: req.user }));
   }));
 
 router.post('/nightclubs/:nightclubId/push/test',

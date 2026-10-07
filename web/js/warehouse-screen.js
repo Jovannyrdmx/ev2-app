@@ -217,6 +217,25 @@
     const role = api.session.user && api.session.user.role;
     $('btn-back-manager').hidden = !['manager', 'admin'].includes(role);
     await load();
+    watchReturn();
+  }
+
+  /**
+   * El almacén no tiene conexión en vivo: al volver al teléfono después de un rato, se
+   * vuelve a pedir lo que la barra pidió mientras tanto (D91). Sin esto, el número de
+   * pedidos pendientes se quedaba como estaba al bloquear la pantalla.
+   */
+  let watchingReturn = false;
+  function watchReturn() {
+    if (watchingReturn) return;
+    watchingReturn = true;
+    let hiddenAt = null;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+      if (hiddenAt && Date.now() - hiddenAt >= 3000) load();
+      hiddenAt = null;
+    });
+    window.addEventListener('online', () => load());
   }
 
   // ---------------------------------------------------------------- cargar

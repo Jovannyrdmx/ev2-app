@@ -384,8 +384,19 @@
         // reciba reintentos cada medio segundo para siempre.
         stableMs: 10000,
       }, rtOptions.backoff || {});
+      // El latido (D91). Un teléfono que se bloquea o pasa de wifi a datos deja el socket
+      // "abierto" pero muerto: el navegador no se entera y la pantalla dice "En vivo"
+      // sin recibir nada. Cada `intervalMs` se manda un ping; si en `intervalMs +
+      // timeoutMs` no llegó NADA del servidor, el socket se da por muerto y se reconecta
+      // al momento. 0 lo apaga.
+      const heartbeat = Object.assign({ intervalMs: 10000, timeoutMs: 5000 }, rtOptions.heartbeat || {});
       let ws = null;
       let lastEventId = rtOptions.lastEventId || null;
+      let lastSeen = 0;
+      let hbTimer = null;
+      let everOpened = false;
+      let hiddenAt = null;
+      let wakeListeners = null;
       let attempts = 0;
       let openedAt = null;
       let closedByUs = false;
@@ -428,16 +439,110 @@
         reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, wait);
       }
 
+      function stopHeartbeat() {
+        if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
+      }
+
+      function startHeartbeat() {
+        stopHeartbeat();
+        if (!heartbeat.intervalMs) return;
+        hbTimer = setInterval(() => {
+          if (!ws || ws.readyState !== 1) return;
+          if (Date.now() - lastSeen > heartbeat.intervalMs + heartbeat.timeoutMs) { dropDead('heartbeat'); return; }
+          try { ws.send(JSON.stringify({ type: 'ping' })); } catch { /* lo detecta el siguiente latido */ }
+        }, heartbeat.intervalMs);
+        if (hbTimer && hbTimer.unref) hbTimer.unref();
+      }
+
+      /**
+       * Un socket que dejó de contestar. Se suelta sin esperar a que el navegador lo
+       * cierre (puede tardar minutos) y se abre otro en el acto: quien está esperando un
+       * pedido no puede esperar la escalada de reintentos.
+       */
+      function dropDead(reason) {
+        const dead = ws;
+        ws = null;
+        openedAt = null;
+        stopHeartbeat();
+        if (dead) {
+          dead.onopen = null; dead.onmessage = null; dead.onerror = null; dead.onclose = null;
+          try { dead.close(4000, 'stale'); } catch { /* ya estaba cerrado */ }
+        }
+        rt.emit('close', { code: null, reason });
+        if (closedByUs) return;
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        attempts = 0;
+        connect();
+      }
+
+      /**
+       * El teléfono volvió: se desbloqueó, regresó la señal o la pestaña volvió al frente.
+       * Sin esto, el socket esperaba su turno de reintento (hasta 30 s) y la pantalla no
+       * pedía lo que pasó mientras tanto. Emite `wake` con cuánto tiempo estuvo fuera.
+       */
+      function wake(reason = 'manual') {
+        if (closedByUs) return;
+        const awayMs = hiddenAt ? Date.now() - hiddenAt : 0;
+        hiddenAt = null;
+        rt.emit('wake', { away_ms: awayMs, reason });
+        if (!ws) {
+          if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+          attempts = 0;
+          if (session.accessToken) connect(); else scheduleReconnect(0);
+          return;
+        }
+        if (ws.readyState !== 1) return; // conectando: ya viene
+        // Tras dormir, lo más probable es que esté muerto: no se espera al latido.
+        if (heartbeat.intervalMs && Date.now() - lastSeen > heartbeat.intervalMs) { dropDead('wake'); return; }
+        try { ws.send(JSON.stringify({ type: 'ping' })); } catch { dropDead('wake'); }
+      }
+
+      function attachWake() {
+        if (wakeListeners || rtOptions.autoWake === false) return;
+        if (typeof document === 'undefined' || typeof window === 'undefined') return;
+        wakeListeners = {
+          visibility: () => {
+            if (document.visibilityState === 'hidden') hiddenAt = Date.now();
+            else wake('visible');
+          },
+          // Volvió la señal: lo que pasó sin ella hay que pedirlo, sin importar cuánto fue.
+          online: () => wake('online'),
+          pageshow: (e) => { if (e && e.persisted) wake('pageshow'); },
+        };
+        document.addEventListener('visibilitychange', wakeListeners.visibility);
+        window.addEventListener('online', wakeListeners.online);
+        window.addEventListener('pageshow', wakeListeners.pageshow);
+      }
+
+      function detachWake() {
+        if (!wakeListeners) return;
+        document.removeEventListener('visibilitychange', wakeListeners.visibility);
+        window.removeEventListener('online', wakeListeners.online);
+        window.removeEventListener('pageshow', wakeListeners.pageshow);
+        wakeListeners = null;
+      }
+
       function connect() {
         if (!WS) throw new Error('No hay WebSocket disponible; pásalo en createClient({ WebSocket })');
+        attachWake();
         if (!session.accessToken) { scheduleReconnect(1000); return; }
         closedByUs = false;
         const url = wsBase + (lastEventId ? `?since_id=${encodeURIComponent(lastEventId)}` : '');
         ws = new WS(url, ['bearer', session.accessToken]);
 
-        ws.onopen = () => { openedAt = Date.now(); rt.emit('open', {}); };
+        ws.onopen = () => {
+          openedAt = Date.now();
+          lastSeen = openedAt;
+          startHeartbeat();
+          rt.emit('open', {});
+          // No es la primera vez: hubo un hueco. La pantalla se pone al día además de la
+          // reproducción de eventos, por si el hueco fue más largo de lo que se reproduce.
+          if (everOpened) rt.emit('reconnected', {});
+          everOpened = true;
+        };
 
         ws.onmessage = (ev) => {
+          lastSeen = Date.now();
           let msg;
           try { msg = JSON.parse(ev.data); } catch { return; }
           switch (msg.type) {
@@ -470,6 +575,7 @@
         ws.onerror = () => rt.emit('socket_error', {});
 
         ws.onclose = async (ev) => {
+          stopHeartbeat();
           const code = ev && ev.code;
           // Solo una conexión que se sostuvo cuenta como buena.
           if (openedAt && Date.now() - openedAt >= backoff.stableMs) attempts = 0;
@@ -499,8 +605,27 @@
         get lastEventId() { return lastEventId; },
         get connected() { return Boolean(ws) && ws.readyState === 1; },
         ping() { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'ping' })); },
+        wake,
+        /**
+         * Lo que una pantalla hace para ponerse al día: tras reconectar, o al volver
+         * después de unos segundos fuera (D91). Se junta en una sola llamada aunque
+         * lleguen las dos cosas a la vez.
+         */
+        onCatchUp(fn, { minAwayMs = 3000, debounceMs = 800 } = {}) {
+          let timer = null;
+          const soon = () => {
+            clearTimeout(timer);
+            timer = setTimeout(() => { Promise.resolve().then(fn).catch(() => {}); }, debounceMs);
+          };
+          rt.on('reconnected', soon);
+          rt.on('wake', (i) => {
+            if (!i || i.reason !== 'visible' || i.away_ms >= minAwayMs) soon();
+          });
+        },
         close() {
           closedByUs = true;
+          stopHeartbeat();
+          detachWake();
           if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
           if (ws) { ws.close(1000, 'client'); ws = null; }
         },

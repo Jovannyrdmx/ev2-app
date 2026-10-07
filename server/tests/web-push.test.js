@@ -117,3 +117,96 @@ describe('los textos', () => {
     }
   });
 });
+
+// ================================================================== D91
+
+describe('las pantallas se ponen al día solas (D91)', () => {
+  const CONTROLADORES = {
+    'index-screen.js': 'Promise.all([loadFloor(), loadOrders(), loadTaxi()])',
+    'staff-screen.js': 'loadAll()',
+    'bartender-screen.js': 'loadQueue()',
+    'cashier-screen.js': 'refreshSoon()',
+    'manager-screen.js': 'loadAll()',
+    'valet-screen.js': 'loadAll()',
+    'employee-screen.js': 'loadAll()',
+    'driver-screen.js': 'load()',
+  };
+  for (const [archivo, carga] of Object.entries(CONTROLADORES)) {
+    it(`${archivo} vuelve a pedir sus datos al reconectar o al volver`, () => {
+      expect(leer(`js/${archivo}`)).toContain(`rt.onCatchUp(() => ${carga});`);
+    });
+  }
+
+  it('el almacén, que no tiene socket, también al volver o al regresar la señal', () => {
+    const js = leer('js/warehouse-screen.js');
+    expect(js).toMatch(/visibilitychange/);
+    expect(js).toMatch(/addEventListener\('online'/);
+  });
+});
+
+describe('la versión nueva sola, pero nunca a media acción (D91)', () => {
+  const Pwa = require('../../web/js/pwa.js');
+  const doc = (html) => new JSDOM(`<!doctype html><body>${html}</body>`).window.document;
+
+  it('sin nada abierto, se puede recargar', () => {
+    expect(Pwa.isBusy(doc('<main>hola</main><div class="fixed inset-0" hidden></div>'))).toBe(false);
+  });
+
+  it('con una hoja abierta (un pedido armado, un cobro), no', () => {
+    expect(Pwa.isBusy(doc('<div class="fixed inset-0">hoja</div>'))).toBe(true);
+    expect(Pwa.isBusy(doc('<div role="dialog">cuadro</div>'))).toBe(true);
+  });
+
+  it('una hoja dentro de algo escondido no cuenta', () => {
+    expect(Pwa.isBusy(doc('<section hidden><div class="fixed inset-0">x</div></section>'))).toBe(false);
+  });
+
+  it('escribiendo en un campo con algo, no', () => {
+    const d = doc('<input id="q" value="tecate">');
+    d.getElementById('q').focus();
+    expect(Pwa.isBusy(d)).toBe(true);
+  });
+
+  it('busca versión cada cinco minutos', () => {
+    expect(Pwa.CHECK_EVERY_MS).toBe(300000);
+  });
+
+  it('ninguna pantalla abre con una hoja ya visible (si no, nunca se recargaría sola)', () => {
+    for (const html of Object.keys(PANTALLAS)) {
+      const d = new JSDOM(leer(html)).window.document;
+      const abiertas = [...d.querySelectorAll('.fixed.inset-0, [role="dialog"]')]
+        .filter((el) => !el.hidden && !el.closest('[hidden]'));
+      expect([html, abiertas.map((el) => el.id || el.className)]).toEqual([html, []]);
+    }
+  });
+});
+
+describe('el gerente ve por qué no llegan (D91)', () => {
+  it('la tarjeta de notificaciones vive en Club, con su botón de prueba', () => {
+    const d = new JSDOM(leer('manager.html')).window.document;
+    const card = d.getElementById('push-status-card');
+    expect(card).not.toBeNull();
+    expect(d.getElementById('tab-club').contains(card)).toBe(true);
+    expect(d.getElementById('btn-ps-test')).not.toBeNull();
+    expect(leer('js/manager-screen.js')).toMatch(/club: \(\) => Promise\.all\(\[[^\]]*loadPushStatus\(\)/);
+  });
+
+  it('cada motivo tiene su texto en los dos idiomas', () => {
+    const F = require('../../web/js/format.js');
+    for (const k of ['ps.why.server_disabled', 'ps.why.no_devices', 'ps.why.off_shift', 'ps.why.no_night',
+      'ps.fail.server_disabled', 'ps.fail.ios', 'ps.fail.unsupported', 'ps.fail.denied', 'ps.fail.default',
+      'ps.fail.not_delivered', 'ps.fail.server', 'pwa.update']) {
+      expect([k, Boolean(F.STRINGS.es[k]), Boolean(F.STRINGS.en[k])]).toEqual([k, true, true]);
+    }
+  });
+
+  it('la espera del service worker tiene tope: el botón ya no se queda colgado', () => {
+    expect(leer('js/push.js')).toMatch(/Promise\.race\(\[\s*navigator\.serviceWorker\.ready/);
+  });
+
+  it('el script de verificación del VPS revisa las claves y el arranque', () => {
+    const sh = fs.readFileSync(path.join(__dirname, '..', '..', 'deploy', 'verificar-despliegue.sh'), 'utf8');
+    expect(sh).toMatch(/VAPID_PUBLIC_KEY/);
+    expect(sh).toMatch(/Push notifications: enabled/);
+  });
+});

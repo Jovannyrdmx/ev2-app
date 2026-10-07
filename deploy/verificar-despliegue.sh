@@ -180,6 +180,29 @@ else
     rojo "${pendientes} papel(es) esperando hace más de 5 minutos"
     aviso "Alguna PC está apagada o asignada a otra barra. El panel lo dice en Impresoras."
   fi
+
+  # --------------------------------------------------------------- 8. notificaciones
+  # D91: las claves estaban en el .env, pero la API se había quedado con las de antes
+  # (un restart no relee el .env) y en los teléfonos no salía ni el recuadro.
+  titulo '8. Las notificaciones al teléfono (D90)'
+  vapid=$(docker exec ev2-api sh -c 'test -n "${VAPID_PUBLIC_KEY:-}" && test -n "${VAPID_PRIVATE_KEY:-}" && test -n "${VAPID_SUBJECT:-}" && echo si' 2>/dev/null)
+  if [ "$vapid" = "si" ]; then
+    verde "las tres claves VAPID llegaron al contenedor de la API"
+  else
+    rojo "faltan claves VAPID en el contenedor: en los teléfonos no aparece ni el recuadro"
+    aviso "Ponlas en el .env y corre 'docker compose ... up -d' (un restart NO relee el .env)."
+  fi
+  if docker logs ev2-api 2>&1 | grep -q 'Push notifications: enabled'; then
+    verde "la API arrancó con las notificaciones encendidas"
+  else
+    rojo "la API no dice 'Push notifications: enabled' al arrancar"
+  fi
+  telefonos=$(echo "SELECT count(*) FROM push_subscriptions;" | psql_ev2 | tr -d '[:space:]')
+  if [ "${telefonos:-0}" = "0" ]; then
+    aviso "ningún teléfono ha activado las notificaciones todavía"
+  else
+    verde "${telefonos} teléfono(s) con notificaciones activas"
+  fi
 fi
 
 # --------------------------------------------------------------- resumen

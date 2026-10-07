@@ -1759,6 +1759,8 @@
 
   function connectRealtime() {
     const rt = api.createRealtime();
+    // Al reconectar o al volver al teléfono tras unos segundos, ponerse al día (D91).
+    rt.onCatchUp(() => Promise.all([loadFloor(), loadOrders(), loadTaxi()]));
     state.realtime = rt;
 
     rt.on('open', () => { setConnection(true, 'top.live'); banner(null); });

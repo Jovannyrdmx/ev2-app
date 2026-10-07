@@ -113,10 +113,37 @@
   };
   const dismiss = (userId) => { try { localStorage.setItem(DISMISS_KEY, String(userId)); } catch { /* privado */ } };
 
+  /**
+   * El service worker lo registra pwa.js al cargar; aquí se espera a que esté listo.
+   * Con tope (D91): `ready` nunca termina si el registro falló, y entonces el botón se
+   * quedaba apagado para siempre sin decir nada.
+   */
+  const READY_TIMEOUT_MS = 8000;
   async function registration() {
-    // El service worker lo registra pwa.js al cargar; aquí se espera a que esté listo.
     if (!supported()) return null;
-    try { return await navigator.serviceWorker.ready; } catch { return null; }
+    try {
+      return await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((resolve) => { setTimeout(() => resolve(null), READY_TIMEOUT_MS); }),
+      ]);
+    } catch { return null; }
+  }
+
+  /**
+   * Para la tarjeta del gerente (D91): deja ESTE teléfono registrado (pidiendo el
+   * permiso si hace falta, con el toque que lo llamó) y manda uno de prueba.
+   * Devuelve { ok, reason?, devices?, sent? }.
+   */
+  async function testHere(api) {
+    let config = { enabled: false, public_key: null };
+    try { config = await api.get('/push/config'); } catch { return { ok: false, reason: 'server' }; }
+    if (!config.enabled) return { ok: false, reason: 'server_disabled' };
+    if (!supported()) return { ok: false, reason: isIos(navigator) && !standalone() ? 'ios' : 'unsupported' };
+    wakeAudio();
+    const r = await activate(api, config.public_key);
+    if (r !== 'granted') return { ok: false, reason: r };
+    const sent = await api.post(`/nightclubs/${clubOf(api)}/push/test`, {});
+    return { ok: sent.sent > 0, devices: sent.devices, sent: sent.sent, reason: sent.sent > 0 ? null : 'not_delivered' };
   }
 
   const clubOf = (api) => api.session.user && api.session.user.nightclub_id;
@@ -264,5 +291,5 @@
     } catch { /* salir siempre funciona, con o sin notificaciones */ }
   }
 
-  return { keyBytes, isIos, boxState, start, forget, chime };
+  return { keyBytes, isIos, boxState, start, forget, chime, testHere };
 }));

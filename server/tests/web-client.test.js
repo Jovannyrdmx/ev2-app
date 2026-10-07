@@ -433,6 +433,104 @@ describe('Socket de tiempo real', () => {
 
 // ---------------------------------------------------------------- formato
 
+describe('El socket no se queda muerto (D91)', () => {
+  beforeEach(() => { FakeWS.instances = []; });
+  const espera = (ms) => new Promise((r) => { setTimeout(r, ms); });
+
+  async function conectado(opts = {}) {
+    const api = EV2.createClient({
+      baseUrl: '/api',
+      fetch: async () => ({ status: 200, json: async () => TOKENS }),
+      storage: fakeStorage(),
+      retries: 0,
+      WebSocket: FakeWS,
+      wsUrl: 'ws://x',
+    });
+    await api.login({ nightclubSlug: 'ev2', email: 'a@b.mx', password: 'x' });
+    const rt = api.createRealtime({
+      backoff: { baseMs: 5000, maxMs: 5000, jitterMs: 0 },
+      heartbeat: { intervalMs: 30, timeoutMs: 20 },
+      autoWake: false,
+      ...opts,
+    });
+    rt.connect();
+    FakeWS.instances[0].open();
+    return { rt, ws: FakeWS.instances[0] };
+  }
+
+  it('manda latidos mientras el servidor contesta, y no reconecta', async () => {
+    const { rt, ws } = await conectado();
+    const vivo = setInterval(() => ws.receive({ type: 'pong' }), 15);
+    await espera(130);
+    clearInterval(vivo);
+    expect(ws.sent.filter((m) => m.type === 'ping').length).toBeGreaterThanOrEqual(2);
+    expect(FakeWS.instances).toHaveLength(1);
+    rt.close();
+  });
+
+  it('si el servidor deja de contestar, lo da por muerto y abre otro al momento, sin esperar la escalada', async () => {
+    // La escalada está en 5 s: si reconectara por ahí, en 150 ms no habría otro socket.
+    const { rt } = await conectado();
+    const cierres = [];
+    rt.on('close', (i) => cierres.push(i.reason));
+    await espera(150);
+    expect(FakeWS.instances.length).toBeGreaterThanOrEqual(2);
+    expect(cierres[0]).toBe('heartbeat');
+    rt.close();
+  });
+
+  it('avisa "reconnected" la segunda vez que abre, no la primera', async () => {
+    const { rt, ws } = await conectado({ heartbeat: { intervalMs: 0 } });
+    const avisos = [];
+    rt.on('reconnected', () => avisos.push('re'));
+    expect(avisos).toEqual([]);
+    ws.fire(1006);
+    rt.wake('online'); // sin esperar los 5 s de la escalada
+    FakeWS.instances[1].open();
+    expect(avisos).toEqual(['re']);
+    rt.close();
+  });
+
+  it('al despertar sin socket, conecta ya, aunque el reintento estuviera a 5 s', async () => {
+    const { rt, ws } = await conectado({ heartbeat: { intervalMs: 0 } });
+    ws.fire(1006);
+    expect(FakeWS.instances).toHaveLength(1);
+    rt.wake('visible');
+    expect(FakeWS.instances).toHaveLength(2);
+    rt.close();
+  });
+
+  it('al despertar con un socket viejo (el teléfono durmió), no se confía en él', async () => {
+    const { rt } = await conectado({ heartbeat: { intervalMs: 30, timeoutMs: 1000 } });
+    await espera(45); // más que un intervalo sin noticias del servidor
+    rt.wake('visible');
+    expect(FakeWS.instances).toHaveLength(2);
+    rt.close();
+  });
+
+  it('onCatchUp junta reconectar y volver en una sola recarga, y no recarga por un vistazo', async () => {
+    const { rt, ws } = await conectado({ heartbeat: { intervalMs: 0 } });
+    let recargas = 0;
+    rt.onCatchUp(() => { recargas += 1; }, { debounceMs: 20 });
+    rt.wake('visible'); // volvió al instante: no cuenta
+    await espera(40);
+    expect(recargas).toBe(0);
+    ws.fire(1006);
+    rt.wake('online');
+    FakeWS.instances[1].open();
+    await espera(40);
+    expect(recargas).toBe(1);
+    rt.close();
+  });
+
+  it('close() apaga el latido: no vuelve a conectar solo', async () => {
+    const { rt } = await conectado();
+    rt.close();
+    await espera(150);
+    expect(FakeWS.instances).toHaveLength(1);
+  });
+});
+
 describe('Dinero e idioma', () => {
   afterEach(() => fmt.setLanguage('es'));
 

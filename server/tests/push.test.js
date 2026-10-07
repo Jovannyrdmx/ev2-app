@@ -365,3 +365,64 @@ describe('el catálogo no se desfasa del sistema', () => {
     expect(Object.keys(push.TEXTS.en).sort()).toEqual(Object.keys(push.TEXTS.es).sort());
   });
 });
+
+// ================================================================== por qué no llega (D91)
+
+describe('GET /push/status: por qué no me llega', () => {
+  const ORIGINAL = { ...process.env };
+  beforeEach(() => {
+    process.env.VAPID_PUBLIC_KEY = 'BPublicaDePrueba';
+    process.env.VAPID_PRIVATE_KEY = 'privada-de-prueba';
+    process.env.VAPID_SUBJECT = 'mailto:pruebas@ev2.local';
+  });
+  afterEach(() => {
+    for (const k of ['VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT']) {
+      if (ORIGINAL[k] === undefined) delete process.env[k]; else process.env[k] = ORIGINAL[k];
+    }
+  });
+  const status = (user) => api().get(url('/push/status')).set(auth(user));
+
+  it('sin claves en el servidor lo dice, que era justo lo que no se veía', async () => {
+    delete process.env.VAPID_PRIVATE_KEY;
+    const r = await status(waiter);
+    expect(r.body).toMatchObject({ enabled: false, mine: { receiving_now: false, reason: 'server_disabled' } });
+  });
+
+  it('sin teléfono registrado, luego fuera de turno, luego en turno', async () => {
+    expect((await status(waiter)).body.mine.reason).toBe('no_devices');
+    await subscribe(waiter, 1);
+    expect((await status(waiter)).body.mine).toMatchObject({ devices: 1, reason: 'off_shift' });
+    await startShift(waiter);
+    expect((await status(waiter)).body.mine).toEqual({ devices: 1, receiving_now: true, reason: null });
+  });
+
+  it('al gerente: sin noche en curso, y los teléfonos por puesto', async () => {
+    await subscribe(manager, 9); await subscribe(waiter, 1); await subscribe(waiter, 2); await subscribe(guest, 5);
+    const r = await status(manager);
+    expect(r.body.mine.reason).toBe('no_night');
+    expect(r.body.by_role).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'waiter', devices: 2, people: 1 }),
+      expect.objectContaining({ role: 'guest', devices: 1, people: 1 }),
+    ]));
+    await nightInProgress();
+    expect((await status(manager)).body.mine.receiving_now).toBe(true);
+  });
+
+  it('el cliente: siempre que tenga teléfono; y no ve los conteos del club', async () => {
+    await subscribe(guest, 5);
+    const r = await status(guest);
+    expect(r.body.mine.receiving_now).toBe(true);
+    expect(r.body.by_role).toBeUndefined();
+  });
+});
+
+describe('cada aviso deja su línea en el registro (D91)', () => {
+  it('dice a cuántos teléfonos salió', async () => {
+    await startShift(waiter); await subscribe(waiter, 1);
+    await waiterOrderReady();
+    const lineas = [];
+    const logger = { info: (m) => lineas.push(m), warn() {}, error() {} };
+    await push.dispatch(await lastEvent('order_ready'), { sender: fakeSender(), logger });
+    expect(lineas).toEqual(['Push order_ready: 1 destinatario(s), 1 teléfono(s), 1 enviado(s)']);
+  });
+});

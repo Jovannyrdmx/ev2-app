@@ -3447,11 +3447,56 @@
    * "Actualizar" en siete tarjetas; los avisos en vivo ya refrescan todo, y al entrar a
    * una sección se pide lo suyo por si la conexión estuvo caída.
    */
+  // ---------------------------------------------------------------- notificaciones (D91)
+
+  let pushStatus = null;
+  async function loadPushStatus() {
+    try {
+      pushStatus = await api.get(`/nightclubs/${clubId()}/push/status`);
+    } catch (err) { pushStatus = null; showError(err); }
+    renderPushStatus();
+  }
+
+  function renderPushStatus() {
+    const s = pushStatus;
+    const pill = $('ps-pill');
+    if (!s) { pill.textContent = '—'; return; }
+    pill.textContent = t(s.enabled ? 'ps.on' : 'ps.off');
+    pill.className = `pill ${s.enabled ? 'pill-ok' : 'pill-off'}`;
+    $('ps-state').textContent = t(s.enabled ? 'ps.stateOn' : 'ps.stateOff');
+    const roles = s.by_role || [];
+    $('ps-roles').innerHTML = roles.length ? roles.map((r) => `
+      <div class="stat-card">
+        <div class="stat-number">${escape(r.people)}</div>
+        <div class="stat-label">${escape(EV2Roles.describe(r.role, lang()).label)}</div>
+      </div>`).join('')
+      : `<p class="text-xs text-white/40 col-span-full">${escape(t('ps.noDevices'))}</p>`;
+    const mine = s.mine || {};
+    $('ps-mine').textContent = mine.receiving_now
+      ? t('ps.mineOk', { n: mine.devices })
+      : t(`ps.why.${mine.reason || 'no_devices'}`);
+    $('btn-ps-test').disabled = !s.enabled;
+  }
+
+  $('btn-ps-test').onclick = async () => {
+    const listo = ocupado($('btn-ps-test'), 'ps.testing');
+    try {
+      const r = await EV2Push.testHere(api);
+      if (r.ok) toast(t('ps.testOk', { n: r.sent }), 'ok');
+      else toast(t(`ps.fail.${r.reason}`) || t('push.failed'), 'error');
+    } catch (err) {
+      showError(err);
+    } finally {
+      listo();
+      loadPushStatus();
+    }
+  };
+
   const TAB_LOADERS = {
     summary: () => Promise.all([loadTills()]),
     cash: () => Promise.all([loadShiftCuts(), loadTerminalCharges(), loadTips(), loadTills()]),
     lost: () => loadLostFound(),
-    club: () => Promise.all([loadExchangeRate(), loadTerminals(), loadPrinting()]),
+    club: () => Promise.all([loadExchangeRate(), loadTerminals(), loadPrinting(), loadPushStatus()]),
     printing: () => loadPrinting(),
   };
 
@@ -4276,6 +4321,8 @@
 
   function connectRealtime() {
     const rt = api.createRealtime();
+    // Al reconectar o al volver al teléfono tras unos segundos, ponerse al día (D91).
+    rt.onCatchUp(() => loadAll());
     state.realtime = rt;
     rt.on('open', () => { setConnection(true, 'top.live'); banner(null); });
     rt.on('reconnecting', (i) => setConnection(null, 'realtime.reconnecting',
