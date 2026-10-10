@@ -1885,6 +1885,15 @@
    * no avisa. Va junto a los avisos de la revisión porque es donde se arregla lo que
    * esos avisos señalan.
    */
+  /**
+   * Donde puede vivir una PC o una impresora (D96): las barras y Cover. El almacén
+   * no imprime. Cover solo lleva recibos de caja; el servidor lo vuelve a revisar.
+   */
+  const printPlaces = () => (state.locations || [])
+    .filter((l) => (l.kind === 'bar' || l.kind === 'door') && l.active !== false);
+  const isDoor = (id) => Boolean(id)
+    && (state.locations || []).some((l) => l.id === id && l.kind === 'door');
+
   function renderZoneBars() {
     const zonas = printing.zones || [];
     $('zb-empty').hidden = zonas.length > 0;
@@ -1958,7 +1967,7 @@
     // dice: dejarlo abierto con la lista vacía hacía que picarle "Dar de alta"
     // contestara "escoge en qué barra está" señalando un menú sin opciones.
     const select = $('prn-location');
-    const barras = (state.locations || []).filter((l) => l.kind === 'bar');
+    const barras = printPlaces();
     const listas = barras.length > 0;
     if (!listas) {
       select.innerHTML = '';
@@ -2000,8 +2009,15 @@
 
   $('prn-agent-loc').onchange = () => {
     if (!$('prn-agent-loc').value) $('prn-agent-purpose').value = '';
+    // En Cover solo hay recibos de caja (D96).
+    if (isDoor($('prn-agent-loc').value)) $('prn-agent-purpose').value = 'till';
     $('prn-agent-purpose').disabled = !$('prn-agent-loc').value;
   };
+
+  // La impresora nueva en Cover solo puede ser de recibos de caja (D96).
+  $('prn-location').addEventListener('change', () => {
+    if (isDoor($('prn-location').value) && $('prn-purpose')) $('prn-purpose').value = 'till';
+  });
 
   function renderPrintersList() {
     const lista = printing.printers || [];
@@ -2347,7 +2363,7 @@
     const fila = document.createElement('div');
     fila.className = 'flex items-center gap-2';
 
-    const barras = (state.locations || []).filter((l) => l.kind === 'bar');
+    const barras = printPlaces();
     const selBarra = document.createElement('select');
     selBarra.className = 'card rounded-lg px-2 py-1 text-xs min-w-0 flex-1';
     const todo = document.createElement('option');
@@ -2393,6 +2409,8 @@
     };
     selBarra.onchange = () => {
       if (!selBarra.value) selPapel.value = '';
+      // En Cover solo hay recibos de caja (D96).
+      if (isDoor(selBarra.value)) selPapel.value = 'till';
       selPapel.disabled = !selBarra.value;
       guardar();
     };

@@ -45,6 +45,8 @@ const LOCATIONS = [
   { code: 'almacen', name: 'Almacén', kind: 'warehouse', floor: null, sort_order: 0 },
   { code: 'barra-baja', name: 'Barra planta baja', kind: 'bar', floor: 'baja', sort_order: 1 },
   { code: 'barra-alta', name: 'Barra planta alta', kind: 'bar', floor: 'alta', sort_order: 2 },
+  // D96: la entrada. No es barra: solo tiene PC e impresora para los recibos del cover.
+  { code: 'cover', name: 'Cover', kind: 'door', floor: null, sort_order: 3 },
 ];
 
 /**

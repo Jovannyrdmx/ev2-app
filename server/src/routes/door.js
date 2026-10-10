@@ -21,12 +21,16 @@ const door = require('../services/door');
 const passes = require('../services/guest-passes');
 const QRCode = require('qrcode');
 const seating = require('../services/seating');
+const tickets = require('../services/tickets');
 
 const router = express.Router({ mergeParams: true });
 
 router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
 
 const DOOR_ROLES = ['hostess', 'manager', 'admin'];
+
+/** Cómo se llama en el recibo cada forma de pago de la puerta (D96). */
+const DOOR_RECEIPT_METHOD = { cash: 'cash', card: 'card_terminal', transfer: 'bank_transfer' };
 
 // Lo que la puerta necesita ver de un pase: quién, qué mesa, cuántos.
 const PASS_SELECT = `
@@ -816,6 +820,24 @@ router.post('/nightclubs/:nightclubId/door/admissions',
           actorId: req.user.id,
           labels: b.labels || [],
         });
+      }
+
+      // El recibo del cover sale en la impresora de Cover (D96), si el club la tiene.
+      // Nunca tumba el cobro: `printReceipt` encola con salvaguarda.
+      if (transactionId) {
+        const cover = await client.query(
+          `SELECT id FROM supply_locations
+            WHERE nightclub_id = $1 AND kind = 'door' AND active
+            ORDER BY sort_order, code LIMIT 1`, [nightclubId]);
+        if (cover.rows[0]) {
+          await tickets.printReceipt(client, {
+            nightclubId,
+            transactionId,
+            method: DOOR_RECEIPT_METHOD[b.payment_method] || b.payment_method,
+            collectedBy: req.user.id,
+            locationId: cover.rows[0].id,
+          });
+        }
       }
 
       await events.publish({

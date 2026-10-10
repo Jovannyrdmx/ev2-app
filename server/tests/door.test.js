@@ -284,6 +284,27 @@ describe('lo que se vende en la entrada', () => {
     expect(rows[0]).toMatchObject({ amount: '450.00', status: 'paid', provider: 'cash' });
   });
 
+  it('el recibo del cover sale en la impresora de Cover (D96); una cortesía no imprime', async () => {
+    const { rows: [cover] } = await pool.query(
+      `INSERT INTO supply_locations (nightclub_id, code, name, kind, sort_order)
+       VALUES ($1,'cover','Cover','door',3) RETURNING id`, [club.id]);
+    const prn = await api().post(url('/printers')).set(auth(manager)).send({
+      location_id: cover.id, name: 'Cover · caja', purpose: 'till',
+      connection: 'network', host: '192.168.1.60',
+    });
+    expect(prn.status).toBe(201);
+
+    const pagado = await api().post(url('/door/admissions')).set(auth(hostess))
+      .send({ kind: 'general', quantity: 2, unit_price: 150, payment_method: 'cash' });
+    expect(pagado.status).toBe(201);
+    await api().post(url('/door/admissions')).set(auth(hostess))
+      .send({ kind: 'general', quantity: 1, unit_price: 150, payment_method: 'courtesy' });
+
+    const { rows } = await pool.query(
+      `SELECT printer_id, kind FROM print_jobs WHERE kind = 'receipt'`);
+    expect(rows).toEqual([{ printer_id: prn.body.printer.id, kind: 'receipt' }]);
+  });
+
   it('un extra VIP queda pegado a su reservación: así se responde "reservó 8, entraron 10"', async () => {
     const r = await reservar();
     await api().post(url('/door/admissions')).set(auth(hostess))

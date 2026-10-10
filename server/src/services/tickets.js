@@ -617,7 +617,7 @@ async function receiptData(runner, { nightclubId, transactionId, collectedBy }) 
  */
 async function printReceipt(client, {
   nightclubId, transactionId, method, reference = null, collectedBy = null, copies = 1,
-  parts = null,
+  parts = null, locationId = null,
 }) {
   const settings = await printing.settingsOf(client, nightclubId);
 
@@ -628,7 +628,9 @@ async function printReceipt(client, {
     `SELECT location_id FROM staff_shifts
       WHERE user_id = $1 AND ended_at IS NULL AND location_id IS NOT NULL`,
     [collectedBy]) : { rows: [] };
-  const tillLocation = caja.rows[0] ? caja.rows[0].location_id : null;
+  // `locationId` lo manda quien cobra en un lugar fijo sin turno de caja: la puerta
+  // imprime el recibo del cover en la impresora de Cover (D96).
+  const tillLocation = locationId || (caja.rows[0] ? caja.rows[0].location_id : null);
   if (!tillLocation && !settings.print_receipts) return null;
 
   const data = await receiptData(client, { nightclubId, transactionId, collectedBy });
