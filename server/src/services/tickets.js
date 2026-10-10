@@ -73,6 +73,7 @@ const folio = (id) => String(id || '').replace(/-/g, '').slice(-6).toUpperCase()
 const METHOD_LABEL = {
   cash: 'Efectivo',
   cash_usd: 'Efectivo en dólares',
+  vip_credit: 'Crédito VIP',
   card_terminal: 'Tarjeta (terminal)',
   zelle: 'Zelle',
   cash_app: 'Cash App',

@@ -12,6 +12,7 @@ const tickets = require('../services/tickets');
 const consent = require('../services/consent');
 const till = require('../services/till');
 const payments = require('../services/payments');
+const vipCredit = require('../services/vip-credit');
 
 const router = express.Router({ mergeParams: true });
 
@@ -425,6 +426,11 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
             [order.transaction_id]);
         }
         refundDue = order.payment_status === 'paid';
+        // Lo que se pagó con credito VIP regresa al credito, si la noche sigue (D97).
+        if (order.transaction_id) {
+          await vipCredit.restoreForTransaction(client, {
+            transactionId: order.transaction_id, userId: req.user.id });
+        }
       }
 
       // La comanda del pedido que se confirma a mano (D53). El camino normal es el

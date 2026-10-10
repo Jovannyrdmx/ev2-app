@@ -286,7 +286,7 @@ router.post('/nightclubs/:nightclubId/till/payments',
     params: z.object({ nightclubId: uuid }),
     body: z.object({
       transaction_id: uuid,
-      method: z.enum(['cash', 'cash_usd', 'card_terminal']),
+      method: z.enum(['cash', 'cash_usd', 'card_terminal', 'vip_credit']),
       // En dólares (D86) el monto lo calcula el servidor con el tipo de cambio.
       amount: z.number().positive().max(1_000_000).optional(),
       reference: z.string().trim().min(3).max(60).optional(),
@@ -295,7 +295,7 @@ router.post('/nightclubs/:nightclubId/till/payments',
       // El tipo de cambio que el cajero vio: si ya no es el vigente, 409.
       exchange_rate_id: z.union([z.string().regex(/^\d+$/), z.number().int().positive()]).optional(),
       client_request_id: uuid.optional(),
-    }).refine((b) => b.method === 'cash_usd' || b.amount !== undefined,
+    }).refine((b) => ['cash_usd', 'vip_credit'].includes(b.method) || b.amount !== undefined,
       { message: 'Indica el monto a cobrar', path: ['amount'] }),
   }),
   asyncHandler(async (req, res) => {
