@@ -49,6 +49,10 @@
     invView: 'stock', invSearch: '', invFilter: 'all', invAddOpen: false,
     staffSearch: '', staffRole: null,
     recipe: null,   // { drink_id, name, price, lines: [{supply_id, quantity}] }
+    // D95: el insumo abierto en la hoja de edición, y los dados de baja. Los inactivos
+    // se piden aparte y solo al abrir su filtro: `supplies` sigue siendo lo vigente,
+    // que es lo que alimenta el valor del inventario y el selector de recetas.
+    supEdit: null, inactiveSupplies: [], inactiveLoaded: false,
     // El corte de la noche y el rol. `closings` son los cortes GUARDADOS, los
     // unicos que se pueden comparar entre si.
     closings: [],
@@ -1884,6 +1888,15 @@
    * no avisa. Va junto a los avisos de la revisión porque es donde se arregla lo que
    * esos avisos señalan.
    */
+  /**
+   * Donde puede vivir una PC o una impresora (D96): las barras y Cover. El almacén
+   * no imprime. Cover solo lleva recibos de caja; el servidor lo vuelve a revisar.
+   */
+  const printPlaces = () => (state.locations || [])
+    .filter((l) => (l.kind === 'bar' || l.kind === 'door') && l.active !== false);
+  const isDoor = (id) => Boolean(id)
+    && (state.locations || []).some((l) => l.id === id && l.kind === 'door');
+
   function renderZoneBars() {
     const zonas = printing.zones || [];
     $('zb-empty').hidden = zonas.length > 0;
@@ -1957,7 +1970,7 @@
     // dice: dejarlo abierto con la lista vacía hacía que picarle "Dar de alta"
     // contestara "escoge en qué barra está" señalando un menú sin opciones.
     const select = $('prn-location');
-    const barras = (state.locations || []).filter((l) => l.kind === 'bar');
+    const barras = printPlaces();
     const listas = barras.length > 0;
     if (!listas) {
       select.innerHTML = '';
@@ -1999,8 +2012,15 @@
 
   $('prn-agent-loc').onchange = () => {
     if (!$('prn-agent-loc').value) $('prn-agent-purpose').value = '';
+    // En Cover solo hay recibos de caja (D96).
+    if (isDoor($('prn-agent-loc').value)) $('prn-agent-purpose').value = 'till';
     $('prn-agent-purpose').disabled = !$('prn-agent-loc').value;
   };
+
+  // La impresora nueva en Cover solo puede ser de recibos de caja (D96).
+  $('prn-location').addEventListener('change', () => {
+    if (isDoor($('prn-location').value) && $('prn-purpose')) $('prn-purpose').value = 'till';
+  });
 
   function renderPrintersList() {
     const lista = printing.printers || [];
@@ -2371,7 +2391,7 @@
     const fila = document.createElement('div');
     fila.className = 'flex items-center gap-2';
 
-    const barras = (state.locations || []).filter((l) => l.kind === 'bar');
+    const barras = printPlaces();
     const selBarra = document.createElement('select');
     selBarra.className = 'card rounded-lg px-2 py-1 text-xs min-w-0 flex-1';
     const todo = document.createElement('option');
@@ -2417,6 +2437,8 @@
     };
     selBarra.onchange = () => {
       if (!selBarra.value) selPapel.value = '';
+      // En Cover solo hay recibos de caja (D96).
+      if (isDoor(selBarra.value)) selPapel.value = 'till';
       selPapel.disabled = !selBarra.value;
       guardar();
     };
@@ -4242,11 +4264,19 @@
    * tarjetas grandes con un botón "Mínimo" que preguntaba el estante con un número.
    */
   function renderStockList() {
-    let list = state.supplies.filter((x) => invMatches(x.name) || invMatches(x.category));
+    const inactivos = state.invFilter === 'inactive';
+    if (inactivos && !state.inactiveLoaded) {
+      invEmpty(t('inv.loading'));
+      loadInactiveSupplies();
+      return undefined;
+    }
+    const base = inactivos ? state.inactiveSupplies : state.supplies;
+    let list = base.filter((x) => invMatches(x.name) || invMatches(x.category));
     if (state.invFilter === 'low') list = list.filter((x) => x.low);
     if (state.invFilter === 'unconfirmed') list = list.filter((x) => x.size_confirmed === false);
     if (list.length === 0) {
-      return invEmpty(t(state.invFilter === 'all' ? 'inv.emptyStock' : 'inv.emptyFilter'));
+      return invEmpty(t(state.invFilter === 'all' ? 'inv.emptyStock'
+        : (inactivos ? 'inv.emptyInactive' : 'inv.emptyFilter')));
     }
     $('inv-empty').hidden = true;
     const estantes = (state.locations || []).filter((l) => l.kind === 'bar' || l.kind === 'warehouse');
@@ -4259,6 +4289,7 @@
             <div class="px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 ${supply.low ? 'border-l-4 border-amber-400' : ''}">
               <div class="min-w-[12rem] flex-1">
                 <p class="text-sm font-semibold leading-tight">${escape(supply.name)}
+                  ${supply.active === false ? `<span class="text-white/40 text-[11px]">· ${escape(t('inv.inactive'))}</span>` : ''}
                   ${supply.size_confirmed === false ? `<span class="text-pink-300 text-[11px]">· ${escape(t('inv.confirmSize'))}</span>` : ''}</p>
                 <p class="text-[11px] text-white/50">${escape(EV2Warehouse.describeStock(supply, supply.stock, lang()))} · ${escape(money(supply.stock_value, 'MXN'))}</p>
               </div>
@@ -4279,6 +4310,9 @@
                   </label>`;
                 }).join('')}
               </div>
+              <button type="button" class="tap shrink-0 w-9 h-9 rounded-lg bg-white/5 text-white/70 hover:text-white"
+                      data-edit-supply="${escape(supply.id)}" title="${escape(t('inv.editSupply'))}"
+                      aria-label="${escape(t('inv.editSupply'))}: ${escape(supply.name)}"><i class="fa-solid fa-pen text-xs"></i></button>
             </div>`).join('')}
         </div>
       </section>`).join('');
@@ -4286,6 +4320,193 @@
     for (const input of $('inv-list').querySelectorAll('[data-min-supply]')) {
       input.onchange = () => saveMinimum(input);
     }
+    for (const button of $('inv-list').querySelectorAll('[data-edit-supply]')) {
+      button.onclick = () => openSupplyEdit(button.dataset.editSupply);
+    }
+    return undefined;
+  }
+
+  // ---------------------------------------------------------------- editar / eliminar un insumo (D95)
+
+  /** Los dados de baja: solo se piden al abrir su filtro. */
+  async function loadInactiveSupplies() {
+    try {
+      const d = await api.get(`/nightclubs/${clubId()}/supplies?include_inactive=true`);
+      state.inactiveSupplies = (d.supplies || []).filter((x) => x.active === false);
+      state.inactiveLoaded = true;
+    } catch (err) {
+      showError(err);
+      state.invFilter = 'all';
+    }
+    renderInventory();
+  }
+
+  /**
+   * Después de editar, desactivar o borrar se vuelve a pedir lo que ese insumo toca:
+   * la lista, los inactivos (si ya se abrieron) y las recetas, que muestran su nombre.
+   */
+  async function reloadAfterSupplyChange() {
+    const club = clubId();
+    const [vigentes, recetas] = await Promise.all([
+      api.get(`/nightclubs/${club}/supplies`),
+      api.get(`/nightclubs/${club}/recipes`),
+    ]);
+    state.supplies = vigentes.supplies || [];
+    state.recipes = recetas.recipes || [];
+    if (state.inactiveLoaded) {
+      const d = await api.get(`/nightclubs/${club}/supplies?include_inactive=true`);
+      state.inactiveSupplies = (d.supplies || []).filter((x) => x.active === false);
+    }
+    renderInventory();
+  }
+
+  const findSupply = (id) => state.supplies.find((x) => x.id === id)
+    || state.inactiveSupplies.find((x) => x.id === id) || null;
+
+  function openSupplyEdit(id) {
+    const supply = findSupply(id);
+    if (!supply) return;
+    state.supEdit = supply;
+    $('sup-edit-name').value = supply.name || '';
+    $('sup-edit-category').value = supply.category || '';
+    $('sup-edit-unit').value = supply.unit;
+    $('sup-edit-size').value = supply.package_size;
+    $('sup-edit-label').value = supply.package_label || '';
+    $('sup-edit-error').hidden = true;
+    renderSupplySheet();
+    $('sup-sheet').hidden = false;
+    $('sup-edit-name').focus();
+  }
+
+  function closeSupplyEdit() {
+    state.supEdit = null;
+    $('sup-sheet').hidden = true;
+  }
+
+  function renderSupplySheet() {
+    const supply = state.supEdit;
+    if (!supply) return;
+    const activo = supply.active !== false;
+    $('sup-edit-status').textContent = [
+      supply.name,
+      activo ? t('sup.statusActive') : t('inv.inactive'),
+      EV2Warehouse.describeStock(supply, supply.stock, lang()),
+    ].join(' · ');
+    $('btn-sup-toggle').textContent = t(activo ? 'sup.deactivate' : 'sup.reactivate');
+  }
+
+  /** Nombres de recetas para un aviso: los primeros cinco y cuántos más. */
+  function recipeNames(recipes) {
+    const names = (recipes || []).map((r) => r.name);
+    const shown = names.slice(0, 5).join(', ');
+    return names.length > 5 ? `${shown} ${t('sup.andMore', { n: names.length - 5 })}` : shown;
+  }
+
+  /** Un 409 del servidor, dicho en el idioma de la pantalla. */
+  function supplyConflictMessage(err) {
+    const d = (err && err.details) || {};
+    if (d.reason === 'unit_locked') return t('sup.errUnitLocked');
+    if (d.reason === 'in_recipes') return t('sup.errInRecipes', { names: recipeNames(d.recipes) });
+    return null;
+  }
+
+  async function saveSupply() {
+    const supply = state.supEdit;
+    if (!supply) return undefined;
+    const error = $('sup-edit-error');
+    error.hidden = true;
+    const nombre = $('sup-edit-name').value.trim();
+    const tamano = Number($('sup-edit-size').value);
+    if (!nombre) return avisar(error, t('sup.errName'));
+    if (!Number.isFinite(tamano) || tamano <= 0) return avisar(error, t('sup.errSize'));
+
+    // Solo lo que cambió: mandar el tamaño sin tocarlo lo daría por confirmado.
+    const cambios = {};
+    const categoria = $('sup-edit-category').value.trim();
+    const presentacion = $('sup-edit-label').value.trim();
+    if (nombre !== supply.name) cambios.name = nombre;
+    if (categoria !== (supply.category || '')) cambios.category = categoria;
+    if ($('sup-edit-unit').value !== supply.unit) cambios.unit = $('sup-edit-unit').value;
+    if (tamano !== Number(supply.package_size)) cambios.package_size = tamano;
+    if (presentacion !== (supply.package_label || '')) cambios.package_label = presentacion;
+    if (Object.keys(cambios).length === 0) return avisar(error, t('sup.noChanges'), 'warn');
+
+    const listo = ocupado($('btn-sup-save'), 'sup.saving');
+    try {
+      await api.patch(`/nightclubs/${clubId()}/supplies/${supply.id}`, cambios);
+      toast(t('sup.saved'), 'ok');
+      closeSupplyEdit();
+      await reloadAfterSupplyChange();
+    } catch (err) {
+      const conflicto = supplyConflictMessage(err);
+      if (conflicto) avisar(error, conflicto); else showError(err, error);
+    } finally { listo(); }
+    return undefined;
+  }
+
+  /** Desactivar o reactivar. Desactivar no toca el saldo ni el historial. */
+  async function setSupplyActive(supply, active) {
+    const error = $('sup-edit-error');
+    error.hidden = true;
+    const listo = ocupado($('btn-sup-toggle'), 'sup.saving');
+    try {
+      await api.patch(`/nightclubs/${clubId()}/supplies/${supply.id}`, { active });
+      toast(t(active ? 'sup.reactivated' : 'sup.deactivated'), 'ok');
+      closeSupplyEdit();
+      await reloadAfterSupplyChange();
+    } catch (err) {
+      const conflicto = supplyConflictMessage(err);
+      if (conflicto) avisar(error, conflicto); else showError(err, error);
+    } finally { listo(); }
+  }
+
+  async function toggleSupply() {
+    const supply = state.supEdit;
+    if (!supply) return;
+    if (supply.active === false) { await setSupplyActive(supply, true); return; }
+    if (!(await ask(t('sup.deactivateAsk', { name: supply.name }),
+      { title: t('sup.deactivate'), ok: t('sup.deactivate') }))) return;
+    await setSupplyActive(supply, false);
+  }
+
+  /**
+   * Eliminar. Solo se borra lo que nunca se usó; si el servidor dice que tiene
+   * historia, se ofrece desactivarlo — o se dice qué recetas lo impiden.
+   */
+  async function deleteSupply() {
+    const supply = state.supEdit;
+    if (!supply) return;
+    const error = $('sup-edit-error');
+    error.hidden = true;
+    if (!(await ask(t('sup.deleteAsk', { name: supply.name }),
+      { title: t('sup.delete'), ok: t('sup.delete'), danger: true }))) return;
+
+    const listo = ocupado($('btn-sup-delete'), 'sup.deleting');
+    let enUso = null;
+    try {
+      await api.del(`/nightclubs/${clubId()}/supplies/${supply.id}`);
+      toast(t('sup.deleted'), 'ok');
+      closeSupplyEdit();
+      await reloadAfterSupplyChange();
+      return;
+    } catch (err) {
+      const d = err && err.details;
+      if (err && err.status === 409 && d && d.reason === 'supply_in_use') enUso = d;
+      else showError(err, error);
+    } finally { listo(); }
+    if (!enUso) return;
+
+    if (enUso.can_deactivate) {
+      const ofrecer = await ask(t('sup.inUseAsk', { name: supply.name }),
+        { title: t('sup.cannotDelete'), ok: t('sup.deactivate') });
+      if (ofrecer) await setSupplyActive(supply, false);
+      return;
+    }
+    if ((enUso.active_recipes || []).length > 0) {
+      avisar(error, t('sup.inUseRecipes', { names: recipeNames(enUso.active_recipes) }));
+      return;
+    }
+    avisar(error, t('sup.inUseInactive'), 'warn');
   }
 
   /**
@@ -4599,7 +4820,13 @@
     };
   }
   for (const b of document.querySelectorAll('[data-invf]')) {
-    b.onclick = () => { state.invFilter = b.dataset.invf; renderInventory(); };
+    b.onclick = () => {
+      // Los inactivos se vuelven a pedir cada vez que se abre su filtro: otro gerente
+      // pudo haber dado de baja algo desde otra pantalla.
+      if (b.dataset.invf === 'inactive') state.inactiveLoaded = false;
+      state.invFilter = b.dataset.invf;
+      renderInventory();
+    };
   }
   if ($('btn-inv-add')) {
     $('btn-inv-add').onclick = () => {
@@ -4619,6 +4846,10 @@
     };
   }
   if ($('btn-recipe-close')) $('btn-recipe-close').onclick = closeRecipe;
+  if ($('btn-sup-close')) $('btn-sup-close').onclick = closeSupplyEdit;
+  if ($('btn-sup-save')) $('btn-sup-save').onclick = saveSupply;
+  if ($('btn-sup-toggle')) $('btn-sup-toggle').onclick = toggleSupply;
+  if ($('btn-sup-delete')) $('btn-sup-delete').onclick = deleteSupply;
   if ($('btn-recipe-add')) $('btn-recipe-add').onclick = addRecipeLine;
   if ($('btn-recipe-save')) $('btn-recipe-save').onclick = saveRecipe;
 

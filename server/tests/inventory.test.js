@@ -643,3 +643,153 @@ describe('Presentaciones sin confirmar', () => {
     expect(res.body.supply.package_size).toBe(700);
   });
 });
+
+describe('Editar y eliminar un insumo (D95)', () => {
+  const auditOf = async (supplyId) => (await pool.query(
+    `SELECT action, actor_id, before, after FROM audit_log
+      WHERE entity = 'supply' AND entity_id = $1 ORDER BY id`, [supplyId])).rows;
+
+  it('edita los datos del alta y deja rastro de quién y qué cambió', async () => {
+    const s = await f.createSupply(club.id, { name: 'Tequila', category: 'Tequilas', package_size: 750 });
+    const res = await api().patch(url(`/supplies/${s.id}`)).set(auth(manager))
+      .send({ name: 'Tequila Don Julio 70', package_size: 700, package_label: 'Botella 700 ml' });
+    expect(res.status).toBe(200);
+    expect(res.body.supply).toMatchObject({
+      name: 'Tequila Don Julio 70', package_size: 700, package_label: 'Botella 700 ml', category: 'Tequilas',
+    });
+    const log = await auditOf(s.id);
+    expect(log).toHaveLength(1);
+    expect(log[0]).toMatchObject({ action: 'supply_updated', actor_id: manager.id });
+    expect(log[0].before.name).toBe('Tequila');
+    expect(log[0].after.name).toBe('Tequila Don Julio 70');
+  });
+
+  it('una categoría o presentación mal escrita se puede vaciar', async () => {
+    const s = await f.createSupply(club.id, { name: 'Ron', category: 'Rnes' });
+    const res = await api().patch(url(`/supplies/${s.id}`)).set(auth(manager))
+      .send({ category: '', package_label: '' });
+    expect(res.status).toBe(200);
+    expect(res.body.supply.category).toBeNull();
+    expect(res.body.supply.package_label).toBeNull();
+  });
+
+  it('no deja dos insumos con el mismo nombre al editar', async () => {
+    await f.createSupply(club.id, { name: 'Vodka' });
+    const s = await f.createSupply(club.id, { name: 'Ginebra' });
+    const res = await api().patch(url(`/supplies/${s.id}`)).set(auth(manager)).send({ name: '  vodka ' });
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toMatch(/nombre/);
+  });
+
+  it('la unidad se corrige mientras el insumo no tenga historia', async () => {
+    const s = await f.createSupply(club.id, { name: 'Limón', unit: 'ml', package_size: 1 });
+    const res = await api().patch(url(`/supplies/${s.id}`)).set(auth(manager)).send({ unit: 'pza' });
+    expect(res.status).toBe(200);
+    expect(res.body.supply.unit).toBe('pza');
+  });
+
+  it('pero no con existencia: 2,630 ml no se vuelven 2,630 piezas', async () => {
+    const s = await f.createSupply(club.id, { name: 'Mezcal', unit: 'ml', stock: 2630 });
+    const res = await api().patch(url(`/supplies/${s.id}`)).set(auth(manager)).send({ unit: 'pza' });
+    expect(res.status).toBe(409);
+    expect(res.body.error.details.reason).toBe('unit_locked');
+    const { rows } = await pool.query('SELECT unit FROM supplies WHERE id = $1', [s.id]);
+    expect(rows[0].unit).toBe('ml');
+    expect(await auditOf(s.id)).toHaveLength(0);
+  });
+
+  it('no se desactiva mientras una receta de la carta lo use, y dice cuál', async () => {
+    const { whisky, trago, botella } = await barraBuchanans();
+    const res = await api().patch(url(`/supplies/${whisky.id}`)).set(auth(manager)).send({ active: false });
+    expect(res.status).toBe(409);
+    expect(res.body.error.details.reason).toBe('in_recipes');
+    expect(res.body.error.details.recipes.map((r) => r.id).sort())
+      .toEqual([trago.id, botella.id].sort());
+    const { rows } = await pool.query('SELECT active FROM supplies WHERE id = $1', [whisky.id]);
+    expect(rows[0].active).toBe(true);
+  });
+
+  it('la receta de un trago que ya no está en la carta no lo detiene', async () => {
+    const s = await f.createSupply(club.id, { name: 'Licor viejo' });
+    const viejo = await f.createDrink(club.id, { name: 'Trago retirado', price: 100, stock: null });
+    await f.setRecipe(viejo.id, [[s, 30]]);
+    await pool.query('UPDATE drinks SET active = false WHERE id = $1', [viejo.id]);
+    const res = await api().patch(url(`/supplies/${s.id}`)).set(auth(manager)).send({ active: false });
+    expect(res.status).toBe(200);
+    expect(res.body.supply.active).toBe(false);
+  });
+
+  it('desactivar lo saca de la lista; reactivar lo regresa, con rastro de ambos', async () => {
+    const s = await f.createSupply(club.id, { name: 'Jägermeister', stock: 700 });
+    const off = await api().patch(url(`/supplies/${s.id}`)).set(auth(manager)).send({ active: false });
+    expect(off.status).toBe(200);
+
+    const visibles = await api().get(url('/supplies')).set(auth(manager));
+    expect(visibles.body.supplies.map((x) => x.id)).not.toContain(s.id);
+    const todos = await api().get(url('/supplies?include_inactive=true')).set(auth(manager));
+    expect(todos.body.supplies.find((x) => x.id === s.id).active).toBe(false);
+    // El saldo no se toca: desactivar no es una merma.
+    expect(await f.supplyStock(s.id)).toBe(700);
+
+    const on = await api().patch(url(`/supplies/${s.id}`)).set(auth(manager)).send({ active: true });
+    expect(on.body.supply.active).toBe(true);
+    expect((await auditOf(s.id)).map((r) => r.action))
+      .toEqual(['supply_deactivated', 'supply_reactivated']);
+  });
+
+  it('elimina de verdad un alta que nunca se usó', async () => {
+    const s = await f.createSupply(club.id, { name: 'Error de dedo', location_id: club.bar_id, min_stock: 750 });
+    const res = await api().delete(url(`/supplies/${s.id}`)).set(auth(manager));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ deleted: true, id: s.id });
+    const quedan = await pool.query('SELECT 1 FROM supplies WHERE id = $1', [s.id]);
+    expect(quedan.rows).toHaveLength(0);
+    const estante = await pool.query('SELECT 1 FROM supply_stock WHERE supply_id = $1', [s.id]);
+    expect(estante.rows).toHaveLength(0);
+    const log = await auditOf(s.id);
+    expect(log).toHaveLength(1);
+    expect(log[0]).toMatchObject({ action: 'supply_deleted', actor_id: manager.id });
+    expect(log[0].before.name).toBe('Error de dedo');
+  });
+
+  it('no borra un insumo con kardex: lo ofrece para desactivar', async () => {
+    const s = await f.createSupply(club.id, { name: 'Bacardí', stock: 750 });
+    const res = await api().delete(url(`/supplies/${s.id}`)).set(auth(manager));
+    expect(res.status).toBe(409);
+    expect(res.body.error.details).toMatchObject({
+      reason: 'supply_in_use', movements: 1, recipes: 0, can_deactivate: true, active: true,
+    });
+    expect(res.body.error.message).toMatch(/Bacardí/);
+    const sigue = await pool.query('SELECT 1 FROM supplies WHERE id = $1', [s.id]);
+    expect(sigue.rows).toHaveLength(1);
+  });
+
+  it('un insumo en una receta activa no se borra ni se ofrece desactivar', async () => {
+    const { refresco, trago } = await barraBuchanans();
+    const res = await api().delete(url(`/supplies/${refresco.id}`)).set(auth(manager));
+    expect(res.status).toBe(409);
+    expect(res.body.error.details.can_deactivate).toBe(false);
+    expect(res.body.error.details.active_recipes.map((r) => r.id)).toEqual([trago.id]);
+  });
+
+  it('solo gerencia edita o elimina', async () => {
+    const almacen = await f.createUser(club.id, { role: 'warehouse' });
+    const s = await f.createSupply(club.id, { name: 'Brandy' });
+    for (const who of [almacen, bartender, waiter]) {
+      expect((await api().patch(url(`/supplies/${s.id}`)).set(auth(who)).send({ name: 'X' })).status).toBe(403);
+      expect((await api().delete(url(`/supplies/${s.id}`)).set(auth(who))).status).toBe(403);
+    }
+    const sigue = await pool.query('SELECT name FROM supplies WHERE id = $1', [s.id]);
+    expect(sigue.rows[0].name).toBe('Brandy');
+  });
+
+  it('un insumo de otro club no existe para este', async () => {
+    const otro = await f.createNightclub({ slug: 'ev2-otro' });
+    const ajeno = await f.createSupply(otro.id, { name: 'Ajeno' });
+    expect((await api().patch(url(`/supplies/${ajeno.id}`)).set(auth(manager)).send({ name: 'Mío' })).status)
+      .toBe(404);
+    expect((await api().delete(url(`/supplies/${ajeno.id}`)).set(auth(manager))).status).toBe(404);
+    const sigue = await pool.query('SELECT name FROM supplies WHERE id = $1', [ajeno.id]);
+    expect(sigue.rows[0].name).toBe('Ajeno');
+  });
+});

@@ -427,6 +427,28 @@ const printerBody = z.object({
   drawer_pin: z.union([z.literal(2), z.literal(5)]).nullish(),
 });
 
+/**
+ * El lugar de una impresora o una PC (D96): una barra, o Cover. Cover solo imprime
+ * recibos de caja; el almacen no imprime nada. Lo dice con palabras antes de que el
+ * disparador de la base conteste con un error generico.
+ *
+ * `purposeRequired`: una impresora siempre tiene proposito; una PC puede no tenerlo
+ * ("todo lo de ese lugar").
+ */
+async function checkArea(nightclubId, locationId, purpose, { purposeRequired = false } = {}) {
+  if (!locationId) return;
+  const { rows } = await pool.query(
+    'SELECT kind, active FROM supply_locations WHERE id = $1 AND nightclub_id = $2',
+    [locationId, nightclubId]);
+  if (rows.length === 0) throw ApiError.badRequest('Ese lugar no existe');
+  const { kind } = rows[0];
+  if (kind === 'warehouse') throw ApiError.badRequest('El almacén no imprime: escoge una barra o Cover');
+  if (kind === 'door') {
+    const ok = purposeRequired ? purpose === 'till' : (!purpose || purpose === 'till');
+    if (!ok) throw ApiError.badRequest('En Cover solo se imprimen recibos de caja');
+  }
+}
+
 /** Las columnas que caben, si no las dijeron: 48 a 80 mm, 32 a 58 mm. */
 const defaultColumns = (paperWidth) => (Number(paperWidth) === 58 ? 32 : 48);
 
@@ -485,6 +507,7 @@ router.post('/nightclubs/:nightclubId/printers',
   asyncHandler(async (req, res) => {
     checkPrinter(req.body);
     const b = req.body;
+    await checkArea(req.params.nightclubId, b.location_id, b.purpose, { purposeRequired: true });
     await checkAgent(req.params.nightclubId, b.agent_id);
     try {
       const { rows } = await pool.query(
@@ -527,6 +550,10 @@ router.patch('/nightclubs/:nightclubId/printers/:printerId',
     if (!actual) throw ApiError.notFound('Esa impresora no existe');
     const merged = { ...actual, ...req.body };
     checkPrinter(merged);
+    if (req.body.location_id !== undefined || req.body.purpose !== undefined) {
+      await checkArea(req.params.nightclubId, merged.location_id, merged.purpose,
+        { purposeRequired: true });
+    }
     if (req.body.agent_id) await checkAgent(req.params.nightclubId, req.body.agent_id);
     try {
       await pool.query(
@@ -655,6 +682,7 @@ router.post('/nightclubs/:nightclubId/print-agents/invite',
     }).default({}),
   }),
   asyncHandler(async (req, res) => {
+    await checkArea(req.params.nightclubId, req.body.location_id, req.body.purpose);
     let invite;
     try {
       invite = await printing.createInvite(pool, {
@@ -722,6 +750,7 @@ router.patch('/nightclubs/:nightclubId/print-agents/:agentId',
       if (!agent) throw ApiError.notFound('Ese agente no existe');
     }
     if (req.body.area !== undefined) {
+      await checkArea(req.params.nightclubId, req.body.area.location_id, req.body.area.purpose);
       try {
         agent = await printing.setAgentArea(pool, {
           nightclubId: req.params.nightclubId,

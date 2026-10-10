@@ -1313,3 +1313,69 @@ describe('Cada impresora con la PC que la atiende (D80)', () => {
     expect(rows[0]).toEqual({ l: club.bar_id, purpose: 'till' });
   });
 });
+
+// ---------------------------------------------------------------- Cover (D96)
+
+describe('Cover: la entrada imprime, pero no es barra', () => {
+  let cover;
+  beforeEach(async () => {
+    const { rows } = await pool.query(
+      `INSERT INTO supply_locations (nightclub_id, code, name, kind, sort_order)
+       VALUES ($1,'cover','Cover','door',3) RETURNING id`, [club.id]);
+    cover = rows[0].id;
+  });
+
+  it('una PC se da de alta ya asignada a Cover, para los recibos de caja', async () => {
+    const inv = await api().post(url('/print-agents/invite')).set(auth(manager))
+      .send({ location_id: cover, purpose: 'till' });
+    expect(inv.status).toBe(201);
+    expect(inv.body.invite.location_name).toBe('Cover');
+    const res = await emparejar(inv.body.invite.code, 'PC Cover');
+    expect(res.status).toBe(201);
+    const { rows } = await pool.query(
+      'SELECT location_id, purpose FROM print_agents WHERE id = $1', [res.body.agent.id]);
+    expect(rows[0]).toMatchObject({ location_id: cover, purpose: 'till' });
+  });
+
+  it('una PC de Cover sin propósito también vale: ahí solo hay recibos', async () => {
+    const inv = await api().post(url('/print-agents/invite')).set(auth(manager))
+      .send({ location_id: cover });
+    expect(inv.status).toBe(201);
+  });
+
+  it('su impresora de recibos se da de alta en Cover', async () => {
+    const res = await altaImpresora(manager, { location_id: cover, purpose: 'till', name: 'Cover · caja' });
+    expect(res.status).toBe(201);
+    expect(res.body.printer.location_id).toBe(cover);
+  });
+
+  it('en Cover no hay comandas ni cuentas: se dice con palabras', async () => {
+    const prn = await altaImpresora(manager, { location_id: cover, purpose: 'orders', name: 'Cover · x' });
+    expect(prn.status).toBe(400);
+    expect(prn.body.error.message).toMatch(/Cover/);
+    const inv = await api().post(url('/print-agents/invite')).set(auth(manager))
+      .send({ location_id: cover, purpose: 'service' });
+    expect(inv.status).toBe(400);
+  });
+
+  it('una PC ya dada de alta se puede mover a Cover', async () => {
+    const pc = await nuevoAgente('PC entrada');
+    const res = await api().patch(url(`/print-agents/${pc.id}`)).set(auth(manager))
+      .send({ area: { location_id: cover, purpose: 'till' } });
+    expect(res.status).toBe(200);
+    expect(res.body.agent.location_id).toBe(cover);
+  });
+
+  it('el almacén sigue sin imprimir', async () => {
+    const inv = await api().post(url('/print-agents/invite')).set(auth(manager))
+      .send({ location_id: club.warehouse_id });
+    expect(inv.status).toBe(400);
+  });
+
+  it('Cover no guarda producto', async () => {
+    const s = await f.createSupply(club.id, { name: 'Tequila' });
+    await expect(pool.query(
+      'INSERT INTO supply_stock (supply_id, location_id, stock) VALUES ($1,$2,0)', [s.id, cover]))
+      .rejects.toThrow(/door holds no stock/);
+  });
+});

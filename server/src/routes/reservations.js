@@ -20,6 +20,7 @@ const events = require('../services/events');
 const door = require('../services/door');
 const guestPasses = require('../services/guest-passes');
 const seating = require('../services/seating');
+const vipCredit = require('../services/vip-credit');
 
 const router = express.Router({ mergeParams: true });
 
@@ -592,6 +593,7 @@ router.post('/nightclubs/:nightclubId/reservations/release-no-shows',
               )`,
           [r.table_id],
         );
+        await vipCredit.voidForReservation(client, { reservationId: r.id, reason: 'no_show' });
         // Deposits already charged are NOT refunded; pending ones are simply dropped.
         await client.query(
           `UPDATE transactions SET status = 'cancelled'
@@ -664,6 +666,9 @@ router.post('/nightclubs/:nightclubId/reservations/:reservationId/cancel',
           WHERE id = $1 AND nightclub_id = $2`,
         [reservationId, nightclubId, req.body.reason || null, refundAmount],
       );
+
+      await vipCredit.voidForReservation(client, {
+        reservationId, reason: 'cancelled', userId: req.user.id });
 
       // Pending (never charged) deposits are simply cancelled.
       await client.query(
@@ -750,6 +755,10 @@ router.post('/nightclubs/:nightclubId/reservations/:reservationId/status',
         // Y levantar a todos al cerrar: una mesa que se queda con gente adentro
         // sigue recibiendo pedidos de quien ya se fue.
         await seating.clearTable(client, { tableId: r.table_id });
+        if (next === 'no_show') {
+          await vipCredit.voidForReservation(client, {
+            reservationId, reason: 'no_show', userId: req.user.id });
+        }
       }
 
       await events.publish({
@@ -765,6 +774,23 @@ router.post('/nightclubs/:nightclubId/reservations/:reservationId/status',
     } finally {
       client.release();
     }
+  }));
+
+// ---------------------------------------------------------------- VIP credit (D97)
+router.get('/nightclubs/:nightclubId/vip-credit/mine',
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const credits = await vipCredit.mine(pool, {
+      nightclubId: req.params.nightclubId, userId: req.user.id });
+    res.json({ credits });
+  }));
+
+router.get('/nightclubs/:nightclubId/vip-credits',
+  requireRole('hostess', 'cashier', 'manager'),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const credits = await vipCredit.tonight(pool, { nightclubId: req.params.nightclubId });
+    res.json({ credits });
   }));
 
 // ------------------------------------------------------------ payment methods

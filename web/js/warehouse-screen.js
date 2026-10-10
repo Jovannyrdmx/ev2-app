@@ -246,7 +246,8 @@
         api.get(`/nightclubs/${clubId()}/supply-locations`),
         api.get(`/nightclubs/${clubId()}/supplies`),
       ]);
-      state.locations = locations.locations || [];
+      // Cover (D96) no guarda producto: no se ofrece para recibir, surtir ni contar.
+      state.locations = (locations.locations || []).filter((l) => l.kind !== 'door');
       state.supplies = supplies.supplies || [];
       // Los pedidos pendientes se cargan SIEMPRE, no solo al abrir su pestaña: el
       // número en la pestaña es lo que hace que el almacenista se entere de que la

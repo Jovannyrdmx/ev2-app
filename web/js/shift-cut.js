@@ -33,6 +33,7 @@
   const METHOD_KEY = {
     cash: 'cut.mCash',
     cash_usd: 'cut.mCashUsd',
+    vip_credit: 'cut.mVip',
     card_terminal: 'cut.mCard',
     zelle: 'cut.mZelle',
     cash_app: 'cut.mCashApp',

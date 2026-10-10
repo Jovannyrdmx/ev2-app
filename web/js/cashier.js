@@ -136,9 +136,10 @@
 
   // ---------------------------------------------------------------- el cobro (D79)
 
-  const METHOD_KEYS = ['cash', 'cash_usd', 'mercadopago_point', 'card_terminal'];
+  const METHOD_KEYS = ['cash', 'cash_usd', 'mercadopago_point', 'card_terminal', 'vip_credit'];
   const isCash = (m) => m === 'cash';
   const isUsd = (m) => m === 'cash_usd';
+  const isVip = (m) => m === 'vip_credit';
 
   // ---------------------------------------------------------------- dólares (D86)
 
@@ -205,7 +206,14 @@
   function methodsFor(order, { usdRate } = {}) {
     const usadas = usedMethods(order);
     // Sin tipo de cambio fijado por el gerente, los dólares ni se ofrecen.
-    return METHOD_KEYS.filter((m) => !usadas.includes(m) && (!isUsd(m) || Boolean(usdRate)));
+    return METHOD_KEYS.filter((m) => !usadas.includes(m)
+      && (!isUsd(m) || Boolean(usdRate))
+      && (!isVip(m) || vipBalance(order) > 0));
+  }
+
+  /** El credito VIP (D97) que le queda a la mesa del pedido, en centavos; 0 si no hay. */
+  function vipBalance(order) {
+    return order && order.vip_credit_balance ? toCents(order.vip_credit_balance) : 0;
   }
 
   /** Solo se divide un pedido que todavía no tiene ninguna parte pagada. */
@@ -249,6 +257,13 @@
       montoA = q.applied;
     }
 
+    // Credito VIP (D97): lo que se aplica lo fija el saldo, no se teclea.
+    const vip = vipBalance(order);
+    if (split && isVip(a.method)) {
+      if (vip >= falta) return { error: 'till.errVipCoversAll' };
+      montoA = fromCents(vip);
+    }
+
     const partes = split
       ? [{ ...a, amount: montoA }, { ...b, amount: fromCents(falta - toCents(montoA)) }]
       : [{ ...a, amount: fromCents(falta) }];
@@ -260,6 +275,10 @@
     }
 
     for (const [i, p] of partes.entries()) {
+      if (isVip(p.method)) {
+        const monto = toCents(p.amount);
+        if (vip < monto && !(split && i === 0)) return { error: 'till.errVipShort' };
+      }
       if (isUsd(p.method)) {
         if (!usdRate) return { error: 'till.errNoRate' };
         const q = usdQuote(p.usd, usdRate.rate, p.amount);
@@ -312,6 +331,8 @@
       method: step.method,
     };
     // En dólares el monto lo calcula el servidor con el tipo de cambio que se vio aquí.
+    // (Con credito VIP tambien lo fija el servidor, con el saldo; el monto que va
+    // aqui solo es el que el cajero vio.)
     if (isUsd(step.method)) {
       body.usd_received = Number(step.usd_received);
       body.exchange_rate_id = step.exchange_rate_id;

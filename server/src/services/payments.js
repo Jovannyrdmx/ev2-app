@@ -9,6 +9,7 @@
 const { ApiError } = require('../middleware/errors');
 const events = require('./events');
 const tickets = require('./tickets');
+const vipCredit = require('./vip-credit');
 
 const METHODS = ['cash', 'card_terminal', 'zelle', 'cash_app', 'bank_transfer', 'spei'];
 // Cash is handed over in person; the rest leave a folio in a statement, which is the
@@ -83,6 +84,8 @@ async function applySideEffects(client, tx, nightclubId) {
         WHERE id = $1 AND nightclub_id = $2 AND status = 'pending_payment'
         RETURNING id, user_id, table_id, event_id`,
       [tx.reference_id, nightclubId]);
+    // Lo pagado por reservar se vuelve credito de consumo para esa noche (D97).
+    await vipCredit.grant(client, { nightclubId, tx });
     return { reservation: rows[0] || null, order: null };
   }
 

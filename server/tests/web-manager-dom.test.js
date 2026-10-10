@@ -235,3 +235,37 @@ describe('los botones de las terminales nunca se quedan callados', () => {
     expect(controlador).toMatch(/terminals\.found\.length === 0\) avisar\(error, t\('term\.noneFound'\)/);
   });
 });
+
+// ---------------------------------------------------------------- editar / eliminar un insumo (D95)
+
+describe('la hoja para editar un insumo', () => {
+  it('nace cerrada y trae guardar, desactivar y eliminar', () => {
+    const doc = documento();
+    expect(doc.getElementById('sup-sheet').hasAttribute('hidden')).toBe(true);
+    for (const id of ['btn-sup-save', 'btn-sup-toggle', 'btn-sup-delete', 'btn-sup-close']) {
+      expect(doc.getElementById(id)).not.toBeNull();
+    }
+  });
+
+  it('el filtro de inactivos existe para poder reactivar lo dado de baja', () => {
+    expect(documento().querySelector('[data-invf="inactive"]')).not.toBeNull();
+  });
+
+  it('elimina con DELETE y desactiva con PATCH: no hay borrado escondido en otra ruta', () => {
+    expect(controlador).toMatch(/api\.del\(`\/nightclubs\/\$\{clubId\(\)\}\/supplies\/\$\{supply\.id\}`\)/);
+    expect(controlador).toMatch(/\{ active \}/);
+  });
+
+  it('cada texto de la hoja existe en los dos idiomas', () => {
+    const usadas = new Set();
+    const re = /t\('(sup\.[a-zA-Z0-9_.]+)'/g;
+    let m = re.exec(controlador);
+    while (m) { usadas.add(m[1]); m = re.exec(controlador); }
+    expect(usadas.size).toBeGreaterThanOrEqual(15);
+    for (const lang of ['es', 'en']) {
+      catalogo.setLanguage(lang);
+      const faltantes = [...usadas].filter((k) => catalogo.t(k) === k);
+      expect({ lang, faltantes }).toEqual({ lang, faltantes: [] });
+    }
+  });
+});

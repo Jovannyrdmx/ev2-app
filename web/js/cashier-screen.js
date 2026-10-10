@@ -369,7 +369,14 @@
   $('btn-charge-close').onclick = closeCharge;
 
   const optionsFor = (keys) => keys
-    .map((k) => `<option value="${escape(k)}">${escape(t(`take.method.${k}`))}</option>`).join('');
+    .map((k) => {
+      // Con credito VIP (D97) el saldo va en la opcion: es lo que el cajero necesita ver.
+      const order = state.charge.order;
+      const nombre = k === 'vip_credit' && order
+        ? t('till.vipLine', { amount: money(order.vip_credit_balance, order.currency) })
+        : t(`take.method.${k}`);
+      return `<option value="${escape(k)}">${escape(nombre)}</option>`;
+    }).join('');
 
   /** Las formas que se ofrecen: sin terminal activa, Mercado Pago ni aparece. */
   const hayTerminal = () => (state.terminals || []).some((x) => x && x.active !== false);
@@ -445,7 +452,7 @@
     $('part-a-title').textContent = t(c.split ? 'till.payment1' : 'till.payment');
     const a = $('charge-method').value;
     // En dólares la primera parte no se teclea en pesos: la fijan los dólares (D86).
-    $('charge-amount-row').hidden = !c.split || a === 'cash_usd';
+    $('charge-amount-row').hidden = !c.split || a === 'cash_usd' || a === 'vip_credit';
     $('part-b').hidden = !c.split;
 
     const plan = EV2Cashier.planCharge(chargeInput());
@@ -456,6 +463,10 @@
     if (a === 'cash_usd') {
       const q = pintarDolares('charge', $('charge-usd-received').value, falta, { partial: c.split });
       if (c.split) montoA = q ? q.applied : '0';
+    } else if (a === 'vip_credit') {
+      // El credito VIP (D97) cubre lo que tenga, hasta lo que falta.
+      const saldo = Number(order.vip_credit_balance || 0);
+      montoA = Math.min(saldo, Number(falta)).toFixed(2);
     } else {
       pintarCambio('charge-change', montoA ? EV2Cashier.change($('charge-received').value, montoA) : null);
     }

@@ -19,6 +19,7 @@
 
 const { ApiError } = require('../middleware/errors');
 const payments = require('./payments');
+const vipCredit = require('./vip-credit');
 
 const { OPEN_TX_STATUSES } = payments;
 
@@ -165,7 +166,8 @@ const OPEN_ORDER_SELECT = `
          -- y lo que falta. Lo que la caja cobra es lo que FALTA.
          COALESCE(partes.paid, 0)::numeric(12,2)::text AS paid_amount,
          (o.subtotal - COALESCE(partes.paid, 0))::numeric(12,2)::text AS remaining,
-         COALESCE(partes.parts, '[]'::json) AS parts
+         COALESCE(partes.parts, '[]'::json) AS parts,
+         vip.balance AS vip_credit_balance
     FROM drink_orders o
     JOIN transactions tx ON tx.reference_type = 'drink_order' AND tx.reference_id = o.id
     LEFT JOIN tables t ON t.id = o.table_id
@@ -188,7 +190,25 @@ const OPEN_ORDER_SELECT = `
           SELECT 'mercadopago_point', c.amount FROM terminal_charges c
            WHERE c.transaction_id = tx.id AND c.status = 'processed'
         ) x
-    ) partes ON true`;
+    ) partes ON true
+    -- Credito VIP (D97): lo que le queda a la mesa reservada para esta cuenta. Las
+    -- mismas condiciones que \`vip-credit.quote\`, que es la que manda al cobrar.
+    LEFT JOIN LATERAL (
+      SELECT GREATEST(c.granted - c.spent, 0)::numeric(12,2)::text AS balance
+        FROM reservations rv
+        JOIN reservation_credits c ON c.reservation_id = rv.id
+        JOIN events_calendar ev ON ev.id = c.event_id
+        JOIN users su ON su.id = o.sender_id
+       WHERE rv.table_id = o.table_id AND rv.nightclub_id = o.nightclub_id
+         AND rv.status NOT IN ('cancelled','no_show','pending_payment')
+         AND c.voided_at IS NULL AND c.expires_at > now() AND c.granted > c.spent
+         AND c.currency = o.currency
+         AND (o.sender_id = c.user_id OR su.role <> 'guest')
+         AND o.created_at >= ev.doors_open_at - interval '6 hours'
+         AND o.created_at < c.expires_at
+       ORDER BY c.expires_at
+       LIMIT 1
+    ) vip ON true`;
 
 async function pendingOrders(runner, { nightclubId, locationId }) {
   const { rows } = await runner.query(
@@ -340,6 +360,24 @@ async function collect(client, {
     throw ApiError.unprocessable('Las dos partes de un cobro tienen que ser formas de pago distintas');
   }
 
+  // Credito VIP (D97): el monto lo decide el saldo, no el cajero.
+  if (method === vipCredit.METHOD) {
+    if (cashReceived !== null && cashReceived !== undefined) {
+      throw ApiError.unprocessable('El efectivo recibido no aplica al crédito VIP');
+    }
+    if (usdReceived !== null && usdReceived !== undefined) {
+      throw ApiError.unprocessable('Los dólares recibidos solo aplican al pago en dólares');
+    }
+    const pendiente = round2(Number(tx.amount) - await payments.paidSoFar(client, tx.id));
+    const q = await vipCredit.quote(client, {
+      nightclubId, transactionId: tx.id, pending: pendiente, currency: tx.currency,
+    });
+    return insertAndSettle(client, {
+      nightclubId, till, user, tx, method, amount: q.amount, reference: null,
+      clientRequestId, cashReceived: null, change: null, usd: null, vip: q.credit,
+    });
+  }
+
   // Dólares (D86): lo que cubren se calcula aquí, no se teclea. El tipo de cambio es
   // el vigente, y tiene que ser el mismo que el cajero vio en su pantalla: si el
   // gerente lo cambió mientras tanto, se para y se le enseña el nuevo.
@@ -429,6 +467,7 @@ async function usdPart(client, { transactionId, txAmount, usdReceived, exchangeR
 
 async function insertAndSettle(client, {
   nightclubId, till, user, tx, method, amount, reference, clientRequestId, cashReceived, change, usd,
+  vip = null,
 }) {
   let created;
   try {
@@ -454,6 +493,12 @@ async function insertAndSettle(client, {
     throw err;
   }
 
+  if (vip) {
+    await vipCredit.spend(client, {
+      credit: vip, amount: created.amount, paymentId: created.id,
+      transactionId: tx.id, userId: user.id,
+    });
+  }
   const settled = await payments.settle(client, {
     payment: created, reviewerId: user.id, nightclubId, allowPartial: true,
   });

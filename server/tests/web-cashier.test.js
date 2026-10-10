@@ -277,11 +277,31 @@ describe('EV2Cashier: el cobro con cambio y dos formas de pago (D79)', () => {
     expect(Cashier.remainingOf(null)).toBe('0.00');
   });
 
+  it('el crédito VIP (D97): el monto lo fija el saldo y no se manda como efectivo', () => {
+    const vip = pedido({ subtotal: '120.00', vip_credit_balance: '50.00' });
+    const plan = Cashier.planCharge({ order: vip, split: true, a: { method: 'vip_credit' },
+      b: { method: 'cash', amount: '70', received: '100' } });
+    expect(plan.steps.map((x) => [x.method, x.amount])).toEqual([['vip_credit', '50.00'], ['cash', '70.00']]);
+    // Si el saldo ya paga todo, no hay que dividir.
+    const todo = pedido({ subtotal: '120.00', vip_credit_balance: '500.00' });
+    expect(Cashier.planCharge({ order: todo, split: true, a: { method: 'vip_credit' }, b: { method: 'cash' } }))
+      .toEqual({ error: 'till.errVipCoversAll' });
+    expect(Cashier.planCharge({ order: todo, a: { method: 'vip_credit' } }).steps[0])
+      .toMatchObject({ method: 'vip_credit', amount: '120.00' });
+    // Como segunda forma, no puede cubrir lo que no tiene.
+    expect(Cashier.planCharge({ order: vip, split: true, a: { method: 'cash', amount: '40', received: '40' },
+      b: { method: 'vip_credit' } })).toEqual({ error: 'till.errVipShort' });
+    expect(Cashier.paymentPayload(vip, plan.steps[0], 'k')).toMatchObject({ method: 'vip_credit' });
+  });
+
   it('una forma ya usada no se ofrece otra vez, y no se divide dos veces', () => {
     const conParte = pedido({ remaining: '150', parts: [{ method: 'cash', amount: '300' }] });
     // Sin tipo de cambio los dólares no se ofrecen (D86); con él, todas.
-    expect(Cashier.methodsFor(pedido())).toEqual(Cashier.METHOD_KEYS.filter((m) => m !== 'cash_usd'));
-    expect(Cashier.methodsFor(pedido(), { usdRate: { id: '1', rate: '17.5' } })).toEqual(Cashier.METHOD_KEYS);
+    // El crédito VIP (D97) solo se ofrece si la mesa tiene saldo.
+    const sinVip = Cashier.METHOD_KEYS.filter((m) => m !== 'vip_credit');
+    expect(Cashier.methodsFor(pedido())).toEqual(sinVip.filter((m) => m !== 'cash_usd'));
+    expect(Cashier.methodsFor(pedido(), { usdRate: { id: '1', rate: '17.5' } })).toEqual(sinVip);
+    expect(Cashier.methodsFor(pedido({ vip_credit_balance: '80.00' }))).toContain('vip_credit');
     expect(Cashier.methodsFor(conParte)).not.toContain('cash');
     expect(Cashier.canSplit(conParte)).toBe(false);
     expect(Cashier.planCharge({ order: conParte, split: true, a: { method: 'card_terminal', amount: 50 },
