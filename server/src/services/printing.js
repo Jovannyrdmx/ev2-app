@@ -504,19 +504,22 @@ const hashCode = (code) => crypto.createHash('sha256').update(normalizeCode(code
  * cuál barra pertenece— deja una ventana en la que esa PC se lleva el papel de todo
  * el club, que es justo el problema que la asignación resuelve.
  */
-async function createInvite(runner, { nightclubId, createdBy, locationId = null, purpose = null }) {
+async function createInvite(runner, {
+  nightclubId, createdBy, locationId = null, purpose = null, station = null,
+}) {
   const code = newInviteCode();
   const scopedPurpose = locationId ? purpose : null;
   const { rows } = await runner.query(
     `INSERT INTO print_agent_invites
-       (nightclub_id, code_hash, code_hint, expires_at, created_by, location_id, purpose)
-     VALUES ($1,$2,$3, now() + ($4::int * interval '1 minute'), $5, $6::uuid, $7::text)
+       (nightclub_id, code_hash, code_hint, expires_at, created_by, location_id, purpose, station)
+     VALUES ($1,$2,$3, now() + ($4::int * interval '1 minute'), $5, $6::uuid, $7::text, $8::jsonb)
      RETURNING id::text AS id, code_hint, expires_at, created_at,
-               location_id::text AS location_id, purpose,
+               location_id::text AS location_id, purpose, station,
                (SELECT l.name FROM supply_locations l WHERE l.id = print_agent_invites.location_id)
                  AS location_name`,
     [nightclubId, hashCode(code), code.slice(-4), INVITE_TTL_MINUTES, createdBy || null,
-      locationId || null, scopedPurpose || null]);
+      locationId || null, scopedPurpose || null,
+      station ? JSON.stringify({ ...station, status: 'pending' }) : null]);
   return { ...rows[0], code: prettyCode(code), ttl_minutes: INVITE_TTL_MINUTES };
 }
 
@@ -534,7 +537,7 @@ async function createInvite(runner, { nightclubId, createdBy, locationId = null,
 async function redeemInvite(client, { code, hostname, version = null, ip = null }) {
   const { rows } = await client.query(
     `SELECT id, nightclub_id::text AS nightclub_id, expires_at, used_at, attempts,
-            location_id, purpose
+            location_id, purpose, station
        FROM print_agent_invites
       WHERE code_hash = $1 FOR UPDATE`,
     [hashCode(code)]);
@@ -569,16 +572,17 @@ async function redeemInvite(client, { code, hostname, version = null, ip = null 
       const { rows: creado } = await client.query(
         `INSERT INTO print_agents
            (nightclub_id, name, token_hash, token_hint, hostname, agent_version,
-            paired_at, paired_by, scan_requested_at, location_id, purpose)
+            paired_at, paired_by, scan_requested_at, location_id, purpose, station)
          VALUES ($1,$2::text,$3,$4,$5::text,$6::text, now(),
                  (SELECT created_by FROM print_agent_invites WHERE id = $7), now(),
-                 $8::uuid, $9::text)
+                 $8::uuid, $9::text, $10::jsonb)
          RETURNING id::text AS id, name,
-                   location_id::text AS location_id, purpose,
+                   location_id::text AS location_id, purpose, station,
                    (SELECT l.name FROM supply_locations l WHERE l.id = print_agents.location_id)
                      AS location_name`,
         [invite.nightclub_id, intento, hashToken(token), token.slice(-6),
-          nombre, version, invite.id, invite.location_id, invite.purpose]);
+          nombre, version, invite.id, invite.location_id, invite.purpose,
+          invite.station ? JSON.stringify(invite.station) : null]);
       await client.query(`RELEASE SAVEPOINT ${punto}`);
       agente = creado[0];
     } catch (err) {
@@ -613,7 +617,7 @@ async function countFailedPairing(runner, { nightclubId = null } = {}) {
 async function openInvites(runner, { nightclubId }) {
   const { rows } = await runner.query(
     `SELECT id::text AS id, code_hint, expires_at, attempts, created_at,
-            location_id::text AS location_id, purpose,
+            location_id::text AS location_id, purpose, station,
             (SELECT l.name FROM supply_locations l WHERE l.id = print_agent_invites.location_id)
               AS location_name
        FROM print_agent_invites
@@ -638,7 +642,7 @@ async function listAgents(runner, { nightclubId }) {
   const { rows } = await runner.query(
     `SELECT id::text AS id, name, token_hint, last_seen_at, agent_version, active, created_at,
             scan_requested_at, scan_at, scan_result, scan_error,
-            location_id::text AS location_id, purpose,
+            location_id::text AS location_id, purpose, station,
             -- El nombre de la barra viaja resuelto: la pantalla enseña "Barra de
             -- abajo", no un identificador, y así no tiene que cruzar dos listas.
             (SELECT l.name FROM supply_locations l WHERE l.id = print_agents.location_id)
@@ -741,7 +745,7 @@ async function agentByToken(runner, token) {
   if (!token) return null;
   const { rows } = await runner.query(
     `SELECT id::text AS id, nightclub_id::text AS nightclub_id, name, active,
-            location_id::text AS location_id, purpose,
+            location_id::text AS location_id, purpose, station,
             -- El agente enseña el área en su bitácora al conectarse (D61): parado
             -- frente a la PC de la barra, es la única forma de ver que quedó en la
             -- barra correcta sin abrir el panel.
@@ -918,6 +922,150 @@ async function health(runner, { nightclubId }) {
   return { issues };
 }
 
+// ---------------------------------------------------------------- la estación (D99)
+
+const STATION_PURPOSES = ['orders', 'service', 'till', 'door'];
+
+// Impresoras que Windows trae de fábrica y que nunca son una térmica. Se descartan por
+// puerto y por nombre: un nombre solo no basta (el club puede llamarla "PDF"), un
+// puerto solo tampoco.
+const VIRTUAL_PORT = /^(PORTPROMPT|FILE|NUL|XPSPORT|SHRFAX|WSD|TS\d|MICROSOFT|NE\d)/i;
+const VIRTUAL_NAME = /(pdf|xps|onenote|fax|anydesk|teamviewer|rustdesk|snagit|send to|virtual|print to file)/i;
+const USB_PORT = /^(USB|ESDPRT|TMUSB|BIXOLON|EPUSB|STAR|ESC)/i;
+
+/**
+ * Las impresoras de esta PC que pueden ser la térmica de la estación.
+ *
+ * Si hay alguna con puerto USB, solo cuentan esas: la oficina puede tener una láser
+ * por red instalada en la misma PC, y esa no es la de los tickets. Sin ninguna USB se
+ * aceptan las demás reales (COM, LPT), porque hay térmicas viejas por serie.
+ */
+function stationCandidates(found) {
+  const reales = (Array.isArray(found) ? found : []).filter((f) => f.kind === 'windows' && f.name
+    && !VIRTUAL_NAME.test(f.name) && !(f.host && VIRTUAL_PORT.test(f.host)));
+  const usb = reales.filter((f) => f.host && USB_PORT.test(f.host));
+  return (usb.length ? usb : reales).map((f) => ({ name: f.name, port: f.host || null }));
+}
+
+const columnsFor = (paperWidth) => (Number(paperWidth) === 58 ? 32 : 48);
+
+async function setStation(runner, agentId, patch) {
+  const { rows } = await runner.query(
+    `UPDATE print_agents
+        SET station = COALESCE(station, '{}'::jsonb) || $2::jsonb, updated_at = now()
+      WHERE id = $1 RETURNING station`,
+    [agentId, JSON.stringify(patch)]);
+  return rows[0] ? rows[0].station : null;
+}
+
+/**
+ * Registra la impresora USB de esta estación, con todo lo que el gerente pidió, y
+ * saca la hoja de prueba y el pulso del cajón. Devuelve el estado que se guarda.
+ */
+async function registerStationPrinter(runner, { agent, windowsName, createdBy }) {
+  const st = agent.station || {};
+  const needsLocation = st.purpose !== 'door';
+  const { rows: clubRows } = await runner.query('SELECT name FROM nightclubs WHERE id = $1',
+    [agent.nightclub_id]);
+  await runner.query('SAVEPOINT station_printer');
+  let printer;
+  try {
+    const { rows } = await runner.query(
+      `INSERT INTO printers
+         (nightclub_id, location_id, name, purpose, connection, windows_name, paper_width,
+          columns, codepage, has_cutter, agent_id, drawer_pin)
+       VALUES ($1,$2::uuid,$3::text,$4::text,'windows',$5::text,80,$6,'CP850',true,$7::uuid,$8)
+       RETURNING id::text AS id`,
+      [agent.nightclub_id, needsLocation ? agent.location_id : null,
+        String(st.name || windowsName).slice(0, 60), st.purpose, windowsName,
+        columnsFor(80), agent.id, st.drawer_pin || null]);
+    await runner.query('RELEASE SAVEPOINT station_printer');
+    printer = await getPrinter(runner, { nightclubId: agent.nightclub_id, printerId: rows[0].id });
+  } catch (err) {
+    await runner.query('ROLLBACK TO SAVEPOINT station_printer').catch(() => {});
+    if (err.code === '23505') {
+      return {
+        status: 'blocked',
+        message: 'Ya hay una impresora activa con ese nombre o para ese uso en ese lugar. '
+          + 'Apágala en la lista de impresoras y vuelve a buscar.',
+      };
+    }
+    if (err.code === '23503' || err.code === '23514') {
+      return { status: 'blocked', message: 'El lugar elegido ya no existe o no puede imprimir eso.' };
+    }
+    throw err;
+  }
+  await enqueueTest(runner, {
+    nightclubId: agent.nightclub_id,
+    printer,
+    clubName: clubRows[0] ? clubRows[0].name : 'EV2',
+    createdBy: createdBy || null,
+  });
+  if (printer.drawer_pin) {
+    await enqueueSafely(runner, {
+      nightclubId: agent.nightclub_id,
+      printer,
+      kind: 'drawer',
+      refId: null,
+      copies: 1,
+      payload: escpos.drawerPulse(Number(printer.drawer_pin)),
+      preview: '[Abrir cajón] alta de la estación',
+      createdBy: createdBy || null,
+    });
+  }
+  return { status: 'done', message: null, printer_id: printer.id, candidates: null };
+}
+
+/**
+ * Después de cada barrido de una PC con estación pendiente: si hay una sola impresora
+ * posible, se registra sola; si hay varias, se le pregunta al gerente cuál; si no hay
+ * ninguna, se le dice qué revisar. Nunca lanza hacia el agente: el barrido ya quedó.
+ */
+async function applyStation(runner, { agentId }) {
+  const { rows } = await runner.query(
+    `SELECT id::text AS id, nightclub_id::text AS nightclub_id, location_id::text AS location_id,
+            purpose, station, scan_result, paired_by::text AS paired_by
+       FROM print_agents WHERE id = $1 FOR UPDATE`, [agentId]);
+  const agent = rows[0];
+  if (!agent || !agent.station || agent.station.status === 'done') return null;
+
+  const candidatos = stationCandidates(agent.scan_result);
+  if (candidatos.length === 0) {
+    return setStation(runner, agent.id, {
+      status: 'none', candidates: null,
+      message: 'Esta PC no ve ninguna impresora USB. Revisa que esté encendida, con el cable '
+        + 'USB y con su driver instalado, y pulsa Buscar de nuevo.',
+    });
+  }
+  if (candidatos.length > 1) {
+    return setStation(runner, agent.id, {
+      status: 'choose', candidates: candidatos.slice(0, 8),
+      message: 'Esta PC ve varias impresoras. Escoge cuál es la de tickets.',
+    });
+  }
+  const hecho = await registerStationPrinter(runner, {
+    agent, windowsName: candidatos[0].name, createdBy: agent.paired_by,
+  });
+  return setStation(runner, agent.id, hecho);
+}
+
+/** El gerente escoge entre varias: registra esa y listo. */
+async function finishStation(runner, { nightclubId, agentId, windowsName, createdBy }) {
+  const { rows } = await runner.query(
+    `SELECT id::text AS id, nightclub_id::text AS nightclub_id, location_id::text AS location_id,
+            purpose, station, scan_result
+       FROM print_agents WHERE id = $1 AND nightclub_id = $2 FOR UPDATE`, [agentId, nightclubId]);
+  const agent = rows[0];
+  if (!agent) throw ApiError.notFound('Esa PC no existe');
+  if (!agent.station) throw ApiError.badRequest('Esa PC no tiene una estación pendiente');
+  if (agent.station.status === 'done') throw ApiError.conflict('Esa estación ya quedó registrada');
+  const ok = (Array.isArray(agent.scan_result) ? agent.scan_result : [])
+    .some((f) => f.kind === 'windows' && f.name === windowsName);
+  if (!ok) throw ApiError.badRequest('Esa impresora no la vio la PC en su último barrido');
+  const hecho = await registerStationPrinter(runner, { agent, windowsName, createdBy });
+  return setStation(runner, agent.id, hecho);
+}
+
 module.exports = {
   DEFAULTS, STALE_MINUTES, REROUTE_AFTER, DRAWER_TTL_SECONDS,
   settingsOf, saveSettings,
@@ -930,4 +1078,5 @@ module.exports = {
   CODE_ALPHABET, CODE_LENGTH, INVITE_TTL_MINUTES, INVITE_MAX_ATTEMPTS,
   newInviteCode, prettyCode, normalizeCode, hashCode,
   createInvite, redeemInvite, countFailedPairing, openInvites,
+  STATION_PURPOSES, stationCandidates, applyStation, finishStation,
 };

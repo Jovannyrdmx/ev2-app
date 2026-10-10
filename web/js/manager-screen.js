@@ -1961,6 +1961,8 @@
     renderPrintHealth();
     renderZoneBars();
     renderPairing();
+    renderStationForm();
+    renderStations();
     renderFoundPrinters();
     renderPrintersList();
     renderPrintAgents();
@@ -2633,6 +2635,195 @@
       listo();
     }
   };
+
+
+  // ---------------------------------------------------------------- la estación (D99)
+
+  /** "Puerta" no es una barra: es la entrada, donde la anfitriona cobra el cover. */
+  const STATION_DOOR = '__door';
+  let stationTouched = false;
+
+  function renderStationForm() {
+    const sel = $('stn-place');
+    if (!sel) return;
+    const lugares = printPlaces();
+    const quiero = lugares.length + 1;
+    if (sel.options.length !== quiero) {
+      const antes = sel.value;
+      sel.innerHTML = '';
+      for (const b of lugares) {
+        const opt = document.createElement('option');
+        opt.value = b.id;
+        opt.textContent = b.name;
+        sel.appendChild(opt);
+      }
+      const puerta = document.createElement('option');
+      puerta.value = STATION_DOOR;
+      puerta.textContent = t('stn.door');
+      sel.appendChild(puerta);
+      // Si todavía no ha escogido, la primera barra: las barras llegan después de abrir la
+      // pestaña, y quedarse en "Puerta" por haber pintado antes sería una mala sorpresa.
+      sel.value = (stationTouched && antes) || (lugares[0] ? lugares[0].id : STATION_DOOR);
+    }
+    syncStationPurpose();
+  }
+
+  /** En la puerta no hay "para qué": es la caja del cover. En Cover solo hay recibos. */
+  function syncStationPurpose() {
+    const lugar = $('stn-place').value;
+    $('stn-purpose-box').hidden = lugar === STATION_DOOR;
+    if (isDoor(lugar)) $('stn-purpose').value = 'till';
+    $('stn-purpose').disabled = isDoor(lugar);
+    if (lugar === STATION_DOOR) $('stn-drawer').checked = true;
+  }
+  $('stn-place').onchange = () => { stationTouched = true; syncStationPurpose(); };
+
+  $('btn-stn-create').onclick = async () => {
+    const error = $('stn-error');
+    error.hidden = true;
+    const nombre = $('stn-name').value.trim();
+    if (!nombre) { avisar(error, t('stn.needName')); $('stn-name').focus(); return; }
+    const lugar = $('stn-place').value;
+    if (!lugar) { avisar(error, t('prn.noBars')); return; }
+    const puerta = lugar === STATION_DOOR;
+    const listo = ocupado($('btn-stn-create'), 'prn.saving');
+    try {
+      const cuerpo = {
+        location_id: puerta ? null : lugar,
+        station: {
+          name: nombre,
+          purpose: puerta ? 'door' : $('stn-purpose').value,
+          has_drawer: $('stn-drawer').checked,
+        },
+      };
+      const { invite } = await api.post(`/nightclubs/${clubId()}/print-agents/invite`, cuerpo);
+      printing.invite = invite;
+      printing.pairUntil = new Date(invite.expires_at).getTime();
+      renderPairing();
+      $('prn-pair').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      // El botón se suelta ya: esperar a la PC puede tardar los diez minutos del código y
+      // dejarlo en "Guardando…" todo ese rato parece que la pantalla se trabó.
+      listo();
+      await waitForPairing(invite);
+    } catch (err) {
+      listo();
+      avisar(error, EV2Format.errorMessage(err));
+    }
+  };
+
+  const printerOf = (id) => (printing.printers || []).find((p) => p.id === id) || null;
+
+  /** Las estaciones: una tarjeta por PC pedida como estación, con lo que falta. */
+  function renderStations() {
+    const caja = $('stn-list');
+    if (!caja) return;
+    caja.innerHTML = '';
+    const lista = (printing.agents || []).filter((a) => a.station);
+    for (const a of lista) {
+      const st = a.station;
+      const card = document.createElement('div');
+      card.className = 'rounded-lg p-3 space-y-2';
+      card.style.cssText = 'background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12)';
+
+      const titulo = document.createElement('p');
+      titulo.className = 'font-display truncate';
+      titulo.textContent = `${st.name || a.name}`;
+      const sub = document.createElement('p');
+      sub.className = 'text-[11px] text-white/40 truncate';
+      sub.textContent = `${a.name} · ${a.location_name || t('stn.door')}`;
+      card.append(titulo, sub);
+
+      const linea = (ok, texto) => {
+        const p = document.createElement('p');
+        p.className = 'text-xs';
+        p.style.color = ok === true ? 'var(--ev2-lime)' : ok === false ? '#fca5a5' : '#fcd34d';
+        p.textContent = `${ok === true ? '✓' : ok === false ? '✗' : '…'} ${texto}`;
+        card.appendChild(p);
+        return p;
+      };
+      linea(true, t('stn.pcOk'));
+
+      const impresora = st.printer_id ? printerOf(st.printer_id) : null;
+      if (st.status === 'done' && impresora) {
+        linea(true, t('stn.printerOk', { name: impresora.windows_name || impresora.name }));
+        if (st.drawer_pin || impresora.drawer_pin) {
+          linea(true, t('stn.drawerOk', { pin: impresora.drawer_pin || st.drawer_pin }));
+        } else {
+          linea(null, t('stn.noDrawer'));
+        }
+        const acciones = document.createElement('div');
+        acciones.className = 'flex flex-wrap gap-2 pt-1';
+        const boton = (texto, fn, primary) => {
+          const b = document.createElement('button');
+          b.className = `${primary ? 'ev2-button' : 'card'} rounded-lg px-3 py-2 text-xs`;
+          b.textContent = texto;
+          b.onclick = () => fn(b);
+          acciones.appendChild(b);
+        };
+        boton(t('stn.testSheet'), (b) => stationTest(impresora, b));
+        if (impresora.drawer_pin) {
+          boton(t('stn.testDrawer'), (b) => stationDrawer(impresora, false, b), true);
+          boton(t('stn.otherPin', { pin: impresora.drawer_pin === 2 ? 5 : 2 }),
+            (b) => stationDrawer(impresora, true, b));
+        }
+        card.appendChild(acciones);
+      } else if (st.status === 'choose') {
+        linea(null, st.message || t('stn.pickOne'));
+        const opciones = document.createElement('div');
+        opciones.className = 'flex flex-wrap gap-2';
+        for (const c of st.candidates || []) {
+          const b = document.createElement('button');
+          b.className = 'ev2-button rounded-lg px-3 py-2 text-xs';
+          b.textContent = c.port ? `${c.name} (${c.port})` : c.name;
+          b.onclick = () => stationFinish(a, c.name, b);
+          opciones.appendChild(b);
+        }
+        card.appendChild(opciones);
+      } else if (st.status === 'none' || st.status === 'blocked') {
+        linea(false, st.message || t('stn.printerNone'));
+        const b = document.createElement('button');
+        b.className = 'card rounded-lg px-3 py-2 text-xs';
+        b.textContent = t('prn.scan');
+        b.onclick = () => $('btn-prn-scan').click();
+        card.appendChild(b);
+      } else {
+        linea(null, t('stn.printerWait'));
+      }
+      caja.appendChild(card);
+    }
+  }
+
+  async function stationTest(printer, boton) {
+    const listo = ocupado(boton, 'prn.sending');
+    try {
+      await api.post(`/nightclubs/${clubId()}/printers/${printer.id}/test`, {});
+      toast(t('stn.testSent'), 'ok');
+    } catch (err) { showError(err); } finally { listo(); }
+  }
+
+  /** Probar el cajón; y si no abrió, el otro pin y se vuelve a probar, en un clic. */
+  async function stationDrawer(printer, cambiar, boton) {
+    const listo = ocupado(boton, 'prn.sending');
+    try {
+      if (cambiar) {
+        await api.patch(`/nightclubs/${clubId()}/printers/${printer.id}`,
+          { drawer_pin: printer.drawer_pin === 2 ? 5 : 2 });
+      }
+      await api.post(`/nightclubs/${clubId()}/printers/${printer.id}/test-drawer`, {});
+      toast(t('stn.drawerSent'), 'ok');
+      await loadPrinting();
+    } catch (err) { showError(err); } finally { listo(); }
+  }
+
+  async function stationFinish(agent, windowsName, boton) {
+    const listo = ocupado(boton, 'prn.saving');
+    try {
+      await api.post(`/nightclubs/${clubId()}/print-agents/${agent.id}/station/finish`,
+        { windows_name: windowsName });
+      toast(t('prn.registered'), 'ok');
+      await loadPrinting();
+    } catch (err) { listo(); showError(err); }
+  }
 
   function renderPairing() {
     const caja = $('prn-pair');

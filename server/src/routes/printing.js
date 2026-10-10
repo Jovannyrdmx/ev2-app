@@ -395,6 +395,23 @@ agentRouter.post('/scan',
       found: req.body.found || [],
       error: req.body.error || null,
     });
+    // La estación pedida por el gerente (D99): si la PC tiene una pendiente, su
+    // impresora USB se registra aquí mismo. El barrido ya quedó guardado; si esto
+    // falla, el gerente lo ve en la tarjeta de la estación y no pierde el barrido.
+    if (hecho && !req.body.error && req.agent.station
+        && req.agent.station.status !== 'done') {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await printing.applyStation(client, { agentId: req.agent.id });
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('[print-agent] no se pudo preparar la estación:', err.message);
+      } finally {
+        client.release();
+      }
+    }
     res.json({ saved: Boolean(hecho), scan_at: hecho ? hecho.scan_at : null });
   }));
 
@@ -679,17 +696,44 @@ router.post('/nightclubs/:nightclubId/print-agents/invite',
     body: z.object({
       location_id: uuid.nullish(),
       purpose: z.enum(['orders', 'service', 'till']).nullish(),
+      // La estación completa (D99): PC + impresora USB + cajón en un solo código.
+      station: z.object({
+        name: z.string().trim().min(1).max(60),
+        purpose: z.enum(printing.STATION_PURPOSES),
+        has_drawer: z.coerce.boolean().default(false),
+        drawer_pin: z.union([z.literal(2), z.literal(5)]).default(2),
+      }).optional(),
     }).default({}),
   }),
   asyncHandler(async (req, res) => {
-    await checkArea(req.params.nightclubId, req.body.location_id, req.body.purpose);
+    const { station } = req.body;
+    let locationId = req.body.location_id || null;
+    let purpose = req.body.purpose || null;
+    if (station) {
+      // La puerta no está en ninguna barra; todo lo demás sí.
+      if (station.purpose === 'door') {
+        locationId = null;
+        purpose = null;
+      } else {
+        if (!locationId) throw ApiError.badRequest('Escoge la barra o Cover de esta estación');
+        purpose = station.purpose;
+        await checkArea(req.params.nightclubId, locationId, purpose, { purposeRequired: true });
+      }
+    } else {
+      await checkArea(req.params.nightclubId, locationId, purpose);
+    }
     let invite;
     try {
       invite = await printing.createInvite(pool, {
         nightclubId: req.params.nightclubId,
         createdBy: req.user.id,
-        locationId: req.body.location_id || null,
-        purpose: req.body.purpose || null,
+        locationId,
+        purpose,
+        station: station ? {
+          name: station.name,
+          purpose: station.purpose,
+          drawer_pin: station.has_drawer ? station.drawer_pin : null,
+        } : null,
       });
     } catch (err) {
       if (err.code === '23503') throw ApiError.badRequest('Esa barra no existe');
@@ -726,6 +770,35 @@ router.post('/nightclubs/:nightclubId/print-agents/scan',
  * `location_id: null` la devuelve a atender todo el club: una barra que cierra deja a
  * su PC sin nada que imprimir, y el gerente tiene que poder soltarla sin borrarla.
  */
+/**
+ * Terminar una estación cuando la PC ve varias impresoras (D99): el gerente escoge cuál
+ * es la de tickets y se registra con lo que ya había pedido.
+ */
+router.post('/nightclubs/:nightclubId/print-agents/:agentId/station/finish',
+  requireRole(...MANAGE),
+  validate({
+    params: z.object({ nightclubId: uuid, agentId: uuid }),
+    body: z.object({ windows_name: z.string().trim().min(1).max(240) }),
+  }),
+  asyncHandler(async (req, res) => {
+    const client = await pool.connect();
+    let station;
+    try {
+      await client.query('BEGIN');
+      station = await printing.finishStation(client, {
+        nightclubId: req.params.nightclubId, agentId: req.params.agentId,
+        windowsName: req.body.windows_name, createdBy: req.user.id,
+      });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    res.json({ station });
+  }));
+
 router.patch('/nightclubs/:nightclubId/print-agents/:agentId',
   requireRole(...MANAGE),
   validate({

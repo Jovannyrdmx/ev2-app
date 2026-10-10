@@ -103,6 +103,28 @@ acción: `node.exe` con argumento `C:\EV2\agent\print-agent.js` y "Iniciar en"
 
 El `config.json` tiene la llave de esa PC: no lo subas a git ni lo mandes por chat.
 
+## La forma rápida: una estación en un solo paso (D99)
+
+Para una PC de caja con su impresora USB y su cajón (el cajón va con su cable a la
+impresora, nunca a la PC):
+
+1. Conecta la impresora por USB, enciéndela e instala su driver en Windows.
+2. En el panel: **Impresoras → Nueva estación de caja**. Pon el nombre, escoge dónde
+   está (barra, Cover o Puerta), para qué es, y marca si tiene cajón. Pica **Sacar el
+   código de la estación**.
+3. En la PC: pega la línea de instalación y teclea el código.
+
+Eso es todo. La PC busca sus impresoras, descarta las virtuales de Windows (PDF, XPS,
+OneNote, Fax), registra sola la térmica USB con el nombre, el lugar y el cajón que
+pediste, saca la hoja de prueba y abre el cajón. El panel muestra la tarjeta de la
+estación con ✓ PC · ✓ impresora · ✓ cajón.
+
+- Si el cajón no abre, pica **No abrió, probar pin 5** (o 2): cambia el pin y vuelve a
+  probar en un clic.
+- Si la PC ve **varias** impresoras, la tarjeta te deja escoger cuál es la de tickets.
+- Si **no** ve ninguna, te dice qué revisar (USB, encendida, driver) y pica **Buscar
+  impresoras** para reintentar.
+
 ## Impresoras por USB (Windows)
 
 **No hace falta compartirla en Windows.** El agente le imprime por su nombre.
