@@ -1,5 +1,5 @@
 -- ============================================================================
--- Migration 047: Cover, un lugar que no es barra (D96).
+-- Migration 050: Cover, un lugar que no es barra (D96).
 --
 -- Una PC y su impresora solo se podian asignar a una BARRA, y el club solo tenia
 -- dos: planta baja y planta alta. La entrada -- donde se cobra el cover -- no tenia
@@ -23,6 +23,11 @@ DECLARE
   target_kind VARCHAR(12);
   target_club UUID;
 BEGIN
+  -- La impresora de la puerta del cajon (propósito `door`, migración 047) no tiene
+  -- lugar: la regla de "una barra o Cover" solo aplica cuando sí lo tiene.
+  IF NEW.location_id IS NULL THEN
+    RETURN NEW;
+  END IF;
   SELECT kind, nightclub_id INTO target_kind, target_club
     FROM supply_locations WHERE id = NEW.location_id;
   IF target_kind IS DISTINCT FROM 'bar' AND target_kind IS DISTINCT FROM 'door' THEN
