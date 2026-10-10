@@ -290,7 +290,10 @@ async function settle(client, {
     usd_received: payment.usd_received || null,
     exchange_rate: payment.exchange_rate || null,
   };
-  const receipt = await tickets.printReceipt(client, {
+  // El cover de la puerta (D100) imprime su recibo al asentar la entrada, en la
+  // impresora de Cover; aquí saldría un segundo papel en otra impresora.
+  const esCoverPuerta = tx.reference_type === 'door_admission' && tx.type === 'cover';
+  const receipt = esCoverPuerta ? null : await tickets.printReceipt(client, {
     nightclubId,
     transactionId: tx.id,
     method: payment.method,

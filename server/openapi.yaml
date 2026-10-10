@@ -3461,6 +3461,83 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/nightclubs/{nightclubId}/door/point-charges:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    post:
+      operationId: startDoorPointCharge
+      tags: [Puerta]
+      summary: Cobrar un cover en la terminal de la puerta (hostess)
+      description: |
+        Primero la tarjeta, después la entrada (D100). Crea un renglón PENDIENTE del libro
+        y despierta la terminal asignada a la puerta; **no** crea la entrada. Cuando
+        Mercado Pago aprueba, la entrada se asienta con `POST /door/admissions`
+        (`payment_method=point`). Si la tarjeta no pasa, el renglón se cancela y no queda
+        entrada. Solo cobra covers en pesos y con importe mayor que cero.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: { type: string, enum: [general, vip_extra] }
+                reservation_id: { type: string, format: uuid }
+                quantity: { type: integer, minimum: 1, maximum: 50, default: 1 }
+                cover_price_id: { type: string, format: uuid }
+                unit_price: { type: number, minimum: 0, maximum: 100000 }
+                currency: { type: string, enum: [MXN, USD], default: MXN }
+                event_id: { type: string, format: uuid }
+                rp_code: { type: string, maxLength: 20 }
+      responses:
+        '201':
+          description: La terminal está esperando la tarjeta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  charge: { $ref: '#/components/schemas/TerminalCharge' }
+                  pending_confirmation: { type: boolean }
+        '202':
+          description: Mercado Pago no contestó; el cobro quedó abierto y se resuelve solo
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: La puerta no tiene terminal asignada, el cover es en dólares o no cuesta nada
+
+  /api/nightclubs/{nightclubId}/door/point-charges/pending:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listDoorPointChargesPending
+      tags: [Puerta]
+      summary: Cobros de cover con terminal que todavía no tienen entrada (hostess)
+      description: |
+        Para no perder una tarjeta aprobada: si la pantalla se cerró entre "aprobado" y
+        "asentar la entrada", el cobro aparece aquí con el pedido original y se reclama
+        con `POST /door/admissions` sin volver a cobrar. Últimas 12 horas.
+      responses:
+        '200':
+          description: Los cobros por reclamar
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  charges:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        status: { type: string }
+                        amount: { type: string }
+                        currency: { type: string }
+                        terminal: { type: string }
+                        request: { type: object, description: El pedido del cover tal como se cobró. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/nightclubs/{nightclubId}/door/summary:
     parameters:
       - $ref: '#/components/parameters/NightclubId'
@@ -4246,6 +4323,10 @@ paths:
                 active: { type: boolean }
                 sort_order: { type: integer }
                 set_pdv: { type: boolean }
+                location_id:
+                  type: [string, 'null']
+                  format: uuid
+                  description: Asignarla a una barra o a la puerta (D100); `null` la deja sin lugar.
       responses:
         '200':
           description: Terminal actualizada
@@ -4449,10 +4530,16 @@ paths:
           application/json:
             schema:
               type: object
-              required: [transaction_id, terminal_id]
+              required: [transaction_id]
               properties:
                 transaction_id: { type: string, format: uuid }
-                terminal_id: { type: string, format: uuid }
+                terminal_id:
+                  type: string
+                  format: uuid
+                  description: |
+                    Opcional (D100). La caja cobra por la terminal que el gerente le asignó a
+                    su barra y no puede usar la de otra (`403`). Sin terminal asignada, es
+                    obligatoria (`422`).
                 amount:
                   type: number
                   exclusiveMinimum: 0
@@ -11862,6 +11949,14 @@ components:
           description: PDV es el único en el que obedece a la API.
         active: { type: boolean }
         sort_order: { type: integer }
+        location_id:
+          type: [string, 'null']
+          format: uuid
+          description: |
+            La barra o la puerta donde vive la terminal (D100). El cobro de ese lugar
+            sale por ella sin que nadie la escoja. Un lugar admite UNA terminal activa.
+        location_name: { type: [string, 'null'] }
+        location_kind: { type: [string, 'null'], enum: [bar, door, null] }
 
     TerminalCharge:
       type: object
@@ -12916,8 +13011,18 @@ components:
         currency: { type: string, enum: [MXN, USD], default: MXN }
         payment_method:
           type: string
-          enum: [cash, card, transfer, courtesy]
+          enum: [cash, card, transfer, courtesy, point]
           default: cash
+          description: |
+            `point` (D100) asienta la entrada de un cover YA cobrado en la terminal de la
+            puerta; exige `terminal_charge_id`.
+        terminal_charge_id:
+          type: string
+          format: uuid
+          description: |
+            Solo con `payment_method=point`. El cobro aprobado de `door/point-charges`. Se
+            reclama una sola vez (`409` la segunda) y solo si Mercado Pago ya lo aprobó
+            por el mismo importe del cover.
         notes: { type: string, maxLength: 200 }
         event_id: { type: string, format: uuid }
         labels:

@@ -120,6 +120,50 @@ async function record(runner, { chargeId, source, action, status = null, request
 // ---------------------------------------------------------------- empezar un cobro
 
 /**
+ * Qué terminal cobra (D100).
+ *
+ * Cada caja tiene su terminal fija: el cajero no escoge, y no puede mandar el cobro a
+ * la de otra barra. Mientras el gerente no le haya asignado una a esa caja, se conserva
+ * lo de antes (la que venga en la petición) para no dejar sin cobrar a un club que
+ * todavía no termina de configurar.
+ *
+ * - `locationId`: el lugar de quien cobra (la caja abierta del cajero, o la puerta).
+ * - `requested`: lo que mandó la pantalla, si mandó algo.
+ */
+async function resolveTerminal(client, { nightclubId, locationId = null, requested = null, strict = false }) {
+  if (locationId) {
+    const mine = await client.query(
+      `SELECT id::text AS id FROM payment_terminals
+        WHERE nightclub_id = $1 AND location_id = $2 AND active AND provider = 'mercadopago'`,
+      [nightclubId, locationId]);
+    if (mine.rowCount > 0) {
+      if (requested && requested !== mine.rows[0].id) {
+        throw ApiError.forbidden('Esa terminal no es la de tu caja. El cobro sale por la terminal asignada a tu lugar.');
+      }
+      return mine.rows[0].id;
+    }
+    if (strict) {
+      throw ApiError.unprocessable(
+        'Este lugar no tiene una terminal asignada. Pídele al gerente que la asigne en Pagos.');
+    }
+  }
+  if (!requested) {
+    throw ApiError.unprocessable('Falta la terminal: tu caja no tiene una asignada. Pídele al gerente que la asigne.');
+  }
+  // Una terminal fija de OTRO lugar no se presta: es justo lo que se quiere evitar.
+  if (locationId) {
+    const other = await client.query(
+      `SELECT 1 FROM payment_terminals
+        WHERE id = $1 AND nightclub_id = $2 AND location_id IS NOT NULL AND location_id <> $3`,
+      [requested, nightclubId, locationId]);
+    if (other.rowCount > 0) {
+      throw ApiError.forbidden('Esa terminal está asignada a otra caja.');
+    }
+  }
+  return requested;
+}
+
+/**
  * Aparta el cobro en la base. Transacción corta, sin red de por medio.
  *
  * Devuelve la fila recién creada en `creating`. Todavía no existe nada en Mercado Pago.
@@ -393,6 +437,18 @@ async function apply(pool, { chargeId, read, source, requestId = null, rawPayloa
     await record(client, {
       chargeId: charge.id, source, action: `status_${status}`, status,
     });
+
+    // Un cover de la puerta (D100) nace como renglón pendiente solo para esperar a la
+    // tarjeta. Si la tarjeta no pasó, ese renglón no es una deuda: se cancela, y el
+    // siguiente intento abre uno nuevo en vez de heredar un cobro muerto.
+    if (['failed', 'canceled', 'expired'].includes(status)) {
+      await client.query(
+        `UPDATE transactions SET status = 'cancelled', updated_at = now()
+          WHERE id = $1 AND status = 'pending' AND type = 'cover'
+            AND reference_type = 'door_admission' AND reference_id IS NULL
+            AND (metadata->>'door_point')::boolean IS TRUE`,
+        [charge.transaction_id]);
+    }
 
     if (status === 'processed') {
       // Lo que Mercado Pago dice que cobró, contra lo que el libro dice que vale. Si no
@@ -956,6 +1012,6 @@ async function sweep(pool, { limit = 20 } = {}) {
 
 module.exports = {
   CHARGE_SELECT, EXPIRATION_SECONDS, RECOVERY_WINDOW_MS, REFUND_WINDOW_DAYS,
-  present, record, reserve, push, apply, announce, sweep,
+  present, record, resolveTerminal, reserve, push, apply, announce, sweep,
   bookRefunds, requestRefund, refundsOf,
 };

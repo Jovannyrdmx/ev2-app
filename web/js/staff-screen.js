@@ -246,6 +246,7 @@
     // El cajón de la puerta lo abre la anfitriona, que es quien lo tiene (D96).
     $('btn-door-drawer').hidden = !(api.session.user && api.session.user.role === 'hostess');
     renderAll();
+    cargarPointPendientes().catch(() => {});
   }
 
   async function loadOrders() {
@@ -694,16 +695,25 @@
     }
   }
 
+  /** La terminal Mercado Pago que el gerente dejó en la puerta (D100), si hay. */
+  const puertaTerminal = () => (state.terminals || [])
+    .find((x) => x && x.active !== false && x.location_kind === 'door') || null;
+
   function renderMetodos() {
     const select = $('sell-method');
-    if (select.dataset.filled === '1') return;
-    for (const m of EV2DoorScan.METHODS) {
+    const metodos = EV2DoorScan.METHODS.concat(puertaTerminal() ? ['point'] : []);
+    const marca = metodos.join(',');
+    if (select.dataset.filled === marca) return;
+    const actual = select.value;
+    select.innerHTML = '';
+    for (const m of metodos) {
       const opt = document.createElement('option');
       opt.value = m;
       opt.textContent = t(EV2DoorScan.methodKey(m));
       select.appendChild(opt);
     }
-    select.dataset.filled = '1';
+    select.dataset.filled = marca;
+    if (metodos.includes(actual)) select.value = actual;
   }
 
   /**
@@ -772,6 +782,18 @@
     // El cover cuenta para la comisión del RP que trajo a esta gente (D98).
     const rpCode = kind === 'general' && $('sell-rp') ? $('sell-rp').value.trim() : '';
     if (rpCode) body.rp_code = rpCode;
+    if (body.payment_method === 'point') {
+      // Primero la tarjeta, luego la entrada (D100).
+      try {
+        await cobrarConTerminal(body);
+      } catch (err) {
+        error.textContent = EV2Format.errorMessage(err);
+        error.hidden = false;
+      } finally {
+        boton.disabled = kind === 'vip_extra' && !EV2DoorScan.canSellExtra(scan.last);
+      }
+      return;
+    }
     try {
       const data = await api.post(`/nightclubs/${clubId()}/door/admissions`, body);
       if ($('sell-rp')) $('sell-rp').value = '';
@@ -801,6 +823,95 @@
       error.hidden = false;
     } finally {
       boton.disabled = kind === 'vip_extra' && !EV2DoorScan.canSellExtra(scan.last);
+    }
+  }
+
+  // ------------------------------------------------- cover con la terminal (D100)
+
+  /**
+   * Despierta la terminal de la puerta con el importe del cover. Aquí NO se vende nada:
+   * la entrada se asienta cuando Mercado Pago confirma la tarjeta (`asentarPoint`).
+   */
+  async function cobrarConTerminal(body) {
+    const pedido = { ...body };
+    delete pedido.payment_method;
+    delete pedido.client_request_id;
+    delete pedido.notes;
+    const res = await api.post(`/nightclubs/${clubId()}/door/point-charges`, pedido);
+    state.doorPoint = { chargeId: res.charge.id, body: pedido, requestId: EV2.uuid() };
+    sheet().watch(res.charge);
+  }
+
+  /** La tarjeta ya pasó: se asienta la entrada reclamando ese cobro (una sola vez). */
+  async function asentarPoint(dp) {
+    const error = $('sell-error');
+    error.hidden = true;
+    const body = {
+      ...dp.body, payment_method: 'point', terminal_charge_id: dp.chargeId,
+      client_request_id: dp.requestId,
+    };
+    try {
+      const data = await api.post(`/nightclubs/${clubId()}/door/admissions`, body);
+      state.doorPoint = null;
+      if ($('sell-rp')) $('sell-rp').value = '';
+      avisarRp(data.rp);
+      toast(t('sell.done', { total: money(data.admission.total, data.admission.currency) }), 'ok');
+      $('sell-qty').value = '1';
+      state.sell.requestId = null;
+      renderVenta();
+      await Promise.all([loadDoorSummary(), cargarPointPendientes()]);
+    } catch (err) {
+      // El dinero ya entró: que no se pierda. El aviso se queda y el cobro sigue en la
+      // lista de pendientes para asentarlo de nuevo sin volver a cobrar.
+      error.textContent = `${t('sell.pointStuck')} ${EV2Format.errorMessage(err)}`;
+      error.hidden = false;
+      await cargarPointPendientes();
+    }
+  }
+
+  /** Cobros aprobados (o en curso) que todavía no tienen su entrada. */
+  async function cargarPointPendientes() {
+    const caja = $('sell-pending');
+    if (!caja || !isDoorRole() || !puertaTerminal()) return;
+    let lista = [];
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/door/point-charges/pending`);
+      lista = data.charges || [];
+    } catch { lista = []; }
+    caja.innerHTML = '';
+    caja.hidden = lista.length === 0;
+    for (const c of lista) {
+      const fila = document.createElement('div');
+      fila.className = 'flex items-center justify-between gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs';
+      const texto = document.createElement('span');
+      const listo = c.status === 'processed';
+      texto.textContent = t(listo ? 'sell.pointApproved' : 'sell.pointWaiting',
+        { amount: money(c.amount, c.currency) });
+      const boton = document.createElement('button');
+      boton.className = 'ev2-button rounded-lg px-3 py-1 text-xs shrink-0';
+      boton.textContent = t(listo ? 'sell.pointClaim' : 'sell.pointWatch');
+      boton.onclick = async () => {
+        boton.disabled = true;
+        try {
+          const r = c.request || {};
+          const pedido = {
+            kind: r.kind, quantity: r.quantity,
+            ...(r.cover_price_id ? { cover_price_id: r.cover_price_id } : { unit_price: r.unit_price }),
+            ...(r.reservation_id ? { reservation_id: r.reservation_id } : {}),
+            ...(r.event_id ? { event_id: r.event_id } : {}),
+            ...(r.rp_code ? { rp_code: r.rp_code } : {}),
+          };
+          state.doorPoint = { chargeId: c.id, body: pedido, requestId: EV2.uuid() };
+          if (listo) {
+            await asentarPoint(state.doorPoint);
+          } else {
+            const det = await api.get(`/nightclubs/${clubId()}/terminal-charges/${c.id}`);
+            sheet().watch(det.charge);
+          }
+        } finally { boton.disabled = false; }
+      };
+      fila.append(texto, boton);
+      caja.appendChild(fila);
     }
   }
 
@@ -1703,11 +1814,16 @@
         money: (a, c) => EV2Format.money(a, c || state.currency),
         errorMessage: (err) => EV2Format.errorMessage(err),
         confirm: (texto) => ask(texto),
-        onPaid: async () => {
+        onPaid: async (charge) => {
+          // El cover de la puerta (D100): la tarjeta pasó, ahora se asienta la entrada.
+          if (state.doorPoint && state.doorPoint.chargeId === charge.id) {
+            await asentarPoint(state.doorPoint);
+            return;
+          }
           toast(t('take.charged'), 'ok');
           await Promise.all([loadOrders(), loadTables()]);
         },
-        onClose: () => { closeTake(); },
+        onClose: () => { if (!state.doorPoint) closeTake(); },
       });
     }
     return terminalSheet;

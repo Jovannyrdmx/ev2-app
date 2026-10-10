@@ -92,6 +92,23 @@ describe('Con qué terminal se cobra', () => {
     expect(T.pickTerminal([{ id: 'x', active: false }], null)).toBe(null);
     expect(T.pickTerminal([], null)).toBe(null);
   });
+
+  it('con lugar (D100): manda la terminal asignada a ESA caja, no la recordada', () => {
+    const fijas = [
+      { id: 'alta', active: true, location_id: 'L2' },
+      { id: 'baja', active: true, location_id: 'L1' },
+    ];
+    expect(T.pickTerminal(fijas, 'alta', 'L1').id).toBe('baja');
+  });
+
+  it('con lugar: no ofrece la terminal fija de otro lugar, y usa una sin asignar', () => {
+    expect(T.pickTerminal([{ id: 'alta', active: true, location_id: 'L2' }], null, 'L1')).toBe(null);
+    const mezcla = [
+      { id: 'alta', active: true, location_id: 'L2' },
+      { id: 'libre', active: true, location_id: null },
+    ];
+    expect(T.pickTerminal(mezcla, null, 'L1').id).toBe('libre');
+  });
 });
 
 describe('El cuadro se arma solo', () => {

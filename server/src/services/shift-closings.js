@@ -78,7 +78,8 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
           AND c.status IN ('processed','refunded')
           AND c.created_at >= $3 AND c.created_at <= $4
         GROUP BY c.currency`, params),
-    // 3. El cover que vendió en la puerta. La cortesía no es dinero. Lo que se pagó
+    // 3. El cover que vendió en la puerta. La cortesía no es dinero, y el cover cobrado
+    //    en la terminal (D100) ya cuenta en la consulta 2 (es un cobro con terminal). Lo que se pagó
     //    con dólares (D96) no entra como pesos: va aparte, en la consulta de abajo.
     runner.query(
       `SELECT d.payment_method AS method, d.currency,
@@ -86,7 +87,7 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
               COALESCE(sum(d.total - COALESCE(d.usd_amount, 0)), 0)::numeric(12,2)::text AS amount,
               COALESCE(sum(d.quantity), 0)::int AS people
          FROM door_admissions d
-        WHERE d.nightclub_id = $1 AND d.sold_by = $2 AND d.payment_method <> 'courtesy'
+        WHERE d.nightclub_id = $1 AND d.sold_by = $2 AND d.payment_method NOT IN ('courtesy', 'point')
           AND d.created_at >= $3 AND d.created_at <= $4
         GROUP BY d.payment_method, d.currency`, params),
     // La propina de la noche. NO es del club: va aparte y no se entrega.

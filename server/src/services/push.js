@@ -111,6 +111,8 @@ const TEXTS = {
     userReported: ['Reporte de un usuario', 'Revísalo en Moderación.'],
     printFailed: ['Falló una impresión', 'Revisa Impresoras.'],
     terminalRejected: ['Cobro con terminal rechazado', '{detail}'],
+    terminalPaid: ['Cobro aprobado', '{detail}'],
+    terminalExpired: ['Cobro con terminal vencido', '{detail}'],
     table: 'Mesa {code}',
     noPlace: 'Sin mesa',
     drinks: '{n} tragos',
@@ -145,6 +147,8 @@ const TEXTS = {
     userReported: ['A user was reported', 'Review it in Moderation.'],
     printFailed: ['A print failed', 'Check Printers.'],
     terminalRejected: ['Terminal charge declined', '{detail}'],
+    terminalPaid: ['Charge approved', '{detail}'],
+    terminalExpired: ['Terminal charge expired', '{detail}'],
     table: 'Table {code}',
     noPlace: 'No table',
     drinks: '{n} drinks',
@@ -459,14 +463,19 @@ const CATALOG = {
     return managers.map((u) => ({ ...u, key: 'printFailed', tag: 'printing' }));
   },
 
+  // Los avisos de cobro con terminal (D100): a quien lo empezó y a los gerentes. Aprobado,
+  // rechazado y vencido; los pasos intermedios (esperando, requiere acción) no suenan.
   async terminal_charge_updated(db, ev) {
     const p = ev.payload;
-    if (p.status !== 'failed') return [];
+    const key = { processed: 'terminalPaid', failed: 'terminalRejected', expired: 'terminalExpired' }[p.status];
+    if (!key) return [];
     const managers = await usersWithRoles(db, ev.nightclub_id, MANAGER_ROLES);
     const starter = await usersByIds(db, ev.nightclub_id, [p.started_by]);
     const detail = [p.terminal, p.amount ? money(p.amount, p.currency) : null].filter(Boolean).join(' · ');
-    return [...managers, ...starter.filter((u) => u.role !== 'guest')]
-      .map((u) => ({ ...u, key: 'terminalRejected', vars: { detail }, tag: `terminal-${p.charge_id}` }));
+    const seen = new Set();
+    return [...starter.filter((u) => u.role !== 'guest'), ...managers]
+      .filter((u) => (seen.has(u.id) ? false : seen.add(u.id)))
+      .map((u) => ({ ...u, key, vars: { detail }, tag: `terminal-${p.charge_id}` }));
   },
 };
 

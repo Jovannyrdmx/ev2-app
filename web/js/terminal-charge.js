@@ -113,17 +113,24 @@
   const canCancel = (status) => !isFinal(status);
 
   /**
-   * La terminal con la que se va a cobrar cuando hay varias.
+   * La terminal con la que se va a cobrar.
    *
-   * La última que usó ESE aparato, si sigue activa. La tableta de la barra cobra
-   * siempre con la de la barra, y preguntárselo cada vez a las dos de la mañana es una
-   * pregunta de más por cobro.
+   * Con `locationId` (la caja o la puerta de quien cobra), manda la terminal que el
+   * gerente le asignó a ESE lugar (D100); las asignadas a otro lugar no se ofrecen, el
+   * servidor las rechazaría. Sin una asignada, o sin lugar, queda lo de antes: la última
+   * que usó ESE aparato, si sigue activa. La tableta de la barra cobra siempre con la de
+   * la barra, y preguntárselo cada vez a las dos de la mañana es una pregunta de más.
    */
-  function pickTerminal(terminals, remembered) {
+  function pickTerminal(terminals, remembered, locationId = null) {
     const activas = (terminals || []).filter((t) => t && t.active !== false);
-    if (activas.length === 0) return null;
-    const recordada = activas.find((t) => t.id === remembered);
-    return recordada || activas[0];
+    if (locationId) {
+      const mia = activas.find((t) => t.location_id === locationId);
+      if (mia) return mia;
+    }
+    const libres = activas.filter((t) => !t.location_id || !locationId || t.location_id === locationId);
+    if (libres.length === 0) return null;
+    const recordada = libres.find((t) => t.id === remembered);
+    return recordada || libres[0];
   }
 
   // ---------------------------------------------------------------- el cuadro

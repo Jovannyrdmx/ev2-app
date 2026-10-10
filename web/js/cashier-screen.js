@@ -379,7 +379,7 @@
     }).join('');
 
   /** Las formas que se ofrecen: sin terminal activa, Mercado Pago ni aparece. */
-  const hayTerminal = () => (state.terminals || []).some((x) => x && x.active !== false);
+  const hayTerminal = () => EV2TerminalCharge.pickTerminal(state.terminals, null, barId()) !== null;
   const ofrecidas = (order) => EV2Cashier.methodsFor(order, { usdRate: state.usdRate })
     .filter((m) => m !== 'mercadopago_point' || hayTerminal());
 
@@ -419,7 +419,8 @@
         received: $('charge-b-received').value,
         usd: $('charge-b-usd-received').value,
       },
-      terminals: state.terminals,
+      // Solo las que esta caja puede usar (D100): la suya, o las que no son de otro lugar.
+      terminals: (state.terminals || []).filter((x) => x && (!x.location_id || x.location_id === barId())),
       usdRate: state.usdRate,
     };
   }
@@ -551,7 +552,7 @@
     for (let i = 0; i < steps.length; i += 1) {
       const step = steps[i];
       if (step.terminal) {
-        const terminal = EV2TerminalCharge.pickTerminal(state.terminals, EV2TerminalCharge.recordada());
+        const terminal = EV2TerminalCharge.pickTerminal(state.terminals, EV2TerminalCharge.recordada(), barId());
         const body = { transaction_id: order.transaction_id, terminal_id: terminal.id };
         // Solo se manda el monto cuando es una parte: sin él, la terminal cobra lo que falta.
         if (steps.length > 1) body.amount = Number(step.amount);
@@ -816,7 +817,7 @@
           return;
         }
         if (EV2OrderTaking.isTerminalMethod(method)) {
-          const terminal = EV2TerminalCharge.pickTerminal(state.terminals, EV2TerminalCharge.recordada());
+          const terminal = EV2TerminalCharge.pickTerminal(state.terminals, EV2TerminalCharge.recordada(), barId());
           const res = await api.post(`/nightclubs/${clubId()}/terminal-charges`, {
             transaction_id: order.transaction_id, terminal_id: terminal.id,
           });

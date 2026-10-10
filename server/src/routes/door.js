@@ -25,6 +25,8 @@ const payments = require('../services/payments');
 const cashDrawer = require('../services/cash-drawer');
 const tickets = require('../services/tickets');
 const rpService = require('../services/rp');
+const mercadopago = require('../services/mercadopago');
+const terminalCharges = require('../services/terminal-charges');
 
 const router = express.Router({ mergeParams: true });
 
@@ -33,7 +35,9 @@ router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
 const DOOR_ROLES = ['hostess', 'manager', 'admin'];
 
 /** Cómo se llama en el recibo cada forma de pago de la puerta (D96). */
-const DOOR_RECEIPT_METHOD = { cash: 'cash', card: 'card_terminal', transfer: 'bank_transfer' };
+const DOOR_RECEIPT_METHOD = {
+  cash: 'cash', card: 'card_terminal', transfer: 'bank_transfer', point: 'card_terminal',
+};
 
 // Lo que la puerta necesita ver de un pase: quién, qué mesa, cuántos.
 const PASS_SELECT = `
@@ -646,7 +650,7 @@ router.patch('/nightclubs/:nightclubId/cover-prices/:coverId',
 
 // ------------------------------------------------------------------ vender la entrada
 
-const admissionSchema = z.object({
+const admissionBase = z.object({
   client_request_id: uuid.optional(),
   kind: z.enum(['general', 'vip_extra']),
   reservation_id: uuid.optional(),
@@ -659,7 +663,10 @@ const admissionSchema = z.object({
   // marcado como `manual` para que el corte lo distinga.
   unit_price: z.number().min(0).max(100000).optional(),
   currency: z.enum(['MXN', 'USD']).default('MXN'),
-  payment_method: z.enum(['cash', 'card', 'transfer', 'courtesy']).default('cash'),
+  payment_method: z.enum(['cash', 'card', 'transfer', 'courtesy', 'point']).default('cash'),
+  // El cobro con la terminal Mercado Pago que ya se aprobó (D100). La entrada se asienta
+  // DESPUÉS de que la tarjeta pasó, y reclama ese cobro una sola vez.
+  terminal_charge_id: uuid.optional(),
   notes: z.string().trim().max(200).optional(),
   // El código del RP que trajo a esta gente (D98): el cover cuenta para su comisión.
   rp_code: z.string().trim().min(1).max(20).optional(),
@@ -673,11 +680,22 @@ const admissionSchema = z.object({
   usd_received: z.number().positive().max(100_000).optional(),
   // El tipo de cambio que vio la anfitriona: si ya no es el vigente, 409.
   exchange_rate_id: z.union([z.string().regex(/^\d+$/), z.number().int().positive()]).optional(),
-}).refine((b) => b.kind !== 'vip_extra' || b.reservation_id, {
+});
+const admissionSchema = admissionBase.refine((b) => b.kind !== 'vip_extra' || b.reservation_id, {
   message: 'Un extra VIP va contra una reservación', path: ['reservation_id'],
 }).refine((b) => (b.cash_received === undefined && b.usd_received === undefined)
   || b.payment_method === 'cash', {
   message: 'Lo recibido solo aplica al cobro en efectivo', path: ['cash_received'],
+}).refine((b) => (b.payment_method === 'point') === (b.terminal_charge_id !== undefined), {
+  message: 'El cobro con terminal lleva el id del cobro aprobado', path: ['terminal_charge_id'],
+});
+
+/** Lo que hace falta para cobrar un cover en la terminal (D100). */
+const pointChargeSchema = admissionBase.pick({
+  kind: true, reservation_id: true, quantity: true, cover_price_id: true, unit_price: true,
+  currency: true, event_id: true, rp_code: true,
+}).refine((b) => b.kind !== 'vip_extra' || b.reservation_id, {
+  message: 'Un extra VIP va contra una reservación', path: ['reservation_id'],
 });
 
 /**
@@ -820,6 +838,128 @@ async function resolvePrice(client, { nightclubId, body }) {
   };
 }
 
+// ---------------------------------------------------------- cover con la terminal (D100)
+
+/**
+ * Cobrar un cover en la terminal Mercado Pago de la puerta.
+ *
+ * Primero la tarjeta, después la entrada: aquí solo nace un renglón PENDIENTE del libro
+ * y se despierta la terminal. La entrada (y sus QR) se asienta en `door/admissions` con
+ * `payment_method: 'point'` cuando Mercado Pago ya confirmó el cobro. Así no existe una
+ * entrada para dinero que no llegó.
+ *
+ * Contesta en cuanto Mercado Pago acepta la orden, no cuando el cliente paga: la
+ * pantalla sigue el cobro por el socket, igual que la caja.
+ */
+router.post('/nightclubs/:nightclubId/door/point-charges',
+  requireRole(...DOOR_ROLES),
+  validate({ params: z.object({ nightclubId: uuid }), body: pointChargeSchema }),
+  asyncHandler(async (req, res) => {
+    mercadopago.assertUsable({ forCharge: true });
+    const { nightclubId } = req.params;
+    const b = req.body;
+
+    const client = await pool.connect();
+    let apartado;
+    try {
+      await client.query('BEGIN');
+      const precio = await resolvePrice(client, { nightclubId, body: b });
+      const total = Math.round(precio.unitPrice * b.quantity * 100) / 100;
+      if (precio.currency !== 'MXN') {
+        throw ApiError.unprocessable('La terminal cobra solo en pesos: un cover en dólares se cobra en efectivo.');
+      }
+      if (!(total > 0)) {
+        throw ApiError.unprocessable('Un cover sin costo no pasa por la terminal.');
+      }
+      const cover = await client.query(
+        `SELECT id FROM supply_locations
+          WHERE nightclub_id = $1 AND kind = 'door' AND active
+          ORDER BY sort_order, code LIMIT 1`, [nightclubId]);
+      if (!cover.rows[0]) {
+        throw ApiError.unprocessable('El club no tiene el lugar Cover (puerta) dado de alta.');
+      }
+      const terminalId = await terminalCharges.resolveTerminal(client, {
+        nightclubId, locationId: cover.rows[0].id, strict: true,
+      });
+      if (b.reservation_id) {
+        const r = await client.query(
+          'SELECT id FROM reservations WHERE id = $1 AND nightclub_id = $2',
+          [b.reservation_id, nightclubId]);
+        if (r.rowCount === 0) throw ApiError.notFound('Reservación no encontrada');
+      }
+
+      const tx = await client.query(
+        `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status,
+                                   provider, reference_type, metadata)
+         VALUES ($1,'cover','in',$2,'MXN','pending','mercadopago','door_admission',$3)
+         RETURNING id`,
+        [nightclubId, total, JSON.stringify({
+          door_point: true, sold_by: req.user.id,
+          request: {
+            kind: b.kind, quantity: b.quantity, cover_price_id: b.cover_price_id || null,
+            reservation_id: b.reservation_id || null, event_id: b.event_id || null,
+            unit_price: precio.unitPrice, price_source: precio.source,
+            rp_code: b.rp_code || null,
+          },
+        })]);
+      apartado = await terminalCharges.reserve(client, {
+        nightclubId, transactionId: tx.rows[0].id, terminalId, userId: req.user.id,
+      });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    // Fuera de la transacción: la red no puede tener bloqueado un renglón del libro.
+    let uncertain = false;
+    try {
+      await terminalCharges.push(pool, {
+        charge: { ...apartado.charge, started_by: req.user.id },
+        tx: apartado.tx, terminal: apartado.terminal, nightclubId,
+      });
+    } catch (err) {
+      const saved = await pool.query('SELECT status FROM terminal_charges WHERE id = $1',
+        [apartado.charge.id]);
+      if (saved.rows[0]?.status !== 'creating') throw err;
+      uncertain = true;
+    }
+    const { rows } = await pool.query(`${terminalCharges.CHARGE_SELECT} WHERE c.id = $1`,
+      [apartado.charge.id]);
+    res.status(uncertain ? 202 : 201)
+      .json({ charge: terminalCharges.present(rows[0]), pending_confirmation: uncertain });
+  }));
+
+/**
+ * Los cobros de cover con terminal que todavía no tienen entrada (D100).
+ *
+ * Sirve para no perder una tarjeta aprobada: si la pantalla se cerró o el wifi cayó
+ * entre "aprobado" y "asentar la entrada", el cobro aparece aquí y se reclama con
+ * `door/admissions` (`payment_method: 'point'`) sin volver a cobrar.
+ */
+router.get('/nightclubs/:nightclubId/door/point-charges/pending',
+  requireRole(...DOOR_ROLES),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `SELECT c.id::text AS id, c.status, c.amount::text AS amount, c.currency,
+              c.created_at, c.expires_at, t.label AS terminal,
+              tx.metadata->'request' AS request
+         FROM terminal_charges c
+         JOIN transactions tx ON tx.id = c.transaction_id
+         JOIN payment_terminals t ON t.id = c.terminal_id
+        WHERE c.nightclub_id = $1 AND tx.type = 'cover'
+          AND (tx.metadata->>'door_point')::boolean IS TRUE
+          AND c.status IN ('creating','waiting','action_required','processed')
+          AND c.created_at > now() - interval '12 hours'
+          AND NOT EXISTS (SELECT 1 FROM door_admissions d WHERE d.terminal_charge_id = c.id)
+        ORDER BY c.created_at DESC`,
+      [req.params.nightclubId]);
+    res.json({ charges: rows });
+  }));
+
 router.post('/nightclubs/:nightclubId/door/admissions',
   requireRole(...DOOR_ROLES),
   validate({ params: z.object({ nightclubId: uuid }), body: admissionSchema }),
@@ -849,6 +989,37 @@ router.post('/nightclubs/:nightclubId/door/admissions',
 
       const precio = await resolvePrice(client, { nightclubId, body: b });
       const total = Math.round(precio.unitPrice * b.quantity * 100) / 100;
+
+      // El cover pagado en la terminal (D100): la tarjeta ya pasó y esa tarjeta se
+      // reclama UNA vez. Se bloquea el cobro para que dos pantallas no la reclamen a la vez.
+      let cobroPoint = null;
+      if (b.payment_method === 'point') {
+        const c = await client.query(
+          `SELECT c.id::text AS id, c.status, c.amount::text AS amount, c.transaction_id::text AS transaction_id,
+                  tx.type, (tx.metadata->>'door_point')::boolean AS door_point,
+                  EXISTS (SELECT 1 FROM door_admissions d WHERE d.terminal_charge_id = c.id) AS claimed
+             FROM terminal_charges c JOIN transactions tx ON tx.id = c.transaction_id
+            WHERE c.id = $1 AND c.nightclub_id = $2
+            FOR UPDATE OF c`,
+          [b.terminal_charge_id, nightclubId]);
+        const cobro = c.rows[0];
+        if (!cobro || cobro.type !== 'cover' || !cobro.door_point) {
+          throw ApiError.notFound('Ese cobro con terminal no es de un cover');
+        }
+        if (cobro.claimed) throw ApiError.conflict('Ese cobro ya tiene su entrada');
+        if (cobro.status !== 'processed') {
+          throw ApiError.conflict(cobro.status === 'refunded'
+            ? 'Ese cobro fue devuelto: no ampara una entrada'
+            : 'La terminal todavía no aprueba la tarjeta: no se puede asentar la entrada');
+        }
+        if (Number(cobro.amount).toFixed(2) !== total.toFixed(2)) {
+          throw ApiError.conflict(
+            `La terminal cobró ${cobro.amount} y este cover vale ${total.toFixed(2)}. Avisa al gerente.`,
+            { charged: cobro.amount, expected: total.toFixed(2) });
+        }
+        cobroPoint = cobro;
+      }
+
       const pago = b.payment_method === 'cash' && total > 0
         ? await tender(client, {
           total, currency: precio.currency, cashReceived: b.cash_received,
@@ -865,8 +1036,8 @@ router.post('/nightclubs/:nightclubId/door/admissions',
 
       // Una cortesía no es dinero: se registra el acceso, pero no se inventa un
       // renglón de cobro por cero pesos en el libro.
-      let transactionId = null;
-      if (b.payment_method !== 'courtesy' && total > 0) {
+      let transactionId = cobroPoint ? cobroPoint.transaction_id : null;
+      if (!cobroPoint && b.payment_method !== 'courtesy' && total > 0) {
         const tx = await client.query(
           `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status,
                                      provider, reference_type, metadata)
@@ -895,9 +1066,9 @@ router.post('/nightclubs/:nightclubId/door/admissions',
                                       transaction_id, sold_by, notes,
                                       client_request_id, price_source, cover_price_id,
                                       cash_received, usd_received, exchange_rate, exchange_rate_id,
-                                      usd_amount, usd_change, change_given)
+                                      usd_amount, usd_change, change_given, terminal_charge_id)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::text,$15,
-                 $16,$17,$18,$19,$20,$21,$22)
+                 $16,$17,$18,$19,$20,$21,$22,$23)
          RETURNING id, kind, quantity, unit_price::text, total::text, currency,
                    payment_method, reservation_id, price_source, created_at,
                    cash_received::text, usd_received::text, exchange_rate::text,
@@ -912,7 +1083,8 @@ router.post('/nightclubs/:nightclubId/door/admissions',
           pago && pago.usd ? pago.usd.rateId : null,
           pago && pago.usd ? pago.usd.amount : null,
           pago && pago.usd ? pago.usd.change : null,
-          pago ? pago.change : null],
+          pago ? pago.change : null,
+          cobroPoint ? cobroPoint.id : null],
       );
 
       let rpOut = null;

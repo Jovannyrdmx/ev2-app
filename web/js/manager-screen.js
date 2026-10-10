@@ -1088,11 +1088,44 @@
       mode.textContent = t(MODE_KEY[term.operating_mode] || 'term.modeUnknown');
       left.append(name, mode);
 
-      const acciones = document.createElement('div');
-      acciones.className = 'flex gap-2 shrink-0';
       const nota = document.createElement('p');
       nota.className = 'text-xs text-red-300';
       nota.hidden = true;
+
+      // Dónde vive la terminal (D100): la caja de una barra o la puerta. El cobro de ese
+      // lugar sale por ella sin que nadie la escoja.
+      const sitio = document.createElement('select');
+      sitio.className = 'field text-xs mt-1';
+      sitio.setAttribute('aria-label', t('term.place'));
+      const ninguno = document.createElement('option');
+      ninguno.value = '';
+      ninguno.textContent = t('term.placeNone');
+      sitio.appendChild(ninguno);
+      for (const lugar of printPlaces()) {
+        const opt = document.createElement('option');
+        opt.value = lugar.id;
+        opt.textContent = lugar.kind === 'door' ? t('stn.door') : lugar.name;
+        sitio.appendChild(opt);
+      }
+      sitio.value = term.location_id || '';
+      sitio.onchange = async () => {
+        sitio.disabled = true;
+        nota.hidden = true;
+        try {
+          await api.patch(`/nightclubs/${clubId()}/payment-terminals/${term.id}`,
+            { location_id: sitio.value || null });
+          toast(t('term.saved'), 'ok');
+          await loadTerminals();
+        } catch (err) {
+          sitio.disabled = false;
+          sitio.value = term.location_id || '';
+          avisar(nota, EV2Format.errorMessage(err));
+        }
+      };
+      left.appendChild(sitio);
+
+      const acciones = document.createElement('div');
+      acciones.className = 'flex gap-2 shrink-0';
       // La razón por la que se dio de alta sin poder cobrar. Se queda puesta hasta que se
       // arregle: si solo saliera en un aviso de dos segundos, nadie sabría qué pasó.
       const pendiente = terminals.warnings[term.id];

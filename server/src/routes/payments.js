@@ -618,16 +618,33 @@ async function tryPdv(externalId) {
   }
 }
 
+/**
+ * El lugar al que se amarra una terminal (D100): una barra o la puerta del mismo club,
+ * activa. Un almacén no cobra.
+ */
+async function assertStation(runner, nightclubId, locationId) {
+  const { rows } = await runner.query(
+    `SELECT id FROM supply_locations
+      WHERE id = $1 AND nightclub_id = $2 AND active AND kind IN ('bar','door')`,
+    [locationId, nightclubId]);
+  if (rows.length === 0) {
+    throw ApiError.unprocessable('Ese lugar no existe o no cobra: escoge una barra o la puerta');
+  }
+}
+
 /** Las terminales que el club tiene dadas de alta. */
 router.get('/nightclubs/:nightclubId/payment-terminals',
   requireRole(...STAFF_ROLES),
   validate({ params: z.object({ nightclubId: uuid }) }),
   asyncHandler(async (req, res) => {
     const { rows } = await pool.query(
-      `SELECT id, external_id, label, operating_mode, operating_mode_at, active, sort_order
-         FROM payment_terminals
-        WHERE nightclub_id = $1 AND (${isManager(req.user)} OR active)
-        ORDER BY active DESC, sort_order, label`,
+      `SELECT t.id, t.external_id, t.label, t.operating_mode, t.operating_mode_at, t.active,
+              t.sort_order, t.location_id::text AS location_id, l.name AS location_name,
+              l.kind AS location_kind
+         FROM payment_terminals t
+         LEFT JOIN supply_locations l ON l.id = t.location_id
+        WHERE t.nightclub_id = $1 AND (${isManager(req.user)} OR t.active)
+        ORDER BY t.active DESC, t.sort_order, t.label`,
       [req.params.nightclubId]);
     res.json({ terminals: rows, provider: paymentConfig.mercadoPagoConfig() });
   }));
@@ -692,6 +709,8 @@ router.post('/nightclubs/:nightclubId/payment-terminals',
       external_id: z.string().trim().min(3).max(120),
       label: z.string().trim().min(1).max(60),
       sort_order: z.number().int().min(0).max(999).default(0),
+      // La caja o la puerta donde vive (D100).
+      location_id: uuid.nullable().optional(),
       // Pasarla a PDV en el mismo movimiento. Es lo que casi siempre se quiere: una
       // terminal recién sacada de la caja viene en STANDALONE y no obedece a nadie.
       set_pdv: z.boolean().default(true),
@@ -709,6 +728,8 @@ router.post('/nightclubs/:nightclubId/payment-terminals',
       throw ApiError.conflict('Ya hay una terminal con ese nombre o ese identificador');
     }
 
+    if (b.location_id) await assertStation(pool, req.params.nightclubId, b.location_id);
+
     let pdv = { mode: null, sandbox: mercadopago.isSandboxTerminal(b.external_id) };
     if (pdv.sandbox) pdv = { mode: 'PDV', sandbox: true };
     else if (b.set_pdv) pdv = await tryPdv(b.external_id);
@@ -717,10 +738,12 @@ router.post('/nightclubs/:nightclubId/payment-terminals',
       const { rows } = await pool.query(
         `INSERT INTO payment_terminals
            (nightclub_id, external_id, label, sort_order, operating_mode, operating_mode_at,
-            registered_by)
-         VALUES ($1,$2,$3,$4,$5::text, CASE WHEN $5::text IS NULL THEN NULL ELSE now() END, $6)
-         RETURNING id, external_id, label, operating_mode, active, sort_order`,
-        [req.params.nightclubId, b.external_id, b.label, b.sort_order, mode, req.user.id]);
+            registered_by, location_id)
+         VALUES ($1,$2,$3,$4,$5::text, CASE WHEN $5::text IS NULL THEN NULL ELSE now() END, $6, $7)
+         RETURNING id, external_id, label, operating_mode, active, sort_order,
+                   location_id::text AS location_id`,
+        [req.params.nightclubId, b.external_id, b.label, b.sort_order, mode, req.user.id,
+          b.location_id || null]);
       // `warning` es la razón por la que la terminal quedó dada de alta pero SIN poder
       // cobrar todavía. La pantalla la enseña en grande; no es un detalle.
       res.status(201).json({
@@ -730,7 +753,9 @@ router.post('/nightclubs/:nightclubId/payment-terminals',
       });
     } catch (err) {
       if (err.code === '23505') {
-        throw ApiError.conflict('Ya hay una terminal con ese nombre o ese identificador');
+        throw ApiError.conflict(String(err.constraint || '').includes('location')
+          ? 'Ese lugar ya tiene una terminal activa asignada'
+          : 'Ya hay una terminal con ese nombre o ese identificador');
       }
       throw err;
     }
@@ -745,6 +770,8 @@ router.patch('/nightclubs/:nightclubId/payment-terminals/:terminalId',
       active: z.boolean().optional(),
       sort_order: z.number().int().min(0).max(999).optional(),
       set_pdv: z.boolean().optional(),
+      // null = quitarle el lugar (D100).
+      location_id: uuid.nullable().optional(),
     }).refine((v) => Object.keys(v).length > 0, { message: 'No hay nada que cambiar' }),
   }),
   asyncHandler(async (req, res) => {
@@ -754,6 +781,8 @@ router.patch('/nightclubs/:nightclubId/payment-terminals/:terminalId',
       [terminalId, nightclubId]);
     if (found.rowCount === 0) throw ApiError.notFound('Esa terminal no existe');
 
+    if (req.body.location_id) await assertStation(pool, nightclubId, req.body.location_id);
+
     let mode = null;
     if (req.body.set_pdv) {
       // Aquí un rechazo SÍ es un error: es justo lo que el gerente pidió reintentar, y
@@ -762,18 +791,31 @@ router.patch('/nightclubs/:nightclubId/payment-terminals/:terminalId',
       if (pdv.warning) throw ApiError.unprocessable(pdv.warning);
       mode = pdv.mode;
     }
-    const { rows } = await pool.query(
-      `UPDATE payment_terminals
-          SET label = COALESCE($3::text, label),
-              active = COALESCE($4::boolean, active),
-              sort_order = COALESCE($5::int, sort_order),
-              operating_mode = COALESCE($6::text, operating_mode),
-              operating_mode_at = CASE WHEN $6::text IS NULL THEN operating_mode_at ELSE now() END,
-              updated_at = now()
-        WHERE id = $1 AND nightclub_id = $2
-        RETURNING id, external_id, label, operating_mode, active, sort_order`,
-      [terminalId, nightclubId, req.body.label ?? null, req.body.active ?? null,
-        req.body.sort_order ?? null, mode]);
+    const cambiaLugar = Object.prototype.hasOwnProperty.call(req.body, 'location_id');
+    let rows;
+    try {
+      ({ rows } = await pool.query(
+        `UPDATE payment_terminals
+            SET label = COALESCE($3::text, label),
+                active = COALESCE($4::boolean, active),
+                sort_order = COALESCE($5::int, sort_order),
+                operating_mode = COALESCE($6::text, operating_mode),
+                operating_mode_at = CASE WHEN $6::text IS NULL THEN operating_mode_at ELSE now() END,
+                location_id = CASE WHEN $7::boolean THEN $8::uuid ELSE location_id END,
+                updated_at = now()
+          WHERE id = $1 AND nightclub_id = $2
+          RETURNING id, external_id, label, operating_mode, active, sort_order,
+                    location_id::text AS location_id`,
+        [terminalId, nightclubId, req.body.label ?? null, req.body.active ?? null,
+          req.body.sort_order ?? null, mode, cambiaLugar, req.body.location_id ?? null]));
+    } catch (err) {
+      if (err.code === '23505') {
+        throw ApiError.conflict(String(err.constraint || '').includes('location')
+          ? 'Ese lugar ya tiene una terminal activa asignada'
+          : 'Ya hay una terminal con ese nombre');
+      }
+      throw err;
+    }
     res.json({ terminal: rows[0] });
   }));
 
@@ -793,7 +835,8 @@ router.post('/nightclubs/:nightclubId/terminal-charges',
     params: z.object({ nightclubId: uuid }),
     body: z.object({
       transaction_id: uuid,
-      terminal_id: uuid,
+      // Opcional (D100): la caja cobra en la terminal que el gerente le asignó.
+      terminal_id: uuid.optional(),
       // Solo una parte del cobro (D79): la caja divide el pago en dos formas.
       amount: z.number().positive().max(1_000_000).optional(),
     }),
@@ -809,13 +852,17 @@ router.post('/nightclubs/:nightclubId/terminal-charges',
     let apartado;
     try {
       await client.query('BEGIN');
-      await till.assertCanCollect(client, {
+      const caja = await till.assertCanCollect(client, {
         nightclubId, user: req.user, transactionId: req.body.transaction_id,
+      });
+      const terminalId = await terminalCharges.resolveTerminal(client, {
+        nightclubId, locationId: caja ? caja.location_id : null,
+        requested: req.body.terminal_id || null,
       });
       apartado = await terminalCharges.reserve(client, {
         nightclubId,
         transactionId: req.body.transaction_id,
-        terminalId: req.body.terminal_id,
+        terminalId,
         userId: req.user.id,
         amount: req.body.amount ?? null,
       });
