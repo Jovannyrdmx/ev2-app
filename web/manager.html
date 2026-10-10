@@ -701,6 +701,7 @@
             <button class="chip tap px-3 on" data-invf="all" data-i18n="inv.fAll">Todo</button>
             <button class="chip tap px-3" data-invf="low" data-i18n="inv.fLow">Bajo mínimo</button>
             <button class="chip tap px-3" data-invf="unconfirmed" data-i18n="inv.fUnconfirmed">Por confirmar</button>
+            <button class="chip tap px-3" data-invf="inactive" data-i18n="inv.fInactive">Inactivos</button>
           </div>
           <button id="btn-inv-add" class="ev2-button rounded-lg px-3 py-2 text-xs font-display"><i class="fa-solid fa-plus mr-1"></i><span id="btn-inv-add-label" data-i18n="sup.new">Dar de alta un insumo</span></button>
         </div>
@@ -770,6 +771,51 @@
           <p id="recipe-cost" class="text-sm text-white/70"></p>
           <button id="btn-recipe-save" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="inv.save">Guardar receta</button>
           <p id="recipe-error" class="text-sm text-red-300" hidden></p>
+        </div>
+      </div>
+
+      <!--
+        D95: editar o eliminar un insumo. Se abre con el lápiz de cada renglón en
+        Existencias. Eliminar solo borra lo que nunca se usó; lo que tiene historia se
+        desactiva, y no se desactiva mientras una receta de la carta lo use.
+      -->
+      <div id="sup-sheet" class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur flex flex-col" role="dialog" aria-modal="true" aria-labelledby="sup-edit-title" hidden>
+        <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
+          <div class="min-w-0">
+            <p id="sup-edit-title" class="font-display text-lg truncate" data-i18n="sup.editTitle">Editar insumo</p>
+            <p id="sup-edit-status" class="text-xs text-white/50 truncate">—</p>
+          </div>
+          <button id="btn-sup-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="inv.close">Cerrar</button>
+        </header>
+
+        <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3 max-w-xl w-full mx-auto">
+          <div><label class="label" for="sup-edit-name" data-i18n="sup.name">Nombre</label><input id="sup-edit-name" class="field" maxlength="120"></div>
+          <div class="grid grid-cols-6 gap-2">
+            <div class="col-span-3"><label class="label" for="sup-edit-category" data-i18n="sup.category">Categoría</label><input id="sup-edit-category" class="field" maxlength="40"></div>
+            <div class="col-span-3"><label class="label" for="sup-edit-unit" data-i18n="sup.unit">Unidad</label>
+              <select id="sup-edit-unit" class="field">
+                <option value="ml">ml</option>
+                <option value="g">g</option>
+                <option value="pza">pza</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-cols-6 gap-2">
+            <div class="col-span-3"><label class="label" for="sup-edit-size" data-i18n="sup.size">Contenido</label><input id="sup-edit-size" type="number" min="0" step="any" inputmode="decimal" class="field"></div>
+            <div class="col-span-3"><label class="label" for="sup-edit-label" data-i18n="sup.label">Presentación</label><input id="sup-edit-label" class="field" maxlength="60"></div>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="sup.editNote">La existencia y el costo no se editan aquí: se mueven con una recepción, un traspaso o un conteo. La unidad solo se puede cambiar si el insumo no tiene existencia ni movimientos.</p>
+          <p id="sup-edit-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
+        <div class="px-4 py-3 border-t border-white/10 bg-black/40">
+          <div class="max-w-xl mx-auto space-y-2">
+            <button id="btn-sup-save" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="sup.save">Guardar cambios</button>
+            <div class="grid grid-cols-2 gap-2">
+              <button id="btn-sup-toggle" class="card rounded-xl py-2 text-sm" data-i18n="sup.deactivate">Desactivar</button>
+              <button id="btn-sup-delete" class="rounded-xl py-2 text-sm border border-red-400/40 text-red-300 bg-red-500/10" data-i18n="sup.delete">Eliminar</button>
+            </div>
+          </div>
         </div>
       </div>
 

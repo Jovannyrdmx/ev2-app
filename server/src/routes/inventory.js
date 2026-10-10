@@ -312,14 +312,52 @@ router.post('/nightclubs/:nightclubId/supplies',
       );
       created = rows[0];
     } catch (err) {
-      if (err.code === '23505') throw ApiError.conflict('Ya existe un insumo con ese nombre');
-      throw err;
+      throw duplicateSupply(err) || err;
     }
     // Nace en cero a proposito: la existencia entra por una recepcion o un conteo,
     // nunca al darlo de alta. Un saldo inicial tecleado es un numero sin respaldo.
     const { rows } = await pool.query(`${SUPPLY_SELECT} WHERE s.id = $1`, [created.id]);
     res.status(201).json({ supply: rows[0] });
   }));
+
+/**
+ * Lo que ata a un insumo a la historia del club (D95). Decide dos cosas:
+ *
+ * - Si se puede BORRAR: solo un insumo que nunca se uso -- sin kardex, sin saldo, sin
+ *   receta, sin sustitucion, sin pedido de barra. Lo demas es evidencia, y la base ya
+ *   lo protege con llaves `RESTRICT`; esto existe para decir POR QUE en vez de un 500.
+ * - Si se puede DESACTIVAR: no mientras una receta de la carta activa lo use, porque
+ *   ese trago seguiria descontando un insumo que ya nadie ve ni surte.
+ */
+async function supplyUsage(runner, supplyId) {
+  const { rows } = await runner.query(
+    `SELECT
+       (SELECT count(*) FROM supply_movements m WHERE m.supply_id = $1)::int AS movements,
+       (SELECT COALESCE(sum(abs(ss.stock)), 0) FROM supply_stock ss
+         WHERE ss.supply_id = $1)::float8 AS stock,
+       (SELECT count(*) FROM drink_supplies ds WHERE ds.supply_id = $1)::int AS recipes,
+       (SELECT COALESCE(json_agg(json_build_object('id', d.id, 'name', d.name) ORDER BY d.name),
+                        '[]'::json)
+          FROM drink_supplies ds JOIN drinks d ON d.id = ds.drink_id
+         WHERE ds.supply_id = $1 AND d.active) AS active_recipes,
+       (SELECT count(*) FROM supply_substitutions x
+         WHERE x.supply_id = $1 OR x.substitute_id = $1)::int AS substitutions,
+       (SELECT count(*) FROM bar_request_lines b WHERE b.supply_id = $1)::int AS bar_requests`,
+    [supplyId]);
+  return rows[0];
+}
+
+/** Las columnas que se auditan de un insumo: lo que se edita, nunca saldo ni costo. */
+const SUPPLY_AUDIT_COLUMNS = `id, name, category, unit, package_size::float8 AS package_size,
+  package_label, size_confirmed, pos_id, active`;
+
+/** Un nombre o un codigo de POS repetido, dicho con palabras. */
+function duplicateSupply(err) {
+  if (err.code !== '23505') return null;
+  return err.constraint === 'supplies_pos_id_unique'
+    ? ApiError.conflict('Ya existe un insumo con ese codigo de POS')
+    : ApiError.conflict('Ya existe un insumo con ese nombre');
+}
 
 router.patch('/nightclubs/:nightclubId/supplies/:supplyId',
   requireRole('manager', 'admin'),
@@ -330,30 +368,138 @@ router.patch('/nightclubs/:nightclubId/supplies/:supplyId',
   }),
   asyncHandler(async (req, res) => {
     const b = req.body;
+    const { nightclubId, supplyId } = req.params;
     if (Object.keys(b).length === 0) throw ApiError.unprocessable('Nada que cambiar');
     // Cambiar el tamano de la presentacion es confirmarlo: es exactamente el dato
     // que faltaba, y pedirlo dos veces solo consigue que nadie lo confirme.
     const confirmed = b.size_confirmed ?? (b.package_size !== undefined ? true : null);
-    const { rows } = await pool.query(
-      `UPDATE supplies
-          SET name = COALESCE($3, name),
-              category = COALESCE($4, category),
-              unit = COALESCE($5, unit),
-              package_size = COALESCE($6, package_size),
-              package_label = COALESCE($7, package_label),
-              size_confirmed = COALESCE($8, size_confirmed),
-              pos_id = COALESCE($9, pos_id),
-              active = COALESCE($10, active),
-              updated_at = now()
-        WHERE id = $2 AND nightclub_id = $1
-        RETURNING id`,
-      [req.params.nightclubId, req.params.supplyId, b.name ?? null, b.category ?? null,
-        b.unit ?? null, b.package_size ?? null, b.package_label ?? null,
-        confirmed, b.pos_id ?? null, b.active ?? null],
-    );
-    if (rows.length === 0) throw ApiError.notFound('Insumo no encontrado');
-    const full = await pool.query(`${SUPPLY_SELECT} WHERE s.id = $1`, [rows[0].id]);
+
+    const id = await inTransaction(async (client) => {
+      const cur = await client.query(
+        `SELECT ${SUPPLY_AUDIT_COLUMNS} FROM supplies
+          WHERE id = $1 AND nightclub_id = $2 FOR UPDATE`,
+        [supplyId, nightclubId]);
+      if (cur.rows.length === 0) throw ApiError.notFound('Insumo no encontrado');
+      const before = cur.rows[0];
+
+      const changesUnit = b.unit !== undefined && b.unit !== before.unit;
+      const deactivates = b.active === false && before.active;
+      if (changesUnit || deactivates) {
+        const usage = await supplyUsage(client, supplyId);
+        // La existencia y el kardex estan en la unidad base. Cambiarla convierte
+        // 2,630 ml en 2,630 piezas sin que nadie haya movido nada.
+        if (changesUnit && (usage.movements > 0 || usage.stock !== 0)) {
+          throw ApiError.conflict(
+            'No se puede cambiar la unidad de un insumo que ya tiene existencia o movimientos: '
+            + 'sus cantidades se leerian en otra unidad. Da de alta un insumo nuevo con la unidad correcta.',
+            { reason: 'unit_locked', movements: usage.movements });
+        }
+        if (deactivates && usage.active_recipes.length > 0) {
+          throw ApiError.conflict(
+            `No se puede desactivar: lo usan ${usage.active_recipes.length} receta(s) de la carta. `
+            + 'Quitalo primero de esas recetas.',
+            { reason: 'in_recipes', recipes: usage.active_recipes });
+        }
+      }
+
+      // Categoria, presentacion y codigo de POS se pueden VACIAR: si llegan en el
+      // cuerpo -- aunque sea en blanco -- mandan. Con COALESCE no habia forma de
+      // borrar una categoria mal escrita.
+      let rows;
+      try {
+        ({ rows } = await client.query(
+          `UPDATE supplies
+              SET name = COALESCE($3::text, name),
+                  category = CASE WHEN $11::boolean THEN NULLIF($4::text, '') ELSE category END,
+                  unit = COALESCE($5::text, unit),
+                  package_size = COALESCE($6::numeric, package_size),
+                  package_label = CASE WHEN $12::boolean THEN NULLIF($7::text, '') ELSE package_label END,
+                  size_confirmed = COALESCE($8::boolean, size_confirmed),
+                  pos_id = CASE WHEN $13::boolean THEN NULLIF($9::text, '') ELSE pos_id END,
+                  active = COALESCE($10::boolean, active),
+                  updated_at = now()
+            WHERE id = $2 AND nightclub_id = $1
+            RETURNING ${SUPPLY_AUDIT_COLUMNS}`,
+          [nightclubId, supplyId, b.name ?? null, b.category ?? null,
+            b.unit ?? null, b.package_size ?? null, b.package_label ?? null,
+            confirmed, b.pos_id ?? null, b.active ?? null,
+            b.category !== undefined, b.package_label !== undefined, b.pos_id !== undefined]));
+      } catch (err) {
+        throw duplicateSupply(err) || err;
+      }
+
+      await client.query(
+        `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, before, after, ip)
+         VALUES ($1,$2,$3,'supply',$4,$5,$6,$7)`,
+        [nightclubId, req.user.id,
+          deactivates ? 'supply_deactivated'
+            : (b.active === true && !before.active ? 'supply_reactivated' : 'supply_updated'),
+          supplyId, JSON.stringify(before), JSON.stringify(rows[0]), req.ip || null]);
+      return rows[0].id;
+    });
+
+    const full = await pool.query(`${SUPPLY_SELECT} WHERE s.id = $1`, [id]);
     res.json({ supply: full.rows[0] });
+  }));
+
+/**
+ * Eliminar un insumo (D95). Solo se borra de verdad lo que nunca se uso: un alta con
+ * un error de dedo. Lo que ya tiene historia responde 409 con el detalle de que lo
+ * ata y si se puede desactivar en su lugar, para que la pantalla lo ofrezca.
+ */
+router.delete('/nightclubs/:nightclubId/supplies/:supplyId',
+  requireRole('manager', 'admin'),
+  validate({ params: z.object({ nightclubId: uuid, supplyId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, supplyId } = req.params;
+    await inTransaction(async (client) => {
+      const cur = await client.query(
+        `SELECT ${SUPPLY_AUDIT_COLUMNS} FROM supplies
+          WHERE id = $1 AND nightclub_id = $2 FOR UPDATE`,
+        [supplyId, nightclubId]);
+      if (cur.rows.length === 0) throw ApiError.notFound('Insumo no encontrado');
+      const before = cur.rows[0];
+
+      const usage = await supplyUsage(client, supplyId);
+      const ties = [];
+      if (usage.movements > 0) ties.push(`${usage.movements} movimiento(s) en el kardex`);
+      if (usage.recipes > 0) ties.push(`${usage.recipes} receta(s)`);
+      if (usage.substitutions > 0) ties.push(`${usage.substitutions} sustitucion(es)`);
+      if (usage.bar_requests > 0) ties.push(`${usage.bar_requests} pedido(s) de barra`);
+      if (usage.stock !== 0 && usage.movements === 0) ties.push('existencia registrada');
+      if (ties.length > 0) {
+        throw ApiError.conflict(
+          `No se puede eliminar «${before.name}»: tiene ${ties.join(', ')}. `
+          + 'Su historial es evidencia; desactivalo para que deje de aparecer.',
+          {
+            reason: 'supply_in_use',
+            movements: usage.movements,
+            recipes: usage.recipes,
+            substitutions: usage.substitutions,
+            bar_requests: usage.bar_requests,
+            active_recipes: usage.active_recipes,
+            active: before.active,
+            can_deactivate: before.active && usage.active_recipes.length === 0,
+          });
+      }
+
+      try {
+        // `supply_stock` (renglones en cero) y `supply_suppliers` se van en cascada.
+        await client.query('DELETE FROM supplies WHERE id = $1', [supplyId]);
+      } catch (err) {
+        // Algo lo ligo entre la revision y el borrado: se dice, no se tira un 500.
+        if (err.code === '23503') {
+          throw ApiError.conflict('El insumo acaba de quedar en uso; desactivalo en su lugar.',
+            { reason: 'supply_in_use', can_deactivate: before.active });
+        }
+        throw err;
+      }
+      await client.query(
+        `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, before, ip)
+         VALUES ($1,$2,'supply_deleted','supply',$3,$4,$5)`,
+        [nightclubId, req.user.id, supplyId, JSON.stringify(before), req.ip || null]);
+    });
+    res.json({ deleted: true, id: supplyId });
   }));
 
 /** El minimo es por lugar, asi que se fija por lugar. */
