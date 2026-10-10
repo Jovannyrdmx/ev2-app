@@ -24,6 +24,7 @@ const seating = require('../services/seating');
 const payments = require('../services/payments');
 const cashDrawer = require('../services/cash-drawer');
 const tickets = require('../services/tickets');
+const rpService = require('../services/rp');
 
 const router = express.Router({ mergeParams: true });
 
@@ -266,6 +267,9 @@ router.post('/nightclubs/:nightclubId/door/check-in',
     body: z.object({
       code: z.string().trim().min(4).max(200),
       id_check_id: uuid,
+      // El código del RP que invitó a esta mesa (D98). Opcional: un código malo no
+      // impide entrar, se avisa en `rp` y la puerta lo corrige.
+      rp_code: z.string().trim().min(1).max(20).optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
@@ -386,6 +390,20 @@ router.post('/nightclubs/:nightclubId/door/check-in',
           table_code: row.table_code, inside: row.already_inside + 1,
         },
       });
+      let rpOut = null;
+      if (req.body.rp_code && row.reservation_id) {
+        await client.query('SAVEPOINT rp_attach');
+        try {
+          rpOut = await rpService.attachToReservation(client, {
+            nightclubId, reservationId: row.reservation_id, code: req.body.rp_code,
+            actorId: req.user.id,
+          });
+          await client.query('RELEASE SAVEPOINT rp_attach');
+        } catch (err) {
+          await client.query('ROLLBACK TO SAVEPOINT rp_attach');
+          rpOut = { ok: false, reason: 'error' };
+        }
+      }
       await client.query('COMMIT');
 
       const fresco = await pool.query(`${GUEST_PASS_SELECT} WHERE p.id = $1`, [row.id]);
@@ -393,6 +411,8 @@ router.post('/nightclubs/:nightclubId/door/check-in',
         pass: presentGuestPass(fresco.rows[0], { status: passes.PASS_STATUS.ok, ok: true }),
         admitted: true,
         seated,
+        rp: rpOut ? { ok: rpOut.ok, reason: rpOut.ok ? null : rpOut.reason,
+          display_name: rpOut.rp ? rpOut.rp.display_name : null } : null,
       });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -641,6 +661,8 @@ const admissionSchema = z.object({
   currency: z.enum(['MXN', 'USD']).default('MXN'),
   payment_method: z.enum(['cash', 'card', 'transfer', 'courtesy']).default('cash'),
   notes: z.string().trim().max(200).optional(),
+  // El código del RP que trajo a esta gente (D98): el cover cuenta para su comisión.
+  rp_code: z.string().trim().min(1).max(20).optional(),
   event_id: uuid.optional(),
   // Los nombres de los invitados extra, en el orden en que se emiten sus pases.
   // Opcional: en la puerta a veces no hay tiempo de teclear nada.
@@ -893,6 +915,21 @@ router.post('/nightclubs/:nightclubId/door/admissions',
           pago ? pago.change : null],
       );
 
+      let rpOut = null;
+      if (b.rp_code) {
+        await client.query('SAVEPOINT rp_attach');
+        try {
+          rpOut = await rpService.attachToAdmission(client, {
+            nightclubId, admissionId: rows[0].id, eventId: b.event_id || null,
+            code: b.rp_code, actorId: req.user.id,
+          });
+          await client.query('RELEASE SAVEPOINT rp_attach');
+        } catch (err) {
+          await client.query('ROLLBACK TO SAVEPOINT rp_attach');
+          rpOut = { ok: false, reason: 'error' };
+        }
+      }
+
       // Efectivo en la puerta: el cajón de la puerta se abre solo (D96).
       let drawer = null;
       if (b.payment_method === 'cash' && total > 0) {
@@ -950,6 +987,8 @@ router.post('/nightclubs/:nightclubId/door/admissions',
         admission: rows[0],
         change_given: pago ? pago.change : null,
         drawer,
+        rp: rpOut ? { ok: rpOut.ok, reason: rpOut.ok ? null : rpOut.reason,
+          display_name: rpOut.rp ? rpOut.rp.display_name : null } : null,
         // Con el payload firmado: la pantalla de la puerta dibuja el QR y se lo
         // enseña a la persona que acaba de pagar.
         passes: emitidos.map((p) => ({ ...p, payload: passes.payload(p.code) })),

@@ -203,7 +203,7 @@ async function recordAttempt(runner, {
 
 /** Los roles que entran con PIN. El administrador, solo desde la red del club (ver rutas; D78). */
 const PIN_ROLES = ['waiter', 'bartender', 'cashier', 'dancer', 'dj', 'light_tech', 'valet',
-  'hostess', 'warehouse', 'driver', 'manager', 'admin'];
+  'hostess', 'warehouse', 'driver', 'rp', 'manager', 'admin'];
 
 /**
  * Busca al dueño del PIN y lo verifica.

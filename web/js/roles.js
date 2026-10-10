@@ -65,6 +65,10 @@
       label: { es: 'Cajero', en: 'Cashier' }, home: 'caja.html', ready: true,
       does: { es: 'La caja de su barra: abrir con fondo, cobrar lo que traen los meseros, vender en la barra y hacer el corte.', en: "Their bar's till: open with a float, collect what the waiters bring, sell at the bar and cash up." },
     },
+    rp: {
+      label: { es: 'RP', en: 'PR' }, home: 'employee-portal.html', ready: true,
+      does: { es: 'Su código de invitados, lo que consume su gente cada noche y su comisión del 10%.', en: 'Their guest code, what their guests spend each night and their 10% commission.' },
+    },
     warehouse: {
       label: { es: 'Almacén', en: 'Storeroom' }, home: 'almacen.html', ready: true,
       does: { es: 'Recibir mercancía, surtir las barras, registrar mermas y hacer el conteo.', en: 'Receive goods, restock the bars, record waste and run the counts.' },

@@ -25,7 +25,7 @@
   });
   const CLUB_SLUG = meta('ev2:club', 'ev2');
   // El portal es para el personal. El gerente cobra por nómina, no por este portal.
-  const EMPLOYEE_ROLES = ['waiter', 'bartender', 'cashier', 'dancer', 'dj', 'light_tech', 'valet', 'hostess'];
+  const EMPLOYEE_ROLES = ['waiter', 'bartender', 'cashier', 'dancer', 'dj', 'light_tech', 'valet', 'hostess', 'rp'];
   const PASSWORD_GATE_HIDES = ['screen-auth', 'screen-wrong-role', 'screen-portal'];
 
   const state = {
@@ -33,11 +33,14 @@
     employee: null, balances: [], movements: [], byType: [],
     accounts: [], withdrawals: [], openWithdrawal: null,
     songs: [], shifts: [], drinks: [], realtime: null,
+    // El RP (D98): su código y su noche.
+    rp: null, rpNights: [],
     // El lugar que le toca esta noche, puesto por el gerente (migracion 023).
     myAssignments: [],
   };
 
   const isDj = () => (api.session.user && api.session.user.role) === 'dj';
+  const isRp = () => (api.session.user && api.session.user.role) === 'rp';
   const clubId = () => api.session.user && api.session.user.nightclub_id;
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
@@ -193,6 +196,12 @@
         ? get(`/nightclubs/${clubId()}/dj/song-requests?status=requested&limit=50`,
           (d) => { state.songs = d.song_requests || []; })
         : Promise.resolve(),
+      isRp()
+        ? get(`/nightclubs/${clubId()}/rp/me`, (d) => { state.rp = d; })
+        : Promise.resolve(),
+      isRp()
+        ? get(`/nightclubs/${clubId()}/rp/me/nights`, (d) => { state.rpNights = d.nights || []; })
+        : Promise.resolve(),
       get(`/nightclubs/${clubId()}/staff/me/drinks?limit=30`,
         (d) => { state.drinks = d.staff_drinks || []; }),
       // El lugar de esta noche. Va en el mismo lote: es lo primero que la persona
@@ -206,7 +215,7 @@
 
   // ---------------------------------------------------------------- pintar
 
-  const TABS = ['money', 'songs', 'withdraw', 'account'];
+  const TABS = ['money', 'songs', 'rp', 'withdraw', 'account'];
 
   function renderAll() {
     // La pestaña de canciones solo existe para el DJ. Escondida es mejor que
@@ -214,6 +223,11 @@
     const songsTab = document.querySelector('[data-tab="songs"]');
     if (songsTab) songsTab.hidden = !isDj();
     if (state.tab === 'songs' && !isDj()) state.tab = 'money';
+    // Lo mismo con la pestaña del RP (D98): solo existe para el RP, y es lo primero que ve.
+    const rpTab = document.querySelector('[data-tab="rp"]');
+    if (rpTab) rpTab.hidden = !isRp();
+    if (state.tab === 'rp' && !isRp()) state.tab = 'money';
+    if (isRp() && !state.rpOpened) { state.rpOpened = true; state.tab = 'rp'; }
 
     for (const tab of TABS) $(`tab-${tab}`).hidden = tab !== state.tab;
     document.querySelectorAll('[data-tab]').forEach((b) => {
@@ -226,6 +240,7 @@
     renderWithdraw();
     renderAccounts();
     if (isDj()) renderSongs();
+    if (isRp()) renderRp();
   }
 
   // ---------------------------------------------------------------- turno
@@ -441,6 +456,44 @@
   document.querySelectorAll('[data-tab]').forEach((b) => {
     b.onclick = () => { state.tab = b.dataset.tab; renderAll(); };
   });
+
+  /** La pestaña del RP (D98): su código, lo de su noche y las noches anteriores. */
+  function renderRp() {
+    const d = state.rp;
+    if (!d || !d.profile) return;
+    $('rp-code').textContent = d.profile.code;
+    $('rp-pct').textContent = t('rp.pct', { pct: Number(d.profile.commission_pct).toString() });
+    const night = d.night;
+    const lines = night ? night.lines : [];
+    $('rp-empty').hidden = lines.length > 0;
+    $('rp-lines').innerHTML = lines.map((l) => {
+      const what = l.kind === 'table'
+        ? t('rp.table', { code: l.table_code || '—' })
+        : t('rp.cover', { n: l.cover_quantity || 1 });
+      const extra = l.kind === 'table' ? ` · ${t('rp.items', { n: l.items })}` : '';
+      return `<div class="flex justify-between text-sm">
+        <span class="text-white/70">${escape(what)}<span class="text-white/40">${escape(extra)}</span></span>
+        <span>${escape(money(l.base, l.currency))}</span></div>`;
+    }).join('');
+    const settled = night ? night.settlements : [];
+    $('rp-totals').innerHTML = (night ? night.totals : []).map((tot) => `
+      <div class="flex justify-between text-sm"><span class="text-white/50">${escape(t('rp.consumed'))}</span>
+        <span>${escape(money(tot.base, tot.currency))}</span></div>
+      <div class="flex justify-between font-display"><span>${escape(t('rp.commission'))}</span>
+        <span style="color:var(--ev2-gold)">${escape(money(tot.commission, tot.currency))}</span></div>`).join('');
+    $('rp-note').textContent = !night || lines.length === 0 ? ''
+      : (settled.length ? t('rp.settled') : (night.night_over ? '' : t('rp.pendingNight')));
+
+    const past = state.rpNights || [];
+    $('rp-history-empty').hidden = past.length > 0;
+    $('rp-history').innerHTML = past.map((n) => {
+      const tot = n.totals[0];
+      const done = n.settlements.length > 0;
+      return `<div class="flex justify-between text-sm">
+        <span class="text-white/70">${escape(n.event.name || '')} <span class="text-white/40">${escape(String(n.event.event_date || '').slice(0, 10))}</span></span>
+        <span>${escape(tot ? money(tot.commission, tot.currency) : '—')}${done ? ' ✓' : ''}</span></div>`;
+    }).join('');
+  }
 
   function renderBalance() {
     const b = EV2Earnings.balanceFor(state.balances, state.currency);

@@ -75,6 +75,7 @@ const ROLE_HOME = {
   dj: 'employee-portal.html',
   dancer: 'employee-portal.html',
   light_tech: 'employee-portal.html',
+  rp: 'employee-portal.html',
   manager: 'manager.html',
   admin: 'manager.html',
 };

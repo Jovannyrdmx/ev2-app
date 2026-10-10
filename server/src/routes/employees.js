@@ -20,10 +20,11 @@ const { temporaryPassword } = require('../services/credentials');
 const pins = require('../services/pins');
 const payments = require('../services/payments');
 const fingerprints = require('../services/fingerprints');
+const rpService = require('../services/rp');
 
 const router = express.Router({ mergeParams: true });
 
-const EMPLOYEE_ROLES = ['waiter', 'bartender', 'cashier', 'dancer', 'dj', 'light_tech', 'valet', 'hostess'];
+const EMPLOYEE_ROLES = ['waiter', 'bartender', 'cashier', 'dancer', 'dj', 'light_tech', 'valet', 'hostess', 'rp'];
 
 /**
  * `manager` se puede dar de alta por aquí, y desde D78 lo puede hacer un gerente o el
@@ -166,6 +167,10 @@ router.post('/nightclubs/:nightclubId/employees',
         [user.id, b.employee_code || null, b.country, b.stage_name || null,
           b.hire_date || null, b.phone || null, b.country === 'US' ? 'USD' : 'MXN']);
       await client.query('INSERT INTO user_preferences (user_id) VALUES ($1) ON CONFLICT DO NOTHING', [user.id]);
+      // El RP nace con su código personal (D98).
+      if (b.role === rpService.ROLE) {
+        await rpService.ensureProfile(client, { nightclubId, userId: user.id });
+      }
 
       // El PIN de un solo uso. Sale de aquí en claro UNA vez y no se vuelve a poder
       // leer: lo que queda guardado es el cifrado y la huella con la que se busca.
@@ -256,6 +261,9 @@ router.patch('/nightclubs/:nightclubId/employees/:userId',
 
       if (b.role) {
         await client.query('UPDATE users SET role = $2, updated_at = now() WHERE id = $1', [userId, b.role]);
+        if (b.role === rpService.ROLE) {
+          await rpService.ensureProfile(client, { nightclubId, userId });
+        }
         // Solo cuando la gerencia entra o sale. Mover a alguien de mesero a valet no
         // necesita rastro; quién nombró al gerente, sí.
         if (b.role === MANAGER_ROLE || esGerente) {
@@ -894,6 +902,9 @@ router.get('/nightclubs/:nightclubId/payroll',
       [req.params.nightclubId]);
     res.json({ rows, pending_withdrawals: pending.rows[0].n, exchange_rate: await currentRate() });
   }));
+
+// El RP (D98): su código, sus invitados de la noche y su comisión.
+router.use(require('./rp'));
 
 module.exports = router;
 module.exports.EMPLOYEE_ROLES = EMPLOYEE_ROLES;

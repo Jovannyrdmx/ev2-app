@@ -18,7 +18,7 @@ const router = express.Router({ mergeParams: true });
 // decidía sobre un número al que le faltaba eso.
 const CLUB_REVENUE_TYPES = ['drink_order', 'bottle_service', 'cover', 'reservation_deposit',
   'reservation_balance', 'valet', 'adjustment'];
-const STAFF_INCOME_TYPES = ['tip', 'song_request'];
+const STAFF_INCOME_TYPES = ['tip', 'song_request', 'rp_commission'];
 
 // Public: lets the web app resolve a slug before anyone signs in.
 router.get('/nightclubs/by-slug/:slug',

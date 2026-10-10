@@ -124,6 +124,8 @@
       <button data-tab="money" class="tab active flex-1 py-3 text-sm" data-i18n="earn.tabMoney">Saldo</button>
       <!-- Solo para el DJ: su cola de canciones es su trabajo Y su fuente de propinas. -->
       <button data-tab="songs" class="tab flex-1 py-3 text-sm" data-i18n="song.djQueue" hidden>Cola de canciones</button>
+      <!-- Solo para el RP (D98): su código, sus invitados de la noche y su comisión. -->
+      <button data-tab="rp" class="tab flex-1 py-3 text-sm" data-i18n="rp.tab" hidden>RP</button>
       <button data-tab="withdraw" class="tab flex-1 py-3 text-sm" data-i18n="earn.tabWithdraw">Retiros</button>
       <button data-tab="account" class="tab flex-1 py-3 text-sm" data-i18n="earn.tabAccount">Cuenta</button>
     </nav>
@@ -141,6 +143,27 @@
         </div>
         <p id="dj-empty" class="text-sm text-white/40 text-center py-6" data-i18n="song.djEmpty" hidden>Nadie ha pedido nada. Disfruta la calma.</p>
         <div id="dj-queue" class="space-y-2"></div>
+      </div>
+
+      <div id="tab-rp" class="space-y-4" hidden>
+        <div class="card rounded-xl p-5 text-center space-y-1">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="rp.yourCode">Tu código</p>
+          <p id="rp-code" class="font-display text-5xl tracking-[0.3em] ev2-gradient">—</p>
+          <p class="text-xs text-white/50" data-i18n="rp.codeHelp">Díselo a la puerta cuando llegue tu gente.</p>
+          <p id="rp-pct" class="text-xs text-white/40"></p>
+        </div>
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="rp.tonight">Tu noche</p>
+          <p id="rp-empty" class="text-sm text-white/40" data-i18n="rp.noNight" hidden>Todavía no hay invitados tuyos esta noche.</p>
+          <div id="rp-lines" class="space-y-2"></div>
+          <div id="rp-totals" class="space-y-1 pt-2 border-t border-white/10"></div>
+          <p id="rp-note" class="text-[11px] text-white/40"></p>
+        </div>
+        <div class="card rounded-xl p-4 space-y-2">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="rp.history">Noches anteriores</p>
+          <p id="rp-history-empty" class="text-sm text-white/40" data-i18n="rp.noHistory" hidden>Todavía no hay noches.</p>
+          <div id="rp-history" class="space-y-1"></div>
+        </div>
       </div>
 
       <div id="tab-money" class="space-y-4">

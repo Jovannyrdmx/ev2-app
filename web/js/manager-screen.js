@@ -334,6 +334,7 @@
     parking: ['tab-parking'],
     printing: ['tab-printing'],
     clock: ['tab-clock'],
+    rps: ['tab-rps'],
   };
   // Los nombres viejos siguen sirviendo (un enlace o un pendiente guardado).
   const TAB_ALIAS = { drivers: 'exit', taxi: 'exit' };
@@ -360,6 +361,7 @@
     renderInventory();
     renderPrinting();
     renderClock();
+    renderRps();
     renderSecret();
   }
 
@@ -3855,12 +3857,116 @@
     }
   };
 
+  /* ---------- RPs (D98) ---------- */
+  const rps = { list: [], event: null, summary: null };
+
+  async function loadRps() {
+    const club = clubId();
+    try {
+      const l = await api.get(`/nightclubs/${club}/rps`);
+      rps.list = l.rps || [];
+      const q = rps.event ? `?event_id=${encodeURIComponent(rps.event)}` : '';
+      rps.summary = await api.get(`/nightclubs/${club}/rp/summary${q}`);
+      if (rps.summary && rps.summary.event) rps.event = rps.summary.event.id;
+    } catch (err) {
+      if (state.tab === 'rps') showError(err);
+    }
+    renderRps();
+  }
+
+  function renderRps() {
+    if (!$('tab-rps')) return;
+    $('rpm-empty').hidden = rps.list.length > 0;
+    $('rpm-list').innerHTML = rps.list.map((r) => `
+      <div class="rounded-lg border border-white/10 p-3 flex flex-wrap items-center justify-between gap-2">
+        <div class="min-w-0">
+          <p class="font-display truncate">${escape(r.display_name)}${r.active === false ? ` · ${escape(t('rpm.inactive'))}` : ''}</p>
+          <p class="text-xs text-white/50">${escape(t('rpm.code'))}: <b>${escape(r.code || '—')}</b> · ${escape(r.commission_pct || '10')}%</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button data-rp-pct="${escape(r.user_id)}" class="ev2-button rounded-lg px-3 py-1 text-xs">${escape(t('rpm.editPct'))}</button>
+          <button data-rp-code="${escape(r.user_id)}" class="ev2-button rounded-lg px-3 py-1 text-xs">${escape(t('rpm.newCode'))}</button>
+          <button data-rp-active="${escape(r.user_id)}" class="ev2-button rounded-lg px-3 py-1 text-xs">${escape(r.active === false ? t('rpm.activate') : t('rpm.deactivate'))}</button>
+        </div>
+      </div>`).join('');
+
+    const sel = $('rpm-event');
+    const noches = EV2Manager.sortNights(state.nights, new Date());
+    sel.innerHTML = noches.map((n) => `<option value="${escape(n.id)}">${escape(n.name || '')} · ${escape(String(n.event_date || '').slice(0, 10))}</option>`).join('');
+    if (rps.event) sel.value = rps.event;
+
+    const s = rps.summary;
+    const over = !!(s && s.night_over);
+    const note = $('rpm-note');
+    note.hidden = !(s && s.event && !over);
+    note.textContent = t('rpm.notOver');
+    const filas = (s && s.rps) || [];
+    $('rpm-night-empty').hidden = filas.length > 0;
+    $('rpm-night').innerHTML = filas.map((r) => {
+      const tot = (r.totals || []).map((x) => `${money(x.base, x.currency)} → <b>${money(x.commission, x.currency)}</b>`).join(' · ');
+      const liq = (r.settled || []).length > 0;
+      const accion = liq
+        ? `<span class="text-xs text-emerald-300">${escape(t('rpm.settled'))}</span>`
+        : `<button data-rp-settle="${escape(r.rp_user_id)}" class="ev2-button rounded-lg px-3 py-1 text-xs" ${over ? '' : 'disabled'}>${escape(t('rpm.settle'))}</button>`;
+      return `<div class="rounded-lg border border-white/10 p-3 flex flex-wrap items-center justify-between gap-2">
+        <div class="min-w-0">
+          <p class="font-display truncate">${escape(r.display_name || '')} <span class="text-xs text-white/50">${escape(r.code || '')}</span></p>
+          <p class="text-xs text-white/60">${escape(t('rpm.counts', { tables: r.tables, covers: r.covers }))}</p>
+          <p class="text-sm">${tot}</p>
+        </div>${accion}</div>`;
+    }).join('');
+
+    sel.onchange = () => { rps.event = sel.value || null; loadRps(); };
+    document.querySelectorAll('[data-rp-pct]').forEach((b) => {
+      b.onclick = async () => {
+        const r = rps.list.find((x) => x.user_id === b.dataset.rpPct);
+        const v = window.prompt(t('rpm.askPct'), r ? r.commission_pct : '10');
+        if (v == null) return;
+        const pct = Number(String(v).replace(',', '.'));
+        if (!Number.isFinite(pct) || pct < 0 || pct > 100) { toast(t('rpm.badPct'), 'error'); return; }
+        await rpPatch(b.dataset.rpPct, { commission_pct: pct });
+      };
+    });
+    document.querySelectorAll('[data-rp-code]').forEach((b) => {
+      b.onclick = async () => {
+        if (!window.confirm(t('rpm.confirmCode'))) return;
+        await rpPatch(b.dataset.rpCode, { regenerate_code: true });
+      };
+    });
+    document.querySelectorAll('[data-rp-active]').forEach((b) => {
+      b.onclick = async () => {
+        const r = rps.list.find((x) => x.user_id === b.dataset.rpActive);
+        await rpPatch(b.dataset.rpActive, { active: r ? r.active === false : true });
+      };
+    });
+    document.querySelectorAll('[data-rp-settle]').forEach((b) => {
+      b.onclick = async () => {
+        if (!window.confirm(t('rpm.confirmSettle'))) return;
+        const listo = ocupado(b, 'prn.saving');
+        try {
+          await api.post(`/nightclubs/${clubId()}/rp/settle`, { rp_user_id: b.dataset.rpSettle, event_id: rps.event });
+          toast(t('rpm.settledOk'), 'ok');
+          await loadRps();
+        } catch (err) { showError(err); } finally { listo(); }
+      };
+    });
+  }
+
+  async function rpPatch(userId, body) {
+    try {
+      await api.patch(`/nightclubs/${clubId()}/rps/${userId}`, body);
+      toast(t('rpm.saved'), 'ok');
+      await loadRps();
+    } catch (err) { showError(err); }
+  }
+
   const TAB_LOADERS = {
     summary: () => Promise.all([loadTills()]),
     cash: () => Promise.all([loadShiftCuts(), loadTerminalCharges(), loadTips(), loadTills()]),
     lost: () => loadLostFound(),
     club: () => Promise.all([loadExchangeRate(), loadTerminals(), loadPrinting(), loadPushStatus()]),
     printing: () => loadPrinting(),
+    rps: () => loadRps(),
   };
 
   function goTab(tab) {

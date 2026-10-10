@@ -387,6 +387,13 @@
     }
   }
 
+  /** El código del RP (D98): cuál RP quedó ligado, o por qué no. Nunca frena la entrada. */
+  function avisarRp(rp) {
+    if (!rp) return;
+    if (rp.ok) toast(t('rp.attached', { name: rp.display_name || '' }), 'ok');
+    else toast(t(`rp.fail.${rp.reason}`), 'warn');
+  }
+
   async function leerPase(code) {
     const limpio = String(code || '').trim();
     const bloqueo = EV2DoorScan.scanBlocker({
@@ -400,11 +407,15 @@
     }
     $('btn-scan-code').disabled = true;
     try {
+      const rpCode = $('scan-rp') ? $('scan-rp').value.trim() : '';
       const data = await api.post(`/nightclubs/${clubId()}/door/check-in`, {
         code: limpio, id_check_id: idc.check.id,
+        ...(rpCode ? { rp_code: rpCode } : {}),
       });
       pintarResultado(data);
+      avisarRp(data.rp);
       $('scan-code').value = '';
+      if ($('scan-rp')) $('scan-rp').value = '';
       // La revisión se gastó con el escaneo, abriera o no: si el pase estaba mal,
       // esa identificación ya se miró y la siguiente persona necesita la suya.
       // Solo se conserva cuando lo que falló fue la propia revisión, para que el
@@ -758,8 +769,13 @@
     } : {});
     const boton = kind === 'general' ? $('btn-sell-general') : $('btn-sell-extra');
     boton.disabled = true;
+    // El cover cuenta para la comisión del RP que trajo a esta gente (D98).
+    const rpCode = kind === 'general' && $('sell-rp') ? $('sell-rp').value.trim() : '';
+    if (rpCode) body.rp_code = rpCode;
     try {
       const data = await api.post(`/nightclubs/${clubId()}/door/admissions`, body);
+      if ($('sell-rp')) $('sell-rp').value = '';
+      avisarRp(data.rp);
       const partes = [t('sell.done', { total: money(data.admission.total, data.admission.currency) })];
       if (data.change_given && Number(data.change_given) > 0) {
         partes.push(t('sell.giveChange', { amount: money(data.change_given, 'MXN') }));

@@ -251,6 +251,9 @@
                    placeholder="EV2-XXXX-XXXX" aria-label="Código del pase" disabled>
             <button type="submit" id="btn-scan-code" class="ev2-button px-5 rounded-xl font-display" data-i18n="scan.check" disabled>Entrar</button>
           </form>
+          <input id="scan-rp" class="w-full px-4 py-2 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none font-display tracking-widest uppercase text-sm"
+                 maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                 data-i18n-placeholder="rp.doorCode" placeholder="Código del RP (opcional)" aria-label="Código del RP">
           <p id="scan-blocked" class="text-[11px] text-amber-200/80" data-i18n="scan.errNoIdCheck">Primero revisa la identificación.</p>
 
           <!-- El resultado del último pase. Grande: se lee de reojo, con la fila enfrente. -->
@@ -315,6 +318,9 @@
             <input id="sell-price" type="number" min="0" step="10" class="px-3 py-2 rounded-xl bg-white/5 border border-white/10 outline-none text-center col-span-2" aria-label="Precio por persona">
           </div>
           <div id="sell-quick" class="flex flex-wrap gap-1"></div>
+          <input id="sell-rp" class="w-full px-4 py-2 rounded-xl bg-white/5 border border-white/10 outline-none font-display tracking-widest uppercase text-sm"
+                 maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                 data-i18n-placeholder="rp.doorCode" placeholder="Código del RP (opcional)" aria-label="Código del RP">
           <select id="sell-method" class="w-full px-4 py-2 rounded-xl bg-white/5 border border-white/10 outline-none"></select>
           <!-- Lo que entrega el cliente en efectivo (D96): pesos, dólares o los dos. -->
           <div id="sell-tender" class="space-y-2" hidden>

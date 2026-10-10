@@ -183,6 +183,7 @@
   const TYPE_KEY = {
     tip: 'earn.mTip',
     song_request: 'earn.mSong',
+    rp_commission: 'earn.mRp',
     taxi_ride: 'earn.mRide',
     valet: 'earn.mValet',
     withdrawal: 'earn.mWithdrawal',
