@@ -195,25 +195,51 @@ function installScript(base) {
   }
 
   New-Item -ItemType Directory -Force -Path $Destino | Out-Null
+
+  # Si ya hay un agente corriendo en esta PC (una instalacion anterior), se detiene para
+  # poner el nuevo. config.json NO se toca: ahi vive la llave de esta PC.
+  try {
+    Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+      Where-Object { $_.CommandLine -match 'print-agent\\.js' } |
+      ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  } catch { }
+
   foreach ($archivo in @('print-agent.js', 'package.json')) {
     Write-Host "  Bajando $archivo ..."
     Invoke-WebRequest -Uri "$ApiUrl/api/print-agent/files/$archivo" \`
       -OutFile (Join-Path $Destino $archivo) -UseBasicParsing
   }
 
-  # Para que arranque solo la proxima vez. El acceso directo en la carpeta de inicio
-  # lo pone una persona; esto solo deja el .bat listo (ver agent/README.md).
+  # Que arranque solo y que no se apague nunca por accidente (D99):
+  #  - el .bat vuelve a lanzar el agente si por lo que sea se cierra;
+  #  - el .vbs lo corre SIN ventana, para que nadie lo cierre creyendo que estorba;
+  #  - un acceso directo en la carpeta de Inicio lo arranca cada vez que se prende la PC.
   $bat = Join-Path $Destino 'iniciar-agente.bat'
   Set-Content -Path $bat -Encoding ASCII -Value @"
 @echo off
 cd /d $Destino
+:inicio
 node print-agent.js >> agente.log 2>&1
+timeout /t 10 /nobreak >nul
+goto inicio
 "@
+  $vbs = Join-Path $Destino 'iniciar-agente.vbs'
+  Set-Content -Path $vbs -Encoding ASCII -Value @"
+CreateObject("WScript.Shell").Run """$bat""", 0, False
+"@
+  try {
+    $ws = New-Object -ComObject WScript.Shell
+    $atajo = $ws.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Startup')) 'EV2 agente de impresion.lnk'))
+    $atajo.TargetPath = (Join-Path $env:SystemRoot 'System32\\wscript.exe')
+    $atajo.Arguments = '"' + $vbs + '"'
+    $atajo.WorkingDirectory = $Destino
+    $atajo.Save()
+  } catch {
+    Write-Host "  No se pudo crear el arranque automatico: $($_.Exception.Message)" -ForegroundColor Yellow
+  }
 
   Write-Host ""
   Write-Host "  Instalado en $Destino" -ForegroundColor Green
-  Write-Host "  Ahora te va a pedir el codigo de ocho caracteres que sale en el panel"
-  Write-Host "  del gerente, en Impresoras -> Nueva PC."
   Write-Host ""
 
   # El agente si habla con acentos, y la consola de Windows viene en una pagina de
@@ -223,7 +249,31 @@ node print-agent.js >> agente.log 2>&1
 
   $env:EV2_API_URL = $ApiUrl
   Set-Location $Destino
-  & node print-agent.js
+
+  # El codigo sale en el panel del gerente (Impresoras -> Nueva estacion de caja). Si esta
+  # PC ya estaba registrada y solo se actualiza el programa, se deja vacio: conserva su
+  # llave y sus impresoras. Con un codigo nuevo se vuelve a registrar SIN duplicar la PC.
+  $codigo = Read-Host "  Codigo de 8 caracteres del panel (vacio si esta PC ya estaba registrada)"
+  $argumentos = @('print-agent.js', '--pair-only')
+  if ($codigo) {
+    $env:EV2_PAIR_CODE = $codigo.Trim()
+    $argumentos += '--repair'
+  }
+  & node @argumentos
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "  No se pudo registrar esta PC. Revisa el codigo (dura 10 minutos) y vuelve a pegar la linea." -ForegroundColor Red
+    return
+  }
+
+  # Y se deja corriendo ya, en segundo plano: despues de esto la ventana se puede cerrar.
+  Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\\wscript.exe') -ArgumentList ('"' + $vbs + '"')
+  Start-Sleep -Seconds 6
+  Write-Host ""
+  Write-Host "  Listo. El agente ya esta corriendo en segundo plano y arrancara solo cada vez" -ForegroundColor Green
+  Write-Host "  que se prenda esta PC. Ya puedes cerrar esta ventana."
+  $log = Join-Path $Destino 'agente.log'
+  if (Test-Path $log) { Write-Host ""; Get-Content $log -Tail 3 }
 }
 `;
 }

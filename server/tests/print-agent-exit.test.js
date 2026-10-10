@@ -60,35 +60,26 @@ function correrAgente(env, msTope = 20000) {
 }
 
 describe('Cuando el agente de impresión se rinde', () => {
-  it('con un token que el servidor no reconoce: lo dice, termina, y no deja basura', async () => {
+  it('con un token que el servidor no reconoce: avisa, NO se rinde y no deja basura', async () => {
+    // Antes terminaba con código 1 y había que ir a la PC a registrarla otra vez.
+    // Ahora espera despacio: si el gerente la vuelve a prender, retoma sola.
     const { server, rutas, port } = await servidorQueContesta(401);
     let r;
     try {
       r = await correrAgente({
         EV2_API_URL: `http://127.0.0.1:${port}`,
         EV2_AGENT_TOKEN: 'ev2ag_este_token_ya_no_sirve',
-      });
+      }, 4000).catch((err) => err);
     } finally {
       await new Promise((res) => server.close(res));
     }
 
-    // 1. Dice lo que pasa, y dónde se arregla.
-    expect(r.salida).toContain('El servidor rechazó el token');
-
-    // 2. Termina él solo, con código de error. Sin código de error, un arranque
-    //    automático en Windows lo daría por bueno y nadie se enteraría.
-    expect(r.code).toBe(1);
-    expect(r.signal).toBeNull();
-
-    // 3. Y nada detrás del mensaje. Esta es la línea que documenta el defecto:
-    //    antes quedaba un aborto de Node encima de la explicación útil.
-    expect(r.errores).not.toMatch(/Assertion failed/i);
-    expect(r.errores).not.toMatch(/UV_HANDLE_CLOSING/);
-    expect(r.errores.trim()).toBe('');
-
-    // Y no insistió: un token inválido no se arregla sondeando toda la noche.
+    // Sigue vivo: el tope de tiempo lo tuvo que matar, no se fue solo.
+    expect(r).toBeInstanceOf(Error);
+    expect(r.message).toBe('el agente no terminó solo');
+    // Y sondeó una sola vez en esos segundos (espera lenta, no insiste).
     expect(rutas.filter((u) => u.startsWith('/api/print-agent/jobs'))).toHaveLength(1);
-  }, 30000);
+  }, 15000);
 
   it('no fuerza la salida encima de lo que esté cerrándose', () => {
     // Una honestidad sobre esta prueba: el aborto de Node es de Windows —el archivo

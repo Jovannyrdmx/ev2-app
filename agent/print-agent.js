@@ -44,7 +44,7 @@ const path = require('path');
 const readline = require('readline');
 const { execFile } = require('child_process');
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 
 // ---------------------------------------------------------------- configuración
 
@@ -697,10 +697,19 @@ async function tick(cfg, estado) {
     res = await callApi(cfg, 'GET', `/print-agent/jobs?limit=${cfg.batch}`);
   } catch (err) {
     if (err.status === 401) {
-      // Un token inválido no se arregla insistiendo, y insistir llena la bitácora
-      // del servidor de intentos fallidos toda la noche.
-      fatal('El servidor rechazó el token. Revisa "token" en config.json, '
-        + 'o crea otro agente desde el panel del gerente.');
+      // El servidor no reconoce a esta PC: la apagaron en el panel, o la borraron.
+      // Antes el agente se rendía aquí y ya no volvía solo: había que ir a la PC y
+      // registrarla otra vez. Ahora espera, despacio (ver `esperaSegundos`), y en cuanto
+      // el gerente la vuelve a prender en el panel o la registra de nuevo con un código,
+      // retoma solo. No insiste a ritmo normal para no llenar la bitácora del servidor.
+      if (!estado.rechazado) {
+        log('AVISO', 'el servidor no reconoce a esta PC (está apagada en el panel o fue '
+          + 'dada de baja). Sigo esperando; no hace falta cerrar nada. Para registrarla de '
+          + 'nuevo, pega la línea de instalación con un código nuevo.');
+        estado.rechazado = true;
+      }
+      estado.conectado = false;
+      return;
     }
     if (estado.conectado) {
       log('AVISO', `sin servidor (${err.message}). Se sigue intentando.`);
@@ -712,6 +721,7 @@ async function tick(cfg, estado) {
     log('INFO', `conectado como "${res.agent.name}" — ${areaLabel(res.agent)}`);
     estado.conectado = true;
   }
+  estado.rechazado = false;
   for (const job of res.jobs) {
     // En serie a propósito: dos trabajos a la vez en la misma impresora salen
     // intercalados y los dos tickets quedan inservibles.
@@ -732,13 +742,35 @@ async function tick(cfg, estado) {
   }
 }
 
+/** Cuánto esperar entre vueltas: normal, o despacio si el servidor no reconoce a la PC. */
+const esperaSegundos = (cfg, estado) => (estado.rechazado ? Math.max(cfg.pollSeconds, 30) : cfg.pollSeconds);
+
 async function main() {
+  const args = process.argv.slice(2);
+  // `--repair`: darse de alta otra vez con un código nuevo aunque ya haya token (la PC
+  // conserva su lugar y sus impresoras: el servidor la reconoce por el nombre de la
+  // máquina). `--pair-only`: darse de alta y terminar, para que el instalador lo deje
+  // corriendo en segundo plano y la ventana se pueda cerrar.
+  const repair = args.includes('--repair');
+  const pairOnly = args.includes('--pair-only');
+
   let cfg = loadConfig();
   // Sin token, lo primero es darse de alta. Un agente sin configurar ya no es un
   // error que hay que ir a resolver a un archivo: es la primera pantalla.
-  if (!cfg.token) cfg = await pair(cfg);
+  if (!cfg.token || repair) cfg = await pair(cfg);
+  if (pairOnly) {
+    log('INFO', 'configuración lista');
+    salir(0);
+    return;
+  }
   log('INFO', `EV2 print agent ${VERSION} — servidor ${cfg.apiUrl}`);
-  const estado = { conectado: false, parando: false };
+  const estado = { conectado: false, parando: false, rechazado: false };
+
+  // Nada de lo que pase en una vuelta debe matar al programa: un fallo imprevisto se
+  // anota y el ciclo sigue. Es la diferencia entre "una impresora falló" y "hay que ir a
+  // encender la PC de la barra".
+  process.on('uncaughtException', (err) => log('ERROR', `imprevisto: ${err.stack || err.message}`));
+  process.on('unhandledRejection', (err) => log('ERROR', `imprevisto: ${(err && err.stack) || err}`));
 
   const parar = () => {
     if (estado.parando) process.exit(0);
@@ -759,7 +791,7 @@ async function main() {
       log('ERROR', err.message);
     });
     // eslint-disable-next-line no-await-in-loop
-    await new Promise((r) => { setTimeout(r, cfg.pollSeconds * 1000); });
+    await new Promise((r) => { setTimeout(r, esperaSegundos(cfg, estado) * 1000); });
   }
   salir(0);
 }
