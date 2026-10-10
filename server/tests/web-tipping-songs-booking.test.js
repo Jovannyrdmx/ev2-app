@@ -332,10 +332,10 @@ describe('reservación de mesa', () => {
       .toEqual(['x']);
   });
 
-  it('sabe si esa noche ya cerró para reservar', () => {
-    // e2 abre en 14 horas: con 12 de anticipación mínima aún se puede, con 24 no.
-    expect(Book.isOpenForBooking(events[1], 12, NOW)).toBe(true);
-    expect(Book.isOpenForBooking(events[1], 24, NOW)).toBe(false);
+  it('sabe si esa noche ya cerró para reservar: solo cuando terminó', () => {
+    // e2 abre en 14 horas: está abierta. Antes se cerraba con anticipación mínima.
+    expect(Book.isOpenForBooking(events[1], NOW)).toBe(true);
+    expect(Book.isOpenForBooking(null, NOW)).toBe(false);
   });
 
   const tables = [
@@ -423,7 +423,7 @@ describe('reservación de mesa', () => {
     expect(Book.quoteLines(null)).toEqual([]);
   });
 
-  const rules = { min_party_size: 4, min_advance_hours: 12 };
+  const rules = { min_party_size: 4 };
 
   it('dice por qué no se puede reservar, y cada motivo manda a un lugar distinto', () => {
     const ok = { event: events[1], table: tables[1], guests: 10 };
@@ -433,7 +433,29 @@ describe('reservación de mesa', () => {
     expect(Book.bookingBlocker({ ...ok, guests: 0 }, rules, NOW)).toBe('book.errGuests');
     expect(Book.bookingBlocker({ ...ok, guests: 2.5 }, rules, NOW)).toBe('book.errGuests');
     expect(Book.bookingBlocker({ ...ok, guests: 2 }, rules, NOW)).toBe('book.errMinParty');
-    expect(Book.bookingBlocker(ok, { ...rules, min_advance_hours: 48 }, NOW)).toBe('book.errClosed');
+    // Solo una noche que ya TERMINÓ está cerrada; antes cerraba horas antes de abrir.
+    const acabada = { ...events[1], doors_open_at: '2020-01-01T03:00:00Z', closes_at: '2020-01-01T09:00:00Z' };
+    expect(Book.bookingBlocker({ ...ok, event: acabada }, rules, NOW)).toBe('book.errClosed');
+  });
+
+  it('se reserva con el evento en curso, hasta que la noche termina', () => {
+    const abrio = new Date(new Date(NOW).getTime() - 2 * 3600000).toISOString();
+    const cierra = new Date(new Date(NOW).getTime() + 3 * 3600000).toISOString();
+    const enCurso = { id: 'vivo', status: 'published', doors_open_at: abrio, closes_at: cierra };
+    expect(Book.isOpenForBooking(enCurso, NOW)).toBe(true);
+    expect(Book.bookableEvents([enCurso], NOW).map((e) => e.id)).toEqual(['vivo']);
+    // Sin hora de cierre, la noche dura 8 horas desde que abre.
+    const sinCierre = { id: 'x', status: 'published', doors_open_at: abrio };
+    expect(Book.isOpenForBooking(sinCierre, NOW)).toBe(true);
+    const hace9 = new Date(new Date(NOW).getTime() - 9 * 3600000).toISOString();
+    expect(Book.isOpenForBooking({ ...sinCierre, doors_open_at: hace9 }, NOW)).toBe(false);
+  });
+
+  it('el pase sigue a la vista durante la noche, no solo antes de abrir', () => {
+    const abrio = new Date(new Date(NOW).getTime() - 1 * 3600000).toISOString();
+    const termina = new Date(new Date(NOW).getTime() + 4 * 3600000).toISOString();
+    const mia = { id: 'r-vivo', status: 'confirmed', doors_open_at: abrio, ends_at: termina };
+    expect(Book.upcoming([mia], NOW).map((r) => r.id)).toEqual(['r-vivo']);
   });
 
   it('el cuerpo de la reservación NO lleva el precio: lo pone el servidor', () => {

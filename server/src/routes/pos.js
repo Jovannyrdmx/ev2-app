@@ -297,9 +297,12 @@ router.post('/pos/agent/sync', agentLimiter, agentAuth,
       throw ApiError.forbidden('La integración está desactivada por el club');
     }
     if (b.client_request_id) {
+      // Filtrado por la integración de ESTE club. Sin eso, un agente con llave válida
+      // podía confirmar la existencia de una corrida de otro club y quedarse con su id.
       const existing = await pool.query(
-        'SELECT id::text AS id FROM pos_sync_log WHERE client_request_id = $1',
-        [b.client_request_id]);
+        `SELECT id::text AS id FROM pos_sync_log
+          WHERE client_request_id = $1 AND nightclub_id = $2`,
+        [b.client_request_id, integration.nightclub_id]);
       if (existing.rowCount > 0) {
         return res.status(200).json({ run_id: existing.rows[0].id, idempotent: true });
       }

@@ -224,7 +224,7 @@ describe('Tragos al personal', () => {
     const ledger = (await pool.query('SELECT type, amount, status, payer_user_id, metadata FROM transactions')).rows;
     expect(ledger).toEqual([expect.objectContaining({ type: 'drink_order', amount: '200.00', status: 'pending', payer_user_id: guest.id })]);
     expect(ledger[0].metadata.non_refundable).toBe(true);
-    expect(Number((await pool.query('SELECT quantity FROM inventory WHERE drink_id = $1', [shot.id])).rows[0].quantity)).toBe(8);
+    expect(Number((await pool.query(`SELECT COALESCE(sum(ss.stock), 0) AS quantity FROM drink_supplies ds JOIN supply_stock ss ON ss.supply_id = ds.supply_id WHERE ds.drink_id = $1`, [shot.id])).rows[0].quantity)).toBe(8);
   });
 
   it('solo a roles con permiso (ambientadoras), y el gerente puede cambiarlo', async () => {

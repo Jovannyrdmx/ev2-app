@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Aviso de privacidad — EV2 Clandestinoz</title>
+    <meta name="theme-color" content="#0a0a14">
+    <link rel="icon" href="images/favicon-32x32.png" type="image/png" sizes="32x32">
+    <meta name="description" content="Qué datos guarda EV2 Clandestinoz, para qué, con quién se comparten y cómo borrar tu cuenta.">
+    <!--
+      Esta página es PÚBLICA y tiene que seguir siéndolo: Meta la revisa desde fuera
+      antes de dejar el acceso con Facebook abierto al público, y alguien que ya borró
+      su cuenta tiene que poder leerla sin entrar.
+
+      Los dos idiomas viven aquí completos, uno debajo del otro, en vez de armarse con
+      el catálogo de `format.js`. Un aviso de privacidad es un texto legal: se lee, se
+      cita y se archiva entero, y una clave sin traducir en la mitad de una frase no es
+      un detalle cosmético como en el resto de la aplicación.
+    -->
+    <link rel="stylesheet" href="css/ev2.css">
+</head>
+<body class="text-white page-legal">
+<main class="max-w-2xl mx-auto px-5 py-10">
+
+    <header class="flex items-start justify-between gap-4 mb-6">
+        <div>
+            <p class="font-display text-xl">EV2 Clandestinoz</p>
+            <p class="text-xs text-white/40 mt-1">
+                <span data-l="es">Versión 1.0 · 28 de septiembre de 2026</span>
+                <span data-l="en" hidden>Version 1.0 · September 28, 2026</span>
+            </p>
+        </div>
+        <div class="flex gap-1 shrink-0">
+            <button type="button" data-set-lang="es"
+                    class="lang-btn on text-xs px-3 rounded-lg text-white/60">ES</button>
+            <button type="button" data-set-lang="en"
+                    class="lang-btn text-xs px-3 rounded-lg text-white/60">EN</button>
+        </div>
+    </header>
+
+    <!-- ================================================================= -->
+    <!-- ESPAÑOL                                                            -->
+    <!-- ================================================================= -->
+    <article class="doc card rounded-xl p-5" data-l="es">
+        <h1 class="font-display text-lg mb-1">Aviso de privacidad</h1>
+        <p class="text-white/50 text-xs mb-4">
+            Quién guarda tus datos, cuáles, para qué, con quién se comparten y cómo pedir
+            que se borren.
+        </p>
+
+        <h2>Quién responde por tus datos</h2>
+        <p>
+            <strong>EV2 Clandestinoz</strong>, el club, es el responsable. El contacto para
+            cualquier asunto de este aviso es
+            <a href="mailto:info@ev2clandestinoz.com">info@ev2clandestinoz.com</a>.
+        </p>
+        <p>
+            Este servicio es <strong>solo para mayores de 18 años</strong>. Si tienes menos,
+            no crees una cuenta: no podemos darte servicio y borraremos la cuenta en cuanto
+            nos enteremos.
+        </p>
+
+        <h2>Qué guardamos</h2>
+
+        <h3>Al crear tu cuenta</h3>
+        <ul>
+            <li><strong>Nombre</strong> y apellido.</li>
+            <li><strong>Correo electrónico</strong>, que es con lo que entras.</li>
+            <li><strong>Teléfono</strong>, si decides ponerlo. Es opcional.</li>
+            <li><strong>Fecha de nacimiento</strong>, únicamente para comprobar que eres
+                mayor de edad. El club vende alcohol y de ese dato depende poder atenderte.</li>
+            <li>La <strong>versión de los términos</strong> que aceptaste y cuándo.</li>
+            <li>Tu <strong>contraseña</strong>, que no guardamos: guardamos un resultado
+                irreversible de ella (bcrypt). Nadie del club puede leerla, ni nosotros.</li>
+        </ul>
+
+        <h3>Si entras con Facebook</h3>
+        <p>
+            Facebook nos entrega tres cosas y nada más: el <strong>identificador</strong> que
+            te asigna, tu <strong>nombre</strong> y tu <strong>correo</strong>. Le pedimos
+            los permisos <code>public_profile</code> y <code>email</code>, que son el mínimo.
+            <strong>No</strong> pedimos ni recibimos tus amigos, tus fotos, tus publicaciones
+            ni tus "me gusta".
+        </p>
+        <p>
+            El <strong>token de acceso</strong> que Facebook nos da se usa una sola vez para
+            leer esos tres datos y se descarta: no hay ningún lugar en nuestra base donde se
+            guarde. No podemos volver a entrar a tu Facebook, ni publicar, ni leer nada más.
+        </p>
+        <p>
+            Facebook <strong>no</strong> nos dice tu edad de forma confiable, así que la
+            fecha de nacimiento te la pedimos aparte una sola vez al crear la cuenta.
+        </p>
+
+        <h3>Mientras usas el club</h3>
+        <ul>
+            <li><strong>Tus consumos</strong>: qué pediste, cuánto costó y cómo se pagó.</li>
+            <li><strong>Tus reservaciones</strong> y las peticiones especiales que escribas.</li>
+            <li><strong>Valet</strong>: las placas de tu coche, la descripción del vehículo y
+                el teléfono que dejes para avisarte.</li>
+            <li><strong>Taxi</strong>: el lugar donde te recogen y el destino que indicas.</li>
+            <li><strong>Objetos perdidos</strong>: las señas que escribas del objeto. Las
+                señas de un objeto encontrado nunca se le enseñan a otro cliente — es lo que
+                impide que cualquiera reclame lo que no es suyo.</li>
+            <li><strong>Mensajes entre clientes</strong> ("flirts"): el texto que envías. Esta
+                función viene <strong>apagada</strong>: nadie puede escribirte hasta que tú la
+                enciendas, y puedes bloquear a quien quieras en cualquier momento.</li>
+            <li><strong>Reportes</strong>: si alguien te reporta o tú reportas a alguien,
+                queda el motivo y lo que se escribió.</li>
+        </ul>
+
+        <h3>En la puerta</h3>
+        <p>
+            Cuando se revisa tu identificación se guarda <strong>qué tipo de documento
+            enseñaste</strong> (INE, pasaporte, licencia) y <strong>si eres mayor de edad</strong>.
+            No se guarda el número del documento, ni la fecha de nacimiento que trae, ni
+            ninguna foto de él.
+        </p>
+
+        <h3>Datos técnicos</h3>
+        <ul>
+            <li>Tu <strong>dirección IP</strong> queda en los registros del servidor y en el
+                control de intentos de acceso, para frenar a quien intente adivinar
+                contraseñas.</li>
+            <li>Un descriptor del <strong>dispositivo</strong> con el que iniciaste sesión.</li>
+        </ul>
+
+        <h2>Qué NO guardamos</h2>
+        <ul>
+            <li><strong>El número de tu tarjeta.</strong> Nunca pasa por nuestra base. Solo
+                guardamos los <strong>últimos 4 dígitos</strong>, la marca y una referencia
+                del procesador de pagos para que no tengas que teclearla otra vez.</li>
+            <li><strong>Tu ubicación.</strong> No hay GPS, ni mapas, ni seguimiento.</li>
+            <li><strong>Cookies.</strong> Esta aplicación no usa ni una.</li>
+            <li><strong>Herramientas de análisis o publicidad.</strong> No hay Google
+                Analytics, ni píxel de Meta, ni ninguna otra. Nadie nos paga por seguirte.</li>
+            <li><strong>Tus contactos, tu galería ni tu micrófono.</strong></li>
+        </ul>
+
+        <h2>Lo que se guarda en tu teléfono</h2>
+        <p>
+            No usamos cookies. Tu navegador guarda localmente (<code>localStorage</code>) lo
+            necesario para no pedirte la contraseña en cada pantalla: el testigo que mantiene
+            tu sesión y tus datos básicos de perfil. Eso vive en tu teléfono y se borra al
+            cerrar sesión o al limpiar los datos del sitio.
+        </p>
+
+        <h2>Con quién se comparten</h2>
+        <p>Con nadie que no sea necesario para darte el servicio:</p>
+        <ul>
+            <li><strong>Mercado Pago</strong>, para cobrar. Recibe el monto y la moneda de la
+                operación; los datos de tu tarjeta los maneja directamente y nunca pasan por
+                nosotros.</li>
+            <li><strong>Meta (Facebook)</strong>, solo si eliges entrar con Facebook, y solo
+                en el momento de entrar.</li>
+            <li><strong>El personal del club</strong>, en lo que su trabajo necesita: el
+                cantinero ve el pedido, el valet ve las placas, la gerencia ve la operación.</li>
+            <li><strong>Autoridades</strong>, únicamente cuando exista una orden que nos
+                obligue.</li>
+        </ul>
+        <p><strong>No vendemos tus datos. A nadie. Nunca.</strong></p>
+
+        <h2>Cuánto tiempo</h2>
+        <p>
+            Mientras tengas cuenta. Cuando la borras, tus datos personales se eliminan como
+            se explica abajo. Los <strong>montos y comprobantes de las operaciones</strong> se
+            conservan porque la contabilidad de un negocio tiene obligaciones fiscales, pero
+            quedan sin tu nombre: dejan de poder relacionarse contigo.
+        </p>
+
+        <!-- ============================================================ -->
+        <h2 id="eliminar-datos">Cómo borrar tu cuenta y tus datos</h2>
+        <p>
+            <strong>Desde la aplicación</strong>, que es lo más rápido: entra a tu cuenta, ve
+            a <strong>Perfil → Borrar mi cuenta</strong>, escribe <strong>BORRAR</strong> para
+            confirmar y listo. Es inmediato y no hay que esperar a que nadie lo autorice.
+        </p>
+        <p>
+            <strong>Si ya no puedes entrar</strong> (perdiste la contraseña, cambiaste de
+            número), escríbenos a
+            <a href="mailto:info@ev2clandestinoz.com">info@ev2clandestinoz.com</a> desde el
+            correo de tu cuenta, con el asunto <em>Borrar mi cuenta</em>. Lo hacemos dentro de
+            los <strong>30 días</strong> siguientes y te avisamos cuando esté hecho.
+        </p>
+
+        <h3>Qué se borra</h3>
+        <ul>
+            <li>Tu nombre, tu correo, tu teléfono y tu fecha de nacimiento.</li>
+            <li>Tu contraseña y todas tus sesiones abiertas.</li>
+            <li>Tu <strong>cuenta de Facebook queda desligada</strong>.</li>
+            <li>Tus métodos de pago guardados.</li>
+            <li>Tus mensajes con otros clientes y tus preferencias.</li>
+            <li>El teléfono que dejaste en el valet y el destino de tus viajes en taxi.</li>
+            <li>Las peticiones especiales de tus reservaciones.</li>
+        </ul>
+
+        <h3>Qué no se borra, y por qué</h3>
+        <ul>
+            <li><strong>Los montos de lo que consumiste.</strong> Son la contabilidad de
+                noches que ya se cerraron y declararon. Quedan <strong>sin tu nombre</strong>:
+                ya no se pueden relacionar contigo.</li>
+            <li><strong>Los reportes que otras personas levantaron en tu contra.</strong> Si
+                borrarse limpiara esos reportes, borrarse sería la manera de estrenar
+                expediente, y las personas a las que protegen quedarían sin protección.</li>
+        </ul>
+
+        <h3>Cuándo no se puede todavía</h3>
+        <p>
+            La aplicación te lo dice antes de intentarlo. Son situaciones que se resuelven en
+            minutos: que <strong>tengas un cobro sin pagar</strong>, que <strong>tengas un
+            pedido en curso</strong>, o que <strong>tu coche siga en el valet</strong> — si te
+            borraras, el sistema dejaría de saber de quién es ese auto. Las cuentas del
+            personal del club las da de baja la gerencia, por obligaciones laborales y
+            fiscales que no dependen de la persona.
+        </p>
+        <!-- ============================================================ -->
+
+        <h2>Tus derechos</h2>
+        <p>
+            Puedes pedir <strong>acceder</strong> a los datos que tenemos de ti,
+            <strong>corregirlos</strong> si están mal, <strong>cancelarlos</strong> (borrar tu
+            cuenta) y <strong>oponerte</strong> a un uso concreto. Escríbenos a
+            <a href="mailto:info@ev2clandestinoz.com">info@ev2clandestinoz.com</a> desde el
+            correo de tu cuenta; respondemos dentro de 30 días.
+        </p>
+        <p>
+            Los mensajes entre clientes y aparecer en la lista del club son
+            <strong>opcionales</strong> y vienen apagados. Puedes encenderlos y apagarlos
+            cuando quieras desde tu perfil, sin perder nada más.
+        </p>
+
+        <h2>Cómo lo cuidamos</h2>
+        <ul>
+            <li>Todo viaja <strong>cifrado</strong> (HTTPS).</li>
+            <li>Las <strong>cuentas bancarias</strong> del personal están cifradas en la base
+                de datos, con una llave que no vive en la base.</li>
+            <li>Las <strong>contraseñas y los PIN</strong> se guardan hasheados: no se pueden
+                leer, ni siquiera desde adentro.</li>
+            <li>La base de datos <strong>no está expuesta a internet</strong>.</li>
+            <li>Cada persona del personal ve únicamente lo que su trabajo necesita.</li>
+        </ul>
+        <p>
+            Ningún sistema es infalible. Si alguna vez ocurriera una filtración que te
+            afecte, te lo diremos.
+        </p>
+
+        <h2>Cambios a este aviso</h2>
+        <p>
+            Si cambia, subimos la versión y la fecha que están arriba. Si el cambio afecta
+            para qué usamos tus datos, te lo pedimos de nuevo antes de aplicarlo.
+        </p>
+
+        <p class="text-white/40 text-xs mt-8">
+            <a href="terminos.html">Términos del servicio</a> ·
+            <a href="index.html">Volver a la aplicación</a>
+        </p>
+    </article>
+
+    <!-- ================================================================= -->
+    <!-- ENGLISH                                                            -->
+    <!-- ================================================================= -->
+    <article class="doc card rounded-xl p-5" data-l="en" hidden>
+        <h1 class="font-display text-lg mb-1">Privacy notice</h1>
+        <p class="text-white/50 text-xs mb-4">
+            Who holds your data, what we keep, what for, who it is shared with, and how to
+            have it deleted.
+        </p>
+
+        <h2>Who is responsible</h2>
+        <p>
+            <strong>EV2 Clandestinoz</strong>, the club, is the data controller. For anything
+            in this notice, write to
+            <a href="mailto:info@ev2clandestinoz.com">info@ev2clandestinoz.com</a>.
+        </p>
+        <p>
+            This service is for <strong>adults 18 and over</strong>. If you are younger, do
+            not create an account: we cannot serve you, and we will delete the account as
+            soon as we find out.
+        </p>
+
+        <h2>What we keep</h2>
+
+        <h3>When you create your account</h3>
+        <ul>
+            <li>Your <strong>name</strong> and last name.</li>
+            <li>Your <strong>email address</strong>, which is how you sign in.</li>
+            <li>Your <strong>phone number</strong>, if you choose to give one. It is optional.</li>
+            <li>Your <strong>date of birth</strong>, only to confirm you are of legal age. The
+                club serves alcohol and that is what lets us serve you at all.</li>
+            <li>The <strong>version of the terms</strong> you accepted, and when.</li>
+            <li>Your <strong>password</strong> — which we do not keep. We keep an irreversible
+                result of it (bcrypt). Nobody at the club can read it, and neither can we.</li>
+        </ul>
+
+        <h3>If you sign in with Facebook</h3>
+        <p>
+            Facebook gives us three things and nothing else: the <strong>identifier</strong> it
+            assigns you, your <strong>name</strong> and your <strong>email</strong>. We request
+            the <code>public_profile</code> and <code>email</code> permissions, which are the
+            minimum. We do <strong>not</strong> request or receive your friends, photos, posts
+            or likes.
+        </p>
+        <p>
+            The <strong>access token</strong> Facebook hands us is used once to read those
+            three fields and then discarded: there is no column in our database that stores
+            it. We cannot get back into your Facebook, post anything, or read anything else.
+        </p>
+        <p>
+            Facebook does <strong>not</strong> give us a reliable date of birth, so we ask you
+            for it separately, once, when the account is created.
+        </p>
+
+        <h3>While you use the club</h3>
+        <ul>
+            <li><strong>What you order</strong>: the items, the amount, and how it was paid.</li>
+            <li><strong>Your reservations</strong> and any special requests you write.</li>
+            <li><strong>Valet</strong>: your licence plate, the vehicle description, and the
+                phone number you leave so we can reach you.</li>
+            <li><strong>Taxi</strong>: the pickup point and the destination you give.</li>
+            <li><strong>Lost and found</strong>: the description you write of the item. The
+                description of a found item is never shown to another customer — that is what
+                stops anyone from claiming something that is not theirs.</li>
+            <li><strong>Messages between customers</strong> ("flirts"): the text you send. This
+                feature is <strong>off by default</strong>: nobody can write to you until you
+                turn it on, and you can block anyone at any time.</li>
+            <li><strong>Reports</strong>: if someone reports you, or you report someone, the
+                reason and what was written are kept.</li>
+        </ul>
+
+        <h3>At the door</h3>
+        <p>
+            When your ID is checked we record <strong>what kind of document you showed</strong>
+            (national ID, passport, licence) and <strong>whether you are of legal age</strong>.
+            We do not record the document number, the date of birth printed on it, or any
+            photograph of it.
+        </p>
+
+        <h3>Technical data</h3>
+        <ul>
+            <li>Your <strong>IP address</strong> appears in the server logs and in the sign-in
+                attempt records, to stop anyone trying to guess passwords.</li>
+            <li>A descriptor of the <strong>device</strong> you signed in from.</li>
+        </ul>
+
+        <h2>What we do NOT keep</h2>
+        <ul>
+            <li><strong>Your card number.</strong> It never reaches our database. We keep only
+                the <strong>last 4 digits</strong>, the brand, and a reference from the payment
+                processor so you do not have to type it again.</li>
+            <li><strong>Your location.</strong> There is no GPS, no maps, no tracking.</li>
+            <li><strong>Cookies.</strong> This application does not use a single one.</li>
+            <li><strong>Analytics or advertising tools.</strong> No Google Analytics, no Meta
+                pixel, nothing of the sort. Nobody pays us to follow you around.</li>
+            <li><strong>Your contacts, your photo library or your microphone.</strong></li>
+        </ul>
+
+        <h2>What is stored on your phone</h2>
+        <p>
+            We use no cookies. Your browser stores locally (<code>localStorage</code>) what is
+            needed so you are not asked for your password on every screen: the token that
+            keeps your session and your basic profile fields. That lives on your phone and is
+            cleared when you sign out or clear the site's data.
+        </p>
+
+        <h2>Who it is shared with</h2>
+        <p>Nobody beyond what is needed to give you the service:</p>
+        <ul>
+            <li><strong>Mercado Pago</strong>, to take payment. It receives the amount and
+                currency; your card details are handled by them directly and never pass
+                through us.</li>
+            <li><strong>Meta (Facebook)</strong>, only if you choose to sign in with Facebook,
+                and only at the moment of signing in.</li>
+            <li><strong>The club's staff</strong>, limited to what their job needs: the
+                bartender sees the order, the valet sees the plate, management sees the
+                operation.</li>
+            <li><strong>Authorities</strong>, only where a binding order requires it.</li>
+        </ul>
+        <p><strong>We do not sell your data. To anyone. Ever.</strong></p>
+
+        <h2>For how long</h2>
+        <p>
+            For as long as you have an account. When you delete it, your personal data is
+            removed as described below. The <strong>amounts and records of transactions</strong>
+            are kept because a business's accounts carry tax obligations, but they are left
+            <strong>without your name</strong>: they can no longer be traced back to you.
+        </p>
+
+        <!-- ============================================================ -->
+        <h2 id="delete-data">How to delete your account and your data</h2>
+        <p>
+            <strong>From the app</strong>, which is fastest: sign in, go to
+            <strong>Profile → Delete my account</strong>, type <strong>BORRAR</strong> to
+            confirm, and it is done. It is immediate; nobody has to approve it.
+        </p>
+        <p>
+            <strong>If you can no longer sign in</strong> (lost password, changed number),
+            write to <a href="mailto:info@ev2clandestinoz.com">info@ev2clandestinoz.com</a>
+            from your account's email address, with the subject <em>Delete my account</em>. We
+            do it within <strong>30 days</strong> and confirm when it is done.
+        </p>
+
+        <h3>What is deleted</h3>
+        <ul>
+            <li>Your name, email, phone number and date of birth.</li>
+            <li>Your password and every open session.</li>
+            <li>Your <strong>Facebook account is unlinked</strong>.</li>
+            <li>Your saved payment methods.</li>
+            <li>Your messages with other customers, and your preferences.</li>
+            <li>The phone number you left with the valet and the destinations of your taxi
+                rides.</li>
+            <li>The special requests on your reservations.</li>
+        </ul>
+
+        <h3>What is not deleted, and why</h3>
+        <ul>
+            <li><strong>The amounts of what you consumed.</strong> They are the accounts of
+                nights already closed and filed. They are left <strong>without your name</strong>
+                and can no longer be traced to you.</li>
+            <li><strong>Reports other people filed about you.</strong> If deleting your account
+                wiped those, deleting would be the way to start with a clean record, and the
+                people they protect would be left unprotected.</li>
+        </ul>
+
+        <h3>When it cannot be done yet</h3>
+        <p>
+            The app tells you before you try. These clear up in minutes: an
+            <strong>unpaid charge</strong>, an <strong>order in progress</strong>, or
+            <strong>your car still with the valet</strong> — if you were deleted, the system
+            would no longer know whose car it is. Staff accounts are closed by management,
+            because of employment and tax obligations that are not the individual's to waive.
+        </p>
+        <!-- ============================================================ -->
+
+        <h2>Your rights</h2>
+        <p>
+            You may ask to <strong>access</strong> the data we hold about you,
+            <strong>correct</strong> it if it is wrong, <strong>delete</strong> it (delete your
+            account), and <strong>object</strong> to a specific use. Write to
+            <a href="mailto:info@ev2clandestinoz.com">info@ev2clandestinoz.com</a> from your
+            account's email address; we answer within 30 days.
+        </p>
+        <p>
+            Messages between customers and appearing in the club's list are
+            <strong>optional</strong> and off by default. You can turn them on and off from
+            your profile at any time, losing nothing else.
+        </p>
+
+        <h2>How we look after it</h2>
+        <ul>
+            <li>Everything travels <strong>encrypted</strong> (HTTPS).</li>
+            <li>Staff <strong>bank accounts</strong> are encrypted in the database, with a key
+                that does not live in the database.</li>
+            <li><strong>Passwords and PINs</strong> are stored hashed: they cannot be read,
+                not even from the inside.</li>
+            <li>The database is <strong>not exposed to the internet</strong>.</li>
+            <li>Each staff member sees only what their job requires.</li>
+        </ul>
+        <p>
+            No system is infallible. If a breach ever affected you, we would tell you.
+        </p>
+
+        <h2>Changes to this notice</h2>
+        <p>
+            If it changes, we raise the version and the date shown above. If the change affects
+            what we use your data for, we ask you again before it takes effect.
+        </p>
+
+        <p class="text-white/40 text-xs mt-8">
+            <a href="terminos.html">Terms of service</a> ·
+            <a href="index.html">Back to the app</a>
+        </p>
+    </article>
+</main>
+
+<script>
+/**
+ * El cambio de idioma.
+ *
+ * Sin dependencias a propósito: esta página tiene que abrir aunque el resto de la
+ * aplicación no cargue, y la lee gente que ya no tiene cuenta.
+ *
+ * El idioma se toma del navegador la primera vez. Si alguien llega con un ancla
+ * (#eliminar-datos o #delete-data), esa ancla manda: quien sigue el enlace de
+ * eliminación de datos que está dado de alta en el panel de Meta viene por una sección
+ * concreta y en un idioma concreto.
+ */
+(function () {
+    'use strict';
+    var ancla = (location.hash || '').replace('#', '');
+    var idioma = ancla === 'delete-data' ? 'en'
+        : ancla === 'eliminar-datos' ? 'es'
+        : (navigator.language || 'es').toLowerCase().indexOf('en') === 0 ? 'en' : 'es';
+
+    function poner(lang) {
+        document.documentElement.lang = lang;
+        var nodos = document.querySelectorAll('[data-l]');
+        for (var i = 0; i < nodos.length; i++) {
+            nodos[i].hidden = nodos[i].getAttribute('data-l') !== lang;
+        }
+        var botones = document.querySelectorAll('[data-set-lang]');
+        for (var j = 0; j < botones.length; j++) {
+            botones[j].classList.toggle('on', botones[j].getAttribute('data-set-lang') === lang);
+        }
+    }
+
+    var botones = document.querySelectorAll('[data-set-lang]');
+    for (var k = 0; k < botones.length; k++) {
+        botones[k].addEventListener('click', function () {
+            poner(this.getAttribute('data-set-lang'));
+        });
+    }
+
+    poner(idioma);
+    // El ancla se resuelve después de decidir el idioma: antes, la sección todavía
+    // estaba oculta y el navegador no tenía a dónde bajar.
+    if (ancla && document.getElementById(ancla)) {
+        document.getElementById(ancla).scrollIntoView();
+    }
+}());
+</script>
+</body>
+</html>

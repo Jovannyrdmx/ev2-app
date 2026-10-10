@@ -1,0 +1,9 @@
+{
+  "apiUrl": "https://TU-DOMINIO.com",
+  "token": "ev2ag_pegar-aqui-el-token-que-dio-el-panel",
+  "pollSeconds": 3,
+  "batch": 5,
+  "printTimeoutMs": 15000,
+  "checkPaper": true,
+  "paperCheckMs": 500
+}

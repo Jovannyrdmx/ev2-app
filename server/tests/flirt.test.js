@@ -248,7 +248,7 @@ describe('Invitar trago o botella', () => {
     });
     expect(ledger.rows[0].metadata.non_refundable).toBe(true);
 
-    const stock = await pool.query('SELECT quantity FROM inventory WHERE drink_id = $1', [cerveza.id]);
+    const stock = await pool.query(`SELECT COALESCE(sum(ss.stock), 0) AS quantity FROM drink_supplies ds JOIN supply_stock ss ON ss.supply_id = ds.supply_id WHERE ds.drink_id = $1`, [cerveza.id]);
     expect(Number(stock.rows[0].quantity)).toBe(8);
   });
 
@@ -285,7 +285,7 @@ describe('Invitar trago o botella', () => {
     const ledger = await pool.query(
       `SELECT status FROM transactions WHERE reference_type = 'drink_order'`);
     expect(ledger.rows).toEqual([{ status: 'paid' }]); // ni cancelado ni reembolsado
-    const stock = await pool.query('SELECT quantity FROM inventory WHERE drink_id = $1', [cerveza.id]);
+    const stock = await pool.query(`SELECT COALESCE(sum(ss.stock), 0) AS quantity FROM drink_supplies ds JOIN supply_stock ss ON ss.supply_id = ds.supply_id WHERE ds.drink_id = $1`, [cerveza.id]);
     expect(Number(stock.rows[0].quantity)).toBe(9); // el trago sigue preparándose
 
     const ev = await pool.query(`SELECT payload FROM events WHERE type = 'order_returned'`);

@@ -19,6 +19,7 @@ const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, currency, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const events = require('../services/events');
+const shiftCuts = require('../services/shift-closings');
 const { createOrder } = require('../services/orders');
 
 const router = express.Router({ mergeParams: true });
@@ -148,9 +149,32 @@ router.post('/nightclubs/:nightclubId/staff/shifts/end',
   requireRole(...STAFF_ROLES),
   validate({ params: z.object({ nightclubId: uuid }) }),
   asyncHandler(async (req, res) => {
+    const abierto = await pool.query(
+      `SELECT id, user_id, section, started_at, ended_at FROM staff_shifts
+        WHERE user_id = $1 AND nightclub_id = $2 AND ended_at IS NULL`,
+      [req.user.id, req.params.nightclubId]);
+    if (abierto.rowCount === 0) throw ApiError.conflict('No tienes un turno abierto');
+
+    // Quien cobró dinero no cierra su turno sin corte (D51, D54). Irse con el efectivo
+    // del club en la bolsa y el turno cerrado es exactamente lo que el corte existe
+    // para impedir. Desde D54 el corte se hace en un acto —el gerente cuenta y teclea
+    // su código ahí mismo— y al cerrarlo el turno queda cerrado solo, así que quien
+    // llega aquí con dinero cobrado es alguien que todavía no lo ha hecho.
+    const resumen = await shiftCuts.shiftSummary(pool, {
+      nightclubId: req.params.nightclubId, shift: abierto.rows[0],
+    });
+    if (Number(resumen.cash_to_hand) > 0 || Number(resumen.totals.total_collected) > 0) {
+      if (!resumen.closing) {
+        throw ApiError.unprocessable(
+          `Cobraste ${resumen.totals.total_collected} en este turno: haz tu corte antes de `
+          + 'cerrarlo. Al cerrarlo, el turno se cierra solo.',
+          { cash_to_hand: resumen.cash_to_hand, total_collected: resumen.totals.total_collected });
+      }
+    }
+
     const { rows } = await pool.query(
-      `UPDATE staff_shifts SET ended_at = now() WHERE user_id = $1 AND ended_at IS NULL
-       RETURNING id, section, started_at, ended_at`, [req.user.id]);
+      `UPDATE staff_shifts SET ended_at = now() WHERE id = $1 AND ended_at IS NULL
+       RETURNING id, section, started_at, ended_at`, [abierto.rows[0].id]);
     if (rows.length === 0) throw ApiError.conflict('No tienes un turno abierto');
     res.json({ shift: rows[0] });
   }));
@@ -275,10 +299,15 @@ router.post('/nightclubs/:nightclubId/tips',
     const b = req.body;
     if (b.to_user_id === req.user.id) throw ApiError.unprocessable('No puedes darte propina a ti mismo');
 
-    const dup = await pool.query(`${TIP_SELECT} WHERE t.client_request_id = $1`, [b.client_request_id]);
+    // Dos arreglos en tres líneas. El filtro por club, y `tipForRecipient`: este camino
+    // devolvía la fila CRUDA, así que el reintento de una propina anónima destapaba
+    // quién la mandó — justo lo que esa función existe para tapar.
+    const dup = await pool.query(
+      `${TIP_SELECT} WHERE t.client_request_id = $1 AND t.nightclub_id = $2`,
+      [b.client_request_id, nightclubId]);
     if (dup.rowCount > 0) {
       res.set('Idempotent-Replay', 'true');
-      return res.status(200).json({ tip: dup.rows[0] });
+      return res.status(200).json({ tip: tipForRecipient(dup.rows[0]) });
     }
 
     const staff = await tippableStaff(nightclubId, b.to_user_id);
@@ -482,7 +511,9 @@ router.post('/nightclubs/:nightclubId/staff/:userId/drinks',
     const { nightclubId, userId } = req.params;
     const b = req.body;
 
-    const dup = await pool.query(`${STAFF_DRINK_SELECT} WHERE sd.client_request_id = $1`, [b.client_request_id]);
+    const dup = await pool.query(
+      `${STAFF_DRINK_SELECT} WHERE sd.client_request_id = $1 AND sd.nightclub_id = $2`,
+      [b.client_request_id, nightclubId]);
     if (dup.rowCount > 0) {
       res.set('Idempotent-Replay', 'true');
       return res.status(200).json({ staff_drink: dup.rows[0] });
@@ -675,8 +706,10 @@ router.post('/nightclubs/:nightclubId/song-requests',
     const b = req.body;
 
     const dup = await pool.query(
-      `${SONG_SELECT} WHERE s.id = (SELECT song_request_id FROM song_request_votes WHERE client_request_id = $1)`,
-      [b.client_request_id]);
+      `${SONG_SELECT} WHERE s.nightclub_id = $2
+          AND s.id = (SELECT song_request_id FROM song_request_votes
+                       WHERE client_request_id = $1)`,
+      [b.client_request_id, nightclubId]);
     if (dup.rowCount > 0) {
       res.set('Idempotent-Replay', 'true');
       return res.status(200).json({ song_request: dup.rows[0], merged: null });

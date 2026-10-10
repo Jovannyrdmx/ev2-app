@@ -22,8 +22,11 @@ const { ApiError } = require('../middleware/errors');
  */
 async function getEventPricing({ nightclubId, eventId, runner = pool }) {
   const event = await runner.query(
+    // `deposit_pct` va aquí a proposito: sin el, el `event` que sale de esta
+    // funcion no lo trae y la sobrescritura de la noche se ignora EN SILENCIO --
+    // la cotizacion cobraria el anticipo del club y nadie se enteraria.
     `SELECT id, name, event_date, doors_open_at, closes_at, ticket_price, currency,
-            arrival_deadline_minutes, status
+            arrival_deadline_minutes, status, deposit_pct
        FROM events_calendar WHERE id = $1 AND nightclub_id = $2`,
     [eventId, nightclubId],
   );
@@ -120,8 +123,65 @@ function arrivalDeadline(event) {
   return new Date(new Date(event.doors_open_at).getTime() + minutes * 60_000);
 }
 
+/** Cuándo termina la noche: el cierre publicado, o 8 horas después de abrir. */
+function nightEnd(event) {
+  return event.closes_at
+    ? new Date(event.closes_at)
+    : new Date(new Date(event.doors_open_at).getTime() + 8 * 3_600_000);
+}
+
+/** Si la noche ya terminó. Es lo ÚNICO que cierra las reservaciones de esa noche. */
+const nightIsOver = (event, now = new Date()) => now >= nightEnd(event);
+
+/**
+ * La hora límite para llegar de UNA reservación, según cuándo se hizo.
+ *
+ * Hasta el 2026-09-21 las reservaciones cerraban dos horas antes de abrir, así que la
+ * hora límite de la noche (abrir + `arrival_deadline_minutes`) servía para todas. Ahora
+ * se puede reservar con el evento en curso, y con esa hora fija quien reserva a la una
+ * de la mañana nacía YA vencido: el siguiente repaso de "no llegó" lo marcaba `no_show`
+ * y se quedaba con su anticipo. Por eso cada quien tiene, al menos, el mismo tiempo para
+ * llegar que la noche le da a todos, contado desde que reservó — nunca más allá del
+ * cierre.
+ */
+function bookingArrivalDeadline(event, now = new Date()) {
+  const minutes = Number(event.arrival_deadline_minutes || 180);
+  const deLaNoche = arrivalDeadline(event);
+  const desdeAhora = new Date(Math.min(now.getTime() + minutes * 60_000, nightEnd(event).getTime()));
+  return desdeAhora > deLaNoche ? desdeAhora : deLaNoche;
+}
+
 function round(n) {
   return Number(Number(n).toFixed(2));
 }
 
-module.exports = { getEventPricing, zoneFor, quote, arrivalDeadline, round };
+/**
+ * El anticipo que le toca a una noche, en por ciento.
+ *
+ * La noche manda sobre la regla del club: un 31 de diciembre puede pedir el 100%
+ * y un martes de temporada baja el 10%, sin mover la lista vigente ni tener que
+ * acordarse de volverla a poner (migración 020).
+ *
+ * `null` en el evento significa "usa la regla del club", NO "cero por ciento".
+ * Distinguir esas dos cosas es todo el punto de la columna: confundirlas
+ * regala mesas, porque una noche sin nada especial pasaría a apartarse gratis.
+ * De ahí el `== null` en vez de un `||`: con `||`, un 0 legítimamente capturado
+ * por el gerente —"esta noche se aparta sin anticipo"— se caería a la regla del
+ * club y cobraría el 30%.
+ */
+function depositPctFor(event, rules) {
+  const delEvento = event && event.deposit_pct;
+  if (delEvento != null && delEvento !== '') return Number(delEvento);
+  const delClub = rules && rules.deposit_pct;
+  return delClub == null ? 0 : Number(delClub);
+}
+
+/** El monto del anticipo de un total, con el porcentaje que le toca a esa noche. */
+function depositFor(total, event, rules) {
+  return round(Number(total) * depositPctFor(event, rules) / 100);
+}
+
+module.exports = {
+  getEventPricing, zoneFor, quote, arrivalDeadline, round, depositPctFor, depositFor,
+  nightEnd, nightIsOver, bookingArrivalDeadline,
+};

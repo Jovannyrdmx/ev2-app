@@ -208,9 +208,20 @@
   function createSecretBox() {
     let current = null;
     return {
-      hold(who, password) {
-        if (!password) return null;
-        current = { who, password, at: Date.now() };
+      /**
+       * Lo que el servidor manda UNA vez y ya no se puede volver a pedir.
+       *
+       * Acepta un texto suelto (la contraseña temporal de siempre) o `{ password, pin }`,
+       * porque desde D46 un gerente nuevo recibe las dos cosas a la vez: el PIN para
+       * entrar dentro del club y la contraseña para entrar desde fuera. Enseñar solo una
+       * dejaría la otra perdida para siempre.
+       */
+      hold(who, secrets) {
+        const s = typeof secrets === 'string' ? { password: secrets } : (secrets || {});
+        const password = s.password || null;
+        const pin = s.pin || null;
+        if (!password && !pin) return null;
+        current = { who, password, pin, at: Date.now() };
         return current;
       },
       peek: () => current,
@@ -300,6 +311,15 @@
     const price = Number(f.ticket_price);
     if (!Number.isFinite(price) || price < 0) errors.ticket_price = 'night.errPrice';
 
+    // El anticipo de la noche es OPCIONAL: vacio significa "el del club". Solo se
+    // valida cuando el gerente escribio algo, y ahi si tiene que ser un porcentaje
+    // de verdad -- un 150% capturado de prisa se le cobraria a cada mesa.
+    const dep = f.deposit_pct;
+    if (dep !== undefined && dep !== null && String(dep).trim() !== '') {
+      const pct = Number(dep);
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) errors.deposit_pct = 'night.errDeposit';
+    }
+
     return errors;
   }
 
@@ -321,6 +341,13 @@
     }
     const description = String(form.description || '').trim();
     if (description) body.description = description.slice(0, 2000);
+    // El anticipo de la noche solo se manda si el gerente escribio algo. Vacio
+    // quiere decir "usa el del club", y mandar un 0 en su lugar convertiria cada
+    // noche normal en una noche que se aparta gratis.
+    const dep = form.deposit_pct;
+    if (dep !== undefined && dep !== null && String(dep).trim() !== '') {
+      body.deposit_pct = Number(dep);
+    }
     return body;
   }
 
@@ -435,8 +462,123 @@
    */
   const affectsModeration = (message) => (message && (message.event_type || message.type)) === 'user_reported';
 
+
+  // ---------------------------------------------------------------- recetas y costos
+
+  /**
+   * El margen de un producto: lo que queda despues de pagar lo que lleva dentro.
+   *
+   * Es el numero que el dueno mira para decidir precios, y el que nadie podia ver:
+   * el costo del trago vivia en la cabeza de quien arma la receta. Se calcula en
+   * centavos enteros porque un margen con dos decimales mal redondeados, multiplicado
+   * por mil tragos en una noche, es una decision tomada sobre un numero falso.
+   *
+   * `cost` es cero cuando todavia no se ha recibido mercancia (no hay costo promedio):
+   * en ese caso el margen no se inventa, se reporta `null`.
+   */
+  function recipeMargin(recipe) {
+    const price = Math.round(Number((recipe && recipe.price) || 0) * 100);
+    const cost = Math.round(Number((recipe && recipe.cost) || 0) * 100);
+    if (!(price > 0)) return { price: 0, cost: cost / 100, profit: null, pct: null };
+    if (!(cost > 0)) return { price: price / 100, cost: 0, profit: null, pct: null };
+    const profit = price - cost;
+    return {
+      price: price / 100,
+      cost: cost / 100,
+      profit: profit / 100,
+      pct: Math.round((profit / price) * 1000) / 10,
+    };
+  }
+
+  /**
+   * Las recetas ordenadas como las necesita el gerente: primero lo que NO tiene receta
+   * (no tiene control de existencia), y despues lo de menor margen, que es donde se
+   * esta perdiendo dinero sin que nadie lo vea.
+   */
+  function sortRecipes(recipes, { search = '' } = {}) {
+    const needle = String(search || '').trim().toLowerCase();
+    return (recipes || [])
+      .filter((r) => !needle || String(r.name || '').toLowerCase().includes(needle))
+      .map((r) => Object.assign({}, r, { margin: recipeMargin(r) }))
+      .sort((a, b) => {
+        const sinA = (a.items || []).length === 0 ? 0 : 1;
+        const sinB = (b.items || []).length === 0 ? 0 : 1;
+        if (sinA !== sinB) return sinA - sinB;
+        const pa = a.margin.pct === null ? Infinity : a.margin.pct;
+        const pb = b.margin.pct === null ? Infinity : b.margin.pct;
+        if (pa !== pb) return pa - pb;
+        return String(a.name).localeCompare(String(b.name), 'es');
+      });
+  }
+
+  /**
+   * Que falta para poder guardar una receta. Devuelve la razon, no un booleano.
+   *
+   * Una receta VACIA es valida a proposito: es como se apaga el control de existencia
+   * de un producto que el club vende sin descontar nada (un cover, una cortesia).
+   */
+  function validateRecipe(lines) {
+    const items = (lines || []).filter((l) => l && l.supply_id);
+    const ids = items.map((l) => l.supply_id);
+    if (new Set(ids).size !== ids.length) return 'duplicate_supply';
+    if (items.some((l) => !(Number(l.quantity) > 0))) return 'bad_quantity';
+    if (items.length > 20) return 'too_many';
+    return null;
+  }
+
+  /** El cuerpo que espera la API: solo insumo y cantidad, nada de nombres. */
+  function recipePayload(lines) {
+    return {
+      items: (lines || [])
+        .filter((l) => l && l.supply_id && Number(l.quantity) > 0)
+        .map((l) => ({ supply_id: l.supply_id, quantity: Number(l.quantity) })),
+    };
+  }
+
+  /**
+   * Lo que espera al gerente (D75), en un solo lugar.
+   *
+   * Antes cada pendiente vivia en su pestana: los retiros en Pagos, las cuentas por
+   * verificar mas abajo en la misma, las propinas en efectivo en otra tarjeta, los
+   * reportes en Reportes y las noches sin publicar en Noches. El gerente tenia que
+   * recorrer diez pestanas para saber si habia algo. Esto lo junta, en orden de lo que
+   * mas urge, y dice a que pestana ir. Solo cuenta lo que pide una accion suya.
+   */
+  function pendingWork(input) {
+    const i = input || {};
+    const now = i.now ? new Date(i.now) : new Date();
+    const list = (xs) => (Array.isArray(xs) ? xs : []);
+    const items = [];
+    const add = (key, count, tab, urgent) => { if (count > 0) items.push({ key, count, tab, urgent: Boolean(urgent) }); };
+
+    const reports = list(i.reports).filter((r) => r.status === 'open');
+    const urgentReports = reports.filter((r) => reportSeverity(r) === 'urgent').length;
+    add('inbox.reportsUrgent', urgentReports, 'reports', true);
+    add('inbox.reports', reports.length - urgentReports, 'reports', false);
+    add('inbox.posErrors', Number(i.posErrors) || 0, 'summary', true);
+    add('inbox.withdrawals', list(i.withdrawals).filter((w) => w.status === 'pending').length, 'payouts', false);
+    add('inbox.tips', list(i.tips).length, 'payouts', false);
+    add('inbox.accounts', list(i.accounts).filter((a) => a && a.id && !(a.verified_at || a.verified === true)).length, 'payouts', false);
+    add('inbox.lostFound', list(i.lostFound).filter((x) => x.status === 'matched').length, 'payouts', false);
+
+    // Una noche en borrador que es en los proximos siete dias nadie la puede reservar.
+    const week = new Date(now.getTime() + 7 * 86400000);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    add('inbox.drafts', list(i.nights).filter((n) => {
+      if (n.status !== 'draft') return false;
+      const d = new Date(`${String(n.event_date).slice(0, 10)}T12:00:00`);
+      return d >= today && d <= week;
+    }).length, 'nights', false);
+
+    return items.sort((a, b) => Number(b.urgent) - Number(a.urgent));
+  }
+
   return {
     revenueFor,
+    recipeMargin,
+    sortRecipes,
+    validateRecipe,
+    recipePayload,
     currenciesIn,
     summary,
     pct,
@@ -462,5 +604,6 @@
     resolutionPayload,
     moderationSummary,
     affectsModeration,
+    pendingWork,
   };
 }));

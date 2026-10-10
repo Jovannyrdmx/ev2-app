@@ -14,6 +14,8 @@ const { authenticate, requireRole, sameNightclub } = require('../middleware/auth
 const payments = require('../services/payments');
 const events = require('../services/events');
 const paymentConfig = require('../config/payments');
+const mercadopago = require('../services/mercadopago');
+const terminalCharges = require('../services/terminal-charges');
 
 const router = express.Router({ mergeParams: true });
 
@@ -177,6 +179,29 @@ async function loadPayableTransaction(client, { transactionId, nightclubId, user
   if (!payments.OPEN_TX_STATUSES.includes(tx.status)) {
     throw ApiError.conflict(`El cobro está '${tx.status}' y ya no admite pago`);
   }
+
+  // Y la otra vía. Esto cierra un cobro doble real:
+  //
+  //   El mesero toca cobrar con terminal, la terminal se enciende. El cliente dice
+  //   "mejor efectivo". Se registra el efectivo y el renglón queda pagado — pero la
+  //   terminal SIGUE encendida, porque nadie la apagó. El siguiente que pase una
+  //   tarjeta ahí paga la misma cuenta otra vez, y ese cargo es real.
+  //
+  // El `FOR UPDATE` de arriba serializa las dos vías sobre el mismo renglón, así que
+  // esta comprobación no tiene carrera: o llega primero el efectivo y el cobro con
+  // terminal ve el renglón pagado, o llega primero la terminal y el efectivo ve esto.
+  const enTerminal = await client.query(
+    `SELECT c.id, t.label FROM terminal_charges c
+       JOIN payment_terminals t ON t.id = c.terminal_id
+      WHERE c.transaction_id = $1
+        AND c.status IN ('creating','waiting','action_required')`,
+    [tx.id]);
+  if (enTerminal.rowCount > 0) {
+    throw ApiError.conflict(
+      `Ese cobro tiene la terminal "${enTerminal.rows[0].label}" esperando la tarjeta. `
+      + 'Cancélalo ahí antes de cobrar de otra forma, o la terminal cobra otra vez.',
+      { terminal_charge_id: enTerminal.rows[0].id });
+  }
   return { tx, payer };
 }
 
@@ -202,8 +227,12 @@ router.post('/nightclubs/:nightclubId/manual-payments',
     }
 
     if (b.client_request_id) {
-      const existing = await pool.query(`${payments.PAYMENT_SELECT} WHERE p.client_request_id = $1`,
-        [b.client_request_id]);
+      // El filtro por club NO sobra: `client_request_id` lo escoge el cliente y viaja
+      // en el cuerpo. Sin él, quien conozca una clave de otro club recibía su pago
+      // completo, con folio bancario y los nombres de quien lo declaró y lo revisó.
+      const existing = await pool.query(
+        `${payments.PAYMENT_SELECT} WHERE p.client_request_id = $1 AND p.nightclub_id = $2`,
+        [b.client_request_id, nightclubId]);
       if (existing.rowCount > 0) {
         return res.status(200).json({
           payment: payments.present(existing.rows[0], isManager(req.user) ? 'manager' : 'guest'),
@@ -376,7 +405,7 @@ router.post('/nightclubs/:nightclubId/manual-payments/:paymentId/confirm',
       await client.query('BEGIN');
       const found = await client.query(
         `SELECT id, transaction_id, method, amount::text AS amount, currency, status,
-                declared_by, on_behalf_of
+                declared_by, on_behalf_of, reference
            FROM manual_payments WHERE id = $1 AND nightclub_id = $2 FOR UPDATE`,
         [paymentId, nightclubId]);
       if (found.rowCount === 0) throw ApiError.notFound('Pago no encontrado');
@@ -497,7 +526,7 @@ router.post('/nightclubs/:nightclubId/manual-payments/register',
                                         reviewed_by, reviewed_at, client_request_id)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'confirmed',$5,now(),$11)
            RETURNING id, transaction_id, method, amount::text AS amount, currency, status,
-                     declared_by, on_behalf_of`,
+                     declared_by, on_behalf_of, reference`,
           [nightclubId, tx.id, b.option_id ?? null, b.method, req.user.id, b.on_behalf_of ?? null,
             b.amount, b.currency, b.reference ?? null, b.note ?? null, b.client_request_id ?? null]);
         created = rows[0];
@@ -523,6 +552,569 @@ router.post('/nightclubs/:nightclubId/manual-payments/register',
       payment: payments.present(full.rows[0], 'manager'),
       reservation_confirmed: outcome.reservation ? outcome.reservation.id : null,
     });
+  }));
+
+// ==========================================================================
+// Cobrar con la terminal del club (D47)
+// ==========================================================================
+//
+// La diferencia con todo lo de arriba: esto SÍ cobra. Lo de arriba registra dinero que
+// ya cambió de manos; aquí el sistema despierta una terminal, la persona pasa su
+// tarjeta, y Mercado Pago contesta si pasó. Nadie teclea un monto y nadie teclea un
+// folio, que son los dos sitios por donde se cuela un error en una noche llena.
+
+/**
+ * Lo que Mercado Pago contesta cuando se niega a cambiar el modo, dicho de forma que el
+ * gerente pueda hacer algo con ello. Su mensaje original viaja siempre al final: si
+ * nuestra traducción se equivoca, el texto de ellos sigue ahí.
+ */
+function explainModeRefusal(err) {
+  const suyo = String((err && err.message) || '');
+  if (/not associated|not found|no encontrad|no asociad/i.test(suyo)) {
+    return 'Mercado Pago dice que esa terminal no está vinculada a la cuenta de las '
+      + 'credenciales de este servidor. La terminal tiene que tener la sesión iniciada con '
+      + 'la MISMA cuenta de Mercado Pago de la que salió el token del .env. '
+      + `(Mercado Pago: ${suyo})`;
+  }
+  if (err && err.status === 504) {
+    return 'Mercado Pago no contestó a tiempo al pasar la terminal a PDV. Tócale '
+      + '"Pasarla a PDV" en un momento.';
+  }
+  return `Mercado Pago no dejó pasar la terminal a PDV. (Mercado Pago: ${suyo})`;
+}
+
+/**
+ * Pasar una terminal a PDV sin que un fallo de ESTE paso impida darla de alta.
+ *
+ * Antes, si Mercado Pago rechazaba el cambio de modo, la terminal no se guardaba: el
+ * gerente tocaba "Dar de alta", salía un error en inglés al fondo de la tarjeta, y
+ * volver a tocar daba exactamente lo mismo. No había forma de avanzar. Ahora se guarda
+ * con el modo SIN confirmar (`null`), el cobro se niega a usarla hasta que lo esté, y
+ * el botón "Pasarla a PDV" queda a la vista para reintentar cuando se corrija la causa.
+ *
+ * La terminal virtual de Mercado Pago no tiene modo que cambiar: no existe como aparato.
+ */
+async function tryPdv(externalId) {
+  if (mercadopago.isSandboxTerminal(externalId)) return { mode: 'PDV', sandbox: true };
+  try {
+    await mercadopago.setOperatingMode(externalId, 'PDV');
+    return { mode: 'PDV', sandbox: false };
+  } catch (err) {
+    return { mode: null, sandbox: false, warning: explainModeRefusal(err) };
+  }
+}
+
+/** Las terminales que el club tiene dadas de alta. */
+router.get('/nightclubs/:nightclubId/payment-terminals',
+  requireRole(...STAFF_ROLES),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `SELECT id, external_id, label, operating_mode, operating_mode_at, active, sort_order
+         FROM payment_terminals
+        WHERE nightclub_id = $1 AND (${isManager(req.user)} OR active)
+        ORDER BY active DESC, sort_order, label`,
+      [req.params.nightclubId]);
+    res.json({ terminals: rows, provider: paymentConfig.mercadoPagoConfig() });
+  }));
+
+/**
+ * Preguntarle a Mercado Pago qué terminales tiene la cuenta.
+ *
+ * No da de alta nada: enseña lo que hay para que el gerente le ponga nombre. Una
+ * terminal se llama "NEWLAND_N950__N950NCB801293324" y eso no se le dice a nadie a las
+ * dos de la mañana.
+ */
+router.post('/nightclubs/:nightclubId/payment-terminals/discover',
+  requireRole('manager'),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const found = await mercadopago.listTerminals();
+    const { rows } = await pool.query(
+      'SELECT external_id FROM payment_terminals WHERE nightclub_id = $1',
+      [req.params.nightclubId]);
+    const yaEstan = new Set(rows.map((r) => r.external_id));
+    // Lo que Mercado Pago dice del modo es la verdad, y lo que guardamos es solo lo que
+    // creímos la última vez. Se aprovecha la consulta para ponerlo al día: así una
+    // terminal que alguien regresó a STANDALONE desde el aparato deja de aparecer como
+    // "lista para cobrar", y una que se arregló a mano deja de estar bloqueada.
+    for (const t of found) {
+      if (!yaEstan.has(t.external_id) || mercadopago.isSandboxTerminal(t.external_id)) continue;
+      if (!['PDV', 'STANDALONE', 'UNDEFINED'].includes(t.operating_mode)) continue;
+      await pool.query(
+        `UPDATE payment_terminals
+            SET operating_mode = $3::text, operating_mode_at = now(), updated_at = now()
+          WHERE nightclub_id = $1 AND external_id = $2::text
+            AND operating_mode IS DISTINCT FROM $3::text`,
+        [req.params.nightclubId, t.external_id, t.operating_mode]);
+    }
+    // La terminal virtual, en modo prueba. `GET /terminals/v1/list` nunca la devuelve —
+    // no es un aparato— y una cuenta de prueba normalmente no tiene ninguna terminal
+    // física vinculada, así que la búsqueda volvía VACÍA y no había con qué ensayar.
+    // Mercado Pago documenta que se puede cobrar con ella sin aparato; se ofrece aquí.
+    const modo = paymentConfig.mercadoPagoConfig().mode;
+    const lista = found.slice();
+    if (modo === 'test' && !lista.some((t) => mercadopago.isSandboxTerminal(t.external_id))) {
+      lista.unshift({
+        external_id: mercadopago.SANDBOX_TERMINAL_ID, operating_mode: 'PDV',
+        store_id: null, pos_id: null,
+      });
+    }
+    res.json({
+      mode: modo,
+      terminals: lista.map((t) => ({
+        ...t,
+        virtual: mercadopago.isSandboxTerminal(t.external_id),
+        registered: yaEstan.has(t.external_id),
+      })),
+    });
+  }));
+
+router.post('/nightclubs/:nightclubId/payment-terminals',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      external_id: z.string().trim().min(3).max(120),
+      label: z.string().trim().min(1).max(60),
+      sort_order: z.number().int().min(0).max(999).default(0),
+      // Pasarla a PDV en el mismo movimiento. Es lo que casi siempre se quiere: una
+      // terminal recién sacada de la caja viene en STANDALONE y no obedece a nadie.
+      set_pdv: z.boolean().default(true),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const b = req.body;
+    // Primero el nombre y el aparato, que son lo único que puede impedir el alta. El
+    // cambio de modo va después y ya NO la impide: ver `tryPdv`.
+    const choca = await pool.query(
+      `SELECT 1 FROM payment_terminals
+        WHERE nightclub_id = $1 AND (external_id = $2::text OR label = $3::text)`,
+      [req.params.nightclubId, b.external_id, b.label]);
+    if (choca.rowCount > 0) {
+      throw ApiError.conflict('Ya hay una terminal con ese nombre o ese identificador');
+    }
+
+    let pdv = { mode: null, sandbox: mercadopago.isSandboxTerminal(b.external_id) };
+    if (pdv.sandbox) pdv = { mode: 'PDV', sandbox: true };
+    else if (b.set_pdv) pdv = await tryPdv(b.external_id);
+    const mode = pdv.mode;
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO payment_terminals
+           (nightclub_id, external_id, label, sort_order, operating_mode, operating_mode_at,
+            registered_by)
+         VALUES ($1,$2,$3,$4,$5::text, CASE WHEN $5::text IS NULL THEN NULL ELSE now() END, $6)
+         RETURNING id, external_id, label, operating_mode, active, sort_order`,
+        [req.params.nightclubId, b.external_id, b.label, b.sort_order, mode, req.user.id]);
+      // `warning` es la razón por la que la terminal quedó dada de alta pero SIN poder
+      // cobrar todavía. La pantalla la enseña en grande; no es un detalle.
+      res.status(201).json({
+        terminal: rows[0],
+        sandbox: pdv.sandbox,
+        ...(pdv.warning ? { warning: pdv.warning } : {}),
+      });
+    } catch (err) {
+      if (err.code === '23505') {
+        throw ApiError.conflict('Ya hay una terminal con ese nombre o ese identificador');
+      }
+      throw err;
+    }
+  }));
+
+router.patch('/nightclubs/:nightclubId/payment-terminals/:terminalId',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid, terminalId: uuid }),
+    body: z.object({
+      label: z.string().trim().min(1).max(60).optional(),
+      active: z.boolean().optional(),
+      sort_order: z.number().int().min(0).max(999).optional(),
+      set_pdv: z.boolean().optional(),
+    }).refine((v) => Object.keys(v).length > 0, { message: 'No hay nada que cambiar' }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, terminalId } = req.params;
+    const found = await pool.query(
+      'SELECT id, external_id FROM payment_terminals WHERE id = $1 AND nightclub_id = $2',
+      [terminalId, nightclubId]);
+    if (found.rowCount === 0) throw ApiError.notFound('Esa terminal no existe');
+
+    let mode = null;
+    if (req.body.set_pdv) {
+      // Aquí un rechazo SÍ es un error: es justo lo que el gerente pidió reintentar, y
+      // tiene que saber por qué no pasó. Pero dicho en español y con la causa.
+      const pdv = await tryPdv(found.rows[0].external_id);
+      if (pdv.warning) throw ApiError.unprocessable(pdv.warning);
+      mode = pdv.mode;
+    }
+    const { rows } = await pool.query(
+      `UPDATE payment_terminals
+          SET label = COALESCE($3::text, label),
+              active = COALESCE($4::boolean, active),
+              sort_order = COALESCE($5::int, sort_order),
+              operating_mode = COALESCE($6::text, operating_mode),
+              operating_mode_at = CASE WHEN $6::text IS NULL THEN operating_mode_at ELSE now() END,
+              updated_at = now()
+        WHERE id = $1 AND nightclub_id = $2
+        RETURNING id, external_id, label, operating_mode, active, sort_order`,
+      [terminalId, nightclubId, req.body.label ?? null, req.body.active ?? null,
+        req.body.sort_order ?? null, mode]);
+    res.json({ terminal: rows[0] });
+  }));
+
+// ------------------------------------------------------------------ el cobro
+
+/**
+ * Empezar un cobro: la terminal se enciende sola con el monto.
+ *
+ * Contesta en cuanto Mercado Pago acepta la orden, NO cuando el cliente paga. La
+ * pantalla se queda mirando el socket. Esperar aquí a que alguien saque la tarjeta es
+ * tener una conexión colgada por cada cobro de la noche, y perder el cobro entero
+ * cuando el wifi del club parpadea.
+ */
+router.post('/nightclubs/:nightclubId/terminal-charges',
+  requireRole(...STAFF_ROLES),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({ transaction_id: uuid, terminal_id: uuid }),
+  }),
+  asyncHandler(async (req, res) => {
+    mercadopago.assertUsable();
+    const { nightclubId } = req.params;
+
+    const client = await pool.connect();
+    let apartado;
+    try {
+      await client.query('BEGIN');
+      apartado = await terminalCharges.reserve(client, {
+        nightclubId,
+        transactionId: req.body.transaction_id,
+        terminalId: req.body.terminal_id,
+        userId: req.user.id,
+      });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    // Fuera de la transacción: la red no puede tener bloqueado un renglón del libro.
+    await terminalCharges.push(pool, {
+      charge: { ...apartado.charge, started_by: req.user.id },
+      tx: apartado.tx,
+      terminal: apartado.terminal,
+      nightclubId,
+    });
+
+    const { rows } = await pool.query(`${terminalCharges.CHARGE_SELECT} WHERE c.id = $1`,
+      [apartado.charge.id]);
+    res.status(201).json({ charge: terminalCharges.present(rows[0]) });
+  }));
+
+/**
+ * Cómo va ese cobro.
+ *
+ * Si sigue esperando, aprovecha y le pregunta a Mercado Pago antes de contestar: quien
+ * abre esta ruta es alguien mirando una pantalla que no cambia, y el webhook pudo no
+ * llegar.
+ */
+router.get('/nightclubs/:nightclubId/terminal-charges/:chargeId',
+  requireRole(...STAFF_ROLES),
+  validate({ params: z.object({ nightclubId: uuid, chargeId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, chargeId } = req.params;
+    const first = await pool.query(
+      `${terminalCharges.CHARGE_SELECT} WHERE c.id = $1 AND c.nightclub_id = $2`,
+      [chargeId, nightclubId]);
+    if (first.rowCount === 0) throw ApiError.notFound('Ese cobro no existe');
+    let row = first.rows[0];
+
+    if (!terminalCharges.present(row).is_final && row.external_order_id) {
+      try {
+        const order = await mercadopago.getOrder(row.external_order_id);
+        const read = mercadopago.readOrder(order);
+        // `status_detail` también cuenta: `created` → `at_terminal` es el mismo
+        // "esperando" para esta base, pero es lo que le dice al mesero que la terminal ya
+        // enseña el cobro.
+        if (read && read.status
+          && (read.status !== row.status || read.status_detail !== row.status_detail)) {
+          const applied = await terminalCharges.apply(pool, {
+            chargeId, read, source: 'poll', rawPayload: order,
+          });
+          if (applied.changed) {
+            await terminalCharges.announce({
+              nightclubId, chargeId, status: applied.status,
+              outcome: applied.outcome, startedBy: row.started_by,
+            });
+          }
+          const again = await pool.query(`${terminalCharges.CHARGE_SELECT} WHERE c.id = $1`,
+            [chargeId]);
+          row = again.rows[0];
+        }
+      } catch {
+        // Si Mercado Pago no contesta, se enseña lo que hay guardado en vez de fallar:
+        // una pantalla que dice "esperando" es más útil que una que dice "error" cuando
+        // el cobro puede estar pasando en ese momento.
+      }
+    }
+    res.json({ charge: terminalCharges.present(row) });
+  }));
+
+/** Cancelar un cobro que la terminal todavía no cobró. */
+router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/cancel',
+  requireRole(...STAFF_ROLES),
+  validate({ params: z.object({ nightclubId: uuid, chargeId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, chargeId } = req.params;
+    const found = await pool.query(
+      `SELECT id, status, external_order_id, started_by FROM terminal_charges
+        WHERE id = $1 AND nightclub_id = $2`,
+      [chargeId, nightclubId]);
+    if (found.rowCount === 0) throw ApiError.notFound('Ese cobro no existe');
+    const charge = found.rows[0];
+    if (mercadopago.FINAL_STATUSES.includes(charge.status)) {
+      throw ApiError.conflict(`Ese cobro ya está '${charge.status}' y no se puede cancelar`);
+    }
+
+    if (charge.external_order_id) {
+      // Se cancela PRIMERO del lado de Mercado Pago. Al revés, la terminal se quedaría
+      // encendida pidiendo una tarjeta por un cobro que el sistema ya dio por muerto —
+      // y alguien la pasaría.
+      try {
+        await mercadopago.cancelOrder(charge.external_order_id);
+      } catch (err) {
+        // No dejó cancelar. El motivo que más importa es que la tarjeta YA pasó en el
+        // último segundo: se lee la orden y se asienta lo que diga, en vez de enseñar un
+        // error y dejar al mesero creyendo que no cobró.
+        let read = null;
+        try {
+          const order = await mercadopago.getOrder(charge.external_order_id);
+          read = mercadopago.readOrder(order);
+          if (read) {
+            const applied = await terminalCharges.apply(pool, {
+              chargeId, read, source: 'staff', rawPayload: order,
+            });
+            if (applied.changed) {
+              await terminalCharges.announce({
+                nightclubId, chargeId, status: applied.status,
+                outcome: applied.outcome, startedBy: charge.started_by,
+              });
+            }
+          }
+        } catch { /* si tampoco contesta la consulta, vale el error original */ }
+        if (read && read.status === 'processed') {
+          throw ApiError.conflict('No se canceló: la tarjeta YA pasó. El cobro quedó pagado.');
+        }
+        if (read && read.is_final) {
+          const { rows } = await pool.query(
+            `${terminalCharges.CHARGE_SELECT} WHERE c.id = $1`, [chargeId]);
+          return res.json({ charge: terminalCharges.present(rows[0]), changed: false });
+        }
+        throw new ApiError(err.status === 504 ? 504 : 422, 'cancel_refused',
+          'Mercado Pago no dejó cancelar el cobro. Cancélalo en la terminal (la X o el '
+          + `botón rojo): el sistema se entera solo. (Mercado Pago: ${err.message})`);
+      }
+    }
+    const applied = await terminalCharges.apply(pool, {
+      chargeId, read: { status: 'canceled', status_detail: 'cancelado desde el sistema' },
+      source: 'staff',
+    });
+    await terminalCharges.announce({
+      nightclubId, chargeId, status: 'canceled', outcome: null, startedBy: charge.started_by,
+    });
+    const { rows } = await pool.query(`${terminalCharges.CHARGE_SELECT} WHERE c.id = $1`, [chargeId]);
+    res.json({ charge: terminalCharges.present(rows[0]), changed: applied.changed });
+  }));
+
+/**
+ * El simulador. Solo con credenciales de prueba — el propio cliente se niega si no.
+ *
+ * Existe para que la prueba completa se pueda correr sin una terminal en la mano: se
+ * crea el cobro, se simula "aprobado", y se comprueba que el libro se movió. Sin esto,
+ * probar el camino del dinero exigiría hardware.
+ */
+/**
+ * Los cobros con terminal del club, del más nuevo al más viejo. Solo el gerente.
+ *
+ * Es la única vista de "qué se cobró con tarjeta" que tiene el sistema, y es de donde
+ * sale el botón de devolver. Sin ella, un cobro equivocado solo se podía devolver desde
+ * el panel de Mercado Pago, y el libro no se enteraba.
+ */
+router.get('/nightclubs/:nightclubId/terminal-charges',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: z.object({
+      // Por omisión, las últimas 24 horas: la noche de hoy y la de ayer.
+      hours: z.coerce.number().int().min(1).max(24 * 90).default(24),
+      status: z.enum(['processed', 'refunded', 'failed', 'canceled', 'expired', 'error',
+        'waiting', 'creating', 'action_required']).optional(),
+      limit: z.coerce.number().int().min(1).max(200).default(100),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const { hours, status, limit } = req.query;
+    const { rows } = await pool.query(
+      `${terminalCharges.CHARGE_SELECT}
+        WHERE c.nightclub_id = $1
+          AND c.created_at > now() - make_interval(hours => $2)
+          AND ($3::text IS NULL OR c.status = $3::text)
+        ORDER BY c.created_at DESC
+        LIMIT $4`,
+      [nightclubId, hours, status ?? null, limit]);
+    const devoluciones = await terminalCharges.refundsOf(pool, rows.map((r) => r.id));
+    res.json({
+      charges: rows.map((r) => ({
+        ...terminalCharges.present(r), refunds: devoluciones.get(r.id) || [],
+      })),
+    });
+  }));
+
+/**
+ * Devolver un cobro con terminal, completo. Solo el gerente, y siempre con motivo.
+ *
+ * Solo el total, a propósito (D49): el parcial existe en la API de Mercado Pago, pero un
+ * renglón "pagado en parte" deja el corte descuadrado en lugares que hoy no saben
+ * restar. En una disco el caso real es el cobro equivocado o el doble, que se devuelve
+ * completo.
+ */
+router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/refund',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid, chargeId: uuid }),
+    body: z.object({
+      // Obligatorio: dinero que sale sin que nadie pueda decir por qué es lo primero que
+      // se pregunta en una auditoría.
+      reason: z.string().trim().min(5, 'Escribe por qué se devuelve (mínimo 5 letras)').max(280),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, chargeId } = req.params;
+    const result = await terminalCharges.requestRefund(pool, {
+      nightclubId, chargeId, userId: req.user.id, reason: req.body.reason,
+    });
+    const { rows } = await pool.query(`${terminalCharges.CHARGE_SELECT} WHERE c.id = $1`, [chargeId]);
+    const devoluciones = await terminalCharges.refundsOf(pool, [chargeId]);
+    // 202 cuando Mercado Pago no contestó a tiempo: está pedido, y el repaso lo termina.
+    res.status(result.status === 'pending' ? 202 : 200).json({
+      refund_id: result.refundId,
+      outcome: result.status,
+      charge: { ...terminalCharges.present(rows[0]), refunds: devoluciones.get(chargeId) || [] },
+    });
+  }));
+
+router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/simulate',
+  requireRole('manager'),
+  validate({
+    params: z.object({ nightclubId: uuid, chargeId: uuid }),
+    body: z.object({
+      status: z.enum(['processed', 'failed', 'canceled', 'expired', 'action_required']),
+      status_detail: z.string().trim().max(60).optional(),
+      payment_method_id: z.string().trim().max(30).default('visa'),
+      payment_method_type: z.string().trim().max(30).default('credit_card'),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, chargeId } = req.params;
+    const found = await pool.query(
+      `SELECT id, external_order_id FROM terminal_charges
+        WHERE id = $1 AND nightclub_id = $2`, [chargeId, nightclubId]);
+    if (found.rowCount === 0) throw ApiError.notFound('Ese cobro no existe');
+    if (!found.rows[0].external_order_id) {
+      throw ApiError.conflict('Ese cobro nunca llegó a Mercado Pago: no hay nada que simular');
+    }
+    await mercadopago.simulateOrderEvent(found.rows[0].external_order_id, {
+      status: req.body.status,
+      status_detail: req.body.status_detail
+        || (req.body.status === 'processed' ? 'accredited' : 'simulated'),
+      payment_method_type: req.body.payment_method_type,
+      payment_method_id: req.body.payment_method_id,
+      installments: 1,
+    });
+    res.status(202).json({ simulated: req.body.status });
+  }));
+
+// ------------------------------------------------------------------ el webhook
+
+/**
+ * Lo que Mercado Pago nos avisa.
+ *
+ * PÚBLICA: no lleva sesión, porque quien la llama es un servidor de Mercado Pago. Dos
+ * cosas la hacen segura, y ninguna es la firma:
+ *
+ *   1. El cuerpo de la notificación NO se cree. Solo se lee de él el id de la orden,
+ *      y con ese id se vuelve a preguntar `GET /v1/orders/{id}` con NUESTRO token.
+ *      Cualquiera puede mandar un JSON que diga "pagado"; nadie puede hacer que la API
+ *      de Mercado Pago lo confirme.
+ *   2. Ese id tiene que corresponder a un cobro que ESTE club empezó. Uno que no
+ *      conocemos se contesta 200 y se tira: contestar otra cosa haría que Mercado Pago
+ *      reintentara toda la noche.
+ *
+ * La firma se comprueba igual y se anota, pero no decide. Hay un motivo concreto: hoy
+ * la validación de firma de la Orders API tiene un desacuerdo abierto en los propios SDK
+ * de Mercado Pago. Colgar el cobro de ella sería dejar que un defecto ajeno le diga al
+ * club que un pago real no ocurrió.
+ *
+ * Siempre 200. Un 500 aquí es Mercado Pago reintentando cada pocos minutos, y un
+ * problema nuestro convertido en tormenta.
+ */
+router.post('/payments/mercadopago/webhook', express.json({ limit: '64kb' }),
+  asyncHandler(async (req, res) => {
+    const body = req.body || {};
+    const orderId = String(
+      (body.data && body.data.id) || req.query['data.id'] || body.id || '').trim();
+    const requestId = req.get('x-request-id') || null;
+
+    // Se contesta rápido pase lo que pase; lo que sigue decide si había algo que hacer.
+    if (!orderId) return res.status(200).json({ ignored: 'sin id' });
+
+    const found = await pool.query(
+      `SELECT id, nightclub_id, status, started_by FROM terminal_charges
+        WHERE provider = 'mercadopago' AND external_order_id = $1`, [orderId]);
+    if (found.rowCount === 0) return res.status(200).json({ ignored: 'desconocido' });
+    const charge = found.rows[0];
+
+    const firma = mercadopago.verifySignature({
+      signatureHeader: req.get('x-signature'),
+      requestId,
+      dataId: orderId,
+      secret: process.env.MERCADOPAGO_WEBHOOK_SECRET || '',
+    });
+    await terminalCharges.record(pool, {
+      chargeId: charge.id, source: 'webhook', action: `notify_${body.action || 'unknown'}`,
+      requestId, payload: { signature: firma, body },
+    });
+
+    try {
+      const order = await mercadopago.getOrder(orderId);
+      if (!order) return res.status(200).json({ ignored: 'la orden ya no existe' });
+      const read = mercadopago.readOrder(order);
+      const applied = await terminalCharges.apply(pool, {
+        chargeId: charge.id, read, source: 'webhook', requestId, rawPayload: order,
+      });
+      if (applied.changed) {
+        await terminalCharges.announce({
+          nightclubId: charge.nightclub_id,
+          chargeId: charge.id,
+          status: applied.status,
+          outcome: applied.outcome,
+          startedBy: charge.started_by,
+        });
+      }
+      return res.status(200).json({ applied: applied.changed });
+    } catch (err) {
+      // No se pudo consultar. 200 igual: el repaso de respaldo lo recoge, y un error
+      // aquí solo conseguiría que Mercado Pago repita la misma notificación fallida.
+      await terminalCharges.record(pool, {
+        chargeId: charge.id, source: 'webhook', action: 'lookup_failed',
+        payload: { message: err.message },
+      });
+      return res.status(200).json({ deferred: true });
+    }
   }));
 
 module.exports = router;

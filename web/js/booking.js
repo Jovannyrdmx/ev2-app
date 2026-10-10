@@ -38,7 +38,8 @@
     const when = now ? new Date(now) : new Date();
     return (events || [])
       .filter((e) => e && e.id && e.status !== 'cancelled' && e.status !== 'finished')
-      .filter((e) => !e.doors_open_at || new Date(e.doors_open_at) > when)
+      // Hasta que la noche TERMINA, no hasta que abre: se reserva con el evento en curso.
+      .filter((e) => !e.doors_open_at || nightEnd(e) > when)
       .sort((a, b) => new Date(a.event_date || a.doors_open_at || 0)
         - new Date(b.event_date || b.doors_open_at || 0));
   }
@@ -54,12 +55,27 @@
   }
 
   /**
-   * Si esa noche todavía admite reservaciones. `minAdvanceHours` viene de las reglas
-   * del club; el servidor vuelve a comprobarlo y contesta 422 si ya cerró.
+   * Cuándo termina la noche: el cierre publicado, o 8 horas después de abrir. Es la
+   * misma cuenta que hace el servidor (`eventPricing.nightEnd`).
    */
-  function isOpenForBooking(event, minAdvanceHours, now) {
-    const min = Number(minAdvanceHours);
-    return hoursUntilDoors(event, now) >= (Number.isFinite(min) ? min : 0);
+  function nightEnd(event) {
+    if (event && event.closes_at) return new Date(event.closes_at);
+    if (event && event.doors_open_at) return new Date(new Date(event.doors_open_at).getTime() + 8 * 3600000);
+    return new Date(8640000000000000);
+  }
+
+  /**
+   * Si esa noche todavía admite reservaciones: mientras no haya terminado.
+   *
+   * Antes cerraban unas horas antes de abrir (`min_advance_hours`). El dueño quitó esa
+   * regla el 2026-09-21: se reserva siempre, incluso con el evento en curso, mientras
+   * nadie más tenga la mesa. El servidor vuelve a comprobarlo y contesta 422 si ya
+   * terminó.
+   */
+  function isOpenForBooking(event, now) {
+    if (!event) return false;
+    const when = now ? new Date(now) : new Date();
+    return nightEnd(event) > when;
   }
 
   // ---------------------------------------------------------------- mesas
@@ -159,7 +175,7 @@
 
   /**
    * Por qué no se puede reservar todavía. Devuelve la clave del motivo o null.
-   * `rules` son las del club: mínimo de personas y horas de anticipación.
+   * `rules` son las del club: el mínimo de personas.
    */
   function bookingBlocker(form, rules, now) {
     const r = rules || {};
@@ -169,7 +185,7 @@
     const min = Number(r.min_party_size) || 1;
     if (!Number.isInteger(guests) || guests < 1) return 'book.errGuests';
     if (guests < min) return 'book.errMinParty';
-    if (!isOpenForBooking(form.event, r.min_advance_hours, now)) return 'book.errClosed';
+    if (!isOpenForBooking(form.event, now)) return 'book.errClosed';
     return null;
   }
 
@@ -210,7 +226,13 @@
     const when = now ? new Date(now) : new Date();
     return (reservations || [])
       .filter((r) => LIVE.includes(r.status))
-      .filter((r) => !r.doors_open_at || new Date(r.doors_open_at) > when)
+      // Hasta que termina la noche. Antes desaparecía al abrir las puertas, o sea que
+      // quien llegaba con su reservación ya no veía su pase en el teléfono justo en la
+      // fila de la entrada — y quien reserva con el evento en curso no lo veía nunca.
+      .filter((r) => {
+        if (r.ends_at) return new Date(r.ends_at) > when;
+        return !r.doors_open_at || nightEnd(r) > when;
+      })
       .sort((a, b) => new Date(a.doors_open_at || 0) - new Date(b.doors_open_at || 0));
   }
 
@@ -240,6 +262,7 @@
     money,
     bookableEvents,
     hoursUntilDoors,
+    nightEnd,
     isOpenForBooking,
     tablesByPrice,
     tablesByZone,

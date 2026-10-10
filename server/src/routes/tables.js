@@ -8,10 +8,52 @@ const { validate, z, uuid } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const events = require('../services/events');
 const seating = require('../services/seating');
+const tickets = require('../services/tickets');
 
 const router = express.Router({ mergeParams: true });
 
 router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
+
+/**
+ * Los roles que atienden el piso, y que por tanto necesitan saber QUIÉN está en cada
+ * mesa: para llevarle su trago, para cobrarle, para saber a quién sentar.
+ */
+const FLOOR_STAFF = new Set(['waiter', 'bartender', 'hostess', 'manager', 'admin']);
+
+/**
+ * Quién puede ver el nombre de quién está sentado (D65).
+ *
+ * ---------------------------------------------------------------------------
+ * El defecto que esto cierra
+ * ---------------------------------------------------------------------------
+ * Esta ruta devolvía, por mesa, el identificador, el nombre y la hora de llegada de
+ * cada persona sentada — **a cualquier usuario con sesión**. Un cliente pedía
+ * `/tables` y obtenía el censo del club en tiempo real.
+ *
+ * Y lo más grave: **quien bloqueó a alguien seguía siendo visible para esa persona**,
+ * con mesa y hora, que es justo el escenario que `user_blocks` existe para cortar.
+ * De aquí salían además los identificadores para alcanzar a alguien por `/orders`.
+ *
+ * La contraparte correcta ya existía en el mismo archivo: `/floor-plan` solo devuelve
+ * un conteo, y `/flirts/people` sirve identidades con cuatro filtros.
+ *
+ * ---------------------------------------------------------------------------
+ * Por qué el cliente conserva su PROPIO renglón
+ * ---------------------------------------------------------------------------
+ * Porque la aplicación lo usa para saber en qué mesa está sentado uno mismo
+ * (`web/js/client.js`, `tableOf`). Borrarlo entero rompería que el cliente vea "estás
+ * en la mesa T-7", que es correcto y no filtra nada de nadie más.
+ *
+ * Así que a un cliente se le devuelven los renglones **anónimos** —el conteo sigue
+ * siendo exacto, que es lo que pinta el plano— y el suyo con su nombre.
+ */
+function visibleOccupants(occupants, user) {
+  const lista = Array.isArray(occupants) ? occupants : [];
+  if (user && FLOOR_STAFF.has(user.role)) return lista;
+  return lista.map((o) => (user && o.user_id === user.id
+    ? o
+    : { user_id: null, display_name: null, seated_at: o.seated_at }));
+}
 
 // Tables with their current open occupants (single query, no N+1).
 router.get('/nightclubs/:nightclubId/tables',
@@ -46,7 +88,7 @@ router.get('/nightclubs/:nightclubId/tables',
       [req.params.nightclubId, req.query.section || null, req.query.status || null,
         req.query.floor || null],
     );
-    res.json({ tables: rows });
+    res.json({ tables: rows.map((t) => ({ ...t, occupants: visibleOccupants(t.occupants, req.user) })) });
   }));
 
 // Full floor plan: tables plus the landmarks that make the map readable
@@ -197,8 +239,13 @@ router.post('/nightclubs/:nightclubId/tables/:tableId/seat',
 
       await seating.seatUser(client, { tableId, userId: targetUserId });
 
+      // La audiencia NO es opcional (D65). Sin ella, este aviso llegaba a todo cliente
+      // con el socket abierto: cada vez que alguien se sentaba, el club entero recibía
+      // su identificador y su mesa en vivo. Va al personal del piso, que lo necesita
+      // para atender, y a la persona misma, que se está sentando.
       await events.publish({
         nightclubId, type: 'table_updated', client,
+        audience: { roles: ['waiter', 'bartender', 'hostess', 'manager', 'admin'], userIds: [targetUserId] },
         payload: { table_id: tableId, code: table.rows[0].code, action: 'seated', user_id: targetUserId },
       });
       await client.query('COMMIT');
@@ -247,6 +294,7 @@ router.post('/nightclubs/:nightclubId/tables/:tableId/release',
       }
       await events.publish({
         nightclubId, type: 'table_updated', client,
+        audience: { roles: ['waiter', 'bartender', 'hostess', 'manager', 'admin'], userIds: [targetUserId] },
         payload: { table_id: tableId, action: 'released', user_id: targetUserId },
       });
       await client.query('COMMIT');
@@ -257,6 +305,49 @@ router.post('/nightclubs/:nightclubId/tables/:tableId/release',
     } finally {
       client.release();
     }
+  }));
+
+// ---------------------------------------------------------------- la cuenta (D53)
+
+/**
+ * Lo que va en la cuenta de esa mesa.
+ *
+ * Todo lo que se pidió **desde que esa gente se sentó**, no "lo de hoy": una mesa que
+ * se ocupó a las 11 y otra que se ocupó a las 3 tienen cuentas distintas, y contar
+ * por noche juntaría la de los que ya se fueron con la de los que acaban de llegar.
+ *
+ * Se puede leer sin imprimir: el mesero enseña la cuenta en la pantalla cuando el
+ * cliente solo quiere saber cuánto lleva.
+ */
+router.get('/nightclubs/:nightclubId/tables/:tableId/bill',
+  requireRole('waiter', 'bartender', 'hostess', 'manager', 'admin'),
+  validate({ params: z.object({ nightclubId: uuid, tableId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const bill = await tickets.billData(pool, {
+      nightclubId: req.params.nightclubId, tableId: req.params.tableId,
+    });
+    if (!bill) throw ApiError.notFound('Esa mesa no existe');
+    res.json({ bill });
+  }));
+
+/**
+ * Imprime la cuenta en la impresora de meseros de la barra que atiende esa zona.
+ *
+ * A diferencia de la comanda y del recibo, esta falla con voz: sale porque alguien
+ * picó un botón con el cliente enfrente, y quedarse callado lo deja parado mirando
+ * la pantalla sin saber si el papel viene o no.
+ */
+router.post('/nightclubs/:nightclubId/tables/:tableId/bill/print',
+  requireRole('waiter', 'bartender', 'hostess', 'manager', 'admin'),
+  validate({ params: z.object({ nightclubId: uuid, tableId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const out = await tickets.printBill(pool, {
+      nightclubId: req.params.nightclubId,
+      tableId: req.params.tableId,
+      userId: req.user.id,
+    });
+    if (out.error) throw ApiError.badRequest(out.error);
+    res.status(202).json({ job: out.job, bill: out.bill });
   }));
 
 // Manager: bulk layout update (coordinates, capacity, section, status).
@@ -292,8 +383,12 @@ router.put('/nightclubs/:nightclubId/tables/layout',
         );
         updated += r.rowCount;
       }
+      // Cambió el plano del club. No lleva identidades, pero igual necesita audiencia:
+      // desde D65 un evento sin ella no le llega a nadie, y a quien le importa que se
+      // movieron las mesas es a quien atiende el piso.
       await events.publish({
         nightclubId: req.params.nightclubId, type: 'table_updated', client,
+        audience: { roles: ['waiter', 'bartender', 'hostess', 'manager', 'admin'] },
         payload: { action: 'layout_changed', count: updated },
       });
       await client.query('COMMIT');
@@ -304,6 +399,155 @@ router.put('/nightclubs/:nightclubId/tables/layout',
     } finally {
       client.release();
     }
+  }));
+
+// ---------------------------------------------------------------------------
+// Puntos de entrega
+//
+// No todo el que pide esta en una mesa. En la pista se pide desde donde se este
+// bailando, y el mesero necesita un lugar concreto al que llegar: "Pista A",
+// "Pista B", "Terraza". Cada punto tiene su QR pegado en una columna.
+//
+// El QR lleva un token opaco -- ni el nombre del cliente, ni la mesa, ni nada que
+// sirva de algo si alguien le toma una foto. Y solo el personal y la gerencia ven
+// ese token: el cliente que escanea no necesita verlo, necesita que funcione.
+// ---------------------------------------------------------------------------
+
+const POINT_SELECT = `
+  SELECT dp.id, dp.code, dp.name, dp.kind, dp.section, dp.floor,
+         dp.client_selectable, dp.active, dp.table_id, t.code AS table_code
+    FROM delivery_points dp
+    LEFT JOIN tables t ON t.id = dp.table_id`;
+
+router.get('/nightclubs/:nightclubId/delivery-points',
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    query: z.object({
+      kind: z.enum(['table', 'floor', 'terrace', 'bar']).optional(),
+      include_tables: z.coerce.boolean().default(false),
+      include_inactive: z.coerce.boolean().default(false),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const q = req.query;
+    const staff = ['waiter', 'bartender', 'hostess', 'warehouse', 'manager', 'admin']
+      .includes(req.user.role);
+    const { rows } = await pool.query(
+      `${POINT_SELECT}
+        WHERE dp.nightclub_id = $1
+          AND ($2::boolean IS TRUE OR dp.active)
+          AND ($3::text IS NULL OR dp.kind = $3::text)
+          AND ($4::boolean IS TRUE OR dp.kind <> 'table')
+          AND ($5::boolean IS TRUE OR dp.client_selectable)
+        ORDER BY dp.kind, dp.name`,
+      [req.params.nightclubId, q.include_inactive, q.kind || null, q.include_tables, staff],
+    );
+    res.json({ delivery_points: rows });
+  }));
+
+/**
+ * Lo que hay detras de un QR pegado en una mesa o en una columna.
+ *
+ * Es la puerta de "pedir escaneando": el telefono lee el token y pregunta a donde
+ * pertenece. Devuelve lo minimo -- el punto y, si es una mesa, cual -- y nunca
+ * quien esta sentado ahi.
+ */
+router.get('/nightclubs/:nightclubId/delivery-points/by-token/:token',
+  validate({
+    params: z.object({ nightclubId: uuid, token: z.string().trim().min(8).max(64) }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `${POINT_SELECT} WHERE dp.nightclub_id = $1 AND dp.qr_token = $2 AND dp.active`,
+      [req.params.nightclubId, req.params.token],
+    );
+    if (rows.length === 0) throw ApiError.notFound('Ese codigo no corresponde a ningun lugar');
+    res.json({ delivery_point: rows[0] });
+  }));
+
+/** El QR para imprimir. Solo gerencia: es lo que autoriza a pedir a nombre de un lugar. */
+router.get('/nightclubs/:nightclubId/delivery-points/:pointId/qr',
+  requireRole('manager', 'admin'),
+  validate({ params: z.object({ nightclubId: uuid, pointId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `SELECT id, code, name, kind, qr_token FROM delivery_points
+        WHERE id = $1 AND nightclub_id = $2`,
+      [req.params.pointId, req.params.nightclubId]);
+    if (rows.length === 0) throw ApiError.notFound('Punto de entrega no encontrado');
+    res.json({ delivery_point: rows[0] });
+  }));
+
+router.post('/nightclubs/:nightclubId/delivery-points',
+  requireRole('manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      code: z.string().trim().min(1).max(30).regex(/^[a-z0-9-]+$/,
+        'El codigo va en minusculas, sin espacios ni acentos'),
+      name: z.string().trim().min(1).max(80),
+      kind: z.enum(['floor', 'terrace', 'bar']),
+      floor: z.string().trim().max(10).optional(),
+      section: z.string().trim().max(40).optional(),
+      client_selectable: z.boolean().default(true),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const b = req.body;
+    // Token nuevo en cada alta: el QR se imprime una vez y se pega. Reusar uno viejo
+    // dejaria dos lugares distintos respondiendo al mismo papel.
+    let created;
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO delivery_points (nightclub_id, code, name, kind, section, floor,
+                                      qr_token, client_selectable)
+         VALUES ($1,$2,$3,$4,$5,$6, encode(gen_random_bytes(16), 'hex'), $7)
+         RETURNING id`,
+        [req.params.nightclubId, b.code, b.name, b.kind, b.section || null,
+          b.floor || null, b.client_selectable]);
+      created = rows[0];
+    } catch (err) {
+      if (err.code === '23505') throw ApiError.conflict('Ya existe un punto con ese codigo');
+      throw err;
+    }
+    const full = await pool.query(`${POINT_SELECT} WHERE dp.id = $1`, [created.id]);
+    res.status(201).json({ delivery_point: full.rows[0] });
+  }));
+
+router.patch('/nightclubs/:nightclubId/delivery-points/:pointId',
+  requireRole('manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid, pointId: uuid }),
+    body: z.object({
+      name: z.string().trim().min(1).max(80).optional(),
+      floor: z.string().trim().max(10).optional(),
+      section: z.string().trim().max(40).optional(),
+      client_selectable: z.boolean().optional(),
+      active: z.boolean().optional(),
+      // Girar el token invalida el papel pegado en la columna. Se pide a proposito,
+      // porque es justo lo que hay que hacer si alguien fotografio el QR.
+      rotate_qr: z.boolean().optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const b = req.body;
+    if (Object.keys(b).length === 0) throw ApiError.unprocessable('Nada que cambiar');
+    const { rows } = await pool.query(
+      `UPDATE delivery_points
+          SET name = COALESCE($3, name), floor = COALESCE($4, floor),
+              section = COALESCE($5, section),
+              client_selectable = COALESCE($6, client_selectable),
+              active = COALESCE($7, active),
+              qr_token = CASE WHEN $8::boolean IS TRUE
+                              THEN encode(gen_random_bytes(16), 'hex') ELSE qr_token END,
+              updated_at = now()
+        WHERE id = $2 AND nightclub_id = $1
+        RETURNING id`,
+      [req.params.nightclubId, req.params.pointId, b.name ?? null, b.floor ?? null,
+        b.section ?? null, b.client_selectable ?? null, b.active ?? null, b.rotate_qr ?? false]);
+    if (rows.length === 0) throw ApiError.notFound('Punto de entrega no encontrado');
+    const full = await pool.query(`${POINT_SELECT} WHERE dp.id = $1`, [rows[0].id]);
+    res.json({ delivery_point: full.rows[0] });
   }));
 
 module.exports = router;

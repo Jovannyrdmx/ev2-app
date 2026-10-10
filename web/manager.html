@@ -10,73 +10,10 @@
     <meta name="ev2:api" content="/api">
     <meta name="ev2:ws" content="">
     <meta name="ev2:club" content="ev2">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
-
-        :root {
-            --ev2-cyan: #00BFFF;
-            --ev2-pink: #FF1493;
-            --ev2-lime: #00FF00;
-            --ev2-gold: #FFD700;
-            --ev2-red: #FF4444;
-        }
-
-        body { font-family: 'Inter', system-ui, sans-serif; background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%); }
-        .font-display { font-family: 'Poppins', sans-serif; font-weight: 700; }
-
-        .ev2-gradient {
-            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
-            -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-        }
-        .ev2-button {
-            background: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink));
-            color: #000; font-weight: 700;
-            transition: filter .15s ease, transform .1s ease;
-        }
-        .ev2-button:active { transform: scale(.98); }
-        .ev2-button:disabled { filter: grayscale(1) brightness(.55); cursor: not-allowed; }
-
-        button, select, input, textarea, .tap { min-height: 44px; }
-        textarea { min-height: 96px; }
-
-        .card { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10); }
-
-        .stat-card {
-            background: rgba(0,191,255,.10); border: 1px solid var(--ev2-pink);
-            border-radius: 10px; padding: 10px 8px; text-align: center;
-        }
-        .stat-number { font-size: 1.5rem; font-weight: 700; color: var(--ev2-lime); line-height: 1.1; }
-        .stat-label { font-size: .62rem; color: var(--ev2-cyan); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
-        .stat-card.warn { border-color: var(--ev2-red); }
-        .stat-card.warn .stat-number { color: var(--ev2-red); }
-
-        .tab { border-bottom: 3px solid transparent; color: rgba(255,255,255,.5); font-weight: 600; }
-        .tab.active { color: var(--ev2-cyan); border-bottom-color: var(--ev2-cyan); }
-
-        .pill { font-size: .65rem; padding: .15rem .5rem; border-radius: 9999px; font-weight: 700; white-space: nowrap; }
-        .pill-ok { background: rgba(0,255,0,.18); color: var(--ev2-lime); }
-        .pill-wait { background: rgba(255,215,0,.18); color: var(--ev2-gold); }
-        .pill-off { background: rgba(255,255,255,.12); color: rgba(255,255,255,.6); }
-        .pill-bad { background: rgba(255,68,68,.18); color: var(--ev2-red); }
-
-        .field { width: 100%; padding: .6rem 1rem; border-radius: .6rem; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); outline: none; }
-        .field:focus { border-color: var(--ev2-cyan); }
-        .field.bad { border-color: var(--ev2-red); }
-        .field-error { font-size: .7rem; color: var(--ev2-red); margin-top: .15rem; }
-        .label { font-size: .68rem; color: rgba(255,255,255,.5); display: block; margin-bottom: .2rem; }
-
-        .dot { width: .5rem; height: .5rem; border-radius: 9999px; display: inline-block; }
-        .dot-on { background: var(--ev2-lime); }
-        .dot-off { background: var(--ev2-red); }
-        .dot-wait { background: var(--ev2-gold); }
-
-        [hidden] { display: none !important; }
-    </style>
+    <link rel="stylesheet" href="css/ev2.css">
 </head>
-<body class="text-white">
-<div class="max-w-2xl mx-auto min-h-screen flex flex-col">
+<body class="text-white page-manager">
+<div class="max-w-2xl lg:max-w-none mx-auto min-h-screen flex flex-col">
 
   <!-- ============================ ENTRAR ============================ -->
   <section id="screen-auth" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto">
@@ -88,6 +25,11 @@
       <input id="login-password" type="password" autocomplete="current-password" required placeholder="Contraseña" data-i18n-placeholder="auth.password" class="field">
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.enter">Entrar al club</button>
     </form>
+    <!-- El personal de piso ya no tiene contraseña: entra con su PIN, y el teclado
+         está en la pantalla de acceso. Sin este enlace, quien abre esta página
+         directamente se queda mirando un formulario que no puede llenar. -->
+    <a href="index.html" class="block mt-4 text-center text-sm text-white/50 underline"
+       data-i18n="pin.usePin">Entrar con PIN</a>
     <p id="auth-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
   </section>
 
@@ -125,6 +67,9 @@
         <span class="text-xs text-white/50 flex items-center gap-1">
           <span id="rt-dot" class="dot dot-off"></span><span id="rt-text">Conectando…</span>
         </span>
+        <!-- El almacén es otra pantalla, no una pestaña: se usa de pie, con una caja en
+             la mano. Sin esta puerta el gerente tenía que teclear la URL. -->
+        <a id="btn-warehouse" href="almacen.html" class="text-xs text-white/60 px-2" data-i18n-title="manager.openWarehouse" title="Abrir almacén"><i class="fa-solid fa-boxes-stacked"></i></a>
         <button id="btn-refresh" class="text-xs text-white/60 px-2" data-i18n-title="manager.refresh" title="Actualizar"><i class="fa-solid fa-rotate"></i></button>
         <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
         <button id="btn-logout" class="text-xs text-white/60 px-2" data-i18n-title="top.signOut" title="Salir"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
@@ -135,33 +80,64 @@
 
     <!-- La contraseña temporal se muestra UNA vez: no se puede perder en un render. -->
     <div id="secret-box" class="m-4 rounded-xl p-4" style="background:rgba(0,255,0,.08);border:2px solid var(--ev2-lime)" hidden>
-      <p class="text-xs uppercase tracking-wider" style="color:var(--ev2-lime)"><span data-i18n="manager.tempPassword">Contraseña temporal</span> — <span id="secret-who"></span></p>
-      <p id="secret-value" class="font-display text-2xl tracking-wider my-2 select-all">—</p>
-      <p class="text-[11px] text-white/60" data-i18n="manager.tempPasswordNote">Anótala ahora: solo se muestra una vez.</p>
+      <p class="text-xs uppercase tracking-wider" style="color:var(--ev2-lime)"><span id="secret-who"></span></p>
+
+      <!-- El PIN va primero: es lo que esa persona va a teclear esta noche en la barra. -->
+      <div id="secret-pin-row" hidden>
+        <p class="text-[11px] uppercase tracking-wider text-white/50 mt-2" data-i18n="manager.tempPin">PIN de un solo uso</p>
+        <p id="secret-pin" class="font-display text-3xl tracking-[.3em] select-all">—</p>
+      </div>
+
+      <div id="secret-password-row" hidden>
+        <p class="text-[11px] uppercase tracking-wider text-white/50 mt-2" data-i18n="manager.tempPassword">Contraseña temporal</p>
+        <p id="secret-value" class="font-display text-2xl tracking-wider select-all">—</p>
+      </div>
+
+      <p id="secret-both" class="text-[11px] text-white/60 mt-2" data-i18n="manager.pinAndPassword" hidden>El PIN es para entrar en el club. La contraseña, desde fuera.</p>
+      <p class="text-[11px] text-white/60 mt-1" data-i18n="manager.tempPasswordNote">Anótala ahora: solo se muestra una vez.</p>
       <button id="btn-secret-ok" class="ev2-button rounded-lg px-4 py-2 mt-3 text-sm" data-i18n="manager.gotIt">Ya la anoté</button>
     </div>
 
-    <nav class="flex px-2 border-b border-white/10 overflow-x-auto">
-      <button data-tab="summary" class="tab active flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabSummary">Turno</button>
-      <button data-tab="nights" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="night.tab">Noches</button>
-      <button data-tab="staff" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="staff.tab">Personal</button>
-      <button data-tab="payouts" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="pay.tab">Pagos</button>
-      <button data-tab="reports" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="mod.tab">Reportes</button>
-      <button data-tab="drivers" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabDrivers">Conductores</button>
-      <button data-tab="taxi" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabTaxi">Taxi</button>
-      <button data-tab="parking" class="tab flex-1 py-3 text-sm whitespace-nowrap" data-i18n="manager.tabParking">Cajones</button>
+    <!--
+      Las secciones (D75). En la PC, una barra lateral en tres grupos: lo de esta noche,
+      lo del negocio y lo que se configura una vez. En el telefono, la misma lista en un
+      renglon que se desliza. Antes eran diez pestanas apretadas en un renglon fijo.
+    -->
+    <div class="flex-1 flex flex-col lg:flex-row min-h-0">
+    <nav id="mgr-nav" class="flex px-2 border-b border-white/10 overflow-x-auto lg:flex-col lg:overflow-visible lg:w-60 lg:shrink-0 lg:border-b-0 lg:border-r lg:px-3 lg:py-4 lg:sticky lg:top-[57px] lg:self-start lg:h-[calc(100vh-57px)]" aria-label="Secciones">
+      <p class="mgr-group" data-i18n="mgr.groupNight">Esta noche</p>
+      <button data-tab="summary" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap active"><i class="fa-solid fa-chart-line mgr-icon"></i><span data-i18n="manager.tabSummary">Turno</span><span id="inbox-count" class="tab-count" hidden>0</span></button>
+      <button data-tab="payouts" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-wallet mgr-icon"></i><span data-i18n="pay.tab">Pagos</span></button>
+      <button data-tab="reports" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-shield-halved mgr-icon"></i><span data-i18n="mod.tab">Reportes</span></button>
+      <p class="mgr-group" data-i18n="mgr.groupBusiness">Negocio</p>
+      <button data-tab="nights" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-calendar-days mgr-icon"></i><span data-i18n="night.tab">Noches</span></button>
+      <button data-tab="staff" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-users mgr-icon"></i><span data-i18n="staff.tab">Personal</span></button>
+      <button data-tab="inventory" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mgr-icon"></i><span data-i18n="inv.tab">Inventario</span></button>
+      <p class="mgr-group" data-i18n="mgr.groupSetup">Configuración</p>
+      <button data-tab="drivers" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-car mgr-icon"></i><span data-i18n="manager.tabDrivers">Conductores</span></button>
+      <button data-tab="taxi" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-taxi mgr-icon"></i><span data-i18n="manager.tabTaxi">Taxi</span></button>
+      <button data-tab="parking" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-location-dot mgr-icon"></i><span data-i18n="manager.tabParking">Cajones</span></button>
+      <button data-tab="printing" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-print mgr-icon"></i><span data-i18n="prn.tab">Impresoras</span></button>
     </nav>
 
-    <main class="flex-1 overflow-y-auto p-4 space-y-4">
+    <main class="flex-1 min-w-0 overflow-y-auto p-4 lg:p-8 space-y-4 mgr-main">
 
       <!-- ---------------------------- TURNO ---------------------------- -->
       <div id="tab-summary" class="space-y-4">
-        <div class="grid grid-cols-3 gap-2">
+        <!-- Lo que espera al gerente, junto (D75). Cada renglon lleva a su pestana. -->
+        <div class="card rounded-2xl p-4 space-y-2">
+          <div class="flex items-center justify-between">
+            <p class="font-display text-lg" data-i18n="inbox.title">Pendientes</p>
+            <span id="inbox-total" class="pill pill-off">0</span>
+          </div>
+          <p id="inbox-empty" class="text-sm text-white/50 flex items-center gap-2" hidden><i class="fa-solid fa-circle-check" style="color:var(--ev2-lime)"></i><span data-i18n="inbox.none">Todo al día. Nada espera por ti.</span></p>
+          <div id="inbox-list" class="space-y-2"></div>
+        </div>
+
+        <div class="grid grid-cols-3 sm:grid-cols-5 gap-2">
           <div class="stat-card"><div class="stat-number" id="s-occupancy">—</div><div class="stat-label" data-i18n="manager.occupancy">Mesas ocupadas</div></div>
           <div class="stat-card"><div class="stat-number" id="s-orders">—</div><div class="stat-label" data-i18n="manager.ordersOpen">Pedidos abiertos</div></div>
           <div class="stat-card"><div class="stat-number" id="s-shift">—</div><div class="stat-label" data-i18n="manager.onShift">En turno</div></div>
-        </div>
-        <div class="grid grid-cols-2 gap-2">
           <div class="stat-card"><div class="stat-number" id="s-delivered">—</div><div class="stat-label" data-i18n="manager.ordersDelivered">Entregados hoy</div></div>
           <div class="stat-card" id="s-poserr-card"><div class="stat-number" id="s-poserr">—</div><div class="stat-label" data-i18n="manager.posErrors">Rechazados por la caja</div></div>
         </div>
@@ -184,6 +160,32 @@
         de la semana, y hasta ahora no había forma de hacerlo desde ninguna pantalla.
       -->
       <div id="tab-nights" class="space-y-3" hidden>
+        <!--
+          Los covers del club. Hasta la revisión del 2026-09-20 estos tres precios vivían
+          escritos dentro del JavaScript de dos pantallas, y el servidor asentaba en el
+          libro el importe que la puerta tecleara, sin compararlo con nada. Mientras esta
+          lista esté vacía la puerta sigue tecleando (y queda marcado así en el corte);
+          en cuanto tenga un cover, el precio deja de escribirse a mano.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="cover.title">Covers del club</p>
+          <p class="text-[11px] text-white/40" data-i18n="cover.why">Mientras no haya ninguno, la puerta teclea el precio y el corte lo marca como tecleado.</p>
+          <p id="cover-empty" class="text-sm text-white/40" data-i18n="cover.none" hidden>Todavía no hay ningún cover dado de alta.</p>
+          <div id="cover-list" class="space-y-2"></div>
+          <form id="cover-form" class="grid grid-cols-5 gap-2 items-end border-t border-white/5 pt-3">
+            <div class="col-span-3">
+              <label class="label" for="cover-name" data-i18n="cover.name">Cómo se llama</label>
+              <input id="cover-name" class="field" maxlength="40" placeholder="COVER" required>
+            </div>
+            <div>
+              <label class="label" for="cover-amount" data-i18n="cover.amount">Cuánto</label>
+              <input id="cover-amount" type="number" min="0" step="10" class="field" required>
+            </div>
+            <button id="btn-cover-add" type="submit" class="ev2-button rounded-xl py-2 text-xs font-display" data-i18n="cover.add">Agregar</button>
+          </form>
+          <p id="cover-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
         <button id="btn-new-night" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="night.new">Abrir una noche</button>
 
         <form id="night-form" class="card rounded-xl p-4 space-y-3" hidden>
@@ -222,9 +224,23 @@
               <p class="field-error" data-error="closes_at" hidden></p>
             </div>
           </div>
-          <div>
-            <label class="label" for="n-deadline" data-i18n="night.deadline">Minutos para llegar antes de soltar la mesa</label>
-            <input id="n-deadline" type="number" min="15" max="720" step="15" class="field" value="180">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label" for="n-deadline" data-i18n="night.deadline">Minutos para llegar antes de soltar la mesa</label>
+              <input id="n-deadline" type="number" min="15" max="720" step="15" class="field" value="180">
+            </div>
+            <div>
+              <label class="label" for="n-deposit" data-i18n="night.deposit">Anticipo de esta noche (%)</label>
+              <!--
+                Vacio = se usa el anticipo del club. NO es lo mismo que 0: una noche
+                sin nada capturado cobra lo de siempre, y una de 0% se aparta sin
+                cobrar. Por eso el campo nace vacio y no en un numero.
+              -->
+              <input id="n-deposit" type="number" min="0" max="100" step="5" class="field"
+                     placeholder="—" data-i18n-placeholder="night.depositHint">
+              <p id="n-deposit-note" class="text-[11px] text-white/40 mt-1" data-i18n="night.depositNote">Si lo dejas vacío se cobra el anticipo normal del club.</p>
+              <p class="field-error" data-error="deposit_pct" hidden></p>
+            </div>
           </div>
           <div class="grid grid-cols-2 gap-2">
             <button type="button" id="btn-night-cancel" class="card rounded-lg py-2 text-sm" data-i18n="manager.cancel">Cancelar</button>
@@ -235,6 +251,18 @@
 
         <p id="nights-empty" class="text-sm text-white/40 text-center py-6" data-i18n="night.empty" hidden>Todavía no hay ninguna noche. Abre la primera.</p>
         <div id="nights-list" class="space-y-2"></div>
+
+        <!-- Comparar noches cerradas. Solo cortes GUARDADOS: comparar el corte en
+             vivo de hoy con el cerrado del viernes compara media noche contra una
+             completa, y el resultado siempre dice que hoy va peor. -->
+        <section id="compare-box" class="card rounded-xl p-4 space-y-3 mt-4" hidden>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="cut.compare">Comparar noches</p>
+          <div class="grid grid-cols-2 gap-2">
+            <select id="compare-a" class="field"></select>
+            <select id="compare-b" class="field"></select>
+          </div>
+          <div id="compare-result" class="space-y-1 text-sm"></div>
+        </section>
       </div>
 
       <!--
@@ -307,6 +335,97 @@
         retiro para siempre.
       -->
       <div id="tab-payouts" class="space-y-3" hidden>
+        <!--
+          Las terminales del club (D47). Va ARRIBA de todo lo demas en esta pestana a
+          proposito: es lo primero que hay que hacer para poder cobrar con tarjeta, y
+          una terminal sin dar de alta no da ningun error visible -- simplemente no
+          aparece la opcion en la barra ni en el piso.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="term.title">Terminales</p>
+            <button id="btn-term-discover" class="card rounded-lg px-3 py-2 text-xs" data-i18n="term.discover">Buscar en Mercado Pago</button>
+          </div>
+          <p id="term-not-configured" class="text-sm text-amber-300" hidden></p>
+          <p id="term-empty" class="text-sm text-white/40" data-i18n="term.none" hidden>Todavía no hay ninguna terminal dada de alta.</p>
+          <div id="term-list" class="space-y-2"></div>
+
+          <div id="term-found-block" class="border-t border-white/5 pt-3 space-y-2" hidden>
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="term.found">Terminales de la cuenta</p>
+            <div id="term-found" class="space-y-2"></div>
+          </div>
+          <p id="term-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
+        <!--
+          Los cobros con terminal y sus devoluciones (D49). Antes no existía ninguna vista de
+          "qué se cobró con tarjeta": un cobro equivocado solo se devolvía desde el panel de
+          Mercado Pago, y el libro del club seguía diciendo que ese dinero había entrado.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tch.title">Cobros con terminal</p>
+            <button id="btn-tch-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="tch.reload">Actualizar</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="tch.why">Las últimas 24 horas. Desde aquí se devuelve un cobro a la tarjeta, y el libro se entera.</p>
+          <p id="tch-empty" class="text-sm text-white/40" data-i18n="tch.none" hidden>No hubo cobros con terminal en las últimas 24 horas.</p>
+          <div id="tch-list" class="space-y-2"></div>
+          <p id="tch-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
+        <!--
+          Objetos perdidos (D67). Vive en Pagos porque es la pestaña de "lo que el
+          gerente administra", y porque emparejar y entregar son los dos actos que
+          nadie más puede hacer.
+
+          El código de entrega NO se enseña aquí: lo tiene el dueño en su teléfono, y
+          quien entrega lo teclea de ahí. Si el personal pudiera verlo, no probaría nada.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="lfm.title">Objetos perdidos</p>
+            <button id="btn-lfm-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="tip.reload">Actualizar</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="lfm.why">Empareja un reporte con el objeto guardado y el dueño recibe un código en su teléfono. Ese código es lo que autoriza la entrega.</p>
+          <p id="lfm-empty" class="text-sm text-white/40" data-i18n="lfm.none" hidden>No hay objetos ni reportes abiertos.</p>
+          <div id="lfm-list" class="space-y-2"></div>
+          <p id="lfm-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
+        <!--
+          Las propinas pendientes (D66). `POST /tips/:id/confirm` existía desde el
+          principio y no tenía botón, y es LO QUE METE la propina al saldo del
+          empleado: sin él, una propina en efectivo se quedaba en 'pendiente' para
+          siempre y esa persona nunca podía retirarla.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tip.title">Propinas por confirmar</p>
+            <button id="btn-tip-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="tip.reload">Actualizar</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="tip.why">Confirmar es lo que le suma la propina al empleado. Hasta que lo hagas, ese dinero no está en su saldo y no lo puede retirar.</p>
+          <p id="tip-empty" class="text-sm text-white/40" data-i18n="tip.none" hidden>No hay propinas esperando confirmación.</p>
+          <div id="tip-list" class="space-y-2"></div>
+          <p id="tip-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
+        <!--
+          Los cortes de turno (D51). Aquí el gerente cuenta el dinero que le entrega
+          cada mesero y cada bartender: las entregas parciales de media noche y el
+          corte final. Confirmar un corte cierra el turno de esa persona.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="cuts.title">Cortes de turno</p>
+            <button id="btn-cuts-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="cuts.reload">Actualizar</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="cuts.why">Cuenta el dinero antes de confirmar: al confirmar, el turno de esa persona queda cerrado.</p>
+          <p id="cuts-empty" class="text-sm text-white/40" data-i18n="cuts.none" hidden>Nadie tiene entregas ni cortes pendientes.</p>
+          <div id="cuts-drops" class="space-y-2"></div>
+          <div id="cuts-list" class="space-y-2"></div>
+          <p id="cuts-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
         <div class="card rounded-xl p-4 space-y-2">
           <div class="flex justify-between items-baseline">
             <span class="text-sm text-white/60" data-i18n="pay.owed">Se debe</span>
@@ -418,6 +537,114 @@
       </div>
 
       <!-- ---------------------------- CAJONES ---------------------------- -->
+      <!--
+        ---------------------------- INVENTARIO ----------------------------
+        Lo que el gerente necesita y la pantalla de almacen no da: cuanto vale lo que
+        hay, que producto se esta vendiendo con poco margen, y el editor de recetas
+        -- que hasta ahora solo existia como ruta de la API, o sea que nadie podia
+        corregir una receta sin que yo escribiera un curl.
+      -->
+      <div id="tab-inventory" class="space-y-4" hidden>
+        <!-- Esta pestaña es para MIRAR: valor, mínimos, recetas, movimientos. Recibir
+             mercancía, surtir barras y contar se hace en el almacén, y este botón es
+             la única señal de que esa pantalla existe. -->
+        <a id="btn-open-warehouse" href="almacen.html" class="ev2-button w-full py-3 rounded-xl font-display flex items-center justify-center gap-2 tap">
+          <i class="fa-solid fa-boxes-stacked"></i><span data-i18n="manager.openWarehouse">Abrir almacén</span>
+        </a>
+        <p class="text-xs text-white/50 -mt-2" data-i18n="manager.warehouseNote">Entradas de mercancía, pedidos de las barras, mermas y conteo.</p>
+
+        <div class="grid grid-cols-3 gap-2">
+          <div class="stat-card"><div class="stat-number" id="inv-value">—</div><div class="stat-label" data-i18n="inv.value">Valor al costo</div></div>
+          <div class="stat-card"><div class="stat-number" id="inv-low">—</div><div class="stat-label" data-i18n="inv.low">Bajo mínimo</div></div>
+          <div class="stat-card"><div class="stat-number" id="inv-norecipe">—</div><div class="stat-label" data-i18n="inv.noRecipe">Sin receta</div></div>
+        </div>
+
+        <div id="inv-unconfirmed" class="card rounded-xl p-3 border border-pink-400/40 text-sm" hidden>
+          <p class="text-pink-200"><span id="inv-unconfirmed-n">0</span> <span data-i18n="inv.unconfirmed">presentaciones sin confirmar: hasta que se confirmen, el conteo de esas botellas no es de fiar.</span></p>
+        </div>
+
+        <nav class="flex gap-2 text-xs">
+          <button class="chip tap px-3 on" data-inv="stock" data-i18n="inv.subStock">Existencias</button>
+          <button class="chip tap px-3" data-inv="recipes" data-i18n="inv.subRecipes">Recetas y margen</button>
+          <button class="chip tap px-3" data-inv="kardex" data-i18n="inv.subKardex">Movimientos</button>
+          <!--
+            D66: la carta. `POST /drinks` y `PATCH /drinks/:id` existían desde el
+            principio y no tenían pantalla: dar de alta un trago o cambiar un precio
+            había que hacerlo a mano en la base de datos.
+          -->
+          <button class="chip tap px-3" data-inv="menu" data-i18n="inv.subMenu">Carta</button>
+        </nav>
+
+        <input id="inv-search" type="search" class="field" placeholder="Buscar" data-i18n-placeholder="inv.search">
+
+        <p id="inv-empty" class="text-center text-white/40 text-sm py-10" hidden></p>
+        <div id="inv-list" class="space-y-2"></div>
+
+        <!--
+          D66: el alta de un insumo. `POST /supplies` es de gerente (el almacén no
+          puede), y no tenía pantalla: un producto nuevo se registraba a mano en la
+          base. Nace en CERO a propósito — la existencia entra por una recepción o un
+          conteo, nunca al darlo de alta, porque un saldo inicial tecleado es un número
+          sin respaldo.
+        -->
+        <div id="sup-add" class="card rounded-xl p-4 space-y-3" hidden>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="sup.new">Dar de alta un insumo</p>
+          <input id="sup-name" class="field" placeholder="Nombre" data-i18n-placeholder="sup.name">
+          <div class="grid grid-cols-6 gap-2">
+            <input id="sup-category" class="field col-span-3" placeholder="Categoría" data-i18n-placeholder="sup.category">
+            <select id="sup-unit" class="field col-span-3">
+              <option value="ml">ml</option>
+              <option value="g">g</option>
+              <option value="pza" selected>pza</option>
+            </select>
+          </div>
+          <div class="grid grid-cols-6 gap-2">
+            <input id="sup-size" type="number" min="0" step="any" class="field col-span-3" placeholder="Contenido" data-i18n-placeholder="sup.size">
+            <input id="sup-label" class="field col-span-3" placeholder="Presentación" data-i18n-placeholder="sup.label">
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="sup.note">El contenido es cuánto trae UNA presentación: una botella de 750 ml son 750 en ml. Nace en cero: la existencia entra por una recepción o un conteo.</p>
+          <p id="sup-error" class="text-sm text-red-300" hidden></p>
+          <button id="btn-sup-add" class="ev2-button w-full rounded-lg py-2" data-i18n="sup.add">Dar de alta</button>
+        </div>
+
+        <!-- El alta de un trago. Solo se ve en la pestaña de la carta. -->
+        <div id="menu-add" class="card rounded-xl p-4 space-y-3" hidden>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="inv.menuNew">Agregar a la carta</p>
+          <div class="grid grid-cols-5 gap-2">
+            <input id="menu-name" class="field col-span-3" placeholder="Nombre" data-i18n-placeholder="inv.menuName">
+            <input id="menu-price" type="number" min="0" step="1" class="field col-span-2" placeholder="Precio" data-i18n-placeholder="inv.menuPrice">
+          </div>
+          <input id="menu-category" class="field" placeholder="Categoría" data-i18n-placeholder="inv.menuCategory">
+          <p class="text-[11px] text-white/40" data-i18n="inv.menuNote">Un trago nuevo nace SIN receta, así que no descuenta inventario hasta que se la pongas en "Recetas y margen".</p>
+          <p id="menu-error" class="text-sm text-red-300" hidden></p>
+          <button id="btn-menu-add" class="ev2-button w-full rounded-lg py-2" data-i18n="inv.menuAdd">Agregar</button>
+        </div>
+      </div>
+
+      <!-- Editor de una receta. Se abre desde la lista de recetas. -->
+      <div id="recipe-sheet" class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur flex flex-col" hidden>
+        <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
+          <div class="min-w-0">
+            <p id="recipe-title" class="font-display text-lg truncate">—</p>
+            <p id="recipe-note" class="text-xs text-white/50 truncate">—</p>
+          </div>
+          <button id="btn-recipe-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="inv.close">Cerrar</button>
+        </header>
+
+        <div id="recipe-lines" class="flex-1 overflow-y-auto px-4 py-3 space-y-2"></div>
+
+        <div class="px-4 py-3 border-t border-white/10 space-y-3 bg-black/40">
+          <div class="flex gap-2">
+            <select id="recipe-supply" class="field"></select>
+            <input id="recipe-qty" type="number" min="0" step="0.001" class="field w-28" inputmode="decimal">
+            <button id="btn-recipe-add" class="ev2-button rounded-lg px-4 font-display">+</button>
+          </div>
+          <p id="recipe-cost" class="text-sm text-white/70"></p>
+          <button id="btn-recipe-save" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="inv.save">Guardar receta</button>
+          <p id="recipe-error" class="text-sm text-red-300" hidden></p>
+        </div>
+      </div>
+
       <div id="tab-parking" class="space-y-4" hidden>
         <div class="grid grid-cols-3 gap-2">
           <div class="stat-card"><div class="stat-number" id="p-total">—</div><div class="stat-label" data-i18n="manager.parkingTotal">Cajones</div></div>
@@ -445,19 +672,283 @@
         <p id="spots-empty" class="text-sm text-white/40 text-center py-6" data-i18n="manager.noSpots" hidden>Todavía no hay cajones dados de alta.</p>
         <div id="spots-list" class="flex flex-wrap gap-2"></div>
       </div>
+
+      <!--
+        Impresoras (D52). Tiene pestaña propia y no un rincón de "Pagos" porque son
+        cuatro cosas que se consultan juntas cuando algo no sale en papel: qué
+        impresoras hay, qué PCs están vivas, qué tickets se quedaron sin salir, y si
+        la comanda por pedido está prendida.
+      -->
+      <div id="tab-printing" class="space-y-4" hidden>
+
+        <!--
+          Por qué no va a salir papel, dicho antes de que alguien lo note (D63).
+
+          Va arriba de todo, antes de las impresoras, porque es lo único de esta
+          pantalla que hay que leer aunque no se venga a cambiar nada. Un papel que
+          no sale no avisa solo: no hay excepción ni renglón rojo, y alguien lo nota
+          cuando un bartender se queja. Vacío y oculto cuando no hay nada que decir,
+          que es como tiene que estar casi siempre para que signifique algo.
+        -->
+        <div id="prn-health" class="space-y-2" hidden></div>
+
+        <!--
+          D66: qué barra atiende cada zona del plano. `GET/PUT /zone-bars` existían y no
+          tenían pantalla, y es de lo que más depende esta pestaña: la comanda de una
+          mesa va a la barra que atiende SU zona. Una zona sin barra asignada no encola
+          nada y no avisa — por eso va aquí arriba, junto a los avisos que lo delatan.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="zb.title">Qué barra atiende cada zona</p>
+            <button id="btn-zb-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.reload">Actualizar</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="zb.why">La comanda de una mesa va a la barra que atiende su zona. Una zona sin barra no manda nada a imprimir y no avisa.</p>
+          <p id="zb-empty" class="text-sm text-white/40" data-i18n="zb.none" hidden>Este club todavía no tiene zonas en el plano.</p>
+          <div id="zb-list" class="space-y-2"></div>
+          <p id="zb-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.printers">Impresoras</p>
+            <button id="btn-prn-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.reload">Actualizar</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="prn.why">Cada barra tiene dos: la de la PC del bartender saca las comandas, la de la PC de meseros saca cuentas y recibos.</p>
+          <p id="prn-empty" class="text-sm text-white/40" data-i18n="prn.none" hidden>Todavía no hay impresoras dadas de alta.</p>
+          <div id="prn-list" class="space-y-2"></div>
+          <p id="prn-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
+        <!--
+          Buscar antes que teclear. Una IP mal escrita no se descubre al guardarla: se
+          descubre cuando el ticket no sale, a las dos de la mañana.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.found">Impresoras encontradas</p>
+            <button id="btn-prn-scan" class="ev2-button rounded-lg px-3 py-2 text-xs" data-i18n="prn.scan">Buscar impresoras</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="prn.scanWhy">Cada PC busca en su propia red y dice lo que ve. Así también sabes cuál PC alcanza a cuál impresora.</p>
+          <p id="prn-scan-status" class="text-[11px]" hidden></p>
+          <div id="prn-found" class="space-y-2"></div>
+          <p id="prn-scan-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
+        <details id="prn-add-box" class="card rounded-xl p-4">
+          <summary class="text-sm cursor-pointer" data-i18n="prn.addTitle">Dar de alta una impresora</summary>
+          <div class="space-y-3 pt-3">
+            <div>
+              <label class="label" for="prn-location" data-i18n="prn.location">Barra</label>
+              <select id="prn-location" class="field"></select>
+            </div>
+            <div>
+              <label class="label" for="prn-purpose" data-i18n="prn.purpose">Para qué es</label>
+              <select id="prn-purpose" class="field">
+                <option value="orders" data-i18n="prn.pOrders">Comandas (PC del bartender)</option>
+                <option value="service" data-i18n="prn.pService">Cuentas y recibos (PC de meseros)</option>
+              </select>
+            </div>
+            <div>
+              <label class="label" for="prn-name" data-i18n="prn.name">Nombre</label>
+              <input id="prn-name" class="field" maxlength="60" placeholder="Barra baja · bartender">
+            </div>
+            <div>
+              <label class="label" for="prn-connection" data-i18n="prn.connection">Cómo está conectada</label>
+              <select id="prn-connection" class="field">
+                <option value="network" data-i18n="prn.cNetwork">En la red, con su IP</option>
+                <option value="windows" data-i18n="prn.cWindows">Por USB a una PC (Windows)</option>
+              </select>
+            </div>
+            <div id="prn-network-fields" class="grid grid-cols-3 gap-2">
+              <div class="col-span-2">
+                <label class="label" for="prn-host" data-i18n="prn.host">Dirección IP</label>
+                <input id="prn-host" class="field" maxlength="120" placeholder="192.168.1.50" inputmode="decimal">
+              </div>
+              <div>
+                <label class="label" for="prn-port" data-i18n="prn.port">Puerto</label>
+                <input id="prn-port" class="field" type="number" min="1" max="65535" value="9100">
+              </div>
+            </div>
+            <div id="prn-windows-fields" hidden>
+              <label class="label" for="prn-winname" data-i18n="prn.winName">Nombre compartido en Windows</label>
+              <input id="prn-winname" class="field" maxlength="120" placeholder="XP80">
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="label" for="prn-width" data-i18n="prn.width">Ancho del papel</label>
+                <select id="prn-width" class="field">
+                  <option value="80">80 mm</option>
+                  <option value="58">58 mm</option>
+                </select>
+              </div>
+              <div>
+                <label class="label" for="prn-codepage" data-i18n="prn.codepage">Acentos</label>
+                <select id="prn-codepage" class="field">
+                  <option value="CP850">CP850</option>
+                  <option value="CP1252">CP1252</option>
+                  <option value="CP858">CP858</option>
+                  <option value="CP860">CP860</option>
+                  <option value="CP437">CP437</option>
+                </select>
+              </div>
+            </div>
+            <p class="text-[11px] text-white/40" data-i18n="prn.codepageHint">Si la prueba sale con la ñ y los acentos rotos, cambia esta opción y vuelve a probar. No hay forma de saberlo sin imprimir.</p>
+            <label class="flex items-center gap-3 text-sm tap">
+              <input id="prn-cutter" type="checkbox" class="w-5 h-5 accent-emerald-400" checked>
+              <span data-i18n="prn.cutter">Corta el papel sola</span>
+            </label>
+            <p id="prn-add-error" class="text-sm text-red-300" hidden></p>
+            <button id="btn-prn-add" class="ev2-button w-full rounded-lg py-2" data-i18n="prn.add">Dar de alta</button>
+          </div>
+        </details>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.agents">PCs que imprimen</p>
+            <button id="btn-agent-add" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.agentAdd">Nueva PC</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="prn.agentsWhy">El servidor no alcanza las impresoras del club: un programa en una PC de barra las alcanza por él. Con dos, si apagan una la otra sigue sacando todo el papel.</p>
+          <p id="prn-agents-empty" class="text-sm text-white/40" data-i18n="prn.agentsNone" hidden>Ninguna PC está dada de alta todavía. Sin esto no sale ningún papel.</p>
+
+          <!--
+            El código de emparejamiento (D56). Se enseña en grande porque alguien lo
+            va a leer de esta pantalla y teclearlo en otra máquina, y ese es
+            exactamente el momento en que se confunde un 0 con una O.
+          -->
+          <div id="prn-pair" class="rounded-xl p-4 text-center space-y-2"
+               style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12)" hidden>
+            <p class="text-xs text-white/50" data-i18n="prn.pairStep1">En esa PC, abre el agente y teclea este código:</p>
+            <p id="prn-pair-code" class="font-display text-3xl tracking-[0.2em]" style="color:var(--ev2-gold)">—</p>
+            <p id="prn-pair-ttl" class="text-[11px] text-white/40">—</p>
+            <p id="prn-pair-wait" class="text-xs" style="color:var(--ev2-lime)" hidden></p>
+
+            <!--
+              Y si esa PC todavía no tiene el agente (D57). Va aquí adentro y cerrado:
+              la mayoría de las veces la PC ya lo tiene y esto solo estorbaría, pero
+              la vez que no, quien está parado en la barra necesita encontrarlo sin
+              buscar una carpeta en una USB.
+            -->
+            <details id="prn-install" class="text-left rounded-lg" style="background:rgba(0,0,0,.25)">
+              <summary class="cursor-pointer px-3 py-2 text-xs text-white/60 tap" data-i18n="prn.installOpen">Esa PC todavía no tiene el agente</summary>
+              <div class="px-3 pb-3 space-y-2">
+                <p class="text-[11px] text-white/50" data-i18n="prn.installHow">En esa PC: clic derecho en Inicio → Windows PowerShell. Pega esta línea y dale Enter.</p>
+                <code id="prn-install-cmd" class="block text-[11px] break-all rounded p-2" style="background:rgba(0,0,0,.45);color:var(--ev2-lime)">—</code>
+                <div class="flex gap-2">
+                  <button id="btn-prn-copy" class="card rounded-lg px-3 py-2 text-xs flex-1" data-i18n="prn.installCopy">Copiar la línea</button>
+                  <a id="prn-install-dl" class="card rounded-lg px-3 py-2 text-xs flex-1 text-center tap" href="#" download="instalar-agente-ev2.ps1" data-i18n="prn.installDownload">Bajar el archivo</a>
+                </div>
+                <p class="text-[11px] text-white/40" data-i18n="prn.installNode">Hace falta Node.js en esa PC. Si no lo tiene, la línea te lo dice y te manda a nodejs.org.</p>
+              </div>
+            </details>
+          </div>
+
+          <div id="prn-agents" class="space-y-2"></div>
+        </div>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.queue">Últimos tickets</p>
+            <button id="btn-jobs-reload" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.reload">Actualizar</button>
+          </div>
+          <p id="prn-jobs-empty" class="text-sm text-white/40" data-i18n="prn.queueNone" hidden>No se ha mandado imprimir nada todavía.</p>
+          <div id="prn-jobs" class="space-y-2"></div>
+        </div>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.settings">Ajustes</p>
+          <label class="flex items-center gap-3 text-sm tap">
+            <input id="prn-order-tickets" type="checkbox" class="w-5 h-5 accent-emerald-400">
+            <span data-i18n="prn.orderTickets">Imprimir comanda en la barra con cada pedido</span>
+          </label>
+          <p class="text-[11px] text-white/40" data-i18n="prn.orderTicketsWhy">Lo cambian el gerente y el administrador, y queda registrado quién fue. El recibo de cobro sale siempre.</p>
+          <p id="prn-settings-error" class="text-sm text-red-300" hidden></p>
+        </div>
+      </div>
     </main>
+    </div>
   </section>
 
   <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50" hidden></div>
+
+  <!-- ==================== EL CORTE DE LA NOCHE ====================
+       Cuatro cifras arriba porque a la una de la mañana, desde un teléfono, un
+       tablero con veinte números no se lee. Lo demás va abajo, para quien lo
+       busque. Y las cosas que salieron mal van con su número al lado, para que no
+       haya que ir a buscarlo. -->
+  <div id="cut-sheet" class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur flex flex-col" hidden>
+    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
+      <div class="min-w-0">
+        <p class="font-display text-lg" data-i18n="cut.title">Corte de la noche</p>
+        <p id="cut-night" class="text-xs text-white/50 truncate">—</p>
+      </div>
+      <button id="btn-cut-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="manager.close">Cerrar</button>
+    </header>
+
+    <div id="cut-body" class="flex-1 overflow-y-auto px-4 py-3 space-y-3"></div>
+
+    <div class="px-4 py-3 border-t border-white/10 space-y-2 bg-black/40">
+      <p id="cut-frozen" class="text-[11px] text-white/40" hidden></p>
+      <input id="cut-note" class="field" maxlength="300" placeholder="Nota del corte (opcional)"
+             data-i18n-placeholder="cut.note">
+      <button id="btn-cut-save" class="ev2-button w-full py-3 rounded-xl font-display"
+              data-i18n="cut.close">Cerrar la noche</button>
+      <p id="cut-error" class="text-sm text-red-300" hidden></p>
+    </div>
+  </div>
+
+  <!-- ==================== EL ROL DE LA NOCHE ====================
+       Se arma por DESTINO y no por persona, porque es como piensa el gerente:
+       "¿quién tiene la Terraza?". Y lo que quedó sin nadie va arriba, en rojo: una
+       zona sin mesero no se nota mirando la lista de asignados. -->
+  <div id="roster-sheet" class="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur flex flex-col" hidden>
+    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
+      <div class="min-w-0">
+        <p class="font-display text-lg" data-i18n="roster.title">Rol de la noche</p>
+        <p id="roster-night" class="text-xs text-white/50 truncate">—</p>
+      </div>
+      <button id="btn-roster-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="manager.close">Cerrar</button>
+    </header>
+
+    <div id="roster-progress" class="px-4 py-2 text-sm border-b border-white/10"></div>
+    <div id="roster-body" class="flex-1 overflow-y-auto px-4 py-3 space-y-3"></div>
+
+    <div class="px-4 py-3 border-t border-white/10 space-y-2 bg-black/40">
+      <p class="text-[11px] text-white/40" data-i18n="roster.assignNote">
+        Asignar no abre el turno: el empleado marca su entrada al llegar.
+      </p>
+      <p id="roster-error" class="text-sm text-red-300" hidden></p>
+    </div>
+  </div>
+
+  <!-- Elegir a quién poner en un destino. Nace vacío: se llena con los candidatos
+       del puesto que ese destino necesita. -->
+  <div id="pick-backdrop" class="fixed inset-0 bg-black/70 z-40" hidden></div>
+  <section id="pick-sheet" class="fixed bottom-0 left-0 right-0 z-50 card rounded-t-2xl px-4 pt-3 pb-6 max-w-3xl mx-auto max-h-[80vh] overflow-y-auto" hidden>
+    <div class="flex items-start justify-between mb-2">
+      <div>
+        <p class="font-display text-lg" data-i18n="roster.pick">Poner a alguien</p>
+        <p id="pick-where" class="text-xs text-white/50">—</p>
+      </div>
+      <button id="pick-close" class="text-white/50 px-2" aria-label="Cerrar">✕</button>
+    </div>
+    <div id="pick-list" class="space-y-2"></div>
+    <p id="pick-empty" class="text-sm text-white/40 py-6 text-center" hidden></p>
+  </section>
 </div>
 
 <script src="js/api.js"></script>
 <script src="js/format.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/roles.js"></script>
 <script src="js/password-gate.js"></script>
+<script src="js/warehouse.js"></script>
+<script src="js/terminal-charge.js"></script>
 <script src="js/manager.js"></script>
 <script src="js/staff-admin.js"></script>
 <script src="js/payouts.js"></script>
+<script src="js/night-report.js"></script>
+<script src="js/roster.js"></script>
 <script src="js/manager-screen.js"></script>
 <script src="js/pwa.js"></script>
 </body>

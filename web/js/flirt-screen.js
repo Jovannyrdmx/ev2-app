@@ -12,6 +12,10 @@
 /* global EV2Screen, EV2Flirt, EV2Format */
 (function () {
   'use strict';
+  // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
+  const ask = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.confirm(text, opts) : Promise.resolve(window.confirm(text)));
+
 
   if (!window.EV2Screen) return;
 
@@ -213,7 +217,12 @@
       const on = state.section === value;
       b.className = `px-3 py-1 rounded-full text-xs shrink-0 ${on ? 'tab-active' : 'card text-white/60'}`;
       b.textContent = label;
-      b.onclick = async () => { state.section = value; await loadPeople(); };
+      // `loadPeople` relanza todo lo que no sea 422. Sin este catch, el rechazo
+      // quedaba sin manejar y la lista seguía mostrando la zona anterior como si nada.
+      b.onclick = async () => {
+        state.section = value;
+        try { await loadPeople(); } catch (err) { ctx.showError(err); }
+      };
       return b;
     };
     bar.appendChild(make(null, t('flirt.allZones')));
@@ -337,7 +346,7 @@
       if (gift) { showError('flirt-error', t(gift)); return; }
       // Un trago invitado se cobra al mandarlo y no se devuelve. Preguntar una vez es
       // molesto; cobrar sin preguntar es peor.
-      if (!window.confirm(t('flirt.confirmGift'))) return;
+      if (!(await ask(t('flirt.confirmGift')))) return;
     }
 
     const body = EV2Flirt.sendPayload(person, state.mode, {
@@ -472,7 +481,7 @@
   }
 
   async function blockPerson(userId, name) {
-    if (!userId || !window.confirm(t('flirt.confirmBlock', { name: name || '' }))) return;
+    if (!userId || !(await ask(t('flirt.confirmBlock', { name: name || '' }), { danger: true }))) return;
     try {
       await ctx.api.post(`/me/blocks/${userId}`, {});
       ctx.toast(t('flirt.blocked'), 'ok');
@@ -527,7 +536,7 @@
 
   function renderBadges() {
     const nuevos = EV2Flirt.unread(state.inbox);
-    for (const id of ['flirt-badge', 'flirt-inbox-badge']) {
+    for (const id of ['flirt-badge', 'flirt-badge-show', 'flirt-inbox-badge']) {
       const el = $(id);
       if (!el) continue;
       el.textContent = String(nuevos);

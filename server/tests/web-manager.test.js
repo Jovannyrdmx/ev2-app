@@ -370,3 +370,194 @@ describe('Las noches del club', () => {
     expect(M.nightStatusLabel('lo-que-sea')).toBe('night.stDraft');
   });
 });
+
+/**
+ * Recetas y margen, en el panel del gerente.
+ *
+ * Es el número que decide precios y que nadie podía ver: el costo de un trago vivía en
+ * la cabeza de quien armó la receta. Un margen mal calculado aquí, multiplicado por mil
+ * tragos en una noche, es una decisión de precio tomada sobre un número falso.
+ */
+describe('Margen de un producto', () => {
+  it('descuenta lo que lleva dentro y da el porcentaje', () => {
+    const m = M.recipeMargin({ price: '150.00', cost: 39.6 });
+    expect(m).toEqual({ price: 150, cost: 39.6, profit: 110.4, pct: 73.6 });
+  });
+
+  it('sin costo todavía NO inventa un margen del 100%', () => {
+    // `avg_cost` en cero significa "no se ha recibido mercancía", no "es gratis".
+    const m = M.recipeMargin({ price: '150.00', cost: 0 });
+    expect(m.profit).toBeNull();
+    expect(m.pct).toBeNull();
+  });
+
+  it('un producto de precio cero no tiene margen que calcular', () => {
+    expect(M.recipeMargin({ price: '0.00', cost: 10 }).pct).toBeNull();
+  });
+
+  it('suma en centavos enteros: 0.1 + 0.2 no es 0.3 en float', () => {
+    const m = M.recipeMargin({ price: '0.30', cost: 0.1 });
+    expect(m.profit).toBe(0.2);
+  });
+
+  it('un costo mayor que el precio da margen negativo, y se dice', () => {
+    const m = M.recipeMargin({ price: '100.00', cost: 120 });
+    expect(m.profit).toBe(-20);
+    expect(m.pct).toBe(-20);
+  });
+});
+
+describe('El orden en que el gerente necesita ver las recetas', () => {
+  const recetas = [
+    { name: 'Buen margen', price: '200', cost: 20, items: [{}] },
+    { name: 'Sin receta', price: '100', cost: 0, items: [] },
+    { name: 'Margen flaco', price: '100', cost: 80, items: [{}] },
+  ];
+
+  it('primero lo que NO tiene receta: no tiene control de existencia', () => {
+    expect(M.sortRecipes(recetas)[0].name).toBe('Sin receta');
+  });
+
+  it('después lo de menor margen, que es donde se pierde dinero sin verlo', () => {
+    expect(M.sortRecipes(recetas).map((r) => r.name))
+      .toEqual(['Sin receta', 'Margen flaco', 'Buen margen']);
+  });
+
+  it('busca por nombre', () => {
+    expect(M.sortRecipes(recetas, { search: 'flaco' }).map((r) => r.name)).toEqual(['Margen flaco']);
+  });
+
+  it('trae el margen ya calculado, para no recalcularlo al pintar', () => {
+    expect(M.sortRecipes(recetas).find((r) => r.name === 'Margen flaco').margin.pct).toBe(20);
+  });
+});
+
+describe('Guardar una receta', () => {
+  it('una receta vacía es válida: así se apaga el control de existencia', () => {
+    expect(M.validateRecipe([])).toBeNull();
+    expect(M.recipePayload([])).toEqual({ items: [] });
+  });
+
+  it('el mismo insumo dos veces no se guarda', () => {
+    expect(M.validateRecipe([
+      { supply_id: 'a', quantity: 30 }, { supply_id: 'a', quantity: 10 },
+    ])).toBe('duplicate_supply');
+  });
+
+  it('una cantidad en cero o negativa no se guarda', () => {
+    expect(M.validateRecipe([{ supply_id: 'a', quantity: 0 }])).toBe('bad_quantity');
+    expect(M.validateRecipe([{ supply_id: 'a', quantity: -5 }])).toBe('bad_quantity');
+  });
+
+  it('más de 20 ingredientes no se guarda: el servidor los rechaza igual', () => {
+    const muchos = Array.from({ length: 21 }, (x, i) => ({ supply_id: `s${i}`, quantity: 1 }));
+    expect(M.validateRecipe(muchos)).toBe('too_many');
+  });
+
+  it('el cuerpo lleva solo insumo y cantidad, y la cantidad como número', () => {
+    expect(M.recipePayload([{ supply_id: 'a', quantity: '30', name: 'Whisky' }]))
+      .toEqual({ items: [{ supply_id: 'a', quantity: 30 }] });
+  });
+});
+
+describe('el anticipo de una noche, desde la pantalla del gerente', () => {
+  const base = {
+    name: 'Sabado', event_date: '2026-12-31',
+    doors_open_at: '2026-12-31T22:00', ticket_price: '150', currency: 'MXN',
+  };
+
+  it('vacio NO se manda: significa "usa el del club"', () => {
+    // Mandar un 0 en su lugar convertiria cada noche normal en una noche que se
+    // aparta gratis. Es el error que cuesta dinero.
+    for (const vacio of ['', '   ', null, undefined]) {
+      const body = M.nightPayload({ ...base, deposit_pct: vacio });
+      expect({ vacio, tiene: 'deposit_pct' in body }).toEqual({ vacio, tiene: false });
+    }
+  });
+
+  it('un numero si se manda, como numero', () => {
+    expect(M.nightPayload({ ...base, deposit_pct: '100' }).deposit_pct).toBe(100);
+    expect(M.nightPayload({ ...base, deposit_pct: 10 }).deposit_pct).toBe(10);
+  });
+
+  it('el CERO se manda: es una noche que se aparta sin cobrar', () => {
+    const body = M.nightPayload({ ...base, deposit_pct: '0' });
+    expect(body.deposit_pct).toBe(0);
+  });
+
+  it('vacio es valido: el campo es opcional', () => {
+    const ayer = new Date('2026-01-01');
+    for (const vacio of ['', undefined, null]) {
+      const errores = M.validateNight({ ...base, deposit_pct: vacio }, ayer);
+      expect(errores.deposit_pct).toBeUndefined();
+    }
+  });
+
+  it('un porcentaje imposible se detiene ANTES de mandarlo', () => {
+    const ayer = new Date('2026-01-01');
+    for (const malo of ['101', '-5', 'muchos', '1000']) {
+      const errores = M.validateNight({ ...base, deposit_pct: malo }, ayer);
+      expect({ malo, error: errores.deposit_pct }).toEqual({ malo, error: 'night.errDeposit' });
+    }
+  });
+
+  it('0 y 100 son los limites y los dos pasan', () => {
+    const ayer = new Date('2026-01-01');
+    for (const bueno of ['0', '100', 50]) {
+      const errores = M.validateNight({ ...base, deposit_pct: bueno }, ayer);
+      expect({ bueno, error: errores.deposit_pct }).toEqual({ bueno, error: undefined });
+    }
+  });
+});
+
+// ---------------------------------------------------------------- pendientes (D75)
+
+describe('Pendientes del gerente (D75)', () => {
+  const M = require('../../web/js/manager.js');
+  const now = new Date('2026-10-02T20:00:00Z');
+
+  it('sin nada que hacer, la lista está vacía', () => {
+    expect(M.pendingWork({ now })).toEqual([]);
+  });
+
+  it('junta lo de cada pestaña y dice a cuál ir; lo urgente va primero', () => {
+    const items = M.pendingWork({
+      now,
+      withdrawals: [{ status: 'pending' }, { status: 'pending' }, { status: 'paid' }],
+      accounts: [{ id: 'a' }, { id: 'b', verified_at: '2026-09-01' }],
+      tips: [{ id: 't' }],
+      reports: [{ status: 'open', reason: 'underage' }, { status: 'open', reason: 'spam' }, { status: 'actioned' }],
+      lostFound: [{ status: 'matched' }, { status: 'open' }],
+      nights: [
+        { status: 'draft', event_date: '2026-10-04' },
+        { status: 'draft', event_date: '2026-11-20' },
+        { status: 'published', event_date: '2026-10-03' },
+      ],
+      posErrors: 0,
+    });
+    expect(items[0]).toEqual({ key: 'inbox.reportsUrgent', count: 1, tab: 'reports', urgent: true });
+    const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
+    expect(byKey['inbox.reports']).toMatchObject({ count: 1, tab: 'reports' });
+    expect(byKey['inbox.withdrawals']).toMatchObject({ count: 2, tab: 'payouts' });
+    expect(byKey['inbox.accounts'].count).toBe(1);
+    expect(byKey['inbox.tips'].count).toBe(1);
+    expect(byKey['inbox.lostFound'].count).toBe(1);
+    // Solo la de esta semana: la de noviembre todavía no urge.
+    expect(byKey['inbox.drafts']).toMatchObject({ count: 1, tab: 'nights' });
+  });
+
+  it('los pedidos rechazados por la caja cuentan como urgentes', () => {
+    expect(M.pendingWork({ now, posErrors: 2 })).toEqual([
+      { key: 'inbox.posErrors', count: 2, tab: 'summary', urgent: true }]);
+  });
+
+  it('cada clave existe en los dos idiomas', () => {
+    const F = require('../../web/js/format.js');
+    for (const key of ['inbox.title', 'inbox.none', 'inbox.reportsUrgent', 'inbox.reports',
+      'inbox.posErrors', 'inbox.withdrawals', 'inbox.tips', 'inbox.accounts',
+      'inbox.lostFound', 'inbox.drafts']) {
+      expect(F.STRINGS.es[key]).toBeTruthy();
+      expect(F.STRINGS.en[key]).toBeTruthy();
+    }
+  });
+});

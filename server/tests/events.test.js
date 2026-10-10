@@ -117,7 +117,9 @@ describe('Eventos', () => {
     const res = await api().patch(url(`/events/${ev.body.event.id}`)).set(auth(manager))
       .send({ ticket_price: 999 });
     expect(res.status).toBe(200);
-    expect(res.headers['x-warning']).toMatch(/keep the price agreed/);
+    // El aviso ahora nombra tambien el anticipo: los dos se congelan en la
+    // reservacion, y cambiar cualquiera de los dos no toca lo ya vendido.
+    expect(res.headers['x-warning']).toMatch(/keep the price and deposit agreed/);
   });
 
   it('no borra un evento con reservaciones activas', async () => {
@@ -360,10 +362,10 @@ describe('Reservación por noche', () => {
     expect(res.status).toBe(422);
   });
 
-  it('respeta la anticipación mínima', async () => {
+  it('ya no exige anticipación: una hora antes de abrir se reserva (regla quitada el 2026-09-21)', async () => {
     const ev = await makeEvent({ hoursAhead: 1 });
     const res = await book(ev.body.event.id, roja.id, 8);
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(201);
   });
 
   it('suma botellas y extras del catálogo por su código', async () => {

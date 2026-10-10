@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>EV2 — Almacén</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0a0a14">
+    <link rel="icon" href="images/favicon-32x32.png" type="image/png" sizes="32x32">
+    <meta name="ev2:api" content="/api">
+    <meta name="ev2:ws" content="">
+    <meta name="ev2:club" content="ev2">
+    <link rel="stylesheet" href="css/ev2.css">
+</head>
+<body class="text-white page-almacen">
+<div class="max-w-3xl lg:max-w-6xl mx-auto min-h-screen flex flex-col">
+
+  <!-- ============================ ENTRAR ============================ -->
+  <section id="screen-auth" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto">
+    <div class="text-center mb-8">
+      <h1 class="font-display text-3xl ev2-gradient mb-1">EV2 · <span data-i18n="wh.title">Almacén</span></h1>
+      <p class="text-sm text-white/50" data-i18n="wh.subtitle">Entradas, surtido, mermas y conteo</p>
+    </div>
+    <form id="form-login" class="space-y-3">
+      <input id="login-email" type="email" autocomplete="email" required placeholder="Correo" data-i18n-placeholder="auth.email" class="field">
+      <input id="login-password" type="password" autocomplete="current-password" required placeholder="Contraseña" data-i18n-placeholder="auth.password" class="field">
+      <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.signin">Entrar</button>
+    </form>
+    <!-- El personal de piso ya no tiene contraseña: entra con su PIN, y el teclado
+         está en la pantalla de acceso. Sin este enlace, quien abre esta página
+         directamente se queda mirando un formulario que no puede llenar. -->
+    <a href="index.html" class="block mt-4 text-center text-sm text-white/50 underline"
+       data-i18n="pin.usePin">Entrar con PIN</a>
+    <p id="auth-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
+  </section>
+
+  <!-- ====== CONTRASEÑA TEMPORAL: el servidor bloquea todo hasta cambiarla ====== -->
+  <section id="screen-password" class="flex-1 flex flex-col justify-center px-6 py-10 max-w-md w-full mx-auto" hidden>
+    <h2 class="font-display text-2xl ev2-gradient mb-1" data-i18n="gate.title">Cambia tu contraseña</h2>
+    <p class="text-sm text-white/60 mb-6" data-i18n="gate.note">Entraste con una contraseña temporal.</p>
+    <form id="form-password" class="space-y-3">
+      <input id="pw-current" type="password" autocomplete="current-password" required placeholder="Contraseña temporal" data-i18n-placeholder="gate.current" class="field">
+      <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" placeholder="Contraseña nueva (mínimo 8)" data-i18n-placeholder="gate.new" class="field">
+      <input id="pw-repeat" type="password" autocomplete="new-password" required placeholder="Repite la nueva" data-i18n-placeholder="gate.repeat" class="field">
+      <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="gate.save">Cambiar y entrar</button>
+    </form>
+    <p id="pw-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
+    <button id="btn-pw-logout" class="mt-6 text-sm text-white/50 underline" data-i18n="top.signOut">Salir</button>
+  </section>
+
+  <!-- ============ ENTRÓ ALGUIEN QUE NO ES DE ALMACÉN ============ -->
+  <section id="screen-wrong-role" class="flex-1 flex flex-col justify-center px-6 py-10 text-center max-w-md w-full mx-auto" hidden>
+    <p class="text-xs uppercase tracking-widest text-white/40" data-i18n="staff.signedInAs">Entraste como</p>
+    <h2 id="wrong-role" class="font-display text-2xl ev2-gradient mb-4">—</h2>
+    <p id="wrong-role-note" class="text-sm text-white/60"></p>
+    <button id="btn-wrong-logout" class="mt-8 text-sm text-white/60 underline" data-i18n="top.signOut">Salir</button>
+  </section>
+
+  <!-- ============================ ALMACÉN ============================ -->
+  <section id="screen-warehouse" class="flex-1 flex flex-col" hidden>
+    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10 sticky top-0 backdrop-blur bg-black/80 z-20">
+      <div>
+        <p class="font-display text-lg ev2-gradient leading-none">EV2 · <span data-i18n="wh.title">Almacén</span></p>
+        <p class="text-xs text-white/50"><span id="me-name">—</span></p>
+      </div>
+      <div class="flex items-center gap-2">
+        <!-- La vuelta al panel. Solo la ve quien vino de ahí (gerente o administrador):
+             a un almacenista no se le ofrece una puerta que el servidor le va a cerrar. -->
+        <a id="btn-back-manager" href="manager.html" class="text-xs text-white/60 px-2 flex items-center gap-1" title="Panel del gerente" data-i18n-title="wh.backManager" hidden><i class="fa-solid fa-chevron-left"></i><span data-i18n="wh.back">Panel</span></a>
+        <button id="btn-refresh" class="text-xs text-white/60 px-2" title="Actualizar" data-i18n-title="wh.refresh"><i class="fa-solid fa-rotate"></i></button>
+        <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
+        <button id="btn-logout" class="text-xs text-white/60 px-2" title="Salir" data-i18n-title="top.signOut"><i class="fa-solid fa-right-from-bracket"></i></button>
+      </div>
+    </header>
+
+    <div id="banner" class="px-4 py-2 text-sm text-center bg-amber-500/20 text-amber-100" hidden></div>
+
+    <div class="px-4 py-3 grid grid-cols-3 gap-2">
+      <div class="stat-card"><div class="stat-number" id="stat-low">—</div><div class="stat-label" data-i18n="wh.statLow">Bajo mínimo</div></div>
+      <div class="stat-card"><div class="stat-number" id="stat-value">—</div><div class="stat-label" data-i18n="wh.statValue">Valor al costo</div></div>
+      <div class="stat-card"><div class="stat-number" id="stat-unconfirmed">—</div><div class="stat-label" data-i18n="wh.statUnconfirmed">Por confirmar</div></div>
+    </div>
+
+    <!-- Filtro por lugar: el almacenista trabaja un estante a la vez -->
+    <div class="px-4 pb-2 flex gap-2 overflow-x-auto" id="location-chips"></div>
+
+    <nav class="flex border-b border-white/10 text-sm sticky top-[57px] bg-black/80 backdrop-blur z-10">
+      <button class="tab active flex-1 py-3" data-tab="stock">
+        <span data-i18n="wh.tabStock">Existencias</span><span class="tab-count" id="count-stock">0</span>
+      </button>
+      <button class="tab flex-1 py-3" data-tab="entrada">
+        <span data-i18n="wh.tabEntry">Entrada</span><span class="tab-count" id="count-entry">0</span>
+      </button>
+      <button class="tab flex-1 py-3" data-tab="pedidos">
+        <span data-i18n="wh.tabRequests">Pedidos</span><span class="tab-count" id="count-requests">0</span>
+      </button>
+      <button class="tab flex-1 py-3" data-tab="restock">
+        <span data-i18n="wh.tabRestock">Surtir</span><span class="tab-count" id="count-restock">0</span>
+      </button>
+      <button class="tab flex-1 py-3" data-tab="kardex">
+        <span data-i18n="wh.tabKardex">Movimientos</span>
+      </button>
+    </nav>
+
+    <!-- El buscador no aplica a la captura de una entrada ni a la bandeja de
+         pedidos: ahí el buscador vive dentro de cada renglón. Se esconde en vez de
+         dejarlo filtrando algo que no se está viendo. -->
+    <div class="px-4 py-3" id="search-wrap">
+      <input id="search" type="search" class="field" placeholder="Buscar insumo…" data-i18n-placeholder="wh.search">
+    </div>
+
+    <main class="flex-1 px-4 pb-28 overflow-y-auto">
+      <p id="list-empty" class="text-center text-white/40 text-sm py-16"></p>
+      <div id="list" class="space-y-2"></div>
+    </main>
+  </section>
+
+  <!-- ============ CAPTURA DE UN MOVIMIENTO (hoja inferior) ============ -->
+  <div id="sheet-backdrop" class="fixed inset-0 bg-black/70 z-30" hidden></div>
+  <section id="sheet" class="fixed bottom-0 left-0 right-0 z-40 sheet rounded-t-2xl px-4 pt-3 pb-6 max-w-3xl mx-auto max-h-[88vh] overflow-y-auto" hidden>
+    <div class="flex items-start justify-between mb-2">
+      <div>
+        <h3 id="sheet-title" class="font-display text-lg">—</h3>
+        <p id="sheet-supply" class="text-xs text-white/50">—</p>
+      </div>
+      <button id="sheet-close" class="text-white/50 px-2" aria-label="Cerrar">✕</button>
+    </div>
+
+    <div class="flex gap-2 flex-wrap mb-3" id="sheet-kinds"></div>
+
+    <div class="space-y-3">
+      <div>
+        <label class="text-xs text-white/50" data-i18n="wh.from">Lugar</label>
+        <select id="sheet-from" class="field"></select>
+      </div>
+      <div id="sheet-to-wrap" hidden>
+        <label class="text-xs text-white/50" data-i18n="wh.to">Destino</label>
+        <select id="sheet-to" class="field"></select>
+      </div>
+      <div>
+        <label class="text-xs text-white/50"><span id="sheet-amount-label" data-i18n="wh.amount">Cantidad</span></label>
+        <div class="flex gap-2">
+          <input id="sheet-amount" type="number" step="0.001" min="0" class="field" inputmode="decimal">
+          <div class="flex gap-1">
+            <button type="button" class="chip on tap px-3" id="mode-packages" data-i18n="wh.inPackages">Cajas</button>
+            <button type="button" class="chip tap px-3" id="mode-base" data-i18n="wh.inBase">ml</button>
+          </div>
+        </div>
+      </div>
+      <div id="sheet-cost-wrap" hidden>
+        <label class="text-xs text-white/50" data-i18n="wh.packageCost">Costo por presentación (factura)</label>
+        <input id="sheet-cost" type="number" step="0.01" min="0" class="field" inputmode="decimal">
+      </div>
+      <div id="sheet-reason-wrap">
+        <label class="text-xs text-white/50"><span data-i18n="wh.reason">Motivo</span> <span id="sheet-reason-required" class="text-pink-300">*</span></label>
+        <input id="sheet-reason" type="text" maxlength="200" class="field" placeholder="Por qué" data-i18n-placeholder="wh.reasonHint">
+      </div>
+
+      <div id="sheet-preview" class="text-sm text-white/70 card rounded-xl px-3 py-2"></div>
+      <p id="sheet-error" class="text-sm text-red-300" hidden></p>
+
+      <button id="sheet-submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="wh.save">Registrar</button>
+    </div>
+  </section>
+
+  <!-- ============ PROVEEDOR NUEVO (hoja inferior) ============
+       Solo gerencia. Un proveedor nuevo es una decisión de compras: quien recibe
+       mercancía no debería poder inventarse el origen de una caja para
+       justificarla. El servidor lo exige igual; esto solo esconde el botón. -->
+  <section id="sheet-supplier" class="fixed bottom-0 left-0 right-0 z-40 sheet rounded-t-2xl px-4 pt-3 pb-6 max-w-3xl mx-auto max-h-[88vh] overflow-y-auto" hidden>
+    <div class="flex items-start justify-between mb-3">
+      <h3 class="font-display text-lg" data-i18n="wh.newSupplier">Proveedor nuevo</h3>
+      <button id="supplier-close" class="text-white/50 px-2" aria-label="Cerrar">✕</button>
+    </div>
+    <form id="form-supplier" class="space-y-3">
+      <div>
+        <label class="text-xs text-white/50" data-i18n="wh.supplierName">Nombre</label>
+        <input id="supplier-name" type="text" maxlength="120" required class="field">
+      </div>
+      <div>
+        <label class="text-xs text-white/50" data-i18n="wh.supplierContact">Contacto</label>
+        <input id="supplier-contact" type="text" maxlength="120" class="field">
+      </div>
+      <div>
+        <label class="text-xs text-white/50" data-i18n="wh.supplierPhone">Teléfono</label>
+        <input id="supplier-phone" type="tel" maxlength="30" class="field">
+      </div>
+      <p id="supplier-error" class="text-sm text-red-300" hidden></p>
+      <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="wh.save">Registrar</button>
+    </form>
+  </section>
+
+  <!-- ============ SURTIR UN PEDIDO (hoja inferior) ============
+       Nace con lo que FALTA de cada renglón, no con lo pedido: un pedido a medias
+       se termina de surtir, no se vuelve a mandar completo. -->
+  <section id="sheet-fulfill" class="fixed bottom-0 left-0 right-0 z-40 sheet rounded-t-2xl px-4 pt-3 pb-6 max-w-3xl mx-auto max-h-[88vh] overflow-y-auto" hidden>
+    <div class="flex items-start justify-between mb-2">
+      <div>
+        <h3 class="font-display text-lg" data-i18n="wh.fulfillTitle">Surtir pedido</h3>
+        <p id="fulfill-bar" class="text-xs text-white/50">—</p>
+      </div>
+      <button id="fulfill-close" class="text-white/50 px-2" aria-label="Cerrar">✕</button>
+    </div>
+    <div>
+      <label class="text-xs text-white/50" data-i18n="wh.fulfillFrom">Surtir desde</label>
+      <select id="fulfill-from" class="field"></select>
+    </div>
+    <div id="fulfill-lines" class="space-y-2 mt-3"></div>
+    <div id="fulfill-preview" class="text-sm text-white/70 card rounded-xl px-3 py-2 mt-3"></div>
+    <p id="fulfill-error" class="text-sm text-red-300 mt-2" hidden></p>
+    <button id="fulfill-submit" class="ev2-button w-full py-3 rounded-xl font-display mt-3" data-i18n="wh.fulfillSend">Surtir</button>
+  </section>
+
+  <!-- ============ LA FOTO DEL TICKET, EN GRANDE ============
+       Quien revisa los renglones tiene que poder ver el papel. Sin esto tendría que
+       confiar en lo que leyó el programa, que es justo lo que esta pantalla evita.
+       La imagen se pide con el token y se pinta desde un blob: es una factura con el
+       RFC del club y los precios de compra, no un archivo público. -->
+  <div id="photo-viewer" class="fixed inset-0 z-50 bg-black/95 flex flex-col" hidden>
+    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10">
+      <p class="text-sm text-white/60" id="photo-viewer-title">—</p>
+      <button id="photo-viewer-close" class="px-3 py-2 rounded-xl card text-sm" data-i18n="wh.close">Cerrar</button>
+    </header>
+    <div class="flex-1 overflow-auto p-2 flex items-start justify-center">
+      <img id="photo-viewer-img" alt="" class="max-w-full rounded-lg">
+    </div>
+  </div>
+
+  <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50" hidden></div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/format.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/roles.js"></script>
+<script src="js/password-gate.js"></script>
+<script src="js/warehouse.js"></script>
+<script src="js/receiving.js"></script>
+<script src="js/receipt-review.js"></script>
+<script src="js/warehouse-screen.js"></script>
+<script src="js/pwa.js"></script>
+</body>
+</html>

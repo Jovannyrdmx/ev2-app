@@ -11,6 +11,18 @@ const { pendingAfter } = require('../src/realtime/hub');
 const events = require('../src/services/events');
 const f = require('./helpers/factories');
 
+/**
+ * "Para todo el club", dicho explícitamente.
+ *
+ * Estas pruebas usaban `audience: {}` con el significado que ese campo tenía antes de
+ * D65: vacío era para todos. Ahora vacío es para nadie —falla cerrado, porque olvidar
+ * el campo publicaba datos de más y nadie lo notaba—, así que lo que estas pruebas
+ * quieren decir se dice con todas sus letras. Lo que prueban no cambia: cómo se
+ * ENTREGA un evento, no qué significa una audiencia vacía (eso lo prueba
+ * `events-audience.test.js`).
+ */
+const TODO_EL_CLUB = { roles: ['guest', 'waiter', 'bartender', 'hostess', 'manager', 'admin'] };
+
 let realtime; let port;
 let club; let otherClub; let guest; let bartender; let outsider;
 
@@ -68,7 +80,7 @@ function open(user, { sinceId } = {}) {
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Writes n events for the club and returns their ids as strings. */
-async function seed(n, { nightclubId = null, audience = {}, type = 'tick' } = {}) {
+async function seed(n, { nightclubId = null, audience = TODO_EL_CLUB, type = 'tick' } = {}) {
   const ids = [];
   for (let i = 0; i < n; i += 1) {
     const row = await events.publish({
@@ -138,7 +150,7 @@ describe('Recuperar lo perdido', () => {
     expect(err.code).toBe('bad_since_id');
     // Sigue viva y entregando.
     realtime.deliver({
-      id: 77, nightclub_id: club.id, type: 'table_updated', audience: {},
+      id: 77, nightclub_id: club.id, type: 'table_updated', audience: TODO_EL_CLUB,
       payload: { i: 99 }, created_at: new Date().toISOString(),
     });
     expect((await bad.waitFor('event')).payload).toEqual({ i: 99 });
@@ -151,7 +163,7 @@ describe('Reconectar no es una puerta trasera', () => {
   it('solo se reproduce lo que era para esa persona', async () => {
     await seed(1, { audience: { roles: ['bartender'] }, type: 'order_created' });
     await seed(1, { audience: { userIds: [bartender.id] }, type: 'tip_received' });
-    await seed(1, { audience: {}, type: 'table_updated' });
+    await seed(1, { audience: TODO_EL_CLUB, type: 'table_updated' });
 
     const ana = open(guest, { sinceId: '0' });
     const done = await ana.waitFor('resume_complete');
@@ -192,7 +204,7 @@ describe('Orden y duplicados', () => {
 
     // Llega algo en vivo mientras todavía se está reproduciendo.
     realtime.deliver({
-      id: 9999, nightclub_id: club.id, type: 'en_vivo', audience: {},
+      id: 9999, nightclub_id: club.id, type: 'en_vivo', audience: TODO_EL_CLUB,
       payload: { i: 'vivo' }, created_at: new Date().toISOString(),
     });
 
@@ -233,9 +245,9 @@ describe('Cuando el hueco es más grande de lo que se puede reproducir', () => {
     // Se insertan de golpe: uno por uno serían 501 viajes a la base.
     await pool.query(
       `INSERT INTO events (nightclub_id, type, audience, payload)
-       SELECT $1, 'tick', '{}'::jsonb, jsonb_build_object('i', g)
+       SELECT $1, 'tick', $3::jsonb, jsonb_build_object('i', g)
          FROM generate_series(1, $2) AS g`,
-      [club.id, RESUME_MAX_EVENTS + 1]);
+      [club.id, RESUME_MAX_EVENTS + 1, JSON.stringify(TODO_EL_CLUB)]);
 
     const back = open(guest, { sinceId: '0' });
     const done = await back.waitFor('resume_complete');

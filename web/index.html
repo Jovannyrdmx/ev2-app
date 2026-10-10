@@ -12,112 +12,9 @@
     <meta name="ev2:ws" content="">
     <!-- Debe coincidir con el slug del club en la base (el seed crea "ev2"). -->
     <meta name="ev2:club" content="ev2">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@500;600;700&display=swap');
-
-        /* Paleta del plano original (table-selector.html). */
-        :root {
-            --ev2-cyan: #00BFFF;
-            --ev2-pink: #FF1493;
-            --ev2-purple: #9D00FF;
-            --ev2-lime: #00FF00;
-            --ev2-gold: #FFD700;
-            --ev2-red: #FF4444;
-        }
-
-        body {
-            font-family: 'Inter', system-ui, sans-serif;
-            background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%);
-        }
-
-        .font-display { font-family: 'Poppins', sans-serif; font-weight: 700; }
-
-        .ev2-gradient {
-            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .ev2-button {
-            background: linear-gradient(135deg, var(--ev2-cyan), var(--ev2-pink));
-            color: #000;
-            font-weight: 600;
-            transition: filter .15s ease, transform .1s ease;
-        }
-        .ev2-button:active { transform: scale(.98); }
-        .ev2-button:disabled { filter: grayscale(1) brightness(.55); cursor: not-allowed; }
-
-        .tab-active { color: var(--ev2-cyan); border-bottom: 3px solid var(--ev2-cyan); }
-
-        /* Objetivos táctiles grandes: esto se usa de noche, con poca luz y una mano. */
-        button, .tap { min-height: 44px; }
-
-        .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
-
-        /* Tarjetas de conteo del diseño original. */
-        .stat-card {
-            background: rgba(0, 191, 255, .10);
-            border: 1px solid var(--ev2-pink);
-            border-radius: 10px;
-            padding: 10px 6px;
-            text-align: center;
-        }
-        .stat-number { font-size: 1.5rem; font-weight: 700; color: var(--ev2-lime); line-height: 1.1; }
-        .stat-label { font-size: .62rem; color: var(--ev2-cyan); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
-
-        .floor-btn {
-            padding: 10px 18px;
-            border: 2px solid var(--ev2-cyan);
-            background: transparent;
-            color: var(--ev2-cyan);
-            border-radius: 8px;
-            font-weight: 700;
-            font-size: .8rem;
-            white-space: nowrap;
-            transition: all .25s ease;
-        }
-        .floor-btn.active {
-            background: linear-gradient(135deg, var(--ev2-cyan) 0%, var(--ev2-pink) 100%);
-            color: #000;
-            border-color: var(--ev2-pink);
-        }
-
-        .canvas-wrapper {
-            background: #000;
-            border: 2px solid var(--ev2-cyan);
-            border-radius: 12px;
-            padding: 8px;
-            box-shadow: 0 0 24px rgba(0, 191, 255, .28);
-        }
-        #floor-canvas { width: 100%; height: auto; display: block; border-radius: 8px; cursor: crosshair; }
-
-        .info-panel {
-            background: linear-gradient(135deg, rgba(0,191,255,.10) 0%, rgba(255,20,147,.10) 100%);
-            border: 2px solid var(--ev2-cyan);
-            border-radius: 10px;
-            padding: 14px;
-        }
-        .info-item { background: rgba(0,191,255,.05); padding: 8px 10px; border-radius: 6px; border-left: 3px solid var(--ev2-cyan); }
-        .info-label { font-size: .62rem; color: #9aa4b8; text-transform: uppercase; letter-spacing: .04em; }
-        .info-value { font-size: 1rem; color: var(--ev2-lime); font-weight: 700; margin-top: 2px; }
-
-        .legend-color { width: 14px; height: 14px; border-radius: 4px; border: 1px solid rgba(255,255,255,.7); flex: none; }
-
-        .dot { width: .5rem; height: .5rem; border-radius: 9999px; display: inline-block; }
-        .dot-on { background: var(--ev2-lime); }
-        .dot-off { background: var(--ev2-red); }
-        .dot-wait { background: var(--ev2-gold); }
-
-        @keyframes pulse-soft { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
-        .pulsing { animation: pulse-soft 1.6s ease-in-out infinite; }
-
-        [hidden] { display: none !important; }
-    </style>
+    <link rel="stylesheet" href="css/ev2.css">
 </head>
-<body class="text-white">
+<body class="text-white page-index">
 <div class="max-w-md mx-auto min-h-screen flex flex-col">
 
   <!-- ============================ ENTRAR ============================ -->
@@ -127,10 +24,48 @@
       <p id="club-city" class="text-white/50 text-sm" data-i18n="auth.city">Nogales, Sonora</p>
     </div>
 
-    <div class="flex mb-6 text-sm">
+    <!--
+      Quién eres, antes de nada. Son dos puertas distintas y no dos maneras de abrir la
+      misma: el cliente entra con su correo, y quien trabaja aquí con un PIN de seis
+      dígitos que teclea de pie en la barra, con una mano y sin luz. Mezclarlas obligaba
+      al empleado a escribir un correo y una contraseña larga en esa situación.
+
+      Cuál sale primero se recuerda EN ESTE APARATO: la tableta de la barra la usan
+      cuarenta personas por turno y ninguna debería tener que tocar "trabajo aquí" cada
+      vez. El teléfono de un cliente abre en cliente para siempre.
+    -->
+    <div id="access-switch" class="flex gap-2 mb-5">
+      <button id="mode-client" class="flex-1 py-2 rounded-xl text-sm tab-active font-semibold" data-i18n="pin.modeClient">Soy cliente</button>
+      <button id="mode-staff" class="flex-1 py-2 rounded-xl text-sm text-white/50" data-i18n="pin.modeStaff">Trabajo aquí</button>
+    </div>
+
+    <div id="auth-tabs" class="flex mb-6 text-sm">
       <button id="tab-login" class="flex-1 py-2 tab-active font-semibold" data-i18n="auth.signin">Entrar</button>
       <button id="tab-register" class="flex-1 py-2 text-white/50" data-i18n="auth.signup">Crear cuenta</button>
     </div>
+
+    <!-- ---------------------------- EL TECLADO ----------------------------
+      Puntos y no números: esto se usa con gente al lado y la pantalla a la vista de
+      todos. Se manda solo al sexto dígito, sin botón de "entrar": un toque menos en la
+      oscuridad, y equivocarse solo cuesta volver a empezar.
+    -->
+    <div id="pin-pad" class="space-y-5" hidden>
+      <div class="text-center">
+        <p id="pin-title" class="font-display text-xl ev2-gradient" data-i18n="pin.title">Tu PIN</p>
+        <p id="pin-note" class="text-sm text-white/60 mt-1" data-i18n="pin.note">Teclea tus 6 dígitos.</p>
+      </div>
+      <div id="pin-dots" class="flex justify-center gap-3" aria-hidden="true"></div>
+      <div id="pin-keys" class="grid grid-cols-3 gap-3"></div>
+      <p id="pin-error" class="text-sm text-red-300 text-center" hidden></p>
+      <div id="pin-extra" class="text-center space-y-2">
+        <button type="button" id="btn-use-password" class="text-sm text-white/50 underline" data-i18n="pin.usePassword">Entrar con correo y contraseña</button>
+        <p class="text-[11px] text-white/35 leading-snug" data-i18n="pin.managerNote">La gerencia entra con PIN dentro del club. Desde fuera, con su correo y contraseña.</p>
+      </div>
+      <button type="button" id="btn-pin-cancel" class="w-full text-sm text-white/50 underline" data-i18n="top.signOut" hidden>Salir</button>
+    </div>
+
+    <!-- El regreso al teclado, para el gerente que entró a la pantalla de contraseña. -->
+    <button type="button" id="btn-use-pin" class="mt-3 text-sm text-white/50 underline" data-i18n="pin.usePin" hidden>Entrar con PIN</button>
 
     <form id="form-login" class="space-y-3">
       <input id="login-email" type="email" autocomplete="email" required placeholder="Correo" data-i18n-placeholder="auth.email"
@@ -154,7 +89,7 @@
              class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
       <label class="flex items-start gap-3 text-sm text-white/70 tap">
         <input id="reg-terms" type="checkbox" required class="mt-1 w-5 h-5 accent-cyan-400">
-        <span data-i18n="auth.terms">Tengo 18 años o más y acepto los términos y el código de conducta.</span>
+        <span><span data-i18n="auth.terms">Tengo 18 años o más y acepto los términos y el código de conducta.</span> <a href="terminos.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.termsLink">Términos</a> <span class="text-white/30">·</span> <a href="privacidad.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.privacyLink">Privacidad</a></span>
       </label>
       <label class="flex items-start gap-3 text-sm text-white/70 tap">
         <input id="reg-flirts" type="checkbox" class="mt-1 w-5 h-5 accent-pink-400">
@@ -163,8 +98,73 @@
       <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="auth.create">Crear cuenta</button>
     </form>
 
+    <!-- Entrar con una cuenta de otro.
+         Nace vacío y oculto a propósito: los botones los pinta `social-login.js` con
+         lo que contesta el servidor, así que solo aparece el proveedor que de verdad
+         está configurado. Un botón de Facebook sin credenciales manda a la persona a
+         una pantalla de Meta que la rechaza, y eso es peor que no tener el botón. -->
+    <div id="social-block" hidden>
+      <div class="flex items-center gap-3 my-5">
+        <span class="flex-1 h-px bg-white/10"></span>
+        <span class="text-xs uppercase tracking-widest text-white/35" data-i18n="social.or">o entra con</span>
+        <span class="flex-1 h-px bg-white/10"></span>
+      </div>
+      <div id="social-buttons" class="space-y-2"></div>
+    </div>
+
+    <!-- Terminar el registro que empezó con una cuenta social.
+         Facebook no entrega fecha de nacimiento fiable, y de ese dato depende dejar
+         entrar a alguien a un negocio de alcohol: inventarla sería inventar la edad
+         de un cliente. Así que se pide aquí, igual que en el registro normal. -->
+    <form id="social-finish" class="space-y-3 mt-2" hidden>
+      <div class="info-panel text-left">
+        <p class="font-display text-lg ev2-gradient" data-i18n="social.finishTitle">Falta un dato</p>
+        <p id="social-finish-note" class="text-xs text-white/60 mt-1"></p>
+      </div>
+      <input id="social-email" type="email" autocomplete="email" placeholder="Correo" data-i18n-placeholder="auth.email"
+             class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+      <label class="block text-xs text-white/50 pt-1" data-i18n="auth.birthDate">Fecha de nacimiento</label>
+      <input id="social-birth" type="date" required
+             class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-400 outline-none">
+      <label class="flex items-start gap-3 text-sm text-white/70 tap">
+        <input id="social-terms" type="checkbox" required class="mt-1 w-5 h-5 accent-cyan-400">
+        <span><span data-i18n="auth.terms">Tengo 18 años o más y acepto los términos y el código de conducta.</span> <a href="terminos.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.termsLink">Términos</a> <span class="text-white/30">·</span> <a href="privacidad.html" target="_blank" rel="noopener" class="underline text-cyan-300" data-i18n="auth.privacyLink">Privacidad</a></span>
+      </label>
+      <button type="submit" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="social.finish">Terminar y entrar</button>
+      <button type="button" id="social-finish-cancel" class="w-full text-sm text-white/50 underline" data-i18n="social.cancel">Cancelar</button>
+    </form>
+
     <p id="auth-error" class="mt-4 text-sm text-red-300 text-center" hidden></p>
+
+    <!-- Ver antes de registrarse (D74): la carta y las noches, sin cuenta. -->
+    <button type="button" id="btn-preview" class="btn-secondary w-full mt-5 py-3 rounded-xl text-sm">
+      <i class="fa-solid fa-martini-glass mr-2"></i><span data-i18n="preview.open">Ver la carta y las noches sin cuenta</span>
+    </button>
     <p class="mt-8 text-center text-xs text-white/30" data-i18n="auth.adults">Solo +18 · EV2 Clandestinoz</p>
+  </section>
+
+  <!-- ============================ VITRINA SIN CUENTA (D74) ============================ -->
+  <section id="screen-preview" class="flex-1 flex flex-col" hidden>
+    <header class="px-4 py-3 flex items-center justify-between border-b border-white/10 sticky top-0 backdrop-blur bg-black/70 z-20">
+      <button id="btn-preview-back" class="text-sm text-white/70 px-1 flex items-center gap-2"><i class="fa-solid fa-chevron-left"></i><span data-i18n="preview.back">Entrar</span></button>
+      <p class="font-display text-lg ev2-gradient">EV2</p>
+      <span class="w-12"></span>
+    </header>
+    <main class="flex-1 overflow-y-auto p-4 pb-28 space-y-5">
+      <div id="preview-nights-wrap" hidden>
+        <p class="text-xs uppercase tracking-wider text-white/40 mb-2" data-i18n="preview.nights">Próximas noches</p>
+        <div id="preview-nights" class="space-y-2"></div>
+      </div>
+      <div>
+        <p class="text-xs uppercase tracking-wider text-white/40 mb-2" data-i18n="preview.menu">La carta</p>
+        <input id="preview-search" type="search" class="field mb-3" placeholder="Buscar en la carta" data-i18n-placeholder="menu.search" autocomplete="off">
+        <div id="preview-categories" class="flex gap-2 overflow-x-auto pb-3 -mx-1 px-1"></div>
+        <div id="preview-list" class="space-y-2"></div>
+      </div>
+    </main>
+    <div class="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-black/90 backdrop-blur border-t border-white/10">
+      <button id="btn-preview-join" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="preview.join">Crear cuenta para pedir</button>
+    </div>
   </section>
 
   <!-- ================== EMPLEADO SIN PANTALLA TODAVÍA ================== -->
@@ -206,8 +206,78 @@
 
     <main class="flex-1 overflow-y-auto pb-28">
 
+      <!-- ---------------------------- INICIO (D74) ----------------------------
+        Lo que el cliente necesita AHORA, segun el momento de su noche: sin mesa, elegir
+        o reservar; sentado, pedir y ver lo que viene; de salida, el taxi. Antes la app
+        abria en el plano con cuatro contadores, que es lo que menos se usa adentro. -->
+      <div id="view-home" class="p-4 space-y-3">
+        <div class="pt-1">
+          <p class="text-sm text-white/50" data-i18n="home.hello">Hola</p>
+          <p id="home-name" class="font-display text-2xl leading-tight">—</p>
+          <p id="home-where" class="text-sm text-white/60 mt-1">—</p>
+        </div>
+
+        <button id="home-seat" class="card rounded-2xl p-4 w-full text-left flex items-center gap-4">
+          <span class="w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0" style="background:rgba(30,200,255,.14);color:var(--ev2-cyan)"><i class="fa-solid fa-map-location-dot"></i></span>
+          <span class="flex-1 min-w-0">
+            <span class="block font-semibold" data-i18n="home.seatTitle">Elige tu mesa o reserva</span>
+            <span class="block text-xs text-white/50 mt-0.5" data-i18n="home.seatHint">Tócala en el plano. Para otra noche, apártala desde ahí.</span>
+          </span>
+          <i class="fa-solid fa-chevron-right text-white/30"></i>
+        </button>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button id="home-menu" class="ev2-button col-span-2 rounded-2xl py-4 font-display text-lg">
+            <i class="fa-solid fa-martini-glass mr-2"></i><span data-i18n="home.order">Pedir algo</span>
+          </button>
+          <button id="home-repeat" class="btn-secondary rounded-2xl py-3 text-sm" hidden>
+            <i class="fa-solid fa-rotate-left mr-1"></i><span data-i18n="home.repeat">Repetir lo último</span>
+          </button>
+          <button id="home-orders" class="btn-secondary rounded-2xl py-3 text-sm">
+            <i class="fa-solid fa-receipt mr-1"></i><span data-i18n="nav.orders">Pedidos</span>
+          </button>
+        </div>
+
+        <!-- El pedido que va en camino, sin tener que buscarlo. -->
+        <button id="home-live" class="card rounded-2xl p-4 w-full text-left" hidden>
+          <span class="flex items-center justify-between gap-3">
+            <span class="min-w-0">
+              <span class="block text-xs uppercase tracking-wider text-white/40" data-i18n="home.live">Tu pedido</span>
+              <span id="home-live-status" class="block font-semibold mt-0.5">—</span>
+              <span id="home-live-items" class="block text-xs text-white/50 truncate">—</span>
+            </span>
+            <span id="home-live-count" class="pill pill-wait" hidden></span>
+          </span>
+          <span class="block mt-3 h-1.5 rounded-full bg-white/10 overflow-hidden"><span id="home-live-bar" class="block h-full ev2-button pulsing" style="width:0%"></span></span>
+        </button>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button id="home-show" class="card rounded-2xl p-4 text-left">
+            <i class="fa-solid fa-music text-xl" style="color:var(--ev2-pink)"></i>
+            <span class="block font-semibold mt-2" data-i18n="home.show">Propinas y canciones</span>
+          </button>
+          <button id="home-flirt" class="card rounded-2xl p-4 text-left relative">
+            <i class="fa-solid fa-heart text-xl" style="color:var(--ev2-pink)"></i>
+            <span class="block font-semibold mt-2" data-i18n="nav.flirt">Conecta</span>
+          </button>
+        </div>
+
+        <button id="home-exit" class="card rounded-2xl p-4 w-full text-left flex items-center gap-4">
+          <span class="w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0" style="background:rgba(74,222,128,.14);color:var(--ev2-lime)"><i class="fa-solid fa-taxi"></i></span>
+          <span class="flex-1 min-w-0">
+            <span class="block font-semibold" data-i18n="home.exitTitle">Salida segura</span>
+            <span id="home-exit-hint" class="block text-xs text-white/50 mt-0.5" data-i18n="home.exitHint">Pide un taxi del club cuando te vayas.</span>
+          </span>
+          <i class="fa-solid fa-chevron-right text-white/30"></i>
+        </button>
+      </div>
+
       <!-- ---------------------------- MAPA ---------------------------- -->
-      <div id="view-map" class="p-3 space-y-3">
+      <div id="view-map" class="p-3 space-y-3" hidden>
+        <div class="flex items-center gap-3 -mt-1">
+          <button data-goto="home" class="btn-secondary rounded-full w-11 h-11 flex items-center justify-center shrink-0" aria-label="Inicio" data-i18n-title="nav.home"><i class="fa-solid fa-chevron-left"></i></button>
+          <h2 class="font-display text-xl" data-i18n="nav.map">Mapa</h2>
+        </div>
         <div class="grid grid-cols-4 gap-2">
           <div class="stat-card"><div class="stat-number" id="stat-total">—</div><div class="stat-label" data-i18n="map.tables">Mesas</div></div>
           <div class="stat-card"><div class="stat-number" id="stat-free">—</div><div class="stat-label" data-i18n="map.free">Libres</div></div>
@@ -303,6 +373,7 @@
 
       <!-- ---------------------------- MENÚ ---------------------------- -->
       <div id="view-menu" class="p-4" hidden>
+        <input id="menu-search" type="search" class="field mb-3" placeholder="Buscar en la carta" data-i18n-placeholder="menu.search" autocomplete="off">
         <div id="menu-categories" class="flex gap-2 overflow-x-auto pb-3 -mx-1 px-1"></div>
         <div id="menu-list" class="space-y-2"></div>
       </div>
@@ -320,6 +391,10 @@
         (staff/on-shift); el reconocimiento, del leaderboard real. Nada inventado.
       -->
       <div id="view-show" class="p-4 space-y-4" hidden>
+        <button id="show-flirt" class="card rounded-xl px-4 py-3 w-full flex items-center justify-between text-sm">
+          <span><i class="fa-solid fa-heart mr-2" style="color:var(--ev2-pink)"></i><span data-i18n="nav.flirt">Conecta</span><span id="flirt-badge-show" class="ml-2 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></span>
+          <i class="fa-solid fa-chevron-right text-white/30"></i>
+        </button>
         <div id="show-tabs" class="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1"></div>
 
         <!-- --------- personal de un rol --------- -->
@@ -392,6 +467,10 @@
         buscar cómo apagarlo en un menú.
       -->
       <div id="view-flirt" class="p-4 space-y-4" hidden>
+        <div class="flex items-center gap-3 -mt-1">
+          <button data-goto="home" class="btn-secondary rounded-full w-11 h-11 flex items-center justify-center shrink-0" aria-label="Inicio" data-i18n-title="nav.home"><i class="fa-solid fa-chevron-left"></i></button>
+          <h2 class="font-display text-xl" data-i18n="nav.flirt">Conecta</h2>
+        </div>
         <div id="flirt-optout" class="card rounded-xl p-5 space-y-3" hidden>
           <p class="font-display text-lg" data-i18n="flirt.offTitle">Conecta está apagado</p>
           <p class="text-sm text-white/60" data-i18n="flirt.offBody">Nadie puede mandarte nada y no apareces en ninguna lista. Si lo enciendes, la gente que esté sentada esta noche puede mandarte un saludo, y tú a ellos.</p>
@@ -431,6 +510,10 @@
 
       <!-- ---------------------------- SALIDA SEGURA ---------------------------- -->
       <div id="view-taxi" class="p-4 space-y-4" hidden>
+        <div class="flex items-center gap-3 -mt-1">
+          <button data-goto="home" class="btn-secondary rounded-full w-11 h-11 flex items-center justify-center shrink-0" aria-label="Inicio" data-i18n-title="nav.home"><i class="fa-solid fa-chevron-left"></i></button>
+          <h2 class="font-display text-xl" data-i18n="taxi.nav">Salida</h2>
+        </div>
         <div id="taxi-headline" class="info-panel">
           <p id="taxi-headline-text" class="font-display text-lg leading-snug">—</p>
           <p id="taxi-pickup" class="text-xs text-white/50 mt-2" hidden></p>
@@ -544,6 +627,52 @@
           <div class="flex justify-between px-4 py-3 text-sm"><span class="text-white/50" data-i18n="profile.account">Cuenta</span><span id="profile-role">—</span></div>
         </div>
         <!--
+          Objetos perdidos (D67). Vive en el perfil y no en una pestaña propia: se usa
+          una vez cada muchas noches, y el nav de abajo ya lleva siete.
+
+          Las señas que escribe aquí el cliente NO se le enseñan a nadie más. Es lo que
+          permite comprobar que algo es suyo: la única prueba de que un teléfono es tuyo
+          es que puedas describir lo que nadie más vio.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="lf.title">Objetos perdidos</p>
+            <button id="btn-lf-open" class="card rounded-lg px-3 py-2 text-xs" data-i18n="lf.open">Abrir</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="lf.why">Reporta algo que perdiste, o entrega algo que encontraste. Lo que escribas de sus señas solo lo ve el personal.</p>
+
+          <div id="lf-panel" class="space-y-3" hidden>
+            <!-- Lo que hay guardado, sin señas: categoría, zona y día. -->
+            <div class="space-y-2">
+              <p class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="lf.catalogue">Lo que está guardado</p>
+              <p id="lf-found-empty" class="text-sm text-white/40" data-i18n="lf.foundNone" hidden>No hay nada en resguardo ahora mismo.</p>
+              <div id="lf-found" class="space-y-2"></div>
+            </div>
+
+            <!-- Mis reportes, con mis señas y mi código de entrega. -->
+            <div class="space-y-2 border-t border-white/10 pt-3">
+              <p class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="lf.mine">Mis reportes</p>
+              <p id="lf-mine-empty" class="text-sm text-white/40" data-i18n="lf.mineNone" hidden>Todavía no has levantado ninguno.</p>
+              <div id="lf-mine" class="space-y-2"></div>
+            </div>
+
+            <!-- Levantar uno. -->
+            <div class="space-y-2 border-t border-white/10 pt-3">
+              <div class="grid grid-cols-2 gap-2">
+                <button id="btn-lf-kind-lost" class="chip tap px-3 py-2 text-xs on" data-i18n="lf.kindLost">Perdí algo</button>
+                <button id="btn-lf-kind-found" class="chip tap px-3 py-2 text-xs" data-i18n="lf.kindFound">Encontré algo</button>
+              </div>
+              <select id="lf-category" class="field"></select>
+              <input id="lf-place" class="field" placeholder="¿Dónde?" data-i18n-placeholder="lf.place">
+              <textarea id="lf-details" class="field" rows="3" placeholder="Cómo es" data-i18n-placeholder="lf.details"></textarea>
+              <p class="text-[11px] text-white/40" data-i18n="lf.detailsNote">Mientras más señas, más fácil comprobar que es tuyo: marca, color, funda, qué traía adentro. Esto no se le enseña a otros clientes.</p>
+              <p id="lf-error" class="text-sm text-red-300" hidden></p>
+              <button id="btn-lf-send" class="ev2-button w-full rounded-lg py-3 font-display" data-i18n="lf.send">Levantar el reporte</button>
+            </div>
+          </div>
+        </div>
+
+        <!--
           Los tres interruptores viven en el perfil, juntos y en palabras llanas. Un
           permiso que solo se puede encender es una trampa: los tres se apagan aquí, y
           apagarlos surte efecto en la misma noche.
@@ -572,7 +701,61 @@
           </div>
         </div>
 
+        <!-- Cuentas ligadas. El botón de quitar solo aparece cuando queda otra manera
+             de entrar: dejar a alguien sin contraseña y sin cuenta ligada es dejarlo
+             fuera de su propia cuenta, con sus reservaciones adentro. -->
+        <div id="social-panel" class="card rounded-xl p-4 space-y-3" hidden>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="social.linkedAccounts">Cuentas ligadas</p>
+          <p id="social-panel-empty" class="text-sm text-white/40" data-i18n="social.none" hidden>No tienes ninguna cuenta ligada.</p>
+          <div id="social-panel-list" class="space-y-2"></div>
+          <div id="social-panel-add" class="space-y-2"></div>
+          <p id="social-panel-note" class="text-[11px] text-white/40" hidden></p>
+          <p id="social-panel-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button id="profile-taxi" class="btn-secondary rounded-xl py-3 text-sm"><i class="fa-solid fa-taxi mr-1"></i><span data-i18n="home.exitTitle">Salida segura</span></button>
+          <button id="profile-map" class="btn-secondary rounded-xl py-3 text-sm"><i class="fa-solid fa-map-location-dot mr-1"></i><span data-i18n="home.myTable">Mesa y reservas</span></button>
+        </div>
+
         <button id="btn-profile-logout" class="w-full py-3 rounded-xl card text-sm text-red-300" data-i18n="profile.signOut">Cerrar sesión</button>
+
+        <!--
+          Borrar la cuenta (D68).
+
+          Nace cerrado, al final de todo y sin color de alarma: es la única acción
+          irreversible que un cliente puede hacer sobre sí mismo, y no tiene por qué
+          estar compitiendo por la vista con "cerrar sesión", que es lo que la gente
+          viene a buscar aquí nueve de cada diez veces.
+
+          Al abrirlo se pregunta PRIMERO al servidor qué lo impide, para que quien tiene
+          el coche en el valet lo lea antes de escribir nada y no después.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="del.title">Borrar mi cuenta</p>
+            <button id="btn-del-open" class="card rounded-lg px-3 py-2 text-xs" data-i18n="del.open">Abrir</button>
+          </div>
+
+          <div id="del-panel" class="space-y-3" hidden>
+            <p class="text-[11px] text-white/50" data-i18n="del.what">Se borran tu nombre, correo, teléfono, fecha de nacimiento, sesiones, cuentas ligadas y métodos de pago. Los montos de lo que consumiste se quedan en la contabilidad, sin tu nombre.</p>
+
+            <!-- Los motivos que lo impiden, cada uno en su renglón. -->
+            <div id="del-blockers" class="space-y-1" hidden></div>
+
+            <div id="del-form" class="space-y-2" hidden>
+              <label class="block text-[11px] text-white/50" for="del-confirm" data-i18n="del.typeToConfirm">Escribe BORRAR para confirmar</label>
+              <input id="del-confirm" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-red-400 outline-none font-display tracking-widest text-center"
+                     maxlength="10" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="BORRAR">
+              <button id="btn-del-go" class="w-full py-3 rounded-xl text-sm text-red-300 border border-red-400/40" data-i18n="del.go">Borrar mi cuenta para siempre</button>
+            </div>
+
+            <p id="del-error" class="text-sm text-red-300" hidden></p>
+            <p class="text-[11px] text-white/30">
+              <a href="privacidad.html#eliminar-datos" target="_blank" rel="noopener" class="underline" data-i18n="del.readMore">Qué se borra y qué no</a>
+            </p>
+          </div>
+        </div>
       </div>
     </main>
 
@@ -584,14 +767,13 @@
       </button>
     </div>
 
-    <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto grid grid-cols-7 border-t border-white/10 bg-black/95 backdrop-blur z-20">
-      <button data-view="map" class="nav-tab py-3 text-[10px] tab-active"><i class="fa-solid fa-map-location-dot block text-lg mb-1"></i><span data-i18n="nav.map">Mapa</span></button>
-      <button data-view="menu" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-martini-glass block text-lg mb-1"></i><span data-i18n="nav.menu">Menú</span></button>
-      <button data-view="orders" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-receipt block text-lg mb-1"></i><span data-i18n="nav.orders">Pedidos</span><span id="orders-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
-      <button data-view="show" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-music block text-lg mb-1"></i><span data-i18n="nav.show">Show</span></button>
-      <button data-view="flirt" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-heart block text-lg mb-1"></i><span data-i18n="nav.flirt">Conecta</span><span id="flirt-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
-      <button data-view="taxi" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-taxi block text-lg mb-1"></i><span data-i18n="taxi.nav">Salida</span><span id="taxi-badge" class="ml-1 px-1.5 rounded-full bg-emerald-500 text-[10px]" hidden></span></button>
-      <button data-view="profile" class="nav-tab py-3 text-[10px] text-white/50"><i class="fa-solid fa-user block text-lg mb-1"></i><span data-i18n="nav.profile">Perfil</span></button>
+    <!-- Cinco pestañas (D74). Mapa, Conecta y Salida siguen a un toque desde Inicio. -->
+    <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto grid grid-cols-5 border-t border-white/10 bg-black/95 backdrop-blur z-20" style="padding-bottom:env(safe-area-inset-bottom)" aria-label="Secciones">
+      <button data-view="home" class="nav-tab py-2.5 text-[11px] tab-active"><i class="fa-solid fa-house block text-lg mb-1"></i><span data-i18n="nav.home">Inicio</span><span id="taxi-badge" class="ml-1 px-1.5 rounded-full bg-emerald-500 text-[10px]" hidden></span></button>
+      <button data-view="menu" class="nav-tab py-2.5 text-[11px] text-white/50"><i class="fa-solid fa-martini-glass block text-lg mb-1"></i><span data-i18n="nav.menu">Carta</span></button>
+      <button data-view="orders" class="nav-tab py-2.5 text-[11px] text-white/50"><i class="fa-solid fa-receipt block text-lg mb-1"></i><span data-i18n="nav.orders">Pedidos</span><span id="orders-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
+      <button data-view="show" class="nav-tab py-2.5 text-[11px] text-white/50"><i class="fa-solid fa-music block text-lg mb-1"></i><span data-i18n="nav.show">Show</span><span id="flirt-badge" class="ml-1 px-1.5 rounded-full bg-pink-500 text-[10px]" hidden></span></button>
+      <button data-view="profile" class="nav-tab py-2.5 text-[11px] text-white/50"><i class="fa-solid fa-user block text-lg mb-1"></i><span data-i18n="nav.profile">Cuenta</span></button>
     </nav>
   </section>
 
@@ -732,6 +914,47 @@
       <p id="pass-used" class="text-sm" style="color:var(--ev2-lime)" hidden></p>
       <p class="text-[11px] text-white/40 leading-snug" data-i18n="pass.note">Enséñalo en la entrada. Sirve una sola vez y solo para esta noche.</p>
       <p id="pass-error" class="text-sm text-red-300" hidden></p>
+
+      <!--
+        Los pases de los demás. Va DEBAJO del propio a propósito: lo primero que el
+        titular necesita en la puerta es su QR, no la administración de la mesa.
+
+        Cada invitado tiene el suyo, y el titular los reparte por WhatsApp. Si alguien
+        no viene, se reasigna: el código viejo muere y sale uno nuevo, porque el
+        anterior ya salió de su teléfono y puede estar en la conversación de alguien
+        que ya no va a venir.
+      -->
+      <div id="gp-block" class="border-t border-white/10 pt-3 text-left space-y-2" hidden>
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="gp.title">Los pases de tu mesa</p>
+          <p id="gp-summary" class="text-[11px] text-white/50">—</p>
+        </div>
+        <p class="text-[11px] text-white/40 leading-snug" data-i18n="gp.note">
+          Un pase por persona. Cada uno sirve una sola vez y solo para quien lo lleva.
+        </p>
+        <div id="gp-list" class="space-y-2 max-h-64 overflow-y-auto"></div>
+        <p id="gp-error" class="text-sm text-red-300" hidden></p>
+      </div>
+    </div>
+  </div>
+
+  <!--
+    El motivo, para revocar o reasignar. Es su propia hoja porque el motivo es
+    obligatorio: un pase muerto sin motivo es una discusión en la puerta que nadie
+    puede resolver, y a la semana nadie se acuerda.
+  -->
+  <div id="gp-reason-sheet" class="fixed inset-0 z-[60] flex items-end justify-center bg-black/80 p-0" hidden>
+    <div class="w-full max-w-sm rounded-t-2xl p-5 space-y-3" style="background:#12121f;border-top:1px solid rgba(255,255,255,.12)">
+      <div class="flex items-start justify-between gap-3">
+        <p id="gp-reason-title" class="font-display text-base">—</p>
+        <button id="btn-gp-reason-close" class="text-white/50 px-2" aria-label="Cerrar"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <input id="gp-reason-name" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 outline-none text-sm"
+             maxlength="60" autocomplete="off" placeholder="¿Para quién es?" data-i18n-placeholder="gp.name" aria-label="Para quién es" hidden>
+      <input id="gp-reason-text" class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 outline-none text-sm"
+             maxlength="200" autocomplete="off" placeholder="¿Por qué lo cancelas?" data-i18n-placeholder="gp.revokeWhy" aria-label="Motivo">
+      <p id="gp-reason-error" class="text-sm text-red-300" hidden></p>
+      <button id="btn-gp-reason-go" class="ev2-button w-full py-3 rounded-xl font-display text-sm">—</button>
     </div>
   </div>
 
@@ -740,7 +963,9 @@
 
 <script src="js/api.js"></script>
 <script src="js/format.js"></script>
+<script src="js/ui.js"></script>
 <script src="js/roles.js"></script>
+<script src="js/pin-pad.js"></script>
 <script src="js/floor-map.js"></script>
 <script src="js/taxi-ride.js"></script>
 <script src="js/tipping.js"></script>
@@ -748,11 +973,14 @@
 <script src="js/booking.js"></script>
 <script src="js/drink-art.js"></script>
 <script src="js/flirt.js"></script>
+<script src="js/social-login.js"></script>
 <script src="js/client.js"></script>
 <script src="js/index-screen.js"></script>
 <script src="js/show-screen.js"></script>
 <script src="js/booking-screen.js"></script>
 <script src="js/flirt-screen.js"></script>
+<script src="js/lost-found-screen.js"></script>
+<script src="js/account-delete.js"></script>
 <script src="js/pwa.js"></script>
 </body>
 </html>

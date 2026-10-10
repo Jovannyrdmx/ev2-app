@@ -12,7 +12,11 @@ const router = express.Router({ mergeParams: true });
 
 // What the club actually keeps out of the ledger, versus what only passes through it
 // on its way to a person (see the dashboard query below).
-const CLUB_REVENUE_TYPES = ['drink_order', 'bottle_service', 'reservation_deposit',
+// `cover` entró al libro en la migración 016 y nadie lo agregó aquí, así que toda la
+// venta de la puerta —muy probablemente la mayor línea de efectivo de la noche—
+// desaparecía del total del tablero sin aparecer en ninguna otra parte. El gerente
+// decidía sobre un número al que le faltaba eso.
+const CLUB_REVENUE_TYPES = ['drink_order', 'bottle_service', 'cover', 'reservation_deposit',
   'reservation_balance', 'valet', 'adjustment'];
 const STAFF_INCOME_TYPES = ['tip', 'song_request'];
 
@@ -27,6 +31,43 @@ router.get('/nightclubs/by-slug/:slug',
     );
     if (rows.length === 0) throw ApiError.notFound('Nightclub not found');
     res.json({ nightclub: rows[0] });
+  }));
+
+/**
+ * Public showcase (D74): the menu and the upcoming nights, readable before signing up.
+ *
+ * Asking for an account before showing a single price was the first thing a guest met
+ * at the door. What is published here is what is already printed on the club's own
+ * menu and posters: name, category, price and published nights. No stock (that tells
+ * a competitor how much sells), no reservations count, no people. Ordering and booking
+ * still require an account, because they charge money and need a name.
+ */
+router.get('/nightclubs/by-slug/:slug/showcase',
+  validate({ params: z.object({ slug: z.string().trim().min(1).max(100) }) }),
+  asyncHandler(async (req, res) => {
+    const club = await pool.query(
+      `SELECT id, name, slug, city, country, currency_default
+         FROM nightclubs WHERE slug = $1 AND active`, [req.params.slug]);
+    if (club.rowCount === 0) throw ApiError.notFound('Nightclub not found');
+    const nightclub = club.rows[0];
+    const [drinks, nights] = await Promise.all([
+      pool.query(
+        `SELECT d.id, d.name, d.category, d.price, d.currency, d.description, d.image_url,
+                d.available, d.sort_order
+           FROM drinks d
+          WHERE d.nightclub_id = $1 AND d.active AND d.available
+          ORDER BY d.category, d.sort_order NULLS LAST, d.name`, [nightclub.id]),
+      pool.query(
+        `SELECT e.id, e.name, e.event_date, e.doors_open_at, e.closes_at, e.ticket_price,
+                e.currency, e.description, e.cover_image_url
+           FROM events_calendar e
+          WHERE e.nightclub_id = $1 AND e.status = 'published'
+            AND e.event_date >= (now() AT TIME ZONE 'UTC')::date - 1
+          ORDER BY e.event_date, e.doors_open_at
+          LIMIT 8`, [nightclub.id]),
+    ]);
+    res.set('Cache-Control', 'public, max-age=60');
+    res.json({ nightclub, drinks: drinks.rows, events: nights.rows });
   }));
 
 router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
@@ -105,7 +146,7 @@ router.get('/nightclubs/:nightclubId/dashboard',
   validate({ params: z.object({ nightclubId: uuid }) }),
   asyncHandler(async (req, res) => {
     const id = req.params.nightclubId;
-    const [tables, orders, revenue, staff] = await Promise.all([
+    const [tables, orders, revenue, staff, partialRefunds] = await Promise.all([
       pool.query(
         `SELECT count(*)::int AS total,
                 count(*) FILTER (WHERE status = 'occupied')::int AS occupied,
@@ -139,12 +180,37 @@ router.get('/nightclubs/:nightclubId/dashboard',
         [id, CLUB_REVENUE_TYPES, STAFF_INCOME_TYPES]),
       pool.query(
         `SELECT count(*)::int AS on_shift FROM staff_shifts WHERE nightclub_id = $1 AND ended_at IS NULL`, [id]),
+      // Lo devuelto EN PARTE (D49). Una devolución completa ya saca el renglón original
+      // del ingreso, porque lo pasa a `refunded`; restarla aquí también sería contarla
+      // dos veces. Una parcial deja el original en `paid` por el total, así que solo esa
+      // se resta. El JOIN con el original en `paid` es lo que distingue una de la otra
+      // en cualquier orden en que hayan pasado.
+      pool.query(
+        `SELECT r.currency, COALESCE(sum(r.amount), 0)::numeric(12,2)::text AS refunded
+           FROM transactions r JOIN transactions o ON o.id = r.reference_id
+          WHERE r.nightclub_id = $1 AND r.type = 'refund' AND r.direction = 'out'
+            AND r.status = 'paid' AND r.reference_type = 'transaction'
+            AND o.status = 'paid' AND o.type = ANY($2::text[])
+            AND r.created_at > date_trunc('day', now() - interval '6 hours')
+          GROUP BY r.currency`,
+        [id, CLUB_REVENUE_TYPES]),
     ]);
+
+    const devuelto = new Map(partialRefunds.rows.map((r) => [r.currency, Number(r.refunded)]));
+    const revenueToday = revenue.rows.map((row) => {
+      const menos = devuelto.get(row.currency) || 0;
+      if (!menos) return row;
+      return {
+        ...row,
+        total: (Math.round((Number(row.total) - menos) * 100) / 100).toFixed(2),
+        refunded_partial: menos.toFixed(2),
+      };
+    });
 
     res.json({
       tables: tables.rows[0],
       orders: orders.rows[0],
-      revenue_today: revenue.rows,
+      revenue_today: revenueToday,
       staff: staff.rows[0],
       generated_at: new Date().toISOString(),
     });

@@ -7,7 +7,16 @@ const { pool } = require('../db/pool');
 const { ApiError } = require('./errors');
 
 const ACCESS_TTL = process.env.JWT_ACCESS_TTL || '15m';
-const PASSWORD_CHANGE_ALLOWED = /^\/api\/auth\/(password|logout|me)(\?|$)/;
+/**
+ * Las rutas que quedan abiertas mientras haya una credencial temporal por cambiar.
+ *
+ * Es UNA sola lista para las dos puertas —contraseña y PIN— y eso importa: un gerente
+ * nuevo nace con las dos pendientes (contraseña para entrar desde fuera, PIN para el
+ * club). Con dos listas separadas, la puerta de la contraseña le bloqueaba
+ * `/auth/pin` y la del PIN le bloqueaba `/auth/password`: no podía cambiar ninguna de
+ * las dos y su cuenta quedaba inservible desde el minuto uno. Lo encontró una prueba.
+ */
+const CREDENTIAL_CHANGE_ALLOWED = /^\/api\/auth\/(password|pin|logout|me)(\?|$)/;
 const REFRESH_TTL_DAYS = Number(process.env.JWT_REFRESH_TTL_DAYS || 30);
 
 function jwtSecret() {
@@ -76,7 +85,8 @@ async function authenticate(req, res, next) {
 
     const { rows } = await pool.query(
       `SELECT id, nightclub_id, email, first_name, last_name, display_name, role, status,
-              locale, preferred_currency, must_change_password
+              locale, preferred_currency, must_change_password,
+              must_change_pin, (pin_lookup IS NOT NULL) AS has_pin
          FROM users WHERE id = $1`,
       [payload.sub],
     );
@@ -85,9 +95,18 @@ async function authenticate(req, res, next) {
     if (user.status !== 'active') throw ApiError.forbidden('Account is not active');
 
     // A temporary password opens only the door to replace it.
-    if (user.must_change_password && !PASSWORD_CHANGE_ALLOWED.test(req.originalUrl || req.url)) {
+    if (user.must_change_password && !CREDENTIAL_CHANGE_ALLOWED.test(req.originalUrl || req.url)) {
       throw new ApiError(403, 'password_change_required',
         'Debes cambiar tu contraseña temporal antes de continuar (POST /api/auth/password)');
+    }
+
+    // Y el PIN de un solo uso, lo mismo: mientras no lo cambie, esa sesión no sirve
+    // para nada más. El PIN que entregó el administrador viajó por su boca y por la
+    // pantalla de otra persona; el que de verdad protege la cuenta lo escribe el
+    // empleado y no lo sabe nadie más.
+    if (user.must_change_pin && !CREDENTIAL_CHANGE_ALLOWED.test(req.originalUrl || req.url)) {
+      throw new ApiError(403, 'pin_change_required',
+        'Cambia tu PIN antes de continuar (POST /api/auth/pin)');
     }
 
     req.user = user;

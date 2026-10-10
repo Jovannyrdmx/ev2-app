@@ -79,7 +79,7 @@ describe('El HTML marcado y el catálogo van juntos', () => {
   // en el catálogo imprime el nombre de la clave en pantalla y nadie lo ve hasta que
   // alguien cambia de idioma.
   const PAGES = ['index.html', 'bartender.html', 'driver.html', 'manager.html',
-    'staff.html', 'valet.html', 'employee-portal.html'];
+    'staff.html', 'valet.html', 'employee-portal.html', 'almacen.html'];
   const sources = Object.fromEntries(
     PAGES.map((page) => [page, fs.readFileSync(path.join(WEB, page), 'utf8')]),
   );
@@ -323,5 +323,29 @@ describe('Los roles también hablan los dos idiomas', () => {
   it('sin idioma responde en español, no vacío', () => {
     expect(Roles.describe('valet').label).toBe('Valet');
     expect(Roles.describe('manager').does).toMatch(/Precios/);
+  });
+});
+
+// ---------------------------------------------------------------- lo que manda el servidor
+
+describe('El catálogo cubre lo que el SERVIDOR manda', () => {
+  // Nace de un defecto real: el catálogo tenía `wh.kind.receive` —la clave del BOTÓN del
+  // almacén— y el servidor manda `receipt` en cada entrada de mercancía. En el kardex, la
+  // operación más frecuente de la bodega se veía con el texto crudo `wh.kind.receipt`.
+  //
+  // Las pruebas que había no lo veían porque armaban la lista de tipos desde el propio
+  // cliente. Esta la toma del servidor, que es quien decide.
+  const { F } = loadFormat();
+  // eslint-disable-next-line global-require
+  const inventory = require('../src/services/inventory');
+
+  it('cada tipo de movimiento de inventario tiene texto en los dos idiomas', () => {
+    const faltan = [];
+    for (const kind of inventory.MOVEMENT_KINDS) {
+      for (const idioma of F.SUPPORTED) {
+        if (!F.STRINGS[idioma][`wh.kind.${kind}`]) faltan.push(`${idioma}:${kind}`);
+      }
+    }
+    expect(faltan).toEqual([]);
   });
 });

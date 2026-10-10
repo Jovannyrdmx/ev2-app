@@ -11,13 +11,21 @@
  */
 'use strict';
 
-const VERSION = 'ev2-v6';
+// Se sube en CADA despliegue que cambie la cascara. La busqueda va por red primero,
+// asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
+// vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
+// existe.
+const VERSION = 'ev2-v32';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
-  'valet.html', 'employee-portal.html', 'manifest.json',
+  'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
   // La página pública de verificación: la abre alguien SIN cuenta, en la calle,
   // posiblemente con mala señal. Es justo donde una caché sirve.
   'verificar.html', 'js/verify-screen.js',
+  // El aviso de privacidad y los terminos: los abre gente sin cuenta, y el enlace de
+  // eliminacion de datos que esta dado de alta en el panel de Meta apunta aqui. Una de
+  // las dos paginas en blanco por falta de senal es una revision de Meta reprobada.
+  'privacidad.html', 'terminos.html',
   'js/api.js', 'js/format.js', 'js/roles.js', 'js/password-gate.js', 'js/client.js',
   'js/floor-map.js', 'js/index-screen.js', 'js/bar-queue.js', 'js/bartender-screen.js',
   'js/taxi-ride.js', 'js/driver-screen.js', 'js/manager.js', 'js/manager-screen.js',
@@ -27,9 +35,41 @@ const SHELL = [
   // reservación, personal, pagos, turno, puerta y conecta se quedaban en blanco.
   'js/tipping.js', 'js/songs.js', 'js/booking.js', 'js/show-screen.js', 'js/booking-screen.js',
   'js/staff-admin.js', 'js/payouts.js', 'js/shift.js', 'js/door.js',
-  'js/flirt.js', 'js/flirt-screen.js', 'js/drink-art.js', 'js/order-taking.js',
+  'js/flirt.js', 'js/flirt-screen.js', 'js/lost-found-screen.js', 'js/account-delete.js', 'js/drink-art.js', 'js/order-taking.js',
   'js/door-scan.js',
-  'images/favicon-32x32.png', 'images/ev2-logo.svg',
+  // El almacen se cuenta en una bodega, que es donde peor entra la senal de todo el
+  // edificio: si esta pantalla no abre sin red, el conteo se hace en papel.
+  'js/warehouse.js', 'js/warehouse-screen.js',
+  // Faltaban cinco, de cuatro pasos distintos, y el efecto era el mismo en todos: la
+  // pantalla abria sin senal y la pestana que dependia de ese archivo se quedaba en
+  // blanco. El peor era el almacen: se cuenta en una bodega, que es donde peor entra
+  // la senal del edificio. `tests/web-pwa.test.js` ahora compara esta lista contra los
+  // <script> de cada pagina, para que no vuelva a quedarse atras en silencio.
+  'js/receiving.js', 'js/receipt-review.js', 'js/roster.js', 'js/night-report.js',
+  'js/social-login.js',
+  // El teclado del PIN (D46). Es lo PRIMERO que toca el personal al llegar: si este
+  // archivo no esta guardado, una mala senal en la puerta deja a todo el turno sin
+  // poder entrar.
+  'js/pin-pad.js',
+  // El cuadro de la terminal (D47): si no esta guardado, el cobro con tarjeta se
+  // queda sin pantalla justo cuando la senal falla, que es cuando mas se nota.
+  'js/terminal-charge.js',
+  // El corte del turno (D51): quien cobra lo abre al final de la noche, con el club
+  // lleno y la senal peor que nunca. Sin el guardado, no puede ni ver cuanto entrega.
+  'js/shift-cut.js',
+  // El nombre del logo lleva la extension doble ('...svg.png') porque el archivo que
+  // se puso es un PNG. Apuntar a 'ev2-logo.svg' -- que no existe -- dejaba la app sin
+  // icono grande al agregarla a la pantalla de inicio, y el service worker fallaba al
+  // guardarlo en silencio.
+  'js/ui.js',
+  // La hoja de estilo, las letras y los iconos viven aquí mismo (D71): sin señal la app
+  // abre con su diseño, no con los botones grises del navegador.
+  'css/ev2.css',
+  'fonts/inter-latin-400-normal.woff2', 'fonts/inter-latin-500-normal.woff2',
+  'fonts/inter-latin-600-normal.woff2', 'fonts/inter-latin-700-normal.woff2',
+  'fonts/poppins-latin-500-normal.woff2', 'fonts/poppins-latin-600-normal.woff2',
+  'fonts/poppins-latin-700-normal.woff2',
+  'images/favicon-32x32.png', 'images/ev2-logo.svg.png',
 ];
 
 self.addEventListener('install', (event) => {

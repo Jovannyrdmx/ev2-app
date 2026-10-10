@@ -79,7 +79,7 @@ async function seed() {
       }
     }
 
-    // Drinks + inventory (pos_product_id is a stable dev key; real ids come from the POS sync)
+    // Drinks (pos_product_id is a stable dev key; real ids come from the POS sync)
     for (let i = 0; i < DRINKS.length; i++) {
       const [category, name, price, posId] = DRINKS[i];
       const { rows } = await client.query(
@@ -90,12 +90,10 @@ async function seed() {
          RETURNING id`,
         [CLUB_ID, name, category, price, posId, i],
       );
-      await client.query(
-        `INSERT INTO inventory (drink_id, quantity, unit, low_stock_threshold)
-         VALUES ($1, $2, 'unit', 5)
-         ON CONFLICT (drink_id) DO NOTHING`,
-        [rows[0].id, category === 'Botellas' ? 12 : 100],
-      );
+      // Sin existencia inicial: desde la migracion 018 el saldo vive en `supplies`,
+      // por lugar, y entra por una recepcion o un conteo. Estos treinta productos de
+      // desarrollo no tienen receta, asi que se venden sin control de existencia --
+      // que es la verdad, en vez de un contador de 100 que nadie rellena.
     }
 
     // Users (one per role) + preferences + employee profiles
