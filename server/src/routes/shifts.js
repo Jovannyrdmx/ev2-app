@@ -24,6 +24,7 @@ const { validate, z, uuid, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const cuts = require('../services/shift-closings');
 const managerAuth = require('../services/manager-auth');
+const cashDrawer = require('../services/cash-drawer');
 const tickets = require('../services/tickets');
 const events = require('../services/events');
 const till = require('../services/till');
@@ -334,6 +335,17 @@ router.post('/nightclubs/:nightclubId/till/payments',
         exchangeRateId: b.exchange_rate_id === undefined ? null : String(b.exchange_rate_id),
         clientRequestId: b.client_request_id || null,
       });
+      // Efectivo: el cajón de esta caja se abre solo (D96), en la misma transacción
+      // que asienta el cobro.
+      if (cashDrawer.opensDrawer(b.method)) {
+        const printer = await cashDrawer.tillPrinter(client, {
+          nightclubId, locationId: hecho.till && hecho.till.location_id,
+        });
+        hecho.drawer = await cashDrawer.open(client, {
+          nightclubId, printer, refId: hecho.tx.id, createdBy: req.user.id,
+          reason: `cobro en efectivo ${hecho.payment.amount} ${hecho.payment.currency || ''}`.trim(),
+        });
+      }
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -364,7 +376,67 @@ router.post('/nightclubs/:nightclubId/till/payments',
       usd_received: hecho.payment.usd_received || null,
       exchange_rate: hecho.payment.exchange_rate || null,
       receipt: hecho.receipt ? { job_id: hecho.receipt.id, status: hecho.receipt.status } : null,
+      drawer: hecho.drawer || null,
     });
+  }));
+
+/**
+ * Abrir el cajón sin cobrar (D96): para dar cambio, cambiar un billete o contar.
+ *
+ * Lo pide quien tiene el cajón —el cajero en su caja, la anfitriona en la puerta— y lo
+ * autoriza un gerente con su PIN (nunca él mismo). Cada apertura queda en `audit_log`
+ * con el motivo, porque un cajón que se abre sin venta es justo lo que se revisa
+ * cuando el corte no cuadra.
+ */
+router.post('/nightclubs/:nightclubId/cash-drawer/open',
+  requireRole('cashier', 'hostess'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      reason: z.string().trim().min(3).max(200),
+      manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos'),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    let printer;
+    if (req.user.role === 'cashier') {
+      const caja = await till.openTill(pool, { nightclubId, userId: req.user.id });
+      if (!caja) throw ApiError.conflict('No tienes la caja abierta');
+      printer = await cashDrawer.tillPrinter(pool, { nightclubId, locationId: caja.location_id });
+    } else {
+      printer = await cashDrawer.doorPrinter(pool, { nightclubId });
+    }
+    if (!printer || !printer.drawer_pin) {
+      throw ApiError.unprocessable('Esta caja no tiene cajón configurado. El gerente lo da de alta en Impresoras.');
+    }
+
+    const autoriza = await managerAuth.authorize(pool, {
+      nightclubId, pin: req.body.manager_pin, selfId: req.user.id, ip: req.ip,
+    });
+
+    const client = await pool.connect();
+    let drawer;
+    try {
+      await client.query('BEGIN');
+      drawer = await cashDrawer.open(client, {
+        nightclubId, printer, createdBy: req.user.id,
+        reason: `sin venta: ${req.body.reason} (autorizó ${autoriza.name || 'gerente'})`,
+      });
+      await client.query(
+        `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
+         VALUES ($1,$2,'cash_drawer.open_no_sale','printer',$3,$4,$5)`,
+        [nightclubId, req.user.id, printer.id,
+          JSON.stringify({ reason: req.body.reason, authorized_by: autoriza.id, job_id: drawer.job_id }),
+          req.ip || null]);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    res.status(201).json({ drawer, authorized_by: autoriza.name || null });
   }));
 
 /**

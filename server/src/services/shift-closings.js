@@ -57,7 +57,7 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
   const hasta = to || new Date();
   const params = [nightclubId, userId, from, hasta];
 
-  const [manuales, terminal, puerta, propinas, dolares] = await Promise.all([
+  const [manuales, terminal, puerta, propinas, dolares, puertaUsd] = await Promise.all([
     // 1. Pagos que esa persona registró: efectivo en la mesa y vouchers de terminal.
     runner.query(
       `SELECT p.method, p.currency,
@@ -78,11 +78,12 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
           AND c.status IN ('processed','refunded')
           AND c.created_at >= $3 AND c.created_at <= $4
         GROUP BY c.currency`, params),
-    // 3. El cover que vendió en la puerta. La cortesía no es dinero.
+    // 3. El cover que vendió en la puerta. La cortesía no es dinero. Lo que se pagó
+    //    con dólares (D96) no entra como pesos: va aparte, en la consulta de abajo.
     runner.query(
       `SELECT d.payment_method AS method, d.currency,
               count(*)::int AS count,
-              COALESCE(sum(d.total), 0)::numeric(12,2)::text AS amount,
+              COALESCE(sum(d.total - COALESCE(d.usd_amount, 0)), 0)::numeric(12,2)::text AS amount,
               COALESCE(sum(d.quantity), 0)::int AS people
          FROM door_admissions d
         WHERE d.nightclub_id = $1 AND d.sold_by = $2 AND d.payment_method <> 'courtesy'
@@ -106,6 +107,15 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
         WHERE p.nightclub_id = $1 AND p.declared_by = $2 AND p.status = 'confirmed'
           AND p.method = 'cash_usd'
           AND p.created_at >= $3 AND p.created_at <= $4`, params),
+    // Los dólares que recibió en la puerta (D96), igual que los de la caja.
+    runner.query(
+      `SELECT count(*)::int AS count,
+              COALESCE(sum(d.usd_amount), 0)::numeric(12,2)::text AS amount,
+              COALESCE(sum(d.usd_received), 0)::numeric(12,2)::text AS usd,
+              COALESCE(sum(d.usd_change), 0)::numeric(12,2)::text AS change_mxn
+         FROM door_admissions d
+        WHERE d.nightclub_id = $1 AND d.sold_by = $2 AND d.usd_received IS NOT NULL
+          AND d.created_at >= $3 AND d.created_at <= $4`, params),
   ]);
 
   const porMetodo = new Map();
@@ -124,6 +134,8 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
   // libro para que el corte no tenga dos renglones que significan lo mismo.
   const DOOR_METHOD = { cash: 'cash', card: 'card_terminal', transfer: 'bank_transfer' };
   for (const r of puerta.rows) suma(DOOR_METHOD[r.method] || r.method, r.currency, r.amount, r.count);
+  const pu = puertaUsd.rows[0];
+  if (pu.count > 0) suma('cash_usd', 'MXN', pu.amount, pu.count);
 
   const lineas = [...porMetodo.values()]
     .map((l) => ({ ...l, amount: money(l.amount) }))
@@ -148,9 +160,9 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
     cash_collected: money(efectivo),
     total_collected: money(total),
     usd: {
-      received: dolares.rows[0].usd,
-      change_given_mxn: dolares.rows[0].change_mxn,
-      count: dolares.rows[0].count,
+      received: money(Number(dolares.rows[0].usd) + Number(pu.usd)),
+      change_given_mxn: money(Number(dolares.rows[0].change_mxn) + Number(pu.change_mxn)),
+      count: dolares.rows[0].count + pu.count,
     },
     tips: {
       amount: money(propinas.rows.reduce((n, r) => round2(n + Number(r.amount)), 0)),

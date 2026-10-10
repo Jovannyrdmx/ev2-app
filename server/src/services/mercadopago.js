@@ -18,8 +18,8 @@
  *
  * 2. **`live_mode` se comprueba contra lo que declara el `.env`.** Cada respuesta de
  *    Mercado Pago dice si la cuenta es real. Si el servidor dice "prueba" y la cuenta
- *    contesta "real" —o al revés—, se detiene ahí. Es el único momento en que un error
- *    de credenciales se puede atrapar sin que lo descubra un estado de cuenta.
+ *    contesta "real" —o al revés—, se detiene ahí y se conserva el intento pendiente.
+ *    La respuesta llega DESPUÉS de enviar la solicitud: no prueba que no hubo un cargo.
  *
  * 3. **Tiempo de espera corto, y nunca esperamos al cliente.** Crear la orden tarda lo
  *    que tarda una petición HTTP; lo que tarda es que la persona saque la tarjeta, y eso
@@ -47,7 +47,7 @@ const SANDBOX_SERIAL = 'SBX0000001';
  * existe, y por eso hay que ofrecerlo a mano en modo prueba.
  */
 const SANDBOX_TERMINAL_ID = `NEWLAND_N950__${SANDBOX_SERIAL}`;
-const isSandboxTerminal = (externalId) => String(externalId || '').includes(SANDBOX_SERIAL);
+const isSandboxTerminal = (externalId) => String(externalId || '') === SANDBOX_TERMINAL_ID;
 
 /**
  * Se puede cobrar, o no, y por qué no.
@@ -55,12 +55,14 @@ const isSandboxTerminal = (externalId) => String(externalId || '').includes(SAND
  * Se comprueba antes de cada cobro y no solo al arrancar: las variables de entorno se
  * cambian en caliente más a menudo de lo que a nadie le gusta admitir.
  */
-function assertUsable() {
+function assertUsable({ forCharge = false } = {}) {
   const mp = config.mercadoPagoConfig();
-  if (!mp.configured) {
+  // Missing webhook setup blocks new charges, not reconciliation of existing money.
+  const missing = mp.missing.filter((key) => forCharge || key !== 'MERCADOPAGO_WEBHOOK_SECRET');
+  if (missing.length) {
     throw new ApiError(501, 'mercadopago_not_configured',
-      `Mercado Pago no está configurado en este servidor: falta ${mp.missing.join(', ')} en el .env`,
-      { missing: mp.missing });
+      `Mercado Pago no está configurado en este servidor: falta ${missing.join(', ')} en el .env`,
+      { missing });
   }
   if (mp.mode === 'undeclared') {
     throw new ApiError(501, 'mercadopago_env_undeclared',
@@ -88,7 +90,7 @@ function assertModeMatches(body, declared) {
   throw new ApiError(503, 'mercadopago_env_mismatch',
     `El .env dice que las credenciales de Mercado Pago son de ${declared === 'test' ? 'PRUEBA' : 'PRODUCCIÓN'}, `
     + `pero la cuenta contesta que son de ${real === 'test' ? 'PRUEBA' : 'PRODUCCIÓN'}. `
-    + 'No se cobra nada hasta que eso cuadre.',
+    + 'Resultado pendiente de revisión. No intentes otro cobro hasta verificar la orden.',
     { declared, reported: real });
 }
 
@@ -217,6 +219,13 @@ async function createPointOrder({
   terminalExternalId, amount, currency = 'MXN', externalReference,
   description, idempotencyKey, expirationSeconds = 180, printTicket = false,
 }) {
+  const settings = assertUsable({ forCharge: true });
+  if (currency !== 'MXN' || !Number.isFinite(Number(amount)) || Number(amount) <= 0) {
+    throw ApiError.unprocessable('Esta integración Point cobra únicamente importes positivos en MXN.');
+  }
+  if ((settings.mode === 'test') !== isSandboxTerminal(terminalExternalId)) {
+    throw ApiError.unprocessable('En modo prueba usa únicamente la terminal virtual; en producción usa una terminal física.');
+  }
   const body = {
     type: 'point',
     external_reference: externalReference,
@@ -238,6 +247,10 @@ async function createPointOrder({
   const { status, body: res } = await request('POST', '/v1/orders', { body, idempotencyKey });
   if (status !== 200 && status !== 201) {
     throw new ApiError(502, 'mercadopago_error', describeError(status, res), { status, body: res });
+  }
+  if (!res || typeof res.id !== 'string' || !res.id) {
+    throw new ApiError(502, 'mercadopago_invalid_response',
+      'Mercado Pago no devolvió el identificador del cobro. No vuelvas a cobrar hasta verificarlo.');
   }
   return res;
 }
@@ -340,14 +353,10 @@ async function simulateOrderEvent(orderId, event) {
 /**
  * ¿La notificación viene de Mercado Pago?
  *
- * Devuelve 'valid', 'invalid' o 'unverifiable' (no hay secreto configurado). Lo que NO
- * hace es decidir si se cobra: eso lo decide `getOrder`, con nuestro propio token. La
- * firma es una señal, no la verdad, y aquí hay una razón concreta para no depender de
- * ella — la validación de la firma de la Orders API tiene hoy un desacuerdo abierto en
- * los propios SDK de Mercado Pago sobre si el id va en minúsculas al armar el texto
- * firmado. Por eso se prueban las dos formas, y por eso un 'invalid' se ANOTA en vez de
- * tirar la notificación: una firma que no cuadra por un defecto ajeno no puede dejar al
- * club sin registrar un cobro que de verdad ocurrió.
+ * Returns valid, invalid or unverifiable. The webhook rejects an invalid signature;
+ * a valid signature still cannot settle money without the authoritative GET.
+ * Official manifest: lowercase query data.id, omit absent fields, HMAC-SHA256.
+ * https://www.mercadopago.com.mx/developers/en/docs/mp-point/notifications
  */
 function verifySignature({ signatureHeader, requestId, dataId, secret }) {
   if (!secret) return 'unverifiable';
@@ -360,14 +369,15 @@ function verifySignature({ signatureHeader, requestId, dataId, secret }) {
   }, {});
   if (!parts.ts || !parts.v1) return 'invalid';
 
-  const candidates = [String(dataId), String(dataId).toLowerCase()];
+  if (!/^\d+$/.test(parts.ts) || !/^[a-f0-9]{64}$/i.test(parts.v1)) return 'invalid';
+  const candidates = [dataId == null ? '' : String(dataId).toLowerCase()];
   for (const id of candidates) {
-    const manifest = `id:${id};request-id:${requestId || ''};ts:${parts.ts};`;
+    const manifest = `${id ? `id:${id};` : ''}${requestId ? `request-id:${requestId};` : ''}ts:${parts.ts};`;
     const hmac = crypto.createHmac('sha256', secret).update(manifest).digest('hex');
     // Comparación de tiempo constante: comparar hashes con === filtra información por el
     // tiempo que tarda en fallar.
     const a = Buffer.from(hmac, 'utf8');
-    const b = Buffer.from(parts.v1, 'utf8');
+    const b = Buffer.from(parts.v1.toLowerCase(), 'utf8');
     if (a.length === b.length && crypto.timingSafeEqual(a, b)) return 'valid';
   }
   return 'invalid';
@@ -414,14 +424,19 @@ function readOrder(order) {
     ? Number(payment.refunded_amount) : devueltoPorLista;
 
   const mpStatus = order.status || null;
-  const status = PENDING_STATUSES.includes(mpStatus) ? 'waiting' : mpStatus;
+  const status = PENDING_STATUSES.includes(mpStatus) ? 'waiting'
+    : [...FINAL_STATUSES, 'action_required'].includes(mpStatus) ? mpStatus : 'action_required';
   return {
     external_order_id: order.id || null,
+    external_reference: order.external_reference || null,
+    currency: order.currency || order.currency_id || payment.currency_id || null,
+    order_type: order.type || null,
+    payment_count: (tx.payments || []).length,
     // En el vocabulario de esta base. `mp_status` es lo que dijo Mercado Pago tal cual.
     status,
     mp_status: mpStatus,
     at_terminal: mpStatus === 'at_terminal',
-    status_detail: order.status_detail || payment.status_detail
+    status_detail: payment.status_detail || order.status_detail
       || (PENDING_STATUSES.includes(mpStatus) ? mpStatus : null),
     amount: money2(order.total_amount || payment.amount),
     paid_amount: money2(payment.paid_amount != null ? payment.paid_amount : order.total_paid_amount),

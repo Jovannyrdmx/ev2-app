@@ -38,6 +38,7 @@
     view: 'home',
   };
   const cart = EV2Client.createCart();
+  let venue3D = null; let venueLoading = false; let venueMode = '3d'; let venueFailed = false;
 
   /**
    * El enganche para las pantallas que viven en otro archivo (`show-screen.js`,
@@ -863,7 +864,7 @@
   function renderLegend() {
     const items = EV2Map.zones(tablesOnFloor())
       .map((z) => ({ name: z.name, color: z.color }))
-      .concat([{ name: t('map.occupied'), color: EV2Map.COLORS.occupied },
+      .concat([{ name: t('map.occupied'), color: venueMode === '3d' && !venueFailed ? '#626b7e' : EV2Map.COLORS.occupied },
         { name: t('map.mine'), color: EV2Map.COLORS.mine }]);
     $('legend').innerHTML = items.map((z) => `
       <span class="flex items-center gap-1.5">
@@ -872,6 +873,7 @@
   }
 
   function drawMap() {
+    drawVenue3D();
     const canvas = canvasEl();
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
@@ -884,6 +886,38 @@
       myTableId: state.myTable && state.myTable.id,
     });
   }
+
+  async function drawVenue3D() {
+    if (!$('map-3d') || !window.EV2VenueLayout) return;
+    const enabled = venueMode === '3d' && !venueFailed;
+    $('map-3d').hidden = !enabled;
+    $('map-2d').hidden = enabled && !!venue3D;
+    $('map-view-3d').setAttribute('aria-pressed', String(enabled));
+    $('map-view-2d').setAttribute('aria-pressed', String(!enabled));
+    const plan = () => ({ canvas: state.canvas, tables: state.tables, landmarks: state.landmarks });
+    if (venue3D) {
+      venue3D.update(plan(), { floor: state.floor, selectedId: state.selectedId, myTableId: state.myTable?.id });
+      venue3D.resize(); return;
+    }
+    if (!enabled || venueLoading || $('view-map').hidden || !state.tables.length) return;
+    venueLoading = true;
+    const fallback = () => {
+      venueFailed = true; $('map-3d').hidden = true; $('map-2d').hidden = false;
+      $('map-3d-note').textContent = t('venue.fallback');
+      $('map-3d-note').dataset.i18n = 'venue.fallback';
+      renderLegend();
+    };
+    try {
+      const lib = await window.EV2VenueLayout.load3D();
+      venue3D = lib.create($('map-3d'), { t, onUnavailable: fallback,
+        onSelect: (target) => { state.selectedId = target.key; drawMap(); renderSelection(); },
+      });
+      drawVenue3D();
+    } catch { fallback(); }
+    finally { venueLoading = false; }
+  }
+  if ($('map-view-3d')) $('map-view-3d').onclick = () => { venueMode = '3d'; drawMap(); renderLegend(); };
+  if ($('map-view-2d')) $('map-view-2d').onclick = () => { venueMode = '2d'; drawMap(); renderLegend(); };
 
   canvasEl().addEventListener('click', (ev) => {
     const canvas = canvasEl();
@@ -1848,7 +1882,10 @@
       // Viene del servidor, no del catálogo: se le quita la marca para que un cambio
       // de idioma no lo reemplace por el texto por omisión.
       $('club-city').removeAttribute('data-i18n');
-      $('club-city').textContent = `${data.nightclub.city}, ${data.nightclub.country}`;
+      const locationLabel = [data.nightclub.city, data.nightclub.country]
+        .filter((value) => typeof value === 'string' && value.trim()).join(', ');
+      $('club-city').textContent = locationLabel;
+      $('club-city').hidden = !locationLabel;
     } catch {
       // Sin club no se puede entrar, pero la pantalla de acceso debe verse igual.
     }

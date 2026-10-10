@@ -25,6 +25,7 @@ const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const printing = require('../services/printing');
+const cashDrawer = require('../services/cash-drawer');
 const events = require('../services/events');
 
 const router = express.Router({ mergeParams: true });
@@ -346,10 +347,17 @@ agentRouter.post('/jobs/:jobId/failed',
     // El gerente tiene que enterarse de que un papel no salió mientras la noche
     // sigue, no al cerrar. Solo cuando ya no se va a reintentar más.
     if (job.status === 'failed') {
+      // Un cajón que no abrió (D96) lo tiene que saber quien está cobrando, en ese
+      // momento: tiene al cliente enfrente esperando su cambio.
+      let quien = [];
+      if (job.kind === 'drawer') {
+        const c = await pool.query('SELECT created_by FROM print_jobs WHERE id = $1', [job.id]);
+        quien = c.rows[0] && c.rows[0].created_by ? [c.rows[0].created_by] : [];
+      }
       await events.publish({
         nightclubId: req.agent.nightclub_id,
         type: 'print_job_failed',
-        audience: { roles: ['manager', 'admin'] },
+        audience: { roles: ['manager', 'admin'], userIds: quien },
         payload: { job_id: job.id, kind: job.kind, error: job.last_error },
       });
     }
@@ -399,9 +407,10 @@ router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
 const MANAGE = ['manager', 'admin'];
 
 const printerBody = z.object({
-  location_id: uuid,
+  // La barra donde está. La de la puerta (D96) no está en ninguna barra.
+  location_id: uuid.nullish(),
   name: z.string().trim().min(1).max(60),
-  purpose: z.enum(['orders', 'service', 'till']),
+  purpose: z.enum(['orders', 'service', 'till', 'door']),
   connection: z.enum(['network', 'windows']).default('network'),
   host: z.string().trim().min(1).max(120).nullish(),
   port: z.coerce.number().int().min(1).max(65535).default(9100),
@@ -414,6 +423,8 @@ const printerBody = z.object({
   fallback_id: uuid.nullish(),
   // La PC que la atiende (D80). Obligatoria en la práctica para las USB.
   agent_id: uuid.nullish(),
+  // El cajón de dinero conectado a esta impresora (D96): pin 2 o 5; null = sin cajón.
+  drawer_pin: z.union([z.literal(2), z.literal(5)]).nullish(),
 });
 
 /** Las columnas que caben, si no las dijeron: 48 a 80 mm, 32 a 58 mm. */
@@ -436,6 +447,12 @@ async function checkAgent(nightclubId, agentId) {
 }
 
 function checkPrinter(body) {
+  if (body.purpose !== 'door' && !body.location_id) {
+    throw ApiError.badRequest('Escoge la barra donde está la impresora');
+  }
+  if (body.purpose === 'door' && body.location_id) {
+    throw ApiError.badRequest('La impresora de la puerta no va en una barra');
+  }
   if (body.connection === 'network' && !body.host) {
     throw ApiError.badRequest('Una impresora de red necesita su dirección IP');
   }
@@ -473,13 +490,14 @@ router.post('/nightclubs/:nightclubId/printers',
       const { rows } = await pool.query(
         `INSERT INTO printers
            (nightclub_id, location_id, name, purpose, connection, host, port,
-            windows_name, paper_width, columns, codepage, has_cutter, fallback_id, agent_id)
-         VALUES ($1,$2,$3::text,$4::text,$5::text,$6,$7,$8,$9,$10,$11::text,$12,$13,$14)
+            windows_name, paper_width, columns, codepage, has_cutter, fallback_id, agent_id,
+            drawer_pin)
+         VALUES ($1,$2,$3::text,$4::text,$5::text,$6,$7,$8,$9,$10,$11::text,$12,$13,$14,$15)
          RETURNING id::text AS id`,
-        [req.params.nightclubId, b.location_id, b.name, b.purpose, b.connection,
+        [req.params.nightclubId, b.location_id || null, b.name, b.purpose, b.connection,
           b.host || null, b.port, b.windows_name || null, b.paper_width,
           b.columns || defaultColumns(b.paper_width), b.codepage, b.has_cutter,
-          b.fallback_id || null, b.agent_id || null]);
+          b.fallback_id || null, b.agent_id || null, b.drawer_pin ?? null]);
       const printer = await printing.getPrinter(pool, {
         nightclubId: req.params.nightclubId, printerId: rows[0].id,
       });
@@ -488,7 +506,7 @@ router.post('/nightclubs/:nightclubId/printers',
     } catch (err) {
       if (err.code === '23505') {
         throw ApiError.conflict('Ya hay una impresora activa con ese nombre, '
-          + 'o esa barra ya tiene una para ese uso');
+          + 'o esa barra (o la puerta) ya tiene una para ese uso');
       }
       if (err.code === '23503') throw ApiError.badRequest('Esa barra no existe');
       if (err.code === '23514') throw ApiError.badRequest('Esa barra no es una barra');
@@ -516,17 +534,18 @@ router.patch('/nightclubs/:nightclubId/printers/:printerId',
             SET location_id = $3, name = $4::text, purpose = $5::text,
                 connection = $6::text, host = $7, port = $8, windows_name = $9,
                 paper_width = $10, columns = $11, codepage = $12::text,
-                has_cutter = $13, fallback_id = $14, active = $15, agent_id = $16
+                has_cutter = $13, fallback_id = $14, active = $15, agent_id = $16,
+                drawer_pin = $17
           WHERE id = $1 AND nightclub_id = $2`,
-        [req.params.printerId, req.params.nightclubId, merged.location_id, merged.name,
+        [req.params.printerId, req.params.nightclubId, merged.location_id || null, merged.name,
           merged.purpose, merged.connection, merged.host || null, merged.port,
           merged.windows_name || null, merged.paper_width, merged.columns,
           merged.codepage, merged.has_cutter, merged.fallback_id || null, merged.active,
-          merged.agent_id || null]);
+          merged.agent_id || null, merged.drawer_pin ?? null]);
     } catch (err) {
       if (err.code === '23505') {
         throw ApiError.conflict('Ya hay una impresora activa con ese nombre, '
-          + 'o esa barra ya tiene una para ese uso');
+          + 'o esa barra (o la puerta) ya tiene una para ese uso');
       }
       if (err.code === '23514') throw ApiError.badRequest('Esa barra no es una barra');
       throw err;
@@ -567,6 +586,41 @@ router.post('/nightclubs/:nightclubId/printers/:printerId/test',
     if (!printer.active) throw ApiError.badRequest('Esa impresora está apagada');
     const job = await testJob(req, printer);
     res.status(202).json({ job });
+  }));
+
+/**
+ * "Probar cajón" (D96): manda el pulso a la impresora para confirmar que el cajón
+ * está conectado y que el pin configurado es el correcto. Queda en la bitácora.
+ */
+router.post('/nightclubs/:nightclubId/printers/:printerId/test-drawer',
+  requireRole(...MANAGE),
+  validate({ params: z.object({ nightclubId: uuid, printerId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, printerId } = req.params;
+    const printer = await printing.getPrinter(pool, { nightclubId, printerId });
+    if (!printer) throw ApiError.notFound('Esa impresora no existe');
+    if (!printer.active) throw ApiError.badRequest('Esa impresora está apagada');
+    if (!printer.drawer_pin) throw ApiError.badRequest('Esa impresora no tiene cajón configurado');
+    const client = await pool.connect();
+    let drawer;
+    try {
+      await client.query('BEGIN');
+      drawer = await cashDrawer.open(client, {
+        nightclubId, printer, createdBy: req.user.id, reason: 'prueba desde el panel',
+      });
+      await client.query(
+        `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
+         VALUES ($1,$2,'cash_drawer.test','printer',$3,$4,$5)`,
+        [nightclubId, req.user.id, printer.id, JSON.stringify({ job_id: drawer.job_id }),
+          req.ip || null]);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    res.status(202).json({ drawer });
   }));
 
 // ---------------------------------------------------------------- los agentes

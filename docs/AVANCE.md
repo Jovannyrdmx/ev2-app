@@ -2,6 +2,51 @@
 
 Cada fila se agrega al terminar y verificar un paso del manual. Formato: fecha · paso · qué se hizo · verificación · commit/PR.
 
+## Plano 3D y editor de distribución, 2 de octubre de 2026
+
+Rama `fase5/mapa-3d-editor`, bloque autorizado: mapa 3D de clientes y reservaciones,
+alternativas 2D/lista, editor de mesas, zonas y áreas por arrastre, guardado exclusivo
+del administrador, revisión optimista y transacción atómica. Conserva coordenadas
+actuales, precios, capacidades, identidades de mesas y reservaciones.
+Sin migraciones, seeds ni cambios de distribución en producción.
+
+Verificación local: 43 suites / 1,371 pruebas aprobadas; build web, lint sin errores,
+OpenAPI y diff correctos. Chromium: arrastre con ratón y tacto, guardado/recarga,
+deshacer/cancelar, conflicto entre sesiones, permisos, reservación desde mapa 3D
+sin dinero real y alternativas sin WebGL. Sin desbordamiento a 320/390/768/1440 px.
+PWA `ev2-v36`. Publicado en VPS el 2 de octubre de 2026: código `b5d53c9`,
+API/web saludables, `/api/health` y recursos públicos HTTP 200, hash del renderer
+verificado y checksum del plano intacto (55 mesas, 8 áreas). Respaldo con dump de
+base, imágenes y código en `/root/respaldos/mapa3d-20261002-133750/`.
+Sin PR ni cambios a main. Sin cuentas, reservaciones ni cobros de prueba en producción.
+Detalle: [MAPA_3D.md](MAPA_3D.md).
+
+## Mercado Pago Point: confirmación segura, 1 de octubre de 2026
+
+Desarrollo autorizado en `fase7/mercadopago-notificaciones`, sin cargos reales.
+Código `109f308` publicado en el VPS el 1 de octubre por la noche, en modo de prueba.
+Firma de webhook obligatoria, resultado consultado al
+proveedor, importe/referencia verificados, notificación de aprobación guardada con el
+pago en una transacción SQL, recuperación con solicitud idéntica, bloqueo ante
+resultados ambiguos y avisos en español mexicano. Sin migraciones nuevas.
+
+Verificación: 185 pruebas de pagos/eventos/componente, 1,250 pruebas web y 135 pruebas
+adicionales de pedidos, propinas, cortes y recibos; compilación web correcta y lint sin
+errores. Los conjuntos se superponen. Revisión del VPS autorizada: cuenta preexistente
+de prueba de México verificada por GET, sin terminales físicas, sin cobros/devoluciones
+pendientes y sin migraciones pendientes (37 aplicadas). Pendientes: modelo y cuenta
+receptora de la terminal física y entrega real del webhook del proveedor.
+Publicación verificada: API/web saludables, HTTP 200 público, PWA `ev2-v35`,
+webhook sin firma 401 y firmado para orden inexistente 200/ignorado. No se crearon
+cobros; permanecieron 37 migraciones aplicadas. PostgreSQL/Redis/WS/Caddy no se
+recrearon. Primer intento revertido por permisos; segundo correcto tras preflight.
+Respaldo: `/root/respaldos/mercadopago-20261002-064414/`.
+Detalles y aceptación en [PAGOS_SETUP.md](PAGOS_SETUP.md).
+
+## Actualización UX del 1 de octubre de 2026
+
+Implementación web/PWA en `fase5/ux-integral`, sobre `96facf8`: inicio y navegación del cliente, carga por panel en gerencia, estilos compartidos, diálogos accesibles y recursos locales. Ver alcance, pruebas y límites en [UX_RELEASE_2026-10-01.md](UX_RELEASE_2026-10-01.md). Verificación final: 36 suites y 1220 pruebas aprobadas. Código `4a6236b` desplegado en el VPS el 1 de octubre a las 19:56 de Phoenix, con respaldo previo y solo recreación del contenedor web. HTTPS/API/recursos verificados; aceptación con cuentas y dispositivos reales aún pendiente.
+
 | Fecha | Paso | Qué se hizo | Verificación | Commit / PR |
 |---|---|---|---|---|
 | 2026-09-03 | — | Plan (`PLAN_IMPLEMENTACION_Y_DESARROLLO.md`) y manual (`MANUAL_IMPLEMENTACION_EV2.pdf`) creados. `CLAUDE.md` y esta bitácora creados. | Archivos presentes en la carpeta. | (sin git aún) |
@@ -154,6 +199,8 @@ Cada fila se agrega al terminar y verificar un paso del manual. Formato: fecha �
 | 2026-10-07 | Logo nuevo, favicon e ícono de la app (D92) | Pedido por Jovanny con el archivo del logo; lista de archivos aprobada. `web/images/`: `ev2-clandestinoz.webp` y `favicon-32x32.png` reemplazados; nuevos `favicon.ico`, `favicon-16x16.png`, `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`; borrado `ev2-logo.svg.png`. `manifest.json`, `sw.js` (v49), las 13 páginas HTML (favicon, ícono de iPhone, logo cuadrado), `ev2.css` recompilado. | Pruebas nuevas en `web-pwa.test.js` (4: tamaños reales de los íconos del manifest, enlaces de cada página a archivos que existen, el logo viejo sin uso, ícono de la notificación). Pruebas web: 1390 pasan. Capturas de la entrada del cliente y del personal, y vista previa del ícono recortado en círculo. | rama `fase5/impresoras-por-pc` |
 | 2026-10-07 | Avisos con sonido en la pantalla y aviso al mesero de los pedidos de mesa (D93) | Pedido por Jovanny; plan y archivos aprobados (sin quitar la regla de turno). `server/src/services/push.js` (regla `order_created` para el pedido del cliente, `publishLive` con el evento `notice`, el registro dice si el push está apagado), `web/js/push.js` (`listen`, texto por idioma, un solo sonido por aviso), las 7 pantallas (`EV2Push.listen(rt, { toast })`), `manager-screen.js` (un aviso no recarga el panel), `sw.js` v50. Sin migración. | Pruebas nuevas: `push.test.js` (6) y `web-push.test.js` (10). De punta a punta en Chromium con API, servidor de sockets y SIN llaves de push: la mesa pide desde el teléfono → al mesero le suena "Pedido nuevo · Mesa 12 · cobrar $480.00"; el mesero levanta → a la barra "Pedido nuevo · Mesa 12 · 1 trago"; la barra lo marca listo → al mesero "Trago listo · Mesa 12 · recoger en Barra planta baja", cada uno con su sonido. | rama `fase5/impresoras-por-pc` |
 | 2026-10-07 | Checador de huella para todo el personal (D94) | Pedido por Jovanny; plan, lista de archivos y los ajustes de cajero (solo asistencia), salida bloqueada hasta el corte, dos dedos y mover la regla de turnos a `services/staff-shifts.js` aprobados. Antes de construir: el lector DigitalPersona 4500 se probó en la PC de Jovanny con el programa oficial de HID (5.2.0.50, SHA256 verificado) y una página de prueba: lee y entrega PNG. Nuevo: `matcher/` (Java + SourceAFIS, contenedor interno), migración 046, `services/fingerprints.js`, `routes/clock.js`, `services/staff-shifts.js`, `web/checador.html`, `web/js/checador.js`, `web/vendor/digitalpersona/`. Cambios: `app.js`, `tips.js` (usa el servicio de turnos), `employees.js` (la baja borra las huellas), `manager.html`/`manager-screen.js` (sección Checador), `format.js`, `privacidad.html` (v1.1, datos biométricos), `sw.js` v51, `docker-compose.prod.yml`, `.env.example`, `verificar-despliegue.sh` (sección 9). | Pruebas nuevas: `clock.test.js` (31) y `fingerprints.test.js` (12); suite completa 3141 de 3141. El comparador se compiló y probó con las huellas de prueba de SourceAFIS: mismo dedo 235.56, distinto 3.23, imagen inválida 422, sin token 401, cuerpo grande 413. De punta a punta en Chromium con el comparador REAL: consentimiento (PIN ajeno rechazado), capturas mezcladas rechazadas, el mismo dedo como segundo rechazado, dos dedos registrados; en el checador "Entrada", "Ya tenías tu entrada", "Salida" con el otro dedo, huella desconocida "No te reconocí"; turno abierto y cerrado; asistencia en el panel. Con la librería real de HID y sin su programa: el panel no la toca al cargar y el checador dice que falta el programa. Pendiente: construir la imagen `matcher` en el VPS (aquí Maven Central limitó las descargas) y la prueba final con el lector en la caja. | rama `fase5/impresoras-por-pc` |
+| 2026-10-09 | Una sola rama con el cajero y el mapa 3D (D95) | Pedido y aprobado por Jovanny: base `fase5/impresoras-por-pc`, se trae de `fase5/mapa-3d-editor` el editor y plano 3D, el cobro Point endurecido (un segundo inicio retoma el cobro pendiente en vez de 409), los textos es-MX llave por llave, `categoryLabel`, mensajes del servidor en español, ocultar errores 500, `lang="es-MX"`, y la accesibilidad que no cambia el diseño; se descarta la infraestructura visual duplicada. Paquete 3D reproducible desde `web/` (`npm run build:3d`, idéntico byte por byte). Sin migraciones nuevas por la fusión. | Suite completa contra Postgres 16 y Redis reales; eslint sin errores; OpenAPI válido; CSS recompilado. | rama `fase7/integracion` |
+| 2026-10-09 | Cajón de dinero y cambio en la puerta (D96) | Pedido por Jovanny. Migración `047`; `services/cash-drawer.js`; `escpos.drawerPulse`; cola: pulsos que vencen a 60 s, sin reintento, sin desvío, sin reimpresión; cajero abre el cajón al cobrar en efectivo; `POST /cash-drawer/open` (motivo + PIN de gerente, `audit_log`); `POST /printers/:id/test-drawer`; impresora de puerta; cambio en pesos con pesos/dólares/combinado en `POST /door/admissions`; el corte de la anfitriona separa los dólares. Pantallas: caja (botón y avisos), puerta (recibido, tipo de cambio, cambio en vivo, botón), panel de impresoras (puerta, pin, probar cajón). | `cash-drawer.test.js` (21) y `web-cash-drawer.test.js` (7) más la suite completa. | rama `fase7/integracion` |
 
 **Pendiente del dueno antes de 3.4/3.5:** cuentas de Stripe y de Mercado Pago (alta del negocio, datos fiscales y llaves de prueba). Sin ellas se puede llegar hasta 3.3.
 

@@ -62,6 +62,14 @@ body {
 [hidden] { display: none !important; }
 
 :focus-visible { outline: 2px solid var(--ev2-cyan); outline-offset: 2px; }
+/* "Saltar al contenido": invisible hasta que llega el foco del teclado. */
+.ev2-skip { position: fixed; top: .5rem; left: .5rem; z-index: 200; padding: .75rem 1rem; border-radius: .5rem;
+  background: var(--ev2-cyan); color: #000; font-weight: 700; transform: translateY(-160%); }
+.ev2-skip:focus { transform: translateY(0); }
+/* Quien pidió al teléfono menos movimiento no ve animaciones ni transiciones. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
 
 /* Touch targets. Night, low light, one hand. */
 button, select, input, .tap { min-height: var(--ev2-tap); }
@@ -169,6 +177,13 @@ body.page-driver button, body.page-driver select, body.page-driver input, body.p
 .field.bad { border-color: var(--ev2-red); }
 .field-error { font-size: .75rem; color: var(--ev2-red); margin-top: .2rem; }
 select.field option { background: var(--ev2-panel); }
+/* Renglón de captura en la recepción del almacén: dos columnas en el teléfono,
+   cuatro en pantalla ancha, sin desbordar. */
+.entry-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+.entry-fields > input.field { width: 100%; min-width: 0; }
+@media (min-width: 640px) {
+  .entry-fields { grid-template-columns: minmax(80px, 1fr) auto minmax(150px, 1fr) minmax(100px, 1fr); }
+}
 
 /* ---------------------------------------------------------------- Live dot */
 .dot { width: .5rem; height: .5rem; border-radius: 9999px; display: inline-block; }
@@ -336,3 +351,34 @@ body.bar-board #lane-list article p.text-sm { font-size: 1rem; }
   .mgr-tab .tab-count { margin-left: auto; }
   .mgr-main > div { max-width: 72rem; margin-left: auto; margin-right: auto; }
 }
+
+/* ---------------------------------------------------------------- Plano 3D y editor del lugar (D95) */
+.venue-frame{border:1px solid #354057;border-radius:14px;overflow:hidden;background:#0b101b;color:#edf5ff;min-width:0}
+.venue-tools{display:flex;flex-wrap:wrap;gap:8px;padding:10px;border-bottom:1px solid #354057}
+.venue-tools button,.venue-editor button,.venue-editor select,.venue-editor input{font:inherit;min-height:44px;border:1px solid #43516a;border-radius:8px;padding:8px 12px;background:#182334;color:#edf5ff}
+.venue-tools button{font-size:12px}
+.venue-tools button:focus-visible,.venue-editor :focus-visible{outline:3px solid #6fddec;outline-offset:2px}
+.venue-viewport{height:clamp(300px,52vw,530px);position:relative}
+.venue-viewport canvas{display:block;width:100%;height:100%;touch-action:none}
+.venue-note{font-size:12px;line-height:1.6;color:#a9b9ce;margin:10px 0}
+.venue-editor{font-family:Inter,sans-serif;background:#0b101b;color:#edf5ff;margin:0;min-height:100vh}
+.venue-editor *{box-sizing:border-box}
+.venue-editor header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 24px;border-bottom:1px solid #354057}
+.venue-editor a{color:#6fddec}
+.venue-editor h1{font-size:24px;margin:0 0 8px;font-weight:600}
+.venue-editor h2{font-size:18px;margin:0 0 14px}
+.venue-editor main{max-width:1440px;padding:24px;margin:auto}
+.venue-workspace{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px}
+.venue-inspector{background:#141d2c;border:1px solid #354057;border-radius:12px;padding:20px;align-self:start}
+.venue-inspector label{display:block;font-size:13px;color:#bac8d9;margin:16px 0 6px}
+.venue-inspector select,.venue-inspector input{width:100%}
+.venue-actions{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}
+.venue-editor .venue-primary{background:#55d5e9;color:#071c22;font-weight:600}
+.venue-editor button:disabled{opacity:.45;cursor:not-allowed}
+.venue-editor #editor-status{min-height:48px;padding:12px;background:#182334;border-radius:8px;font-size:14px;line-height:1.5}
+.venue-editor [hidden]{display:none!important}
+@media(max-width:850px){.venue-workspace{grid-template-columns:1fr}.venue-editor main{padding:16px}.venue-editor header{padding:16px;flex-wrap:wrap}.venue-inspector{width:100%}}
+@media(max-height:500px) and (orientation:landscape){.venue-viewport{height:300px}}
+/* La lista de mesas debajo del mapa 3D: alternativa accesible al lienzo. */
+.ux-table-toolbar{padding:12px 0}
+.ux-table-toolbar summary{cursor:pointer;padding:12px;min-height:44px;background:#141d2c;border:1px solid #354057;border-radius:8px}

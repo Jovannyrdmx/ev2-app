@@ -48,6 +48,8 @@ const escpos = require('./escpos');
 const STALE_MINUTES = 2;
 /** A partir de cuántos intentos fallidos se deja de insistir y se desvía. */
 const REROUTE_AFTER = 2;
+/** Segundos que un "abrir cajón" espera a un agente antes de vencer (D96). */
+const DRAWER_TTL_SECONDS = 60;
 
 // ---------------------------------------------------------------- los ajustes
 
@@ -108,7 +110,7 @@ async function saveSettings(runner, { nightclubId, patch, userId }) {
 const PRINTER_COLS = `p.id::text AS id, p.nightclub_id::text AS nightclub_id,
   p.location_id::text AS location_id, p.name, p.purpose, p.connection, p.host, p.port,
   p.windows_name, p.paper_width, p.columns, p.codepage, p.has_cutter,
-  p.fallback_id::text AS fallback_id, p.active, p.agent_id::text AS agent_id`;
+  p.fallback_id::text AS fallback_id, p.active, p.agent_id::text AS agent_id, p.drawer_pin`;
 
 async function listPrinters(runner, { nightclubId, includeInactive = false }) {
   const { rows } = await runner.query(
@@ -283,6 +285,14 @@ async function enqueueTest(runner, { nightclubId, printer, clubName, createdBy }
  * que hacía antes y lo que un club de una sola PC necesita.
  */
 async function claim(runner, { nightclubId, agentId, limit = 5 }) {
+  // Un cajón que no se abrió a tiempo ya no se abre (D96): abrirlo minutos después,
+  // sin nadie cobrando enfrente, es dejar el dinero a la vista.
+  await runner.query(
+    `UPDATE print_jobs
+        SET status = 'failed', last_error = 'vencido: el cajón no se abrió a tiempo'
+      WHERE nightclub_id = $1 AND kind = 'drawer' AND status IN ('pending', 'taken')
+        AND created_at < now() - ($2::int * interval '1 second')`,
+    [nightclubId, DRAWER_TTL_SECONDS]);
   const { rows } = await runner.query(
     `UPDATE print_jobs j
         SET status = 'taken', taken_by = $2, taken_at = now(), attempts = j.attempts + 1
@@ -290,7 +300,7 @@ async function claim(runner, { nightclubId, agentId, limit = 5 }) {
         SELECT c.id FROM print_jobs c
          WHERE c.nightclub_id = $1
            AND (c.status = 'pending'
-                OR (c.status = 'taken'
+                OR (c.status = 'taken' AND c.kind <> 'drawer'
                     AND c.taken_at < now() - ($3::int * interval '1 minute')))
            AND EXISTS (
              SELECT 1 FROM print_agents a
@@ -355,7 +365,9 @@ async function markFailed(runner, { nightclubId, jobId, agentId, error }) {
   const motivo = String(error || 'sin detalle').slice(0, 500);
 
   const printer = await getPrinter(runner, { nightclubId, printerId: job.printer_id });
-  const puedeDesviar = printer && printer.fallback_id && !job.rerouted_from
+  // El cajón de una caja no se abre en otra (D96): ni se desvía ni se reintenta.
+  const esCajon = job.kind === 'drawer';
+  const puedeDesviar = !esCajon && printer && printer.fallback_id && !job.rerouted_from
     && job.attempts >= REROUTE_AFTER;
 
   if (puedeDesviar) {
@@ -382,7 +394,7 @@ async function markFailed(runner, { nightclubId, jobId, agentId, error }) {
     }
   }
 
-  const rendirse = job.attempts >= maxAttempts;
+  const rendirse = esCajon || job.attempts >= maxAttempts;
   const { rows: out } = await runner.query(
     `UPDATE print_jobs
         SET status = $3::text, last_error = $4, taken_by = $5, taken_at = NULL
@@ -399,6 +411,7 @@ async function reprint(runner, { nightclubId, jobId, createdBy }) {
     [jobId, nightclubId]);
   const job = rows[0];
   if (!job) throw ApiError.notFound('Ese trabajo de impresión no existe');
+  if (job.kind === 'drawer') throw ApiError.badRequest('Abrir el cajón no se reimprime');
   const printer = await getPrinter(runner, { nightclubId, printerId: job.printer_id });
   if (!printer || !printer.active) {
     throw ApiError.badRequest('Esa impresora ya no está activa');
@@ -906,7 +919,7 @@ async function health(runner, { nightclubId }) {
 }
 
 module.exports = {
-  DEFAULTS, STALE_MINUTES, REROUTE_AFTER,
+  DEFAULTS, STALE_MINUTES, REROUTE_AFTER, DRAWER_TTL_SECONDS,
   settingsOf, saveSettings,
   listPrinters, getPrinter, resolvePrinter,
   enqueue, enqueueSafely, enqueueTicket, enqueueTest,

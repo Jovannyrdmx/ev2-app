@@ -4,7 +4,7 @@
  * Conecta el DOM con `EV2` (API y socket), `EV2Staff` (charolas, ocupación, propinas)
  * y `EV2Roles`. Las decisiones viven en `staff-floor.js` y están probadas ahí.
  */
-/* global EV2Push, EV2TerminalCharge, EV2ShiftCut, EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan,
+/* global EV2Drawer, EV2Push, EV2TerminalCharge, EV2ShiftCut, EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan,
           EV2Client, EV2DrinkArt, EV2OrderTaking */
 (function () {
   'use strict';
@@ -42,6 +42,7 @@
     // se renueva cuando una venta termina: así el segundo toque del mismo cobro
     // devuelve la MISMA entrada en vez de vender otra.
     sell: { coverId: null, requestId: null },
+    rate: null, // el tipo de cambio vigente USD→MXN, para el cambio en la puerta (D96)
     drinks: [],
     // Lo que el mesero está levantando ahora mismo. `order` se llena cuando el pedido
     // ya existe en el servidor y solo falta cobrarlo: mientras esté ahí, cerrar la hoja
@@ -227,6 +228,7 @@
         ? get(`/nightclubs/${club}/cover-prices`,
           (d) => { state.covers = (d.cover_prices || []).filter((c) => c.active); })
         : Promise.resolve(),
+      isDoorRole() ? loadRate() : Promise.resolve(),
       // Las terminales del club. Si no hay ninguna, el método de tarjeta se ofrece
       // igual pero dice por qué no se puede, en vez de fallar desde el servidor con el
       // cliente enfrente.
@@ -241,6 +243,8 @@
     // eso son diez segundos perdidos con alguien esperando.
     const camara = $('btn-scan-toggle');
     if (camara) camara.hidden = !camaraDisponible();
+    // El cajón de la puerta lo abre la anfitriona, que es quien lo tiene (D96).
+    $('btn-door-drawer').hidden = !(api.session.user && api.session.user.role === 'hostess');
     renderAll();
   }
 
@@ -639,11 +643,44 @@
 
   // ---------------------------------------------------------------- vender la entrada
 
+  async function loadRate() {
+    try {
+      const d = await api.get(`/nightclubs/${clubId()}/exchange-rate`);
+      state.rate = d.current ? { id: String(d.current.id), rate: Number(d.current.rate) } : null;
+    } catch { state.rate = null; }
+  }
+
+  /** La moneda de lo que se está vendiendo: la del cover escogido, o pesos. */
+  function monedaVenta() {
+    const cover = state.covers.find((c) => c.id === state.sell.coverId);
+    return cover ? cover.currency : 'MXN';
+  }
+
   function renderVenta() {
     const cantidad = $('sell-qty').value;
     const precio = $('sell-price').value;
-    $('sell-total').textContent = precio === '' ? '—'
-      : money(EV2DoorScan.total(cantidad, precio), 'MXN');
+    const moneda = monedaVenta();
+    const total = precio === '' ? null : EV2DoorScan.total(cantidad, precio);
+    $('sell-total').textContent = total === null ? '—' : money(total, moneda);
+    // El cambio (D96): solo en efectivo y con cover en pesos.
+    const conCambio = $('sell-method').value === 'cash' && moneda === 'MXN';
+    $('sell-tender').hidden = !conCambio;
+    if (!conCambio) return;
+    const r = state.rate;
+    $('sell-rate').textContent = r ? t('sell.rate', { rate: r.rate.toFixed(2) }) : t('sell.noRate');
+    const c = EV2Drawer.change({
+      total, mxn: $('sell-mxn').value, usd: $('sell-usd').value, rate: r ? r.rate : null,
+    });
+    const el = $('sell-change');
+    el.className = 'text-center font-display text-2xl';
+    if (!c.ready) { el.textContent = c.needsRate ? t('sell.noRate') : ''; return; }
+    if (!c.ok) {
+      el.textContent = t('sell.missing', { amount: money(c.missing, 'MXN') });
+      el.classList.add('text-red-300');
+    } else {
+      el.textContent = t('sell.change', { amount: money(c.change, 'MXN') });
+      el.classList.add('text-lime-300');
+    }
   }
 
   function renderMetodos() {
@@ -708,25 +745,42 @@
     // La clave del intento se crea una vez y se conserva: si el primer toque se queda
     // pensando y el cadenero toca otra vez, el servidor devuelve la MISMA entrada.
     if (!state.sell.requestId) state.sell.requestId = EV2.uuid();
-    const body = EV2DoorScan.admissionPayload(kind, {
+    const conCambio = !$('sell-tender').hidden;
+    const body = EV2Drawer.tenderPayload(EV2DoorScan.admissionPayload(kind, {
       quantity: $('sell-qty').value,
       unitPrice: $('sell-price').value,
       coverPriceId: state.sell.coverId,
       clientRequestId: state.sell.requestId,
       method: $('sell-method').value,
       reservationId,
-    });
+    }), conCambio ? {
+      mxn: $('sell-mxn').value, usd: $('sell-usd').value, rateId: state.rate && state.rate.id,
+    } : {});
     const boton = kind === 'general' ? $('btn-sell-general') : $('btn-sell-extra');
     boton.disabled = true;
     try {
       const data = await api.post(`/nightclubs/${clubId()}/door/admissions`, body);
-      toast(t('sell.done', { total: money(data.admission.total, data.admission.currency) }), 'ok');
+      const partes = [t('sell.done', { total: money(data.admission.total, data.admission.currency) })];
+      if (data.change_given && Number(data.change_given) > 0) {
+        partes.push(t('sell.giveChange', { amount: money(data.change_given, 'MXN') }));
+      }
+      const cajon = EV2Drawer.notice(data.drawer);
+      if (cajon) partes.push(t(cajon.key));
+      toast(partes.join(' '), cajon ? 'warn' : 'ok', data.change_given ? 9000 : 4000);
       $('sell-qty').value = '1';
+      $('sell-mxn').value = '';
+      $('sell-usd').value = '';
       // La venta terminó: la siguiente persona es otra entrada y necesita otra clave.
       state.sell.requestId = null;
       renderVenta();
       await loadDoorSummary();
     } catch (err) {
+      // El gerente cambió el tipo de cambio mientras tanto: se toma el nuevo y se
+      // vuelve a enseñar el cambio para que la anfitriona lo revise (D96).
+      if (err.status === 409 && err.details && err.details.exchange_rate) {
+        await loadRate();
+        renderVenta();
+      }
       error.textContent = EV2Format.errorMessage(err);
       error.hidden = false;
     } finally {
@@ -1005,6 +1059,13 @@
   $('btn-sell-extra').onclick = () => vender('vip_extra');
   $('sell-qty').oninput = renderVenta;
   $('sell-price').oninput = renderVenta;
+  $('sell-mxn').oninput = renderVenta;
+  $('sell-usd').oninput = renderVenta;
+  $('sell-method').addEventListener('change', renderVenta);
+  // Abrir el cajón de la puerta sin venta (D96): motivo y PIN del gerente.
+  $('btn-door-drawer').onclick = () => EV2Drawer.openNoSale({
+    api, clubId, t, toast, ui: window.EV2UI, errorMessage: (e) => EV2Format.errorMessage(e),
+  });
 
   const URGENCY_TEXT = { late: 'text-red-300', warn: 'text-amber-300', ok: 'text-white/50' };
 
@@ -1638,6 +1699,7 @@
 
   async function chargeTake() {
     const take = state.take;
+    if (!take || take.sending) return;
     const method = $('take-method').value;
     const reference = $('take-reference').value;
     const blocker = EV2OrderTaking.chargeBlocker({
@@ -1789,6 +1851,8 @@
       // El cobro con terminal se entera por aquí antes que por la consulta: son los
       // segundos en que alguien está mirando la pantalla con el cliente enfrente.
       if (terminalSheet) terminalSheet.onEvent(message);
+      const cajon = EV2Drawer.failedEvent(message);
+      if (cajon) { toast(t(cajon.key, cajon.vars), 'error', 9000); return; }
       // Alguien pidió (o canceló) su salida sin taxi: la lista de la puerta se refresca.
       if (/^departure_/.test(String(message && (message.event_type || message.type) || ''))) {
         if (canConfirmExit()) await loadDepartures();

@@ -88,7 +88,7 @@ describe('Estado de los pedidos', () => {
   it('traduce el estado a algo que el cliente entienda', () => {
     expect(C.orderLabel('ready')).toMatch(/barra/i);
     expect(C.orderLabel('ready', 'en')).toMatch(/bar/i);
-    expect(C.orderLabel('preparing')).toBe('Preparando');
+    expect(C.orderLabel('preparing')).toBe('En preparación');
     // Un estado que no conocemos se muestra tal cual en vez de quedar en blanco.
     expect(C.orderLabel('inventado')).toBe('inventado');
   });
@@ -186,7 +186,7 @@ describe('Eventos del socket', () => {
     const s = state();
     C.applyEvent(s, { event_type: 'order_returned', payload: { order_id: 'o1' } });
     expect(s.orders[0].status).toBe('returned_to_sender');
-    expect(C.orderLabel('returned_to_sender')).toMatch(/devolvieron/i);
+    expect(C.orderLabel('returned_to_sender')).toBe('Pedido devuelto a quien lo envió');
   });
 
   it('una mesa que cambió obliga a repintar el plano', () => {

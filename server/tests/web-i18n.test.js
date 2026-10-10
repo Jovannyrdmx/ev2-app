@@ -116,7 +116,7 @@ describe('El HTML marcado y el catálogo van juntos', () => {
   });
 
   it.each(PAGES)('%s declara el idioma del documento', (page) => {
-    expect(sources[page]).toMatch(/<html lang="(es|en)"/);
+    expect(sources[page]).toMatch(/<html lang="es-MX"/);
   });
 
   it('la pantalla de acceso está marcada: es lo primero que se ve', () => {
@@ -135,7 +135,7 @@ describe('El HTML marcado y el catálogo van juntos', () => {
   });
 
   it('el marcador de idioma del documento arranca declarado', () => {
-    expect(html).toMatch(/<html lang="(es|en)"/);
+    expect(html).toMatch(/<html lang="es-MX"/);
   });
 });
 
@@ -219,7 +219,7 @@ describe('Traducción de textos', () => {
 
   it('rellena los huecos del texto', () => {
     const { F } = loadFormat({ stored: 'es' });
-    expect(F.tf('staff.pending', { step: '5.7' })).toContain('paso 5.7');
+    expect(F.tf('staff.pending', { step: '5.7' })).toContain('Etapa de desarrollo: 5.7');
     expect(F.tf('staff.pending', { step: '5.7' })).not.toContain('{step}');
     F.setLanguage('en');
     expect(F.tf('staff.pending', { step: '5.7' })).toContain('step 5.7');
@@ -304,7 +304,9 @@ describe('Aplicar el idioma al HTML ya escrito', () => {
     const documentElement = {};
     global.document = { documentElement };
     F.setLanguage('en');
-    expect(documentElement.lang).toBe('en');
+    expect(documentElement.lang).toBe('en-US');
+    F.setLanguage('es');
+    expect(documentElement.lang).toBe('es-MX');
   });
 });
 

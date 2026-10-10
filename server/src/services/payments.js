@@ -197,6 +197,16 @@ async function settle(client, {
   if (payment.currency !== tx.currency) {
     throw ApiError.unprocessable('La moneda declarada no coincide con la del cobro');
   }
+  if (provider !== 'mercadopago') {
+    const pending = await client.query(
+      `SELECT id FROM terminal_charges WHERE transaction_id = $1
+       AND status IN ('creating','waiting','action_required','error') LIMIT 1`, [tx.id]);
+    if (pending.rowCount) {
+      throw ApiError.conflict('Hay un cobro pendiente de confirmar en la terminal. '
+        + 'No se puede confirmar otro pago hasta resolverlo.',
+      { terminal_charge_id: pending.rows[0].id });
+    }
+  }
 
   // Las otras partes de este mismo cobro, sin contar la que se está asentando (que
   // según el camino ya está escrita —efectivo, terminal— o todavía no —transferencia).
@@ -289,8 +299,9 @@ async function settle(client, {
   return { tx, reservation, order, receipt, partial: false, paid: total.toFixed(2), remaining: '0.00' };
 }
 
-async function publishConfirmed({ nightclubId, payment, tx, reservation, order }) {
+async function publishConfirmed({ nightclubId, payment, tx, reservation, order, client }) {
   await events.publish({
+    client,
     nightclubId,
     type: 'payment_confirmed',
     audience: {
@@ -308,6 +319,7 @@ async function publishConfirmed({ nightclubId, payment, tx, reservation, order }
   });
   if (reservation) {
     await events.publish({
+      client,
       nightclubId,
       type: 'reservation_confirmed',
       audience: { userIds: [reservation.user_id], roles: ['hostess', 'manager'] },
@@ -318,6 +330,7 @@ async function publishConfirmed({ nightclubId, payment, tx, reservation, order }
   // for and does not care whether a waiter took cash or a manager cleared a transfer.
   if (order) {
     await events.publish({
+      client,
       nightclubId,
       type: 'order_confirmed',
       audience: { roles: ['bartender', 'waiter', 'cashier', 'manager'], userIds: [order.sender_id] },

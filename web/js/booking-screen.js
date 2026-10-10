@@ -22,6 +22,8 @@
     : `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`);
 
   let ctx = null;
+  let tableRequest = 0; let quoteRequest = 0;
+  let plan = null; let venue = null; let venueLoading = false; let venueFailed = false; let mapMode = '3d';
   const state = {
     events: [], rules: {}, tables: [], mine: [],
     event: null, table: null, guests: 2, quote: null,
@@ -65,14 +67,22 @@
   }
 
   async function loadTables() {
-    if (!state.event) { state.tables = []; renderTables(); return; }
+    const request = ++tableRequest; ++quoteRequest;
+    state.table = null; state.quote = null; state.tables = []; renderTables(); renderQuote();
+    if (!state.event) return;
     const club = ctx.clubId();
     const query = `event_id=${encodeURIComponent(state.event.id)}&guests=${state.guests}`;
     try {
       const data = await ctx.api.get(`/nightclubs/${club}/reservations/availability?${query}`);
+      if (request !== tableRequest) return;
       state.tables = data.tables || [];
       hideError();
+      // Geometry failure must never prevent the accessible availability list from working.
+      const nextPlan = await ctx.api.get(`/nightclubs/${club}/floor-plan`).catch(() => null);
+      if (request !== tableRequest) return;
+      plan = nextPlan;
     } catch (err) {
+      if (request !== tableRequest) return;
       // Aquí el 422 es información útil ("las reservaciones de esa noche ya cerraron"),
       // no una falla: se muestra tal cual en vez de dejar la lista vacía sin explicar.
       state.tables = [];
@@ -137,9 +147,63 @@
         right.textContent = ctx.money(table.price, table.currency);
         b.append(left, right);
         b.onclick = () => pickTable(table);
+        b.setAttribute('aria-pressed', String(!!chosen));
         box.appendChild(b);
       }
     }
+    drawBookingMap();
+  }
+
+  async function drawBookingMap() {
+    if (!$('book-3d') || !window.EV2VenueLayout || !ctx) return;
+    const enabled = mapMode === '3d' && !venueFailed && !!plan;
+    $('book-3d').hidden = !enabled;
+    $('book-2d').hidden = !plan || (enabled && !!venue);
+    $('book-view-3d').setAttribute('aria-pressed', String(enabled));
+    $('book-view-2d').setAttribute('aria-pressed', String(!enabled));
+    if (!plan) return;
+    const selectedFloor = $('book-floor').value;
+    const ids = new Set(state.tables.map((r) => r.id));
+    const options = { floor: selectedFloor, selectedId: state.table?.id, availableIds: ids };
+    const canvas = $('book-2d'); const context = canvas.getContext('2d');
+    if (context) window.EV2Map.draw(context, {
+      canvasSize: { width: canvas.width, height: canvas.height }, planSize: plan.canvas,
+      tables: plan.tables.filter((r) => r.floor === selectedFloor).map((r) => ({
+        ...r, status: ids.has(r.id) ? 'available' : 'blocked', seated: 0,
+      })),
+      landmarks: plan.landmarks.filter((r) => r.floor === selectedFloor || r.floor === 'ambas'),
+      selectedId: state.table?.id,
+    });
+    if (venue) { venue.update(plan, options); venue.resize(); return; }
+    if (!enabled || venueLoading || $('book-panel').hidden) return;
+    venueLoading = true;
+    const fallback = () => {
+      venueFailed = true; $('book-3d').hidden = true; $('book-2d').hidden = false;
+      $('book-3d-note').dataset.i18n = 'venue.fallback'; $('book-3d-note').textContent = t('venue.fallback');
+    };
+    try {
+      const lib = await window.EV2VenueLayout.load3D();
+      venue = lib.create($('book-3d'), { t, onUnavailable: fallback,
+        onSelect: (target) => {
+          const table = state.tables.find((r) => r.id === target.key);
+          if (table) pickTable(table);
+        },
+      });
+      drawBookingMap();
+    } catch { fallback(); }
+    finally { venueLoading = false; }
+  }
+  if ($('book-floor')) {
+    $('book-floor').onchange = drawBookingMap;
+    $('book-view-3d').onclick = () => { mapMode = '3d'; drawBookingMap(); };
+    $('book-view-2d').onclick = () => { mapMode = '2d'; drawBookingMap(); };
+    $('book-2d').onclick = (event) => {
+      if (!plan) return;
+      const canvas = $('book-2d'); const size = { width: canvas.width, height: canvas.height };
+      const point = window.EV2Map.pointFromEvent(event, canvas.getBoundingClientRect(), size, window.EV2Map.layout(size, plan.canvas));
+      const hit = window.EV2Map.hitTest(plan.tables.filter((r) => r.floor === $('book-floor').value), point);
+      const table = hit && state.tables.find((r) => r.id === hit.id); if (table) pickTable(table);
+    };
   }
 
   function renderQuote() {
@@ -478,7 +542,11 @@
   // ---------------------------------------------------------------- acciones
 
   async function pickTable(table) {
+    if (!state.event || !state.tables.some((r) => r.id === table.id)) return;
+    const request = ++quoteRequest;
     state.table = table;
+    state.quote = null; renderQuote();
+    if ($('book-floor') && table.floor) $('book-floor').value = table.floor;
     renderTables();
     hideError();
     try {
@@ -491,8 +559,10 @@
         addons: [],
         discount_code: $('book-code').value.trim() || undefined,
       });
+      if (request !== quoteRequest) return;
       state.quote = data.quote;
     } catch (err) {
+      if (request !== quoteRequest) return;
       state.quote = null;
       showError(window.EV2Format.errorMessage(err));
     }
@@ -500,6 +570,7 @@
   }
 
   async function confirm() {
+    if (!state.quote) return;
     const form = {
       event: state.event, table: state.table, guests: state.guests,
       notes: $('book-notes').value, discountCode: $('book-code').value,
@@ -527,7 +598,7 @@
     } catch (err) {
       showError(window.EV2Format.errorMessage(err));
     } finally {
-      button.disabled = false;
+      button.disabled = !state.quote;
     }
   }
 
@@ -595,4 +666,7 @@
     openBooking: () => { const b = $('btn-book-open'); if (b && $('book-panel').hidden) b.click(); },
   };
   EV2Screen.on('language', () => { if (ctx) { renderTables(); renderQuote(); renderMine(); } });
+  EV2Screen.on('event', (event) => {
+    if (ctx && event.event_type === 'floor_plan_updated' && !$('book-panel').hidden) loadTables();
+  });
 }());

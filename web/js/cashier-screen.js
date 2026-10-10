@@ -6,7 +6,7 @@
  * (`EV2TerminalCharge`), el corte (`EV2ShiftCut`) y el carrito y los métodos de cobro
  * de la venta (`EV2Client`, `EV2OrderTaking`).
  */
-/* global EV2Push, EV2, EV2Format, EV2Roles, EV2PasswordGate, EV2Client, EV2OrderTaking,
+/* global EV2Drawer, EV2Push, EV2, EV2Format, EV2Roles, EV2PasswordGate, EV2Client, EV2OrderTaking,
    EV2TerminalCharge, EV2ShiftCut, EV2Cashier */
 (function () {
   'use strict';
@@ -66,11 +66,13 @@
    * nada; una respuesta repetida por doble toque no lo trae y no avisa de más.
    */
   function chargedToast(message, response) {
-    if (response && response.receipt === null) {
-      toast(`${message} ${t('till.noReceipt')}`, 'warn', 9000);
-    } else {
-      toast(message, 'ok');
-    }
+    const extra = [];
+    if (response && response.receipt === null) extra.push(t('till.noReceipt'));
+    // El cajón que no se va a abrir solo (D96): el cajero lo abre con la llave.
+    const cajon = EV2Drawer.notice(response && response.drawer);
+    if (cajon) extra.push(t(cajon.key));
+    if (extra.length) toast(`${message} ${extra.join(' ')}`, 'warn', 9000);
+    else toast(message, 'ok');
   }
 
   function banner(message) {
@@ -114,6 +116,11 @@
   $('btn-logout').onclick = signOut;
   $('btn-wrong-logout').onclick = signOut;
   $('btn-pw-logout').onclick = signOut;
+
+  // Abrir el cajón sin venta (D96): motivo y PIN del gerente.
+  $('btn-drawer').onclick = () => EV2Drawer.openNoSale({
+    api, clubId, t, toast, ui: window.EV2UI, errorMessage: (e) => EV2Format.errorMessage(e),
+  });
 
   $('btn-lang').onclick = () => {
     EV2Format.setLanguage(EV2Format.otherLanguage());
@@ -529,6 +536,7 @@
     let cambio = 0;
     let pagado = false;
     let ultimo = null;
+    let cajon = null;
     for (let i = 0; i < steps.length; i += 1) {
       const step = steps[i];
       if (step.terminal) {
@@ -546,10 +554,13 @@
       const res = await api.post(`/nightclubs/${clubId()}/till/payments`,
         EV2Cashier.paymentPayload(order, step, keys[i]));
       if (res.change_given && Number(res.change_given) > 0) cambio += Number(res.change_given);
+      if (res.drawer) cajon = res.drawer;
       if (res.paid) { pagado = true; ultimo = res; }
     }
+    if (ultimo && cajon) ultimo = { ...ultimo, drawer: cajon };
     if (cambio > 0) chargedToast(t('till.giveChange', { amount: money(cambio) }), ultimo);
     else if (pagado) chargedToast(t('take.charged'), ultimo);
+    else if (EV2Drawer.notice(cajon)) toast(t(EV2Drawer.notice(cajon).key), 'warn', 9000);
     return { waiting: false };
   }
 
@@ -625,7 +636,8 @@
    * el cuadro de ESE cobro: el cajero ve si pasó, o lo cancela. Devuelve si lo hizo.
    */
   async function resumeLiveCharge(err) {
-    const id = err && err.status === 409 && err.details && err.details.charge_id;
+    const id = err && err.status === 409 && err.details
+      && (err.details.charge_id || err.details.terminal_charge_id);
     if (!id) return false;
     try {
       const res = await api.get(`/nightclubs/${clubId()}/terminal-charges/${id}`);
@@ -896,6 +908,8 @@
     rt.on('event', (message) => {
       if (terminalSheet) terminalSheet.onEvent(message);
       avisoTerminal(message);
+      const cajon = EV2Drawer.failedEvent(message);
+      if (cajon) toast(t(cajon.key, cajon.vars), 'error', 9000);
       if (EV2Cashier.shouldRefresh(message, { locationId: barId() })) refreshSoon();
     });
     api.on('auth:expired', () => {

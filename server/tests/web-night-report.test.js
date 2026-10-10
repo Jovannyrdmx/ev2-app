@@ -162,10 +162,10 @@ describe('el portal del empleado enseña su lugar', () => {
 
 describe('los textos nuevos están en los dos idiomas', () => {
   const CLAVES = [
-    'cut.open', 'cut.title', 'cut.revenue', 'cut.attendance', 'cut.occupancy',
+    'nightCut.open', 'nightCut.title', 'cut.revenue', 'cut.attendance', 'cut.occupancy',
     'cut.perPerson', 'cut.watch', 'cut.money', 'cut.total', 'cut.tipsApart',
     'cut.reservations', 'cut.noShow', 'cut.zones', 'cut.byCategory', 'cut.byBar',
-    'cut.staff', 'cut.close', 'cut.closed', 'cut.confirmClose', 'cut.alreadyClosed',
+    'cut.staff', 'nightCut.close', 'cut.closed', 'cut.confirmClose', 'cut.alreadyClosed',
     'cut.compare', 'cut.notComparable',
     'roster.open', 'roster.title', 'roster.pick', 'roster.remove', 'roster.here',
     'roster.notHere', 'roster.nobody', 'roster.complete', 'roster.missing',

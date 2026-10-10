@@ -85,10 +85,10 @@
 
   const ORDER_LABELS = {
     es: {
-      pending: 'Enviado', confirmed: 'Confirmado', preparing: 'Preparando',
+      pending: 'Pedido registrado', confirmed: 'Confirmado', preparing: 'En preparación',
       ready: '¡Listo! Recógelo en la barra', delivered: 'Entregado',
-      cancelled: 'Cancelado', pos_error: 'Con problema, ya lo revisan',
-      returned_to_sender: 'Te lo devolvieron',
+      cancelled: 'Cancelado', pos_error: 'El pedido necesita revisión del personal',
+      returned_to_sender: 'Pedido devuelto a quien lo envió',
     },
     en: {
       pending: 'Sent', confirmed: 'Confirmed', preparing: 'Preparing',
@@ -200,7 +200,7 @@
       return { changed: 'orders', orderId: id, status: order.status };
     }
 
-    if (type === 'table_updated') return { changed: 'floorPlan' };
+    if (type === 'table_updated' || type === 'floor_plan_updated') return { changed: 'floorPlan' };
     if (type === 'flirt_received') return { changed: 'flirts', payload };
     return null;
   }

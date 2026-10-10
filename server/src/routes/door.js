@@ -21,6 +21,8 @@ const door = require('../services/door');
 const passes = require('../services/guest-passes');
 const QRCode = require('qrcode');
 const seating = require('../services/seating');
+const payments = require('../services/payments');
+const cashDrawer = require('../services/cash-drawer');
 
 const router = express.Router({ mergeParams: true });
 
@@ -639,9 +641,75 @@ const admissionSchema = z.object({
   // Los nombres de los invitados extra, en el orden en que se emiten sus pases.
   // Opcional: en la puerta a veces no hay tiempo de teclear nada.
   labels: z.array(z.string().trim().max(60)).max(50).optional(),
+  // Lo que entregó el cliente en efectivo (D96): pesos, dólares o los dos. El cambio
+  // lo calcula el servidor y se entrega en pesos.
+  cash_received: z.number().min(0).max(1_000_000).optional(),
+  usd_received: z.number().positive().max(100_000).optional(),
+  // El tipo de cambio que vio la anfitriona: si ya no es el vigente, 409.
+  exchange_rate_id: z.union([z.string().regex(/^\d+$/), z.number().int().positive()]).optional(),
 }).refine((b) => b.kind !== 'vip_extra' || b.reservation_id, {
   message: 'Un extra VIP va contra una reservación', path: ['reservation_id'],
+}).refine((b) => (b.cash_received === undefined && b.usd_received === undefined)
+  || b.payment_method === 'cash', {
+  message: 'Lo recibido solo aplica al cobro en efectivo', path: ['cash_received'],
 });
+
+/**
+ * El cambio de un cover pagado en efectivo (D96). Misma regla que la caja (D86):
+ *
+ *   - los dólares se convierten al tipo de cambio vigente del gerente, con la
+ *     aritmética NUMERIC de Postgres (redondeo al centavo);
+ *   - cubren hasta el total; lo que sobre de dólares se devuelve en pesos
+ *     redondeado HACIA ABAJO al peso (los centavos se quedan en el club);
+ *   - los pesos pagan lo que falte, y su cambio es exacto;
+ *   - nunca se acepta recibir menos de lo que cuesta.
+ *
+ * Solo para covers en pesos: un cover en dólares se cobra en dólares, sin cambio
+ * calculado.
+ */
+async function tender(client, { total, currency, cashReceived, usdReceived, exchangeRateId }) {
+  if (cashReceived === undefined && usdReceived === undefined) return null;
+  if (currency !== 'MXN') {
+    throw ApiError.unprocessable('Este cover está en dólares: el cambio en pesos solo se calcula para covers en pesos');
+  }
+  let usd = null;
+  if (usdReceived !== undefined) {
+    const rate = await payments.currentRate(client);
+    if (!rate) {
+      throw ApiError.unprocessable(
+        'El gerente no ha fijado el tipo de cambio: por ahora no se puede cobrar en dólares.');
+    }
+    if (exchangeRateId === undefined || String(exchangeRateId) !== String(rate.id)) {
+      throw ApiError.conflict(
+        `El tipo de cambio cambió a ${Number(rate.rate).toFixed(2)}. Revisa el cobro con el nuevo valor.`,
+        { exchange_rate: { id: String(rate.id), rate: rate.rate } });
+    }
+    const { rows } = await client.query(
+      `SELECT round($1::numeric * $2::numeric, 2)::text AS mxn,
+              LEAST(round($1::numeric * $2::numeric, 2), $3::numeric)::text AS amount,
+              floor(round($1::numeric * $2::numeric, 2)
+                    - LEAST(round($1::numeric * $2::numeric, 2), $3::numeric))::numeric(12,2)::text AS change`,
+      [Number(usdReceived).toFixed(2), String(rate.rate), Number(total).toFixed(2)]);
+    usd = {
+      received: Number(usdReceived).toFixed(2), rate: String(rate.rate), rateId: String(rate.id),
+      mxn: rows[0].mxn, amount: rows[0].amount, change: rows[0].change,
+    };
+  }
+  const cents = (n) => Math.round(Number(n || 0) * 100);
+  const pesosDue = cents(total) - (usd ? cents(usd.amount) : 0);
+  const pesos = cents(cashReceived);
+  if (pesos < pesosDue) {
+    const falta = ((pesosDue - pesos) / 100).toFixed(2);
+    throw ApiError.unprocessable(`Faltan $${falta} para completar el cover.`,
+      { missing: falta, total: Number(total).toFixed(2) });
+  }
+  const change = (pesos - pesosDue) + (usd ? cents(usd.change) : 0);
+  return {
+    cashReceived: cashReceived === undefined ? null : (pesos / 100).toFixed(2),
+    usd,
+    change: (change / 100).toFixed(2),
+  };
+}
 
 /**
  * De dónde sale el precio de una entrada.
@@ -755,6 +823,12 @@ router.post('/nightclubs/:nightclubId/door/admissions',
 
       const precio = await resolvePrice(client, { nightclubId, body: b });
       const total = Math.round(precio.unitPrice * b.quantity * 100) / 100;
+      const pago = b.payment_method === 'cash' && total > 0
+        ? await tender(client, {
+          total, currency: precio.currency, cashReceived: b.cash_received,
+          usdReceived: b.usd_received, exchangeRateId: b.exchange_rate_id,
+        })
+        : null;
 
       if (b.reservation_id) {
         const r = await client.query(
@@ -780,6 +854,10 @@ router.post('/nightclubs/:nightclubId/door/admissions',
               // De dónde salió el precio. Un 'manual' en el corte es un renglón que
               // alguien tecleó, y eso se puede mirar.
               price_source: precio.source,
+              cash_received: pago ? pago.cashReceived : null,
+              usd_received: pago && pago.usd ? pago.usd.received : null,
+              exchange_rate: pago && pago.usd ? pago.usd.rate : null,
+              change_given: pago ? pago.change : null,
             })],
         );
         transactionId = tx.rows[0].id;
@@ -789,15 +867,37 @@ router.post('/nightclubs/:nightclubId/door/admissions',
         `INSERT INTO door_admissions (nightclub_id, event_id, kind, reservation_id, quantity,
                                       unit_price, total, currency, payment_method,
                                       transaction_id, sold_by, notes,
-                                      client_request_id, price_source, cover_price_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::text,$15)
+                                      client_request_id, price_source, cover_price_id,
+                                      cash_received, usd_received, exchange_rate, exchange_rate_id,
+                                      usd_amount, usd_change, change_given)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::text,$15,
+                 $16,$17,$18,$19,$20,$21,$22)
          RETURNING id, kind, quantity, unit_price::text, total::text, currency,
-                   payment_method, reservation_id, price_source, created_at`,
+                   payment_method, reservation_id, price_source, created_at,
+                   cash_received::text, usd_received::text, exchange_rate::text,
+                   change_given::text`,
         [nightclubId, b.event_id || null, b.kind, b.reservation_id || null, b.quantity,
           precio.unitPrice, total, precio.currency, b.payment_method, transactionId,
           req.user.id, b.notes || null,
-          b.client_request_id || null, precio.source, precio.coverPriceId],
+          b.client_request_id || null, precio.source, precio.coverPriceId,
+          pago ? pago.cashReceived : null,
+          pago && pago.usd ? pago.usd.received : null,
+          pago && pago.usd ? pago.usd.rate : null,
+          pago && pago.usd ? pago.usd.rateId : null,
+          pago && pago.usd ? pago.usd.amount : null,
+          pago && pago.usd ? pago.usd.change : null,
+          pago ? pago.change : null],
       );
+
+      // Efectivo en la puerta: el cajón de la puerta se abre solo (D96).
+      let drawer = null;
+      if (b.payment_method === 'cash' && total > 0) {
+        const printer = await cashDrawer.doorPrinter(client, { nightclubId });
+        drawer = await cashDrawer.open(client, {
+          nightclubId, printer, refId: transactionId, createdBy: req.user.id,
+          reason: `cover en efectivo ${total.toFixed(2)} ${precio.currency}`,
+        });
+      }
 
       // Cada extra pagado se lleva su propio QR. Sin esto, "pagué dos extras" se
       // resolvía dejando pasar a dos personas de palabra, y el conteo de adentro y
@@ -826,6 +926,8 @@ router.post('/nightclubs/:nightclubId/door/admissions',
       await client.query('COMMIT');
       return res.status(201).json({
         admission: rows[0],
+        change_given: pago ? pago.change : null,
+        drawer,
         // Con el payload firmado: la pantalla de la puerta dibuja el QR y se lo
         // enseña a la persona que acaba de pagar.
         passes: emitidos.map((p) => ({ ...p, payload: passes.payload(p.code) })),

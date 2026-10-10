@@ -349,6 +349,20 @@ function testTicket({ clubName, printerName, purpose, columns, codepage, hasCutt
   return t.build();
 }
 
+// ---------------------------------------------------------------- el cajón (D96)
+
+/**
+ * El pulso que abre el cajón de dinero conectado a la impresora (RJ11).
+ *
+ * `ESC p m t1 t2`: `m` elige el pin del conector (0 = pin 2, 1 = pin 5) y `t1`/`t2`
+ * son el tiempo encendido y apagado en pasos de 2 ms (50 ms y 500 ms, lo que piden
+ * los cajones comunes). No imprime nada ni mueve el papel.
+ */
+function drawerPulse(pin) {
+  if (pin !== 2 && pin !== 5) throw new Error(`drawer pin must be 2 or 5, got ${pin}`);
+  return Buffer.concat([CMD.init, Buffer.from([ESC, 0x70, pin === 5 ? 1 : 0, 25, 250])]);
+}
+
 module.exports = {
-  CODEPAGES, HIGH_CHARS, FOLD, encode, wrap, twoColumns, ticket, testTicket,
+  CODEPAGES, HIGH_CHARS, FOLD, encode, wrap, twoColumns, ticket, testTicket, drawerPulse,
 };

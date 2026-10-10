@@ -231,7 +231,7 @@ describe('caja.html y su controlador', () => {
   });
 
   it('con una terminal ya esperando, vuelve a mostrar ese cobro en vez de atorarse (D82)', () => {
-    expect(controlador).toMatch(/err\.details && err\.details\.charge_id/);
+    expect(controlador).toMatch(/err\.details\s*&& \(err\.details\.charge_id \|\| err\.details\.terminal_charge_id\)/);
     expect(controlador).toMatch(/resumeLiveCharge\(err\)/);
     expect(controlador).toMatch(/avisoTerminal\(message\)/);
   });

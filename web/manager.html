@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es-MX">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -66,6 +66,7 @@
       <div>
         <p class="font-display text-lg ev2-gradient leading-none">EV2 · <span data-i18n="manager.title">Gerente</span></p>
         <p class="text-xs text-white/50"><span id="me-name">—</span></p>
+        <a id="btn-venue-editor" href="venue-editor.html" class="inline-block py-3 text-sm underline" data-i18n="venue.title" hidden>Distribución del lugar</a>
       </div>
       <div class="flex items-center gap-3">
         <span class="text-xs text-white/50 flex items-center gap-1">
@@ -894,7 +895,7 @@
           <summary class="text-sm cursor-pointer" data-i18n="prn.addTitle">Dar de alta una impresora</summary>
           <div class="space-y-3 pt-3">
             <input type="hidden" id="prn-agent-id" value="">
-            <div>
+            <div id="prn-location-box">
               <label class="label" for="prn-location" data-i18n="prn.location">Barra</label>
               <select id="prn-location" class="field"></select>
             </div>
@@ -904,6 +905,7 @@
                 <option value="orders" data-i18n="prn.pOrders">Comandas (PC del bartender)</option>
                 <option value="service" data-i18n="prn.pService">Cuentas y recibos (PC de meseros)</option>
                 <option value="till" data-i18n="prn.pTill">Recibos de la caja</option>
+                <option value="door" data-i18n="prn.pDoor">Puerta (anfitriona)</option>
               </select>
             </div>
             <div>
@@ -955,6 +957,15 @@
               <input id="prn-cutter" type="checkbox" class="w-5 h-5 accent-emerald-400" checked>
               <span data-i18n="prn.cutter">Corta el papel sola</span>
             </label>
+            <div>
+              <label class="label" for="prn-drawer" data-i18n="prn.drawer">Cajón de dinero</label>
+              <select id="prn-drawer" class="field">
+                <option value="" data-i18n="prn.drawerNone">Sin cajón</option>
+                <option value="2" data-i18n="prn.drawerPin2">Con cajón · pin 2 (el más común)</option>
+                <option value="5" data-i18n="prn.drawerPin5">Con cajón · pin 5</option>
+              </select>
+              <p class="text-[11px] text-white/40 mt-1" data-i18n="prn.drawerHint">El cajón se conecta con su cable a la impresora. Si al probarlo no abre, cambia el pin y vuelve a probar.</p>
+            </div>
             <p id="prn-add-error" class="text-sm text-red-300" hidden></p>
             <button id="btn-prn-add" class="ev2-button w-full rounded-lg py-2" data-i18n="prn.add">Dar de alta</button>
           </div>

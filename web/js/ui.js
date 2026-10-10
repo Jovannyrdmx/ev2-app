@@ -8,8 +8,9 @@
  * backdrop cancel, and the dangerous choice is never the default focus.
  *
  *   EV2UI.confirm(text, { title, ok, cancel, danger })  -> Promise<boolean>
- *   EV2UI.prompt(text, { value, ok, cancel, inputmode })  -> Promise<string|null>
+ *   EV2UI.prompt(text, { value, ok, cancel, inputmode, secret })  -> Promise<string|null>
  *   EV2UI.toast(text, { kind: 'ok'|'bad', action, onAction, ms })
+ *   EV2UI.enhance(root)  -> accessible names and live regions (runs by itself)
  *
  * Screens call it through a one-line `ask()` that falls back to `window.confirm` when
  * this file is not loaded (unit tests evaluate a single screen file on its own).
@@ -64,7 +65,9 @@
       if (withInput) {
         input = doc.createElement('input');
         input.className = 'field mt-3';
-        input.type = 'text';
+        // `secret`: un PIN no se queda a la vista de quien está junto a la caja.
+        input.type = o.secret ? 'password' : 'text';
+        if (o.secret) input.autocomplete = 'off';
         input.value = o.value == null ? '' : String(o.value);
         if (o.inputmode) input.setAttribute('inputmode', o.inputmode);
         input.setAttribute('aria-labelledby', p.id);
@@ -149,5 +152,60 @@
     return close;
   }
 
-  return { confirm, prompt, toast };
+  /**
+   * Accesibilidad que no cambia el diseño (llegó de la revisión de la rama del mapa 3D):
+   *   - un botón que solo tiene un icono y un `title` recibe ese texto como nombre, para
+   *     que un lector de pantalla no diga solo "botón";
+   *   - los avisos de error y el banner se anuncian en cuanto aparecen (`role=alert`), y
+   *     el aviso flotante y el estado en vivo, sin interrumpir (`role=status`).
+   * Se vuelve a aplicar cuando una pantalla pinta algo nuevo.
+   */
+  function enhance(root) {
+    const r = root || doc;
+    if (!r || !r.querySelectorAll) return;
+    r.querySelectorAll('button[title],a[title]').forEach((el) => {
+      if (el.getAttribute('aria-label') || el.textContent.trim()) return;
+      el.setAttribute('aria-label', el.getAttribute('title'));
+      if (el.dataset.i18nTitle) el.setAttribute('data-i18n-aria-label', el.dataset.i18nTitle);
+    });
+    r.querySelectorAll('[id$="-error"],#auth-error,#banner').forEach((el) => {
+      if (!el.getAttribute('role')) el.setAttribute('role', 'alert');
+      el.setAttribute('aria-atomic', 'true');
+    });
+    r.querySelectorAll('#toast,#rt-text').forEach((el) => {
+      if (!el.getAttribute('role')) el.setAttribute('role', 'status');
+      if (!el.getAttribute('aria-live')) el.setAttribute('aria-live', 'polite');
+    });
+  }
+
+  /** "Saltar al contenido": el primer Tab lleva directo a `<main>`, sin recorrer el menú. */
+  function addSkipLink() {
+    const main = doc.querySelector('main');
+    if (!main || doc.querySelector('.ev2-skip')) return;
+    if (!main.id) main.id = 'ev2-main';
+    if (!main.hasAttribute('tabindex')) main.tabIndex = -1;
+    const a = doc.createElement('a');
+    a.href = `#${main.id}`;
+    a.className = 'ev2-skip';
+    a.setAttribute('data-i18n', 'ux.skip');
+    a.textContent = lang() === 'en' ? 'Skip to content' : 'Ir al contenido';
+    doc.body.prepend(a);
+  }
+
+  if (doc && typeof win.MutationObserver === 'function') {
+    const boot = () => {
+      addSkipLink();
+      enhance(doc);
+      let scheduled = false;
+      new win.MutationObserver((records) => {
+        if (scheduled || !records.some((m) => m.addedNodes && m.addedNodes.length)) return;
+        scheduled = true;
+        win.setTimeout(() => { scheduled = false; enhance(doc); }, 0);
+      }).observe(doc.body, { childList: true, subtree: true });
+    };
+    if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', boot);
+    else if (doc.body) boot();
+  }
+
+  return { confirm, prompt, toast, enhance };
 }));

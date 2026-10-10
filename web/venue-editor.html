@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="ev2:api" content="/api">
+  <meta name="theme-color" content="#0b101b">
+  <title>Distribución del lugar · EV2</title>
+  <link rel="icon" href="images/favicon.ico" sizes="any">
+  <link rel="icon" href="images/favicon-32x32.png" type="image/png" sizes="32x32">
+  <link rel="icon" href="images/favicon-16x16.png" type="image/png" sizes="16x16">
+  <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/ev2.css">
+</head>
+<body class="venue-editor">
+  <header>
+    <div><h1 data-i18n="venue.title">Distribución del lugar</h1><a href="manager.html" data-i18n="venue.back">Volver a administración</a></div>
+    <label>Idioma / Language <select id="editor-language"><option value="es">Español</option><option value="en">English</option></select></label>
+  </header>
+  <main>
+    <p id="editor-status" role="status" aria-live="polite">Cargando plano…</p>
+    <div id="editor-work" hidden>
+      <p class="venue-note" data-i18n="venue.editorHint">Elige qué mover y arrástralo. Una zona mueve todas sus mesas. Los cambios se publican solo al guardar.</p>
+      <div class="venue-actions">
+        <button id="editor-save" class="venue-primary" data-i18n="venue.save" disabled>Guardar distribución</button>
+        <button id="editor-undo" data-i18n="venue.undo" disabled>Deshacer</button>
+        <button id="editor-cancel" data-i18n="venue.cancel" disabled>Cancelar cambios</button>
+        <button id="editor-reload" data-i18n="venue.reload">Recargar plano</button>
+      </div>
+      <div class="venue-workspace">
+        <div><div id="editor-map"></div><p id="editor-fallback" class="venue-note" hidden data-i18n="venue.numericFallback"></p><p class="venue-note" data-i18n="venue.schematic"></p></div>
+        <aside class="venue-inspector">
+          <h2 data-i18n="venue.object">Selecciona un elemento</h2>
+          <label for="editor-floor" data-i18n="venue.floor">Piso</label><select id="editor-floor"></select>
+          <label for="editor-mode" data-i18n="venue.mode">Qué quieres mover</label>
+          <select id="editor-mode"><option value="view" data-i18n="venue.view">Explorar sin mover</option><option value="table" data-i18n="venue.table">Mesa</option><option value="zone" data-i18n="venue.zone">Zona completa</option><option value="landmark" data-i18n="venue.landmark">Área del lugar</option></select>
+          <label for="editor-object" data-i18n="venue.object">Selecciona un elemento</label><select id="editor-object"></select>
+          <label for="editor-x" data-i18n="venue.x">Posición horizontal (X)</label><input id="editor-x" type="number" step="0.01" inputmode="decimal">
+          <label for="editor-y" data-i18n="venue.y">Posición vertical (Y)</label><input id="editor-y" type="number" step="0.01" inputmode="decimal">
+          <div class="venue-actions"><button id="editor-apply" data-i18n="venue.apply">Aplicar posición</button></div>
+        </aside>
+      </div>
+    </div>
+  </main>
+  <script src="js/api.js"></script>
+  <script src="js/format.js"></script>
+  <script src="js/venue-layout.js"></script>
+  <script src="js/venue-editor.js"></script>
+  <script src="js/pwa.js"></script>
+</body>
+</html>

@@ -396,6 +396,7 @@ describe('El hueco para Stripe y Mercado Pago', () => {
     // el error que cobra una tarjeta de verdad durante un ensayo.
     process.env.MERCADOPAGO_PUBLIC_KEY = 'APP_USR-pub';
     process.env.MERCADOPAGO_ACCESS_TOKEN = 'APP_USR-123';
+    process.env.MERCADOPAGO_WEBHOOK_SECRET = 'firma';
 
     process.env.MERCADOPAGO_ENV = 'test';
     expect(config.mercadoPagoConfig()).toMatchObject({ mode: 'test', configured: true });
@@ -415,19 +416,21 @@ describe('El hueco para Stripe y Mercado Pago', () => {
     process.env.MERCADOPAGO_ENV = 'test';
   });
 
-  it('la firma del webhook no hace falta para cobrar, y se dice cual de las dos es', () => {
-    // No es un descuido: la notificacion nunca se cree por si misma. Cuando llega, el
-    // servidor vuelve a pedir la orden con su propio token y actua sobre ESA respuesta.
+  it('Point requiere firma de webhook, pero no necesita una llave pública de navegador', () => {
     process.env.MERCADOPAGO_ACCESS_TOKEN = 'APP_USR-123';
     process.env.MERCADOPAGO_PUBLIC_KEY = 'APP_USR-pub';
     process.env.MERCADOPAGO_ENV = 'test';
 
     delete process.env.MERCADOPAGO_WEBHOOK_SECRET;
     expect(config.mercadoPagoConfig()).toMatchObject({
-      configured: true, webhook_verified: false,
+      configured: false, webhook_verified: false,
     });
     process.env.MERCADOPAGO_WEBHOOK_SECRET = 'firma';
     expect(config.mercadoPagoConfig().webhook_verified).toBe(true);
+    delete process.env.MERCADOPAGO_PUBLIC_KEY;
+    expect(config.mercadoPagoConfig()).toMatchObject({
+      configured: true, methods: ['card_terminal'], currencies: ['MXN'],
+    });
   });
 
   it('la llave secreta nunca sale por la API; la pública sí, porque la usa el navegador', async () => {

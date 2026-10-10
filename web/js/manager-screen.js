@@ -84,7 +84,9 @@
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   /** El nombre de cada propósito de impresora. `till` es la caja de una barra (D79). */
-  const PURPOSE_KEY = { orders: 'prn.pOrders', service: 'prn.pService', till: 'prn.pTill' };
+  const PURPOSE_KEY = {
+    orders: 'prn.pOrders', service: 'prn.pService', till: 'prn.pTill', door: 'prn.pDoor',
+  };
 
   let toastTimer = null;
   function toast(message, kind = 'info') {
@@ -208,6 +210,7 @@
     $('screen-wrong-role').hidden = true;
     $('screen-manager').hidden = false;
     $('me-name').textContent = (api.session.user && api.session.user.display_name) || '';
+    $('btn-venue-editor').hidden = role !== 'admin';
     await loadAll();
     connectRealtime();
     // Notificaciones al teléfono (D90): ofrecerlas, o volver a registrar este teléfono.
@@ -2018,7 +2021,8 @@
       nombre.textContent = p.name;
       const donde = document.createElement('p');
       donde.className = 'text-[11px] text-white/50 truncate';
-      donde.textContent = `${p.location_name || ''} · ${t(PURPOSE_KEY[p.purpose] || 'prn.pService')}`;
+      donde.textContent = [p.location_name, t(PURPOSE_KEY[p.purpose] || 'prn.pService'),
+        p.drawer_pin ? t('prn.drawerOn', { pin: p.drawer_pin }) : null].filter(Boolean).join(' · ');
       const como = document.createElement('p');
       como.className = 'text-[11px] text-white/40 truncate';
       como.textContent = p.connection === 'windows'
@@ -2041,10 +2045,34 @@
       apagar.className = 'card rounded-lg px-3 py-2 text-xs';
       apagar.textContent = t(p.active ? 'prn.disable' : 'prn.enable');
       apagar.onclick = () => togglePrinter(p, apagar, nota);
-      acciones.append(probar, apagar);
+      acciones.append(probar);
+      // El cajón (D96): probarlo y cambiar el pin desde la misma tarjeta.
+      const pin = document.createElement('select');
+      pin.className = 'field text-xs py-1';
+      pin.setAttribute('aria-label', t('prn.drawer'));
+      for (const [v, k] of [['', 'prn.drawerNone'], ['2', 'prn.drawerPin2'], ['5', 'prn.drawerPin5']]) {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = t(k);
+        pin.appendChild(o);
+      }
+      pin.value = p.drawer_pin ? String(p.drawer_pin) : '';
+      pin.disabled = !p.active;
+      pin.onchange = () => setDrawerPin(p, pin, nota);
+      const cajon = document.createElement('button');
+      cajon.className = 'card rounded-lg px-3 py-2 text-xs';
+      cajon.textContent = t('prn.testDrawer');
+      cajon.hidden = !p.drawer_pin;
+      cajon.disabled = !p.active;
+      cajon.onclick = () => testDrawer(p, cajon, nota);
+      acciones.append(cajon, apagar);
+      acciones.classList.add('flex-wrap', 'justify-end');
 
       fila.append(left, acciones);
-      card.append(fila, nota);
+      const filaCajon = document.createElement('div');
+      filaCajon.className = 'flex items-center gap-2';
+      filaCajon.append(pin);
+      card.append(fila, filaCajon, nota);
       caja.appendChild(card);
     }
   }
@@ -2462,6 +2490,32 @@
     }
   }
 
+  async function testDrawer(printer, button, nota) {
+    nota.hidden = true;
+    const listo = ocupado(button, 'prn.sending');
+    try {
+      await api.post(`/nightclubs/${clubId()}/printers/${printer.id}/test-drawer`, {});
+      toast(t('prn.drawerQueued'), 'ok');
+      listo();
+    } catch (err) {
+      listo();
+      avisar(nota, EV2Format.errorMessage(err));
+    }
+  }
+
+  async function setDrawerPin(printer, select, nota) {
+    nota.hidden = true;
+    try {
+      await api.patch(`/nightclubs/${clubId()}/printers/${printer.id}`,
+        { drawer_pin: select.value ? Number(select.value) : null });
+      toast(t('prn.saved'), 'ok');
+      await loadPrinting();
+    } catch (err) {
+      select.value = printer.drawer_pin ? String(printer.drawer_pin) : '';
+      avisar(nota, EV2Format.errorMessage(err));
+    }
+  }
+
   async function togglePrinter(printer, button, nota) {
     nota.hidden = true;
     const listo = ocupado(button, 'prn.saving');
@@ -2475,6 +2529,11 @@
     }
   }
 
+  // La impresora de la puerta no va en ninguna barra (D96).
+  $('prn-purpose').addEventListener('change', () => {
+    $('prn-location-box').hidden = $('prn-purpose').value === 'door';
+  });
+
   $('prn-connection').onchange = () => {
     const red = $('prn-connection').value === 'network';
     $('prn-network-fields').hidden = !red;
@@ -2485,10 +2544,12 @@
     const nota = $('prn-add-error');
     nota.hidden = true;
     const red = $('prn-connection').value === 'network';
+    const esPuerta = $('prn-purpose').value === 'door';
     const cuerpo = {
-      location_id: $('prn-location').value,
+      location_id: esPuerta ? null : $('prn-location').value,
       name: $('prn-name').value.trim(),
       purpose: $('prn-purpose').value,
+      drawer_pin: $('prn-drawer').value ? Number($('prn-drawer').value) : null,
       connection: $('prn-connection').value,
       paper_width: Number($('prn-width').value),
       codepage: $('prn-codepage').value,
@@ -2499,7 +2560,7 @@
       ...(!red && $('prn-agent-id').value ? { agent_id: $('prn-agent-id').value } : {}),
       test: true,
     };
-    if (!cuerpo.location_id) { avisar(nota, t('prn.errBar')); return; }
+    if (!esPuerta && !cuerpo.location_id) { avisar(nota, t('prn.errBar')); return; }
     if (!cuerpo.name) { avisar(nota, t('prn.errName')); return; }
     if (red && !cuerpo.host) { avisar(nota, t('prn.errHost')); return; }
     if (!red && !cuerpo.windows_name) { avisar(nota, t('prn.errWinName')); return; }

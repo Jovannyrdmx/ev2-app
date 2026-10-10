@@ -53,7 +53,10 @@
       case 'waiting': return {
         key: charge && charge.at_terminal ? 'pay.termAtTerminal' : 'pay.termWaiting', tone: 'wait',
       };
-      case 'action_required': return { key: 'pay.termAction', tone: 'wait' };
+      case 'action_required': return {
+        key: charge && charge.status_detail === 'reconciliation_required'
+          ? 'pay.termReview' : 'pay.termAction', tone: 'wait',
+      };
       case 'processed': return { key: 'pay.termPaid', tone: 'ok' };
       case 'failed': return { key: 'pay.termFailed', tone: 'bad' };
       case 'canceled': return { key: 'pay.termCanceled', tone: 'bad' };
@@ -66,9 +69,8 @@
   /**
    * El detalle de Mercado Pago, dicho en español cuando es uno de los documentados.
    *
-   * Si no está en la lista se enseña tal cual: dice más que cualquier texto nuestro, y
-   * es lo que el cliente va a preguntar. La lista es corta a propósito: solo los que
-   * aparecen en la guía de Point, para no traducir mal un código que no conocemos.
+   * Unknown provider codes use a plain-language fallback; technical evidence remains
+   * in the server audit, not untranslated in front of a customer.
    */
   const DETAIL_KEYS = {
     accredited: 'pay.detAccredited',
@@ -79,6 +81,10 @@
     created: 'pay.detCreated',
     refunded: 'pay.detRefunded',
     expired: 'pay.detExpired',
+    canceled_on_terminal: 'pay.detCanceledTerminal',
+    check_on_terminal: 'pay.detCheckTerminal',
+    reconciliation_required: 'pay.detReview',
+    create_rejected: 'pay.detCreateRejected',
   };
   const detailKey = (detail) => DETAIL_KEYS[String(detail || '')] || null;
 
@@ -152,17 +158,21 @@
 
     const caja = doc.createElement('div');
     caja.id = 'term-sheet';
+    caja.setAttribute('role', 'dialog');
+    caja.setAttribute('aria-modal', 'true');
+    caja.setAttribute('aria-labelledby', 'term-headline');
+    caja.tabIndex = -1;
     caja.hidden = true;
     caja.className = 'fixed inset-0 z-[70] flex items-end justify-center bg-black/80';
     caja.innerHTML = `
       <div class="w-full max-w-md rounded-t-2xl p-5 space-y-4 text-center"
-           style="background:#12121f;border-top:1px solid rgba(255,255,255,.12)">
+           style="background:#12121f;border-top:1px solid rgba(255,255,255,.12);max-height:100dvh;overflow-y:auto">
         <p id="term-amount" class="font-display text-3xl">—</p>
         <p id="term-where" class="text-xs text-white/50">—</p>
         <div id="term-spinner" class="mx-auto w-12 h-12 rounded-full pulsing"
              style="border:3px solid rgba(0,191,255,.25);border-top-color:var(--ev2-cyan)"></div>
-        <p id="term-headline" class="font-display text-lg">—</p>
-        <p id="term-detail" class="text-xs text-white/50"></p>
+        <p id="term-headline" class="font-display text-lg" role="status" aria-live="polite" aria-atomic="true">—</p>
+        <p id="term-detail" class="text-xs text-white/50" aria-live="polite"></p>
         <p id="term-left" class="text-[11px] text-white/35"></p>
         <button id="term-cancel" class="w-full py-3 rounded-xl card text-sm text-red-300"></button>
         <button id="term-close" class="w-full py-3 rounded-xl ev2-button font-display" hidden></button>
@@ -176,6 +186,17 @@
       chargeId: null, status: null, started: 0, timer: null, expiresAt: null,
       fallos: 0, salida: false,
     };
+    let generation = 0;
+    let inFlight = null;
+    let previousFocus = null;
+    const notified = new Set();
+
+    async function notifyPaid(charge) {
+      if (!isPaid(charge.status) || !onPaid || notified.has(charge.id)) return;
+      notified.add(charge.id);
+      // A refresh callback failing cannot change the already confirmed payment.
+      try { await onPaid(charge); } catch { /* the authoritative result stays visible */ }
+    }
 
     function pintar(charge) {
       const head = headline(charge.status, charge);
@@ -187,22 +208,25 @@
       $('term-headline').textContent = t(head.key);
       $('term-headline').style.color = head.tone === 'ok' ? 'var(--ev2-lime)'
         : head.tone === 'bad' ? '#fca5a5' : '';
-      // El detalle que manda Mercado Pago (por qué se rechazó): en español si es uno de
-      // los documentados, tal cual si no. Y la propina, si el cliente la dejó en la
+      // El detalle que manda Mercado Pago (por qué se rechazó), en lenguaje claro.
+      // Y la propina, si el cliente la dejó en la
       // terminal: es dinero de alguien y tiene que verse.
       const dk = detailKey(charge.status_detail);
-      const partes = [dk ? t(dk) : (charge.status_detail || '')];
+      const partes = [dk ? t(dk) : t(isPaid(charge.status) ? 'pay.detAccredited'
+        : charge.status === 'failed' ? 'pay.detDeclined' : 'pay.detPending')];
       if (isPaid(charge.status) && Number(charge.tip_amount) > 0) {
         partes.push(t('pay.termTip', { tip: deps.money(charge.tip_amount, charge.currency) }));
       }
       $('term-detail').textContent = partes.filter(Boolean).join(' · ');
-      $('term-spinner').hidden = isFinal(charge.status);
+      const needsReview = charge.status_detail === 'reconciliation_required';
+      if (needsReview) estado.salida = true;
+      $('term-spinner').hidden = isFinal(charge.status) || needsReview;
 
       const quedan = secondsLeft(estado.expiresAt);
       $('term-left').textContent = (!isFinal(charge.status) && quedan !== null)
         ? t('pay.termLeft', { n: quedan }) : '';
 
-      const cancelable = canCancel(charge.status);
+      const cancelable = canCancel(charge.status) && !needsReview;
       $('term-cancel').hidden = !cancelable;
       $('term-cancel').textContent = t('pay.termCancel');
       // La puerta de salida, una vez abierta, NO se vuelve a cerrar (D65).
@@ -223,7 +247,6 @@
 
     /** Abre la salida y explica por qué, sin decir que el cobro falló. */
     function abrirSalida(motivo) {
-      if (estado.salida) return;
       estado.salida = true;
       $('term-spinner').hidden = true;
       $('term-headline').textContent = t(motivo);
@@ -236,46 +259,63 @@
     }
 
     async function preguntar() {
-      if (!estado.chargeId) return;
+      if (!estado.chargeId || caja.hidden || inFlight === generation) return;
+      const current = generation;
+      const chargeId = estado.chargeId;
+      inFlight = current;
       try {
-        const res = await api.get(`/nightclubs/${clubId()}/terminal-charges/${estado.chargeId}`);
+        const res = await api.get(`/nightclubs/${clubId()}/terminal-charges/${chargeId}`);
+        if (current !== generation || caja.hidden) return;
+        if (!res.charge || res.charge.id !== chargeId) throw new Error('Unexpected charge');
         estado.fallos = 0;
         pintar(res.charge);
         if (isFinal(res.charge.status)) {
           parar();
-          if (isPaid(res.charge.status) && onPaid) await onPaid(res.charge);
+          await notifyPaid(res.charge);
           return;
         }
       } catch {
+        if (current !== generation || caja.hidden) return;
         // Un tropiezo suelto no es noticia: el cobro puede estar pasando justo ahora, y
         // enseñar "error" por eso sería mentir. Pero TRES seguidas ya no es un tropiezo
         // —son más de veinte segundos sin saber nada— y ahí hay que dar salida en vez
         // de girar para siempre.
         estado.fallos += 1;
         if (estado.fallos >= FALLOS_PARA_SALIR) abrirSalida('pay.termNoAnswer');
+      } finally {
+        if (inFlight === current) inFlight = null;
       }
-      // Y aunque el servidor conteste bien, un cobro que ya venció no se va a resolver
-      // solo: se deja de preguntar y se da salida, en vez de sondear toda la noche.
+      // An elapsed local deadline is NOT a provider-confirmed expiration. Let the
+      // employee leave, keep a slower fallback, and never announce a rejection.
       const quedan = secondsLeft(estado.expiresAt);
       if (quedan !== null && quedan <= 0 && !isFinal(estado.status)) {
         parar();
-        abrirSalida('pay.termExpired');
+        abrirSalida('pay.termPending');
+        estado.timer = setTimeout(preguntar, 15000);
         return;
       }
       estado.timer = setTimeout(preguntar, pollDelay(Date.now() - estado.started));
     }
 
     $('term-cancel').onclick = async () => {
+      parar();
+      const current = ++generation;
       $('term-cancel').disabled = true;
       try {
         const res = await api.post(
           `/nightclubs/${clubId()}/terminal-charges/${estado.chargeId}/cancel`, {});
+        if (current !== generation || caja.hidden) return;
         parar();
         pintar(res.charge);
+        await notifyPaid(res.charge);
       } catch (err) {
+        if (current !== generation || caja.hidden) return;
         $('term-detail').textContent = deps.errorMessage(err);
       } finally {
-        $('term-cancel').disabled = false;
+        if (current === generation && !caja.hidden) {
+          $('term-cancel').disabled = false;
+          if (!isFinal(estado.status)) estado.timer = setTimeout(preguntar, 1500);
+        }
       }
     };
 
@@ -285,30 +325,56 @@
       // al cliente si la tarjeta sí había pasado.
       if (!isFinal(estado.status) && deps.confirm && !(await deps.confirm(t('pay.termLeaveConfirm')))) return;
       parar();
+      generation += 1;
       caja.hidden = true;
+      if (previousFocus && previousFocus.isConnected) previousFocus.focus();
       if (onClose) onClose(estado.status);
     };
+    caja.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !$('term-close').hidden) {
+        event.preventDefault();
+        $('term-close').click();
+      }
+      if (event.key !== 'Tab') return;
+      const buttons = [$('term-cancel'), $('term-close')].filter((b) => !b.hidden && !b.disabled);
+      if (!buttons.length) { event.preventDefault(); caja.focus(); return; }
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+      if (!buttons.includes(doc.activeElement) || (event.shiftKey && doc.activeElement === first)
+        || (!event.shiftKey && doc.activeElement === last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
+    });
 
     return {
       /** Abre el cuadro con un cobro recién creado y se queda mirando. */
       watch(charge) {
         parar();
+        generation += 1;
+        previousFocus = doc.activeElement;
         estado.chargeId = charge.id;
         estado.started = Date.now();
         estado.expiresAt = charge.expires_at || null;
         estado.fallos = 0;
         estado.salida = false;
         caja.hidden = false;
+        $('term-cancel').disabled = false;
         pintar(charge);
-        estado.timer = setTimeout(preguntar, 1500);
+        caja.focus();
+        if (isFinal(charge.status)) notifyPaid(charge);
+        else estado.timer = setTimeout(preguntar, 1500);
       },
       /** El socket avisó. Más rápido que esperar a la siguiente consulta. */
       onEvent(message) {
-        if (!estado.chargeId || caja.hidden) return;
+        if (!estado.chargeId || caja.hidden || (isFinal(estado.status) && estado.status !== 'error')) return;
         const p = (message && message.payload) || {};
         if (p.charge_id === estado.chargeId) { parar(); preguntar(); }
       },
-      close() { parar(); caja.hidden = true; },
+      close() {
+        parar(); generation += 1; caja.hidden = true;
+        if (previousFocus && previousFocus.isConnected) previousFocus.focus();
+      },
       get chargeId() { return estado.chargeId; },
       get open() { return !caja.hidden; },
     };
