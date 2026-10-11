@@ -4,6 +4,7 @@ const { randomUUID } = require('crypto');
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const pins = require('../src/services/pins');
 
 let club; let guest; let other; let bartender; let waiter; let manager; let cashier; let table;
 let beer; let shot;
@@ -28,6 +29,15 @@ beforeEach(async () => {
 });
 
 const url = (p) => `/api/nightclubs/${club.id}${p}`;
+/** El PIN de seis dígitos de alguien, ya sin la obligación de cambiarlo. */
+async function pinOf(user) {
+  const pin = await pins.issuePin(pool, { userId: user.id });
+  await pool.query('UPDATE users SET must_change_pin = false WHERE id = $1', [user.id]);
+  return pin;
+}
+/** El bartender cancela con el PIN de un gerente y un motivo (D101). */
+const cancelAsBartender = (id, body = {}) => api().post(url(`/orders/${id}/status`))
+  .set(auth(bartender)).send({ status: 'cancelled', ...body });
 const newOrder = (over = {}) => ({
   client_request_id: randomUUID(),
   items: [{ drink_id: beer.id, quantity: 2 }],
@@ -306,8 +316,84 @@ describe('Flujo de estados', () => {
   it('cancelar desde la barra también devuelve las existencias', async () => {
     const id = await makeOrder();
     await payFor(id);
-    await setStatus(id, 'cancelled', bartender);
+    const res = await cancelAsBartender(id, {
+      manager_pin: await pinOf(manager), reason: 'Se acabó el hielo',
+    });
+    expect(res.status).toBe(200);
     expect(await stockOf(beer.id)).toBe(10);
+  });
+
+  describe('el bartender no cancela solo (D101)', () => {
+    async function paidOrder() {
+      const id = await makeOrder();
+      await payFor(id);
+      return id;
+    }
+    const statusOf = async (id) => (await pool.query(
+      'SELECT status FROM drink_orders WHERE id = $1', [id])).rows[0].status;
+
+    it('sin PIN: 403 y el pedido no se toca', async () => {
+      const id = await paidOrder();
+      const res = await cancelAsBartender(id, { reason: 'Se acabó el hielo' });
+      expect(res.status).toBe(403);
+      expect(await statusOf(id)).toBe('confirmed');
+      expect(await stockOf(beer.id)).toBe(8);
+    });
+
+    it('con el PIN de un mesero: 403 y el pedido no se toca', async () => {
+      const id = await paidOrder();
+      const res = await cancelAsBartender(id, {
+        manager_pin: await pinOf(waiter), reason: 'Se acabó el hielo',
+      });
+      expect(res.status).toBe(403);
+      expect(await statusOf(id)).toBe('confirmed');
+    });
+
+    it('con su propio PIN de bartender: 403', async () => {
+      const id = await paidOrder();
+      const res = await cancelAsBartender(id, {
+        manager_pin: await pinOf(bartender), reason: 'Se acabó el hielo',
+      });
+      expect(res.status).toBe(403);
+      expect(await statusOf(id)).toBe('confirmed');
+    });
+
+    it('con PIN de gerente pero sin motivo: 400 y el pedido no se toca', async () => {
+      const id = await paidOrder();
+      const res = await cancelAsBartender(id, { manager_pin: await pinOf(manager) });
+      expect(res.status).toBe(400);
+      expect(await statusOf(id)).toBe('confirmed');
+    });
+
+    it('con PIN de gerente y motivo: cancela y deja quién lo autorizó', async () => {
+      const id = await paidOrder();
+      const res = await cancelAsBartender(id, {
+        manager_pin: await pinOf(manager), reason: 'Se acabó el hielo',
+      });
+      expect(res.status).toBe(200);
+      expect(await statusOf(id)).toBe('cancelled');
+      const { rows } = await pool.query(
+        `SELECT actor_id, after FROM audit_log WHERE action = 'order.cancel_authorized'`);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].actor_id).toBe(bartender.id);
+      expect(rows[0].after.authorized_by).toBe(manager.id);
+      expect(rows[0].after.reason).toBe('Se acabó el hielo');
+      const ev = await pool.query(
+        `SELECT payload FROM events WHERE type = 'order_cancelled' ORDER BY id DESC LIMIT 1`);
+      expect(ev.rows[0].payload.authorized_by).toBe(manager.id);
+    });
+
+    it('el gerente cancela sin PIN', async () => {
+      const id = await paidOrder();
+      const res = await setStatus(id, 'cancelled', manager);
+      expect(res.status).toBe(200);
+      expect(await statusOf(id)).toBe('cancelled');
+    });
+
+    it('el bartender sigue avanzando pedidos sin PIN', async () => {
+      const id = await paidOrder();
+      expect((await setStatus(id, 'preparing', bartender)).status).toBe(200);
+    });
   });
 
   it('publica un evento por cada cambio de estado', async () => {
@@ -444,7 +530,9 @@ describe('El pedido trae su cobro', () => {
     const res = await api().post(url('/orders')).set(auth(guest)).send(newOrder());
     const id = res.body.order.id;
     await payFor(id);
-    const cancel = await setStatus(id, 'cancelled', bartender);
+    const cancel = await cancelAsBartender(id, {
+      manager_pin: await pinOf(manager), reason: 'Se rompió la botella',
+    });
     expect(cancel.status).toBe(200);
     expect((await chargeOf(id)).status).toBe('paid');
 

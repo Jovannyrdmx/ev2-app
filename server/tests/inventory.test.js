@@ -163,7 +163,7 @@ describe('Cancelar devuelve exactamente lo que salió', () => {
     // Alguien corrige la receta entre que se sirvió y que se cancela.
     await f.setRecipe(trago.id, [[whisky, 60], [refresco, 300]]);
 
-    await api().post(url(`/orders/${id}/status`)).set(auth(bartender)).send({ status: 'cancelled' });
+    await api().post(url(`/orders/${id}/status`)).set(auth(manager)).send({ status: 'cancelled' });
     expect(await f.supplyStock(whisky.id)).toBe(1500);
     expect(await f.supplyStock(refresco.id)).toBe(4000);
   });
@@ -172,15 +172,15 @@ describe('Cancelar devuelve exactamente lo que salió', () => {
     const { whisky, trago } = await barraBuchanans();
     const res = await pedir(trago, 2);
     const id = res.body.order.id;
-    await api().post(url(`/orders/${id}/status`)).set(auth(bartender)).send({ status: 'cancelled' });
-    await api().post(url(`/orders/${id}/status`)).set(auth(bartender)).send({ status: 'cancelled' });
+    await api().post(url(`/orders/${id}/status`)).set(auth(manager)).send({ status: 'cancelled' });
+    await api().post(url(`/orders/${id}/status`)).set(auth(manager)).send({ status: 'cancelled' });
     expect(await f.supplyStock(whisky.id)).toBe(1500);
   });
 
   it('la devolución deja su renglón en el kardex, con motivo', async () => {
     const { whisky, trago } = await barraBuchanans();
     const res = await pedir(trago, 1);
-    await api().post(url(`/orders/${res.body.order.id}/status`)).set(auth(bartender))
+    await api().post(url(`/orders/${res.body.order.id}/status`)).set(auth(manager))
       .send({ status: 'cancelled', reason: 'Se equivocó de mesa' });
 
     const mov = await api().get(url(`/supplies/${whisky.id}/movements`)).set(auth(manager));

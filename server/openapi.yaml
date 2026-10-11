@@ -1517,6 +1517,13 @@ paths:
         El personal (`bartender`, `waiter`, `manager`) puede hacer cualquiera de ellas.
         Un cliente solo puede **cancelar su propio pedido mientras siga en `pending`**.
         Cancelar devuelve las existencias al inventario.
+
+        **El `bartender` no cancela solo (D101):** para pasar un pedido a `cancelled`
+        debe mandar `manager_pin` (el PIN de seis dígitos de un gerente o admin del club,
+        tecleado por el gerente) y `reason`. Sin PIN, con un PIN que no es de gerencia o
+        con el suyo propio responde 403 sin tocar el pedido; sin `reason`, 400. Quién
+        autorizó queda en `audit_log` (`order.cancel_authorized`) y en el evento
+        `order_cancelled` (`authorized_by`). Gerente y admin cancelan sin PIN.
       parameters:
         - { $ref: '#/components/parameters/NightclubId' }
         - { $ref: '#/components/parameters/OrderId' }
@@ -1532,6 +1539,10 @@ paths:
                   type: string
                   enum: [confirmed, preparing, ready, delivered, cancelled]
                 reason: { type: string, maxLength: 200 }
+                manager_pin:
+                  type: string
+                  pattern: '^\d{6}$'
+                  description: Obligatorio cuando quien cancela es un bartender.
       responses:
         '200':
           description: Estado actualizado

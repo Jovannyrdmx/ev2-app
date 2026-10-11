@@ -13,6 +13,7 @@ const consent = require('../services/consent');
 const till = require('../services/till');
 const payments = require('../services/payments');
 const vipCredit = require('../services/vip-credit');
+const managerAuth = require('../services/manager-auth');
 
 const router = express.Router({ mergeParams: true });
 
@@ -324,12 +325,28 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
     body: z.object({
       status: z.enum(['confirmed', 'preparing', 'ready', 'delivered', 'cancelled']),
       reason: z.string().trim().max(200).optional(),
+      manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos').optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
     const { nightclubId, orderId } = req.params;
     const next = req.body.status;
     const staffRoles = STAFF_ROLES;
+
+    // El bartender prepara, no decide qué pedido se pierde: cancelar le pide el PIN de
+    // un gerente y un motivo. Se verifica ANTES de abrir la transacción, y el rechazo
+    // no toca ni el pedido, ni el estante, ni el cobro. Gerente y admin ya son
+    // gerencia, y el cliente solo cancela lo suyo mientras está pendiente (más abajo).
+    let autoriza = null;
+    if (next === 'cancelled' && req.user.role === 'bartender') {
+      if (!req.body.manager_pin) {
+        throw ApiError.forbidden('Para cancelar un pedido necesitas el PIN de un gerente');
+      }
+      if (!req.body.reason) throw ApiError.badRequest('Escribe el motivo de la cancelación');
+      autoriza = await managerAuth.authorize(pool, {
+        nightclubId, pin: req.body.manager_pin, selfId: req.user.id, ip: req.ip,
+      });
+    }
 
     const client = await pool.connect();
     let refundDue = false;
@@ -451,8 +468,17 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
           order_id: orderId, status: next, reason: req.body.reason || null,
           transaction_id: order.transaction_id || null,
           refund_due: refundDue,
+          authorized_by: autoriza ? autoriza.id : null,
         },
       });
+      if (autoriza) {
+        await client.query(
+          `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
+           VALUES ($1,$2,'order.cancel_authorized','drink_order',$3,$4,$5)`,
+          [nightclubId, req.user.id, orderId,
+            JSON.stringify({ reason: req.body.reason, authorized_by: autoriza.id }),
+            req.ip || null]);
+      }
       await client.query('COMMIT');
       res.json({ order: rows[0] });
     } catch (err) {

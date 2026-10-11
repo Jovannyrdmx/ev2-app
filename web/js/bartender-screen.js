@@ -13,6 +13,10 @@
     ? window.EV2UI.confirm(text, opts) : Promise.resolve(window.confirm(text)));
 
 
+  // Pregunta con texto, con el cuadro de la app (js/ui.js). Devuelve null si cancelan.
+  const askText = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.prompt(text, opts) : Promise.resolve(window.prompt(text)));
+
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
     const el = document.querySelector(`meta[name="${name}"]`);
@@ -423,13 +427,27 @@
    */
   async function advance(orderId, status) {
     if (state.busy.has(orderId)) return;
-    if (status === 'cancelled' && !(await ask(t('bar.confirmCancel'), { danger: true }))) return;
+    let extra = {};
+    if (status === 'cancelled') {
+      const role = api.session.user && api.session.user.role;
+      if (EV2Bar.cancelNeedsPin(role)) {
+        // El bartender no cancela solo: motivo, y el PIN de un gerente tecleado por él.
+        const motivo = await askText(t('bar.cancelWhy'), { ok: t('bar.cancelGo'), danger: true });
+        if (!motivo || !motivo.trim()) return;
+        const pin = await askText(t('bar.cancelPin'), {
+          ok: t('bar.cancelGo'), danger: true, secret: true, inputmode: 'numeric',
+        });
+        if (pin === null) return;
+        if (!/^\d{6}$/.test(String(pin).trim())) { showError(new Error(t('cut.errPin'))); return; }
+        extra = { reason: motivo.trim(), manager_pin: String(pin).trim() };
+      } else if (!(await ask(t('bar.confirmCancel'), { danger: true }))) return;
+    }
 
     state.busy.add(orderId);
     renderAll();
     try {
       const { order } = await api.post(
-        `/nightclubs/${clubId()}/orders/${orderId}/status`, { status });
+        `/nightclubs/${clubId()}/orders/${orderId}/status`, { status, ...extra });
       const index = state.orders.findIndex((o) => o.id === orderId);
       if (index !== -1) {
         if (EV2Bar.isClosed(order.status)) state.orders.splice(index, 1);

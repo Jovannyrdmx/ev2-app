@@ -114,4 +114,18 @@ describe('nada sale sin traducir', () => {
       expect({ lang, faltantes }).toEqual({ lang, faltantes: [] });
     }
   });
+  it('cancelar como bartender pide motivo y PIN de gerente, y los manda al servidor (D101)', () => {
+    expect(controlador).toContain('EV2Bar.cancelNeedsPin(role)');
+    expect(controlador).toContain("t('bar.cancelWhy')");
+    expect(controlador).toContain("t('bar.cancelPin')");
+    expect(controlador).toContain('secret: true');
+    expect(controlador).toContain('extra = { reason: motivo.trim(), manager_pin: String(pin).trim() }');
+    expect(controlador).toContain('{ status, ...extra }');
+  });
+
+  it('los textos de la cancelación con PIN existen en español e inglés', () => {
+    for (const key of ['bar.cancelWhy', 'bar.cancelPin', 'bar.cancelGo']) {
+      expect(catalogo.t(key)).not.toBe(key);
+    }
+  });
 });

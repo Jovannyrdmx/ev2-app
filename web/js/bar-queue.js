@@ -69,6 +69,13 @@
   /** Cancelar solo tiene sentido antes de servirlo. */
   const canCancel = (status) => ['pending', 'confirmed', 'preparing', 'pos_error'].includes(status);
 
+  /**
+   * El bartender prepara, no decide qué pedido se pierde (D101): para cancelar necesita
+   * el PIN de un gerente y un motivo. Gerente y admin ya son gerencia. El servidor
+   * manda igual; esto solo evita mandar una petición que se sabe que será rechazada.
+   */
+  const cancelNeedsPin = (role) => role === 'bartender';
+
   // ---------------------------------------------------------------- la cola
 
   const toTime = (iso) => {
@@ -307,6 +314,7 @@
     nextAction,
     secondAction,
     canCancel,
+    cancelNeedsPin,
     waitMinutes,
     urgency,
     groupByLane,

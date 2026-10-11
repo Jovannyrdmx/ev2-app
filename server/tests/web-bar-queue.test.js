@@ -89,6 +89,12 @@ describe('El botón que se ofrece', () => {
     expect(Bar.canCancel('ready')).toBe(false);
     expect(Bar.canCancel('delivered')).toBe(false);
   });
+
+  it('el bartender necesita el PIN de un gerente para cancelar; la gerencia no (D101)', () => {
+    expect(Bar.cancelNeedsPin('bartender')).toBe(true);
+    expect(Bar.cancelNeedsPin('manager')).toBe(false);
+    expect(Bar.cancelNeedsPin('admin')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------- espera
