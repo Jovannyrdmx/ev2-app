@@ -119,6 +119,7 @@
       <p class="mgr-group" data-i18n="mgr.groupBusiness">Negocio</p>
       <button data-tab="nights" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-calendar-days mgr-icon"></i><span data-i18n="night.tab">Noches</span></button>
       <button data-tab="staff" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-users mgr-icon"></i><span data-i18n="staff.tab">Personal</span></button>
+      <button data-tab="staffcons" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-martini-glass mgr-icon"></i><span data-i18n="scn.tab">Consumo del personal</span></button>
       <button data-tab="inventory" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mgr-icon"></i><span data-i18n="inv.tab">Inventario</span></button>
       <button data-tab="payouts" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-wallet mgr-icon"></i><span data-i18n="mgr.tabPayouts">Pagos al personal</span></button>
       <p class="mgr-group" data-i18n="mgr.groupSetup">Configuración</p>
@@ -374,6 +375,28 @@
         nadie verifica una cuenta, y sin verificación el servidor rechaza el primer
         retiro para siempre.
       -->
+      <div id="tab-staffcons" class="space-y-4" hidden>
+        <div class="card rounded-xl p-4 space-y-2">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="scn.discount">Descuento al personal</p>
+          <p id="scn-pct" class="font-display text-2xl">—</p>
+          <p id="scn-off" class="text-xs text-amber-300" hidden data-i18n="scn.off">Apagado: el personal no puede pedir hasta que pongas el porcentaje.</p>
+          <button id="btn-scn-pct" class="ev2-button rounded-lg px-3 py-2 text-xs" data-i18n="scn.setPct">Cambiar porcentaje</button>
+          <p class="text-[11px] text-white/40" data-i18n="scn.help">El empleado pide desde su teléfono, no paga en caja y lo que consume se descuenta de su pago con este porcentaje de descuento sobre el precio de la carta.</p>
+        </div>
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="scn.weekly">Descuentos de la semana</p>
+          <div class="flex items-center justify-between gap-2">
+            <button id="btn-scn-prev" class="card rounded-lg px-3 py-2 text-sm" aria-label="‹">‹</button>
+            <p id="scn-week" class="font-display text-center flex-1 text-sm"></p>
+            <button id="btn-scn-next" class="card rounded-lg px-3 py-2 text-sm" aria-label="›">›</button>
+          </div>
+          <p id="scn-total" class="text-sm text-white/70"></p>
+          <p id="scn-empty" class="text-sm text-white/50" hidden data-i18n="scn.empty">Nadie consumió esta semana.</p>
+          <div id="scn-list" class="space-y-2"></div>
+          <button id="btn-scn-csv" class="btn-secondary rounded-lg px-3 py-2 text-xs" data-i18n="scn.csv">Descargar para Excel (CSV)</button>
+        </div>
+      </div>
+
       <div id="tab-payouts" class="space-y-3" hidden>
         <div class="card rounded-xl p-4 space-y-2">
           <div class="flex justify-between items-baseline">

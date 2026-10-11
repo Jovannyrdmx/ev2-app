@@ -29,6 +29,7 @@
 
 const escpos = require('./escpos');
 const printing = require('./printing');
+const staffConsumption = require('./staff-consumption');
 
 /** Cuánto hacia atrás mira una cuenta cuando la mesa no tiene a nadie sentado. */
 const FALLBACK_HOURS = 12;
@@ -129,7 +130,7 @@ async function orderData(runner, { nightclubId, orderId }) {
             t.code AS table_code, t.section AS table_section, t.floor AS table_floor,
             dp.name AS delivery_point_name,
             wu.display_name AS taken_by_name,
-            su.display_name AS sender_name,
+            su.display_name AS sender_name, su.role AS sender_role, o.staff_consumption,
             ru.display_name AS recipient_name,
             o.subtotal::text AS subtotal, o.currency,
             -- 'not_required' no es un estado del libro: es la respuesta honesta para un
@@ -242,6 +243,10 @@ function renderOrder(t, data, { club, settings, reprint = false }) {
   t.left().rule();
 
   t.row(`Folio ${folio(data.id)}`, localTime(data.created_at, club.timezone));
+  if (data.staff_consumption) {
+    // El consumo del personal va marcado en grande: no se cobra en caja, se descuenta.
+    t.bold().line(`PERSONAL: ${data.sender_name || 'Sin nombre'} - ${staffConsumption.roleLabel(data.sender_role)}`).boldOff();
+  }
   if (data.taken_by_name) t.line(`Tomó: ${data.taken_by_name}`);
   if (data.recipient_name) t.line(`Para: ${data.recipient_name} (de ${data.sender_name})`);
   t.rule();

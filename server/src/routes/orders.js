@@ -14,6 +14,7 @@ const till = require('../services/till');
 const payments = require('../services/payments');
 const vipCredit = require('../services/vip-credit');
 const managerAuth = require('../services/manager-auth');
+const staffConsumption = require('../services/staff-consumption');
 
 const router = express.Router({ mergeParams: true });
 
@@ -443,6 +444,8 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
             [order.transaction_id]);
         }
         refundDue = order.payment_status === 'paid';
+        // El consumo del personal cancelado deja de descontarse (D101).
+        await staffConsumption.voidForOrder(client, orderId);
         // Lo que se pagó con credito VIP regresa al credito, si la noche sigue (D97).
         if (order.transaction_id) {
           await vipCredit.restoreForTransaction(client, {

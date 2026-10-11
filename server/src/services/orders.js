@@ -16,7 +16,8 @@ const ORDER_SELECT = `
          o.table_id, t.code AS table_code, t.section AS table_section, t.floor AS table_floor,
          o.bar_location_id, bar.name AS bar_name, bar.code AS bar_code,
          o.delivery_point_id, dp.name AS delivery_point_name, dp.kind AS delivery_point_kind,
-         o.sender_id, su.display_name AS sender_name,
+         o.sender_id, su.display_name AS sender_name, su.role AS sender_role,
+         o.staff_consumption,
          o.recipient_id, ru.display_name AS recipient_name,
          o.taken_by, wu.display_name AS taken_by_name,
          o.bartender_id, o.returned_to_sender, o.returned_at,
@@ -58,11 +59,12 @@ const ORDER_SELECT = `
  * @param {string} [p.chargeType]     ledger type; 'drink_order' unless it is a bottle
  * @param {object} [p.chargeMetadata] extra ledger context (a gift, who it is for)
  * @param {boolean} [p.payAtTill]     the bar prepares it before payment; the till collects (D77)
+ * @param {boolean} [p.noCharge]      no ledger charge: staff consumption, deducted from pay (D101)
  * @returns {{ id, subtotal: number, currency: string, transactionId: string|null }}
  */
 async function createOrder({ client, nightclubId, senderId, recipientId, tableId, takenBy,
   message, items, clientRequestId, chargeType, chargeMetadata, deliveryPointId, barLocationId,
-  payAtTill = false }) {
+  payAtTill = false, noCharge = false }) {
   if (tableId) {
     const t = await client.query('SELECT id FROM tables WHERE id = $1 AND nightclub_id = $2 AND active',
       [tableId, nightclubId]);
@@ -162,7 +164,7 @@ async function createOrder({ client, nightclubId, senderId, recipientId, tableId
   // `client_request_id` is the order's own: the ledger rejects a duplicate before the
   // same order can grow a second charge.
   let transactionId = null;
-  if (subtotal > 0) {
+  if (subtotal > 0 && !noCharge) {
     const charge = await client.query(
       `INSERT INTO transactions (nightclub_id, type, direction, amount, currency, status,
                                  payer_user_id, provider, reference_type, reference_id,

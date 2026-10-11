@@ -327,6 +327,7 @@
     reports: ['tab-reports'],
     nights: ['tab-nights'],
     staff: ['tab-staff'],
+    staffcons: ['tab-staffcons'],
     inventory: ['tab-inventory'],
     payouts: ['tab-payouts'],
     club: ['tab-club'],
@@ -352,6 +353,7 @@
     renderInbox();
     renderNights();
     renderStaff();
+    renderStaffCons();
     renderPayouts();
     renderReports();
     renderCoverQuick();
@@ -4184,6 +4186,110 @@
     } catch (err) { showError(err); }
   }
 
+  // ---------------------------------------------------------------- consumo del personal (D101)
+
+  /**
+   * El personal pide para sí desde su teléfono y lo que consume se le descuenta del pago.
+   * Aquí el gerente fija el porcentaje de descuento y ve, de jueves a miércoles, cuánto se
+   * le descuenta a cada quien. El porcentaje no tiene valor por omisión: sin él, la
+   * función está apagada.
+   */
+  const scn = { pct: null, week: null, report: null };
+
+  const addDays = (iso, n) => {
+    const d = new Date(`${iso}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+
+  async function loadStaffCons() {
+    const club = clubId();
+    try {
+      const cfg = await api.get(`/nightclubs/${club}/staff-consumption/settings`);
+      scn.pct = cfg.discount_pct;
+      const q = scn.week ? `?week_start=${encodeURIComponent(scn.week)}` : '';
+      scn.report = await api.get(`/nightclubs/${club}/staff-consumption/weekly${q}`);
+      scn.week = scn.report.week_start;
+    } catch (err) {
+      if (state.tab === 'staffcons') showError(err);
+    }
+    renderStaffCons();
+  }
+
+  function renderStaffCons() {
+    if (!$('tab-staffcons')) return;
+    $('scn-pct').textContent = scn.pct === null ? '—' : `${scn.pct}%`;
+    $('scn-off').hidden = scn.pct !== null;
+
+    const r = scn.report;
+    if (r) {
+      $('scn-week').textContent = t('scn.weekOf', {
+        from: EV2Format.date(`${r.week_start}T12:00:00`), to: EV2Format.date(`${r.week_end}T12:00:00`),
+      });
+    }
+    const empleados = (r && r.employees) || [];
+    $('scn-empty').hidden = empleados.length > 0;
+    $('scn-total').textContent = empleados.length
+      ? t('scn.total', {
+        total: Object.entries(r.totals).map(([cur, v]) => money(v, cur)).join(' · '),
+      })
+      : '';
+    $('scn-list').innerHTML = empleados.map((e) => {
+      const totales = Object.entries(e.totals).map(([cur, v]) => money(v, cur)).join(' · ');
+      const filas = e.consumptions.map((c) => `
+        <div class="flex items-start justify-between gap-3 text-xs border-t border-white/10 pt-2">
+          <div class="min-w-0">
+            <p class="text-white/50">${escape(EV2Format.date(`${c.business_date}T12:00:00`))}</p>
+            <p class="break-words">${escape(c.items.map((i) => `${i.quantity} × ${i.name}`).join(', '))}</p>
+          </div>
+          <div class="text-right shrink-0">
+            <p class="text-white/40 line-through">${escape(money(c.list_total, c.currency))}</p>
+            <p>${escape(money(c.amount, c.currency))}</p>
+          </div>
+        </div>`).join('');
+      return `<details class="rounded-lg border border-white/10 p-3">
+        <summary class="flex items-center justify-between gap-3 cursor-pointer">
+          <span class="min-w-0">
+            <span class="font-display block truncate">${escape(e.name)}</span>
+            <span class="text-xs text-white/50">${escape(e.role_label)} · ${escape(t('scn.count', { n: e.count }))}</span>
+          </span>
+          <span class="font-display shrink-0">${escape(totales)}</span>
+        </summary>
+        <div class="mt-3 space-y-2">${filas}</div>
+      </details>`;
+    }).join('');
+
+    $('btn-scn-pct').onclick = async () => {
+      const dicho = await askText(t('scn.askPct'), scn.pct === null ? '' : String(scn.pct));
+      if (dicho === null) return;
+      const pct = Number(String(dicho).replace(',', '.'));
+      if (String(dicho).trim() === '' || !Number.isFinite(pct) || pct < 0 || pct > 100) {
+        toast(t('scn.badPct'), 'error'); return;
+      }
+      try {
+        await api.put(`/nightclubs/${clubId()}/staff-consumption/settings`, { discount_pct: pct });
+        toast(t('scn.saved'), 'ok');
+        await loadStaffCons();
+      } catch (err) { showError(err); }
+    };
+    $('btn-scn-prev').onclick = () => { if (scn.week) { scn.week = addDays(scn.week, -7); loadStaffCons(); } };
+    $('btn-scn-next').onclick = () => { if (scn.week) { scn.week = addDays(scn.week, 7); loadStaffCons(); } };
+    $('btn-scn-csv').onclick = async () => {
+      const listo = ocupado($('btn-scn-csv'), 'prn.saving');
+      try {
+        const blob = await api.getBlob(
+          `/nightclubs/${clubId()}/staff-consumption/weekly?format=csv&week_start=${encodeURIComponent(scn.week || '')}`);
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `consumo-personal-${scn.week}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      } catch (err) { showError(err); } finally { listo(); }
+    };
+  }
+
   const TAB_LOADERS = {
     summary: () => Promise.all([loadTills()]),
     cash: () => Promise.all([loadShiftCuts(), loadTerminalCharges(), loadTips(), loadTills()]),
@@ -4191,6 +4297,7 @@
     club: () => Promise.all([loadExchangeRate(), loadTerminals(), loadPrinting(), loadPushStatus()]),
     printing: () => loadPrinting(),
     rps: () => loadRps(),
+    staffcons: () => loadStaffCons(),
   };
 
   function goTab(tab) {

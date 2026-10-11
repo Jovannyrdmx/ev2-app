@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>EV2 — Mi consumo</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0a0a14">
+    <link rel="icon" href="images/favicon.ico" sizes="any">
+    <link rel="icon" href="images/favicon-32x32.png" type="image/png" sizes="32x32">
+    <link rel="icon" href="images/favicon-16x16.png" type="image/png" sizes="16x16">
+    <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+    <meta name="ev2:api" content="/api">
+    <meta name="ev2:club" content="ev2">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="stylesheet" href="css/ev2.css">
+</head>
+<!--
+  Mi consumo (D101): el empleado pide una bebida para sí desde su teléfono. No paga en
+  la caja: lo que consume se le descuenta del pago, con el porcentaje que fija el
+  gerente. La sesión es la de siempre (entra con su PIN en el inicio); aquí no hay otro
+  acceso.
+-->
+<body class="text-white page-consumo" data-page="consumo">
+<div class="max-w-xl mx-auto min-h-screen flex flex-col">
+
+  <header class="px-4 py-3 flex items-center justify-between border-b border-white/10 sticky top-0 backdrop-blur bg-black/80 z-20">
+    <div class="min-w-0">
+      <p class="font-display text-lg leading-tight" data-i18n="soc.title">Mi consumo</p>
+      <p id="soc-who" class="text-xs text-white/50 truncate"></p>
+    </div>
+    <div class="flex items-center gap-3">
+      <a id="soc-home" href="index.html" class="text-xs text-white/60 px-2" data-i18n="soc.back">Volver</a>
+      <button id="btn-lang" class="text-xs text-white/60 px-2">EN</button>
+    </div>
+  </header>
+
+  <main class="flex-1 p-4 space-y-4 pb-32">
+    <p id="soc-error" class="card rounded-xl p-3 text-sm text-red-300" role="alert" hidden></p>
+    <p id="soc-off" class="card rounded-xl p-4 text-sm text-amber-300" hidden data-i18n="soc.off">Todavía no está activo: el gerente aún no pone el porcentaje de descuento del personal.</p>
+
+    <section id="soc-week" class="card rounded-xl p-4 space-y-1" hidden>
+      <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="soc.week">Lo que llevas esta semana</p>
+      <p id="soc-week-total" class="font-display text-2xl">—</p>
+      <p id="soc-week-note" class="text-xs text-white/50"></p>
+    </section>
+
+    <section id="soc-menu" class="space-y-4" hidden>
+      <p id="soc-pct" class="text-sm text-white/60"></p>
+      <input id="soc-search" type="search" class="field" data-i18n-placeholder="soc.search" placeholder="Buscar" autocomplete="off">
+      <p id="soc-empty" class="text-sm text-white/50" hidden data-i18n="soc.empty">No hay nada que pedir ahorita.</p>
+      <div id="soc-list" class="space-y-4"></div>
+    </section>
+  </main>
+
+  <!-- La barra de abajo: lo que se pidió y cuánto se descuenta. -->
+  <div id="soc-bar" class="fixed bottom-0 inset-x-0 z-20 border-t border-white/10 bg-black/90 backdrop-blur px-4 py-3" hidden>
+    <div class="max-w-xl mx-auto flex items-center gap-3">
+      <div class="min-w-0 flex-1">
+        <p id="soc-bar-count" class="text-xs text-white/50"></p>
+        <p id="soc-bar-total" class="font-display"></p>
+      </div>
+      <button id="btn-soc-send" class="ev2-button rounded-xl px-5 py-3 font-display" data-i18n="soc.send">Pedir</button>
+    </div>
+  </div>
+
+  <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm z-50" hidden role="status"></div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/format.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/roles.js"></script>
+<script src="js/password-gate.js"></script>
+<script src="js/staff-order.js"></script>
+<script src="js/consumo-screen.js"></script>
+<script src="js/pwa.js"></script>
+</body>
+</html>

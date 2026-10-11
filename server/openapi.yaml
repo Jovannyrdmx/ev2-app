@@ -1560,6 +1560,144 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/nightclubs/{nightclubId}/staff-consumption/settings:
+    get:
+      operationId: getNightclubsByNightclubIdStaffConsumptionSettings
+      tags: [Pedidos]
+      summary: Porcentaje de descuento del consumo del personal
+      description: |
+        `discount_pct` es `null` mientras el gerente no lo configure: la función está
+        apagada y los empleados no pueden pedir para sí (D101).
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+      responses:
+        '200':
+          description: El porcentaje actual
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  discount_pct: { type: [number, 'null'] }
+                  enabled: { type: boolean }
+    put:
+      operationId: putNightclubsByNightclubIdStaffConsumptionSettings
+      tags: [Pedidos]
+      summary: Fijar el porcentaje de descuento del personal (gerente)
+      description: Queda en `audit_log` con el valor anterior.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [discount_pct]
+              properties:
+                discount_pct: { type: number, minimum: 0, maximum: 100 }
+      responses:
+        '200': { description: Guardado }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/staff-orders:
+    post:
+      operationId: postNightclubsByNightclubIdStaffOrders
+      tags: [Pedidos]
+      summary: El empleado pide una bebida para sí (consumo del personal)
+      description: |
+        Para el personal (mesero, bartender, cajero, bailarina, DJ, iluminación, valet,
+        anfitriona, RP). Gerente, admin y clientes reciben 403. El pedido nace
+        `confirmed`, **sin cobro en el libro**: no entra a la caja, a los cortes ni a las
+        ventas de la noche; el monto se descuenta del pago. Lleva el nombre y el puesto
+        de quien lo pide en la comanda. Descuenta existencias. Responde 409 si el
+        gerente todavía no configuró el porcentaje. Idempotente por `client_request_id`.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_request_id, items]
+              properties:
+                client_request_id: { type: string, format: uuid }
+                bar_location_id: { type: string, format: uuid }
+                message: { type: string, maxLength: 280 }
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items:
+                    type: object
+                    required: [drink_id]
+                    properties:
+                      drink_id: { type: string, format: uuid }
+                      quantity: { type: integer, minimum: 1, maximum: 20, default: 1 }
+                      notes: { type: string, maxLength: 120 }
+      responses:
+        '201':
+          description: Pedido creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order: { type: object }
+                  consumption:
+                    type: object
+                    properties:
+                      discount_pct: { type: number }
+                      list_total: { type: number }
+                      amount: { type: number }
+                      week_start: { type: string, format: date }
+                      business_date: { type: string, format: date }
+        '200': { description: Repetición idempotente del mismo pedido }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/staff-consumption/me:
+    get:
+      operationId: getNightclubsByNightclubIdStaffConsumptionMe
+      tags: [Pedidos]
+      summary: Lo que llevo consumido en la semana de pago
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: week_start, in: query, schema: { type: string, format: date }, description: 'Cualquier fecha de la semana; por omisión, la de hoy.' }
+      responses:
+        '200': { description: Mis consumos y el total a descontar por moneda }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/staff-consumption/weekly:
+    get:
+      operationId: getNightclubsByNightclubIdStaffConsumptionWeekly
+      tags: [Pedidos]
+      summary: Reporte semanal de descuentos al personal (gerente)
+      description: |
+        La semana de pago va de **jueves a miércoles**, medida sobre la noche del club
+        (las 6 de la mañana cierran el día). Por empleado: cada consumo y el total a
+        descontar por moneda. `format=csv` baja el mismo reporte para Excel.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: week_start, in: query, schema: { type: string, format: date }, description: 'Cualquier fecha dentro de la semana.' }
+        - { name: format, in: query, schema: { type: string, enum: [json, csv], default: json } }
+      responses:
+        '200':
+          description: El reporte
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  week_start: { type: string, format: date }
+                  week_end: { type: string, format: date }
+                  totals: { type: object, additionalProperties: { type: string } }
+                  employees: { type: array, items: { type: object } }
+            text/csv:
+              schema: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/nightclubs/{nightclubId}/printing-health:
     get:
       operationId: getNightclubsByNightclubIdPrintingHealth

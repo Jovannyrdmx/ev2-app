@@ -167,7 +167,7 @@ async function bar({ nightclubId, from, to, runner = pool }) {
             COALESCE(sum(subtotal) FILTER (WHERE status = 'cancelled'), 0)::float8 AS cancelled_value
        FROM drink_orders
       WHERE nightclub_id = $1 AND created_at >= $2 AND created_at < $3
-        AND status = 'delivered'`,
+        AND status = 'delivered' AND NOT staff_consumption`,
     [nightclubId, from, to],
   );
   const cancelados = await runner.query(
@@ -187,7 +187,7 @@ async function bar({ nightclubId, from, to, runner = pool }) {
        JOIN drink_orders o ON o.id = i.order_id
        JOIN drinks d ON d.id = i.drink_id
       WHERE o.nightclub_id = $1 AND o.created_at >= $2 AND o.created_at < $3
-        AND o.status = 'delivered'
+        AND o.status = 'delivered' AND NOT o.staff_consumption
       GROUP BY COALESCE(d.category, 'Sin categoría')
       ORDER BY revenue DESC`,
     [nightclubId, from, to],

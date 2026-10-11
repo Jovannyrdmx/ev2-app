@@ -345,9 +345,12 @@
     // Lo del mesero se prepara aunque no esté cobrado: lo cobra la caja (D77).
     const ready = EV2Bar.canPrepare(order);
 
-    const who = order.recipient_name
-      ? `<span class="text-pink-300"><i class="fa-solid fa-gift mr-1"></i>${escape(t('bar.gift'))}: ${escape(order.recipient_name)}</span>`
-      : `${escape(t('bar.for'))} ${escape(order.sender_name || '')}`;
+    // El consumo del personal (D101): nombre y puesto de quien lo pidió, bien visibles.
+    const who = order.staff_consumption
+      ? `<span class="text-emerald-300"><i class="fa-solid fa-user mr-1"></i>${escape(t('bar.staffOrder', { name: order.sender_name || '', role: EV2Roles.describe(order.sender_role, lang()).label }))}</span>`
+      : order.recipient_name
+        ? `<span class="text-pink-300"><i class="fa-solid fa-gift mr-1"></i>${escape(t('bar.gift'))}: ${escape(order.recipient_name)}</span>`
+        : `${escape(t('bar.for'))} ${escape(order.sender_name || '')}`;
 
     return `
     <article class="card wait-${level}${flash} rounded-xl p-4" data-order="${escape(order.id)}">
