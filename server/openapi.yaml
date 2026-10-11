@@ -1669,6 +1669,115 @@ paths:
         '200': { description: Mis consumos y el total a descontar por moneda }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/nightclubs/{nightclubId}/promotions/active:
+    get:
+      operationId: getNightclubsByNightclubIdPromotionsActive
+      tags: [Pedidos]
+      summary: Promociones vigentes ahora
+      description: |
+        Las promociones de la noche de negocio del club (las 6 de la mañana cierran el día)
+        cuyo evento no está cancelado ni terminado, que están activas y dentro de su horario.
+        `badge` es la etiqueta corta («2x1», «-20%», «$45»). El precio lo calcula siempre el
+        servidor al crear el pedido (D102).
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+      responses:
+        '200':
+          description: Promociones vigentes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promotions:
+                    type: array
+                    items: { $ref: '#/components/schemas/ActivePromotion' }
+
+  /api/nightclubs/{nightclubId}/events/{eventId}/promotions:
+    get:
+      operationId: getNightclubsByNightclubIdEventsByEventIdPromotions
+      tags: [Pedidos]
+      summary: Promociones de una noche, activas o no (gerente)
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Promociones de la noche
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promotions:
+                    type: array
+                    items: { $ref: '#/components/schemas/Promotion' }
+    post:
+      operationId: postNightclubsByNightclubIdEventsByEventIdPromotions
+      tags: [Pedidos]
+      summary: Crear una promoción para una noche (gerente)
+      description: |
+        Aplica a UNA bebida (`drink_id`) o a UNA categoría (`category`), no a las dos.
+        `fixed_price` usa `value` como precio por pieza; `percent` usa `value` de 1 a 100;
+        `n_for_m` usa `buy_qty` y `pay_qty` (lleva N, paga M, con M menor que N). El horario
+        (`starts_time` y `ends_time`, hora del club) es opcional y puede cruzar la
+        medianoche. Queda en `audit_log`.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PromotionCreate' }
+      responses:
+        '201':
+          description: Promoción creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promotion: { $ref: '#/components/schemas/Promotion' }
+        '404': { description: Evento o bebida no encontrados }
+        '409': { description: El evento ya está cancelado o terminado }
+        '422': { description: Combinación de campos no válida }
+
+  /api/nightclubs/{nightclubId}/promotions/{promotionId}:
+    patch:
+      operationId: patchNightclubsByNightclubIdPromotionsByPromotionId
+      tags: [Pedidos]
+      summary: Editar o apagar una promoción (gerente)
+      description: Las promociones no se borran, se apagan con `active false`. Un pedido ya hecho conserva su precio.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: promotionId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 120 }
+                active: { type: boolean }
+                value: { type: number }
+                buy_qty: { type: integer }
+                pay_qty: { type: integer }
+                starts_time: { type: [string, 'null'], example: '22:00' }
+                ends_time: { type: [string, 'null'], example: '00:30' }
+      responses:
+        '200':
+          description: Promoción actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promotion: { $ref: '#/components/schemas/Promotion' }
+        '404': { description: Promoción no encontrada }
+        '422': { description: Combinación de campos no válida }
+
   /api/nightclubs/{nightclubId}/staff-consumption/weekly:
     get:
       operationId: getNightclubsByNightclubIdStaffConsumptionWeekly
@@ -12576,6 +12685,67 @@ components:
         sort_order: { type: integer }
         stock: { type: string, description: Existencias actuales. }
         low_stock: { type: boolean }
+        promo:
+          description: Promoción vigente de esta bebida (D102), o null.
+          type: [object, 'null']
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            kind: { type: string, enum: [fixed_price, percent, n_for_m] }
+            badge: { type: string }
+            unit_price: { type: [number, 'null'] }
+            buy_qty: { type: [integer, 'null'] }
+            pay_qty: { type: [integer, 'null'] }
+
+    ActivePromotion:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        kind: { type: string, enum: [fixed_price, percent, n_for_m] }
+        drink_id: { type: [string, 'null'], format: uuid }
+        category: { type: [string, 'null'] }
+        value: { type: [number, 'null'] }
+        buy_qty: { type: [integer, 'null'] }
+        pay_qty: { type: [integer, 'null'] }
+        starts_time: { type: [string, 'null'] }
+        ends_time: { type: [string, 'null'] }
+        event_id: { type: string, format: uuid }
+        event_name: { type: string }
+        badge: { type: string, example: 2x1 }
+
+    Promotion:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        event_id: { type: string, format: uuid }
+        name: { type: string }
+        kind: { type: string, enum: [fixed_price, percent, n_for_m] }
+        drink_id: { type: [string, 'null'], format: uuid }
+        drink_name: { type: [string, 'null'] }
+        category: { type: [string, 'null'] }
+        value: { type: [string, 'null'], description: Precio por pieza o porcentaje. }
+        buy_qty: { type: [integer, 'null'] }
+        pay_qty: { type: [integer, 'null'] }
+        starts_time: { type: [string, 'null'], example: '22:00' }
+        ends_time: { type: [string, 'null'], example: '00:30' }
+        active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    PromotionCreate:
+      type: object
+      required: [name, kind]
+      properties:
+        name: { type: string, maxLength: 120 }
+        kind: { type: string, enum: [fixed_price, percent, n_for_m] }
+        drink_id: { type: string, format: uuid }
+        category: { type: string, maxLength: 40 }
+        value: { type: number, minimum: 0 }
+        buy_qty: { type: integer, minimum: 2, maximum: 20 }
+        pay_qty: { type: integer, minimum: 0, maximum: 19 }
+        starts_time: { type: string, example: '22:00' }
+        ends_time: { type: string, example: '00:30' }
 
     DrinkCreate:
       type: object

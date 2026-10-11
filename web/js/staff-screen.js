@@ -1709,7 +1709,7 @@
           ${takeThumb(drink)}
           <div class="min-w-0 flex-1">
             <p class="text-sm truncate">${escape(EV2Client.displayName(drink.name))}</p>
-            <p class="text-xs text-white/50">${escape(money(drink.price, drink.currency))}</p>
+            <p class="text-xs text-white/50">${EV2Promos.priceHtml(drink, money, escape)}</p>
           </div>
           <div class="flex items-center gap-2 flex-none">
             <button class="card rounded-lg w-9 h-9 text-lg" data-minus="1" aria-label="-">−</button>

@@ -140,8 +140,8 @@ router.post('/nightclubs/:nightclubId/staff-orders',
                 staff_consumption = true
           WHERE id = $1`, [order.id]);
       const rec = await consumption.record(client, {
-        nightclubId, user, orderId: order.id, listTotal: order.subtotal, pct,
-        currency: order.currency,
+        nightclubId, user, orderId: order.id, listTotal: order.listTotal, pct,
+        currency: order.currency, promoTotal: order.subtotal,
       });
       await tickets.printOrder(client, { nightclubId, orderId: order.id, userId: user.id });
 
@@ -159,8 +159,8 @@ router.post('/nightclubs/:nightclubId/staff-orders',
       res.status(201).json({
         order: full.rows[0],
         consumption: {
-          discount_pct: pct, list_total: order.subtotal,
-          amount: consumption.amountFor(order.subtotal, pct),
+          discount_pct: pct, list_total: order.listTotal,
+          amount: consumption.amountDue(order.listTotal, pct, order.subtotal),
           week_start: rec.week_start, business_date: rec.business_date,
         },
       });

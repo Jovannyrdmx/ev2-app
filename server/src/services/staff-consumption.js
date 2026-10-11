@@ -44,10 +44,21 @@ function amountFor(listTotal, pct) {
 }
 
 /**
+ * Lo que se le descuenta con promociones de por medio (D102): el MENOR entre el precio de
+ * personal sobre la carta y lo que costaria el pedido con las promociones de la noche.
+ * No se acumulan: una promo no se suma al descuento del personal.
+ */
+function amountDue(listTotal, pct, promoTotal = null) {
+  const staff = amountFor(listTotal, pct);
+  return promoTotal === null ? staff : Math.min(staff, Number(promoTotal));
+}
+
+/**
  * Guarda el consumo de un pedido ya creado. La noche y la semana se calculan en SQL con
  * la zona horaria del club: las 6 de la manana cierran el dia, y la semana abre el jueves.
  */
-async function record(client, { nightclubId, user, orderId, listTotal, pct, currency }) {
+async function record(client, { nightclubId, user, orderId, listTotal, pct, currency, promoTotal = null }) {
+  const amount = amountDue(listTotal, pct, promoTotal);
   const { rows } = await client.query(
     `WITH n AS (
        SELECT ((now() AT TIME ZONE c.timezone) - interval '6 hours')::date AS bd
@@ -60,7 +71,7 @@ async function record(client, { nightclubId, user, orderId, listTotal, pct, curr
        FROM n
      RETURNING id, business_date::text AS business_date, week_start::text AS week_start`,
     [nightclubId, user.id, user.display_name || 'Sin nombre', user.role, orderId,
-      Number(listTotal).toFixed(2), Number(pct).toFixed(2), amountFor(listTotal, pct).toFixed(2),
+      Number(listTotal).toFixed(2), Number(pct).toFixed(2), amount.toFixed(2),
       currency]);
   return rows[0];
 }
@@ -98,7 +109,8 @@ async function weeklyReport(runner, { nightclubId, weekStart }) {
        FROM staff_consumptions sc
        LEFT JOIN LATERAL (
          SELECT json_agg(json_build_object('name', d.name, 'quantity', oi.quantity,
-                  'unit_price', oi.unit_price::text) ORDER BY d.name) AS items
+                  'unit_price', oi.unit_price::text,
+                  'line_total', COALESCE(oi.line_total, oi.unit_price * oi.quantity)::text) ORDER BY d.name) AS items
            FROM drink_order_items oi JOIN drinks d ON d.id = oi.drink_id
           WHERE oi.order_id = sc.order_id) items ON true
       WHERE sc.nightclub_id = $1 AND sc.week_start = $2::date AND sc.status = 'active'
@@ -164,6 +176,6 @@ function reportCsv(report) {
 }
 
 module.exports = {
-  STAFF_ROLES, roleLabel, discountPct, setDiscountPct, amountFor, record, voidForOrder,
+  STAFF_ROLES, roleLabel, discountPct, setDiscountPct, amountFor, amountDue, record, voidForOrder,
   weekStartOf, weeklyReport, reportCsv,
 };

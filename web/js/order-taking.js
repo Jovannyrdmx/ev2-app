@@ -11,13 +11,19 @@
  * respeta existencias.
  */
 (function (root, factory) {
-  const lib = factory();
+  const lib = factory(root);
   if (typeof module === 'object' && module.exports) module.exports = lib;
   else root.EV2OrderTaking = lib;
-}(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+}(typeof globalThis !== 'undefined' ? globalThis : this, function (root) {
   'use strict';
 
   const toCents = (amount) => Math.round(Number(amount) * 100);
+  // Con promociones (D102) el total ya no es precio x cantidad: se pregunta al mismo
+  // modulo que usa el carrito, para que `priceDrift` no avise de una diferencia falsa.
+  const Promos = typeof module === 'object' && module.exports
+    ? require('./promotions.js') : root.EV2Promos;
+  const lineCents = (drink, qty) => (Promos
+    ? Promos.lineCents(drink, qty) : toCents(drink.price) * qty);
   const fromCents = (cents) => (cents / 100).toFixed(2);
 
   /**
@@ -208,7 +214,7 @@
    */
   function totalCents(cart) {
     let cents = 0;
-    for (const line of (cart || [])) cents += toCents(line.drink.price) * line.quantity;
+    for (const line of (cart || [])) cents += lineCents(line.drink, line.quantity);
     return cents;
   }
 

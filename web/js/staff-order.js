@@ -7,16 +7,27 @@
  */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.EV2StaffOrder = factory();
-}(typeof self !== 'undefined' ? self : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(root);
+  else root.EV2StaffOrder = factory(root);
+}(typeof self !== 'undefined' ? self : this, function (root) {
   'use strict';
 
   const cents = (n) => Math.round(Number(n) * 100);
+  // Promociones de la noche (D102): al personal se le cobra el MENOR entre la promocion y
+  // su descuento, nunca las dos. El servidor lo decide; esto lo estima para mostrarlo.
+  const Promos = typeof module === 'object' && module.exports
+    ? require('./promotions.js') : root.EV2Promos;
 
   /** Lo que se le descuenta por una pieza: precio de la carta menos el porcentaje. */
   function staffPrice(price, pct) {
     return Math.round(cents(price) * (1 - Number(pct) / 100)) / 100;
+  }
+
+  /** Por pieza, con la promocion de la bebida si le conviene mas; null si no hay. */
+  function promoUnit(drink, pct) {
+    const u = Promos ? Promos.unitPrice(drink) : null;
+    if (u === null) return null;
+    return u < staffPrice(drink.price, pct) ? u : null;
   }
 
   /** Lo que se puede pedir: lo que la barra no apagó. */
@@ -58,15 +69,18 @@
   function totals(cart, drinks, pct) {
     const byId = new Map((drinks || []).map((d) => [d.id, d]));
     let list = 0;
+    let promo = 0;
     for (const { drink_id: id, quantity } of cart.items()) {
       const d = byId.get(id);
-      if (d) list += cents(d.price) * quantity;
+      if (!d) continue;
+      list += cents(d.price) * quantity;
+      promo += Promos ? Promos.lineCents(d, quantity) : cents(d.price) * quantity;
     }
     return {
       list: list / 100,
-      deduct: Math.round(list * (1 - Number(pct) / 100)) / 100,
+      deduct: Math.min(Math.round(list * (1 - Number(pct) / 100)), promo) / 100,
     };
   }
 
-  return { staffPrice, orderable, byCategory, createCart, totals };
+  return { staffPrice, promoUnit, orderable, byCategory, createCart, totals };
 }));

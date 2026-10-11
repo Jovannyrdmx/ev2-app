@@ -8,6 +8,7 @@
 
 const { ApiError } = require('../middleware/errors');
 const inventory = require('./inventory');
+const promotions = require('./promotions');
 
 const ORDER_SELECT = `
   SELECT o.id, o.status, o.subtotal, o.currency, o.message, o.created_at, o.confirmed_at,
@@ -40,8 +41,12 @@ const ORDER_SELECT = `
                'drink_id', oi.drink_id, 'name', d.name, 'quantity', oi.quantity,
                -- ::text keeps money as a two-decimal string, like every other amount
                -- in the API (json_build_object would turn NUMERIC into a JSON number).
-               'unit_price', oi.unit_price::text, 'notes', oi.notes) ORDER BY d.name) AS items
+               'unit_price', oi.unit_price::text, 'notes', oi.notes,
+               'list_price', oi.list_price::text,
+               'line_total', COALESCE(oi.line_total, oi.unit_price * oi.quantity)::text,
+               'promo', pr.name) ORDER BY d.name) AS items
         FROM drink_order_items oi JOIN drinks d ON d.id = oi.drink_id
+        LEFT JOIN event_promotions pr ON pr.id = oi.promo_id
        WHERE oi.order_id = o.id
     ) items ON true`;
 
@@ -97,7 +102,7 @@ async function createOrder({ client, nightclubId, senderId, recipientId, tableId
   const drinkIds = [...new Set(items.map((i) => i.drink_id))].sort();
 
   const drinks = await client.query(
-    `SELECT id, name, price, currency, available FROM drinks
+    `SELECT id, name, price, currency, available, category FROM drinks
       WHERE id = ANY($1::uuid[]) AND nightclub_id = $2 AND active`,
     [drinkIds, nightclubId],
   );
@@ -121,9 +126,18 @@ async function createOrder({ client, nightclubId, senderId, recipientId, tableId
   if (currencies.size > 1) throw ApiError.unprocessable('All drinks in one order must share a currency');
   const currency = currencies.values().next().value;
 
-  let subtotal = 0;
-  for (const item of items) subtotal += Number(byId.get(item.drink_id).price) * item.quantity;
-  subtotal = Number(subtotal.toFixed(2));
+  // Promociones de la noche (D102): el servidor decide el precio, nunca el cliente. Un
+  // renglon sin promocion se cobra como siempre (precio x cantidad).
+  const promos = await promotions.activeNow(client, { nightclubId });
+  const priced = promotions.priceLines(items, byId, promotions.promosForDrink(promos));
+  let subtotalCents = 0;
+  let listCents = 0;
+  priced.forEach((p, i) => {
+    subtotalCents += p.totalCents;
+    listCents += Math.round(Number(byId.get(items[i].drink_id).price) * 100) * items[i].quantity;
+  });
+  const subtotal = subtotalCents / 100;
+  const listTotal = listCents / 100;
 
   const created = await client.query(
     `INSERT INTO drink_orders (nightclub_id, sender_id, recipient_id, table_id, taken_by, message,
@@ -136,11 +150,15 @@ async function createOrder({ client, nightclubId, senderId, recipientId, tableId
   );
   const order = created.rows[0];
 
-  for (const item of items) {
+  for (const [i, item] of items.entries()) {
+    const p = priced[i];
     await client.query(
-      `INSERT INTO drink_order_items (order_id, drink_id, quantity, unit_price, notes)
-       VALUES ($1,$2,$3,$4,$5)`,
-      [order.id, item.drink_id, item.quantity, byId.get(item.drink_id).price, item.notes || null],
+      `INSERT INTO drink_order_items (order_id, drink_id, quantity, unit_price, notes,
+                                      list_price, promo_id, line_total)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [order.id, item.drink_id, item.quantity, p.unitPrice.toFixed(2), item.notes || null,
+        p.listPrice === null ? null : p.listPrice.toFixed(2), p.promoId,
+        p.lineTotal === null ? null : p.lineTotal.toFixed(2)],
     );
   }
   // Y aqui se descuenta lo que de verdad sale del estante: no "un BUCHANANS 12 -
@@ -178,7 +196,7 @@ async function createOrder({ client, nightclubId, senderId, recipientId, tableId
   }
 
   return {
-    id: order.id, subtotal, currency, drinks: drinks.rows, transactionId, barLocationId: bar,
+    id: order.id, subtotal, listTotal, currency, drinks: drinks.rows, transactionId, barLocationId: bar,
   };
 }
 

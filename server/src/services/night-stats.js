@@ -182,7 +182,7 @@ async function bar({ nightclubId, from, to, runner = pool }) {
   const porCategoria = await runner.query(
     `SELECT COALESCE(d.category, 'Sin categoría') AS category,
             COALESCE(sum(i.quantity), 0)::int AS units,
-            COALESCE(sum(i.quantity * i.unit_price), 0)::float8 AS revenue
+            COALESCE(sum(COALESCE(i.line_total, i.quantity * i.unit_price)), 0)::float8 AS revenue
        FROM drink_order_items i
        JOIN drink_orders o ON o.id = i.order_id
        JOIN drinks d ON d.id = i.drink_id

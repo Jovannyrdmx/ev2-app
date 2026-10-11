@@ -81,12 +81,16 @@
         ${g.category ? `<p class="text-xs uppercase tracking-wider text-white/40">${escape(g.category)}</p>` : ''}
         ${g.items.map((d) => {
     const cantidad = state.cart.quantity(d.id);
-    const tuyo = EV2StaffOrder.staffPrice(d.price, state.pct);
+    const promoU = EV2StaffOrder.promoUnit(d, state.pct);
+    const tuyo = promoU !== null ? promoU : EV2StaffOrder.staffPrice(d.price, state.pct);
+    const etiqueta = EV2Promos.badge(d);
+    const horario = EV2Promos.window(d);
     return `<div class="card rounded-xl px-3 py-2 flex items-center gap-3" data-drink="${escape(d.id)}">
             <div class="min-w-0 flex-1">
               <p class="text-sm font-semibold break-words" data-role="drink-name">${escape(d.name)}</p>
               <p class="text-xs"><span class="text-white/40 line-through">${escape(money(d.price, d.currency))}</span>
-                <span class="text-emerald-300 ml-1">${escape(money(tuyo, d.currency))}</span></p>
+                <span class="text-emerald-300 ml-1">${escape(money(tuyo, d.currency))}</span>
+                ${etiqueta ? `<span class="ml-1 rounded-full bg-fuchsia-500/20 text-fuchsia-200 px-2 py-0.5 text-[11px]" data-role="promo-badge">${escape(etiqueta)}${horario ? ` · ${escape(horario)}` : ''}</span>` : ''}</p>
             </div>
             <div class="flex items-center gap-2 shrink-0">
               <button class="card rounded-lg px-3 py-2 text-sm" data-minus="${escape(d.id)}" aria-label="${escape(t('soc.less'))}" ${cantidad === 0 ? 'disabled' : ''}>−</button>

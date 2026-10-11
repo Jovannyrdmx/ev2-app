@@ -6,14 +6,19 @@
  * El HTML solo pinta lo que este módulo dice.
  */
 (function (root, factory) {
-  const lib = factory();
+  const lib = factory(root);
   if (typeof module === 'object' && module.exports) module.exports = lib;
   else root.EV2Client = lib;
-}(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+}(typeof globalThis !== 'undefined' ? globalThis : this, function (root) {
   'use strict';
 
   const toCents = (amount) => Math.round(Number(amount) * 100);
   const fromCents = (cents) => (cents / 100).toFixed(2);
+  // Promociones (D102): el precio de oferta, solo para mostrar; el servidor es quien cobra.
+  const Promos = typeof module === 'object' && module.exports
+    ? require('./promotions.js') : root.EV2Promos;
+  const lineCents = (drink, qty) => (Promos
+    ? Promos.lineCents(drink, qty) : toCents(drink.price) * qty);
 
   /**
    * Carrito. Las cuentas se hacen en centavos enteros: en float, tres cervezas de 79.90
@@ -28,7 +33,7 @@
         return [...lines.values()].map((l) => ({
           drink: l.drink,
           quantity: l.quantity,
-          subtotal: fromCents(toCents(l.drink.price) * l.quantity),
+          subtotal: fromCents(lineCents(l.drink, l.quantity)),
         }));
       },
       get count() {
@@ -40,7 +45,7 @@
       },
       get total() {
         let cents = 0;
-        for (const l of lines.values()) cents += toCents(l.drink.price) * l.quantity;
+        for (const l of lines.values()) cents += lineCents(l.drink, l.quantity);
         return fromCents(cents);
       },
       quantityOf(drinkId) {

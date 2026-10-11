@@ -154,7 +154,7 @@ async function orderData(runner, { nightclubId, orderId }) {
                   -- igual que en todo el resto del sistema: NUMERIC leído como número
                   -- de JavaScript es cómo se pierde un centavo sin que nadie lo vea.
                   'unit_price', oi.unit_price::text,
-                  'amount', (oi.unit_price * oi.quantity)::text
+                  'amount', COALESCE(oi.line_total, oi.unit_price * oi.quantity)::text
                 ) ORDER BY d.name) AS items
            FROM drink_order_items oi JOIN drinks d ON d.id = oi.drink_id
           WHERE oi.order_id = o.id) items ON true
@@ -436,7 +436,7 @@ async function billData(runner, { nightclubId, tableId }) {
     `SELECT d.name,
             sum(oi.quantity)::int                        AS quantity,
             oi.unit_price::text                          AS unit_price,
-            sum(oi.quantity * oi.unit_price)::text       AS amount,
+            sum(COALESCE(oi.line_total, oi.quantity * oi.unit_price))::text AS amount,
             o.currency,
             bool_and(COALESCE(tx.status, 'not_required') IN ('paid','not_required')) AS paid
        FROM drink_orders o
@@ -482,7 +482,13 @@ function renderBill(t, data, { club, settings }) {
     t.row(`${l.quantity} ${l.name}`, money(l.amount, data.currency));
     // El precio unitario solo cuando hay más de uno: en un renglón de uno sería el
     // mismo número dos veces, y un ticket que repite números se lee peor.
-    if (l.quantity > 1) t.line(`     ${l.quantity} x ${money(l.unit_price, data.currency)}`);
+    if (l.quantity > 1) {
+      // Con una promocion (2x1) el total ya no es cantidad x precio: se dice, en vez de
+      // imprimir una cuenta que no cuadra.
+      if (Math.round(Number(l.amount) * 100) === Math.round(Number(l.unit_price) * 100) * l.quantity) {
+        t.line(`     ${l.quantity} x ${money(l.unit_price, data.currency)}`);
+      } else t.line('     Promocion aplicada');
+    }
   }
   if (!data.lines.length) t.line('Sin consumo registrado.');
 

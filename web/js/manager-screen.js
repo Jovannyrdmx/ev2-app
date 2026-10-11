@@ -328,6 +328,7 @@
     nights: ['tab-nights'],
     staff: ['tab-staff'],
     staffcons: ['tab-staffcons'],
+    promos: ['tab-promos'],
     inventory: ['tab-inventory'],
     payouts: ['tab-payouts'],
     club: ['tab-club'],
@@ -354,6 +355,7 @@
     renderNights();
     renderStaff();
     renderStaffCons();
+    renderPromos();
     renderPayouts();
     renderReports();
     renderCoverQuick();
@@ -4290,6 +4292,121 @@
     };
   }
 
+  // ---------------------------------------------------------------- promociones (D102)
+  //
+  // Bebidas en oferta para UNA noche. El precio lo calcula el servidor al crear el pedido;
+  // aquí solo se dan de alta, se ven y se apagan.
+
+  const prm = { night: null, list: [] };
+
+  const nochesOrdenadas = () => EV2Manager.sortNights(state.nights, new Date());
+
+  async function loadPromos() {
+    const noches = nochesOrdenadas();
+    if (!prm.night || !noches.some((n) => n.id === prm.night)) {
+      const hoy = EV2Manager.tonightNight(state.nights, new Date());
+      prm.night = hoy ? hoy.night.id : (noches[0] ? noches[0].id : null);
+    }
+    prm.list = [];
+    if (prm.night) {
+      try {
+        const d = await api.get(`/nightclubs/${clubId()}/events/${prm.night}/promotions`);
+        prm.list = d.promotions || [];
+      } catch (err) {
+        if (state.tab === 'promos') showError(err);
+      }
+    }
+    renderPromos();
+  }
+
+  function describePromo(p) {
+    const que = p.drink_name || p.category || '';
+    let texto;
+    if (p.kind === 'n_for_m') texto = t('prm.d.n', { what: que, n: p.buy_qty, m: p.pay_qty });
+    else if (p.kind === 'percent') texto = t('prm.d.percent', { what: que, pct: Number(p.value) });
+    else texto = t('prm.d.fixed', { what: que, price: money(p.value) });
+    if (p.starts_time) texto += ` · ${t('prm.d.window', { from: p.starts_time, to: p.ends_time })}`;
+    return texto;
+  }
+
+  function renderPromos() {
+    if (!$('tab-promos')) return;
+    const noches = nochesOrdenadas();
+    $('prm-nonights').hidden = noches.length > 0;
+    const sel = $('prm-night');
+    sel.innerHTML = noches.map((n) => `<option value="${escape(n.id)}">${escape(n.name || '')} · ${escape(String(n.event_date || '').slice(0, 10))}</option>`).join('');
+    if (prm.night) sel.value = prm.night;
+    sel.onchange = () => { prm.night = sel.value; loadPromos(); };
+    const noche = noches.find((n) => n.id === prm.night);
+    $('prm-warn').hidden = !(noche && ['cancelled', 'finished'].includes(noche.status));
+    $('prm-form').hidden = noches.length === 0;
+
+    $('prm-empty').hidden = prm.list.length > 0;
+    $('prm-list').innerHTML = prm.list.map((p) => `
+      <div class="flex items-start justify-between gap-3 rounded-lg border border-white/10 p-3 ${p.active ? '' : 'opacity-50'}" data-promo="${escape(p.id)}">
+        <div class="min-w-0">
+          <p class="font-display break-words">${escape(p.name)}${p.active ? '' : ` <span class="text-xs text-white/50">· ${escape(t('prm.inactive'))}</span>`}</p>
+          <p class="text-xs text-white/60 break-words">${escape(describePromo(p))}</p>
+        </div>
+        <button class="btn-secondary rounded-lg px-3 py-2 text-xs shrink-0" data-toggle-promo="${escape(p.id)}">${escape(t(p.active ? 'prm.off' : 'prm.on'))}</button>
+      </div>`).join('');
+    document.querySelectorAll('[data-toggle-promo]').forEach((b) => {
+      b.onclick = async () => {
+        const p = prm.list.find((x) => x.id === b.dataset.togglePromo);
+        if (!p) return;
+        try {
+          await api.patch(`/nightclubs/${clubId()}/promotions/${p.id}`, { active: !p.active });
+          toast(t(p.active ? 'prm.offDone' : 'prm.onDone'), 'ok');
+          await loadPromos();
+        } catch (err) { showError(err); }
+      };
+    });
+
+    // El formulario: los campos que no son del tipo escogido se esconden, y el objetivo
+    // (bebida o categoría) llena su propia lista.
+    const kind = $('prm-kind').value;
+    $('prm-f-n').hidden = kind !== 'n_for_m';
+    $('prm-f-pct').hidden = kind !== 'percent';
+    $('prm-f-price').hidden = kind !== 'fixed_price';
+    $('prm-kind').onchange = renderPromos;
+    const porCategoria = $('prm-target-kind').value === 'category';
+    const previo = $('prm-target').value;
+    const categorias = [...new Set((state.drinks || []).map((d) => d.category).filter(Boolean))].sort();
+    $('prm-target').innerHTML = porCategoria
+      ? categorias.map((c) => `<option value="${escape(c)}">${escape(c)}</option>`).join('')
+      : (state.drinks || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)))
+        .map((d) => `<option value="${escape(d.id)}">${escape(d.name)}</option>`).join('');
+    if (previo && [...$('prm-target').options].some((o) => o.value === previo)) $('prm-target').value = previo;
+    $('prm-target-kind').onchange = renderPromos;
+
+    $('prm-form').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const r = EV2Promos.payload({
+        name: $('prm-name').value, kind: $('prm-kind').value,
+        buy: $('prm-buy').value, pay: $('prm-pay').value,
+        pct: $('prm-pct').value, price: $('prm-price').value,
+        targetKind: $('prm-target-kind').value,
+        drinkId: $('prm-target-kind').value === 'drink' ? $('prm-target').value : '',
+        category: $('prm-target-kind').value === 'category' ? $('prm-target').value : '',
+        from: $('prm-from').value, to: $('prm-to').value,
+      });
+      const err = $('prm-error');
+      if (r.error) {
+        err.textContent = t(`prm.bad.${r.error}`);
+        err.hidden = false;
+        return;
+      }
+      err.hidden = true;
+      const listo = ocupado($('btn-prm-add'), 'prn.saving');
+      try {
+        await api.post(`/nightclubs/${clubId()}/events/${prm.night}/promotions`, r.body);
+        toast(t('prm.saved'), 'ok');
+        $('prm-name').value = '';
+        await loadPromos();
+      } catch (e) { showError(e); } finally { listo(); }
+    };
+  }
+
   const TAB_LOADERS = {
     summary: () => Promise.all([loadTills()]),
     cash: () => Promise.all([loadShiftCuts(), loadTerminalCharges(), loadTips(), loadTills()]),
@@ -4298,6 +4415,7 @@
     printing: () => loadPrinting(),
     rps: () => loadRps(),
     staffcons: () => loadStaffCons(),
+    promos: () => loadPromos(),
   };
 
   function goTab(tab) {

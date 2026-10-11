@@ -751,7 +751,7 @@
           <div class="min-w-0 flex-1">
             <p class="text-sm truncate">${escape(drink.name)}</p>
             <p class="text-xs text-white/50">
-              ${escape(money(drink.price, drink.currency))}
+              ${EV2Promos.priceHtml(drink, money, escape)}
               ${drink.stock === null || drink.stock === undefined ? ''
                 : `<span class="text-white/35">· ${escape(t('sale.left', { n: drink.stock }))}</span>`}
             </p>

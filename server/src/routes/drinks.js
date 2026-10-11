@@ -11,6 +11,7 @@ const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, currency } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const inventory = require('../services/inventory');
+const promotions = require('../services/promotions');
 
 const router = express.Router({ mergeParams: true });
 
@@ -94,7 +95,13 @@ router.get('/nightclubs/:nightclubId/drinks',
     );
     // La barra a la que se refieren esos numeros. Sin esto, "quedan 3" no dice tres
     // donde, y el mesero promete un trago que la otra barra no tiene.
-    res.json({ drinks: rows, bar_location_id: barId });
+    // Promociones vigentes (D102): cada bebida dice cual le toca, para que TODAS las listas
+    // (cliente, mesero, caja, personal) la muestren sin pedirla aparte. El cobro lo decide
+    // el servidor al crear el pedido; esto solo informa.
+    const vigentes = await promotions.activeNow(pool, { nightclubId: req.params.nightclubId });
+    const para = promotions.promosForDrink(vigentes);
+    const drinks = rows.map((d) => ({ ...d, promo: promotions.summary(d, para(d)) }));
+    res.json({ drinks, bar_location_id: barId });
   }));
 
 router.get('/nightclubs/:nightclubId/drinks/categories',

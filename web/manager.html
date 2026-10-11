@@ -120,6 +120,7 @@
       <button data-tab="nights" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-calendar-days mgr-icon"></i><span data-i18n="night.tab">Noches</span></button>
       <button data-tab="staff" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-users mgr-icon"></i><span data-i18n="staff.tab">Personal</span></button>
       <button data-tab="staffcons" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-martini-glass mgr-icon"></i><span data-i18n="scn.tab">Consumo del personal</span></button>
+      <button data-tab="promos" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-tags mgr-icon"></i><span data-i18n="prm.tab">Promociones</span></button>
       <button data-tab="inventory" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mgr-icon"></i><span data-i18n="inv.tab">Inventario</span></button>
       <button data-tab="payouts" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-wallet mgr-icon"></i><span data-i18n="mgr.tabPayouts">Pagos al personal</span></button>
       <p class="mgr-group" data-i18n="mgr.groupSetup">Configuración</p>
@@ -395,6 +396,53 @@
           <div id="scn-list" class="space-y-2"></div>
           <button id="btn-scn-csv" class="btn-secondary rounded-lg px-3 py-2 text-xs" data-i18n="scn.csv">Descargar para Excel (CSV)</button>
         </div>
+      </div>
+
+      <!--
+        Promociones por evento (D102): bebidas en oferta para UNA noche. El precio lo
+        calcula el servidor al crear el pedido; aquí solo se dan de alta y se apagan.
+      -->
+      <div id="tab-promos" class="space-y-4" hidden>
+        <div class="card rounded-xl p-4 space-y-3">
+          <label class="block text-xs uppercase tracking-wider text-white/40" for="prm-night" data-i18n="prm.night">Noche</label>
+          <select id="prm-night" class="field"></select>
+          <p id="prm-nonights" class="text-sm text-white/50" hidden data-i18n="prm.noNights">Primero registra una noche en el calendario de eventos.</p>
+          <p id="prm-warn" class="text-xs text-amber-300" hidden data-i18n="prm.notLive">Esta noche está cancelada o terminada: sus promociones no se aplican.</p>
+          <p class="text-[11px] text-white/40" data-i18n="prm.help">La promoción solo vale la noche de su evento y dentro de su horario. Si hay varias para la misma bebida gana la más barata; no se acumulan. Si el personal pide con una promoción, paga el menor entre la promoción y su descuento.</p>
+        </div>
+        <div class="card rounded-xl p-4 space-y-2">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prm.list">Promociones de la noche</p>
+          <p id="prm-empty" class="text-sm text-white/50" hidden data-i18n="prm.empty">Esta noche no tiene promociones.</p>
+          <div id="prm-list" class="space-y-2"></div>
+        </div>
+        <form id="prm-form" class="card rounded-xl p-4 space-y-3" novalidate>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prm.new">Nueva promoción</p>
+          <input id="prm-name" class="field" maxlength="120" data-i18n-placeholder="prm.name" placeholder="Nombre (ej. 2x1 en cerveza)" aria-label="Nombre">
+          <select id="prm-kind" class="field" aria-label="Tipo">
+            <option value="n_for_m" data-i18n="prm.kind.n_for_m">Lleva N, paga M (2x1)</option>
+            <option value="percent" data-i18n="prm.kind.percent">Porcentaje de descuento</option>
+            <option value="fixed_price" data-i18n="prm.kind.fixed_price">Precio fijo por pieza</option>
+          </select>
+          <div id="prm-f-n" class="grid grid-cols-2 gap-2">
+            <label class="text-xs text-white/50"><span data-i18n="prm.buy">Lleva</span><input id="prm-buy" type="number" min="2" max="20" value="2" class="field mt-1" inputmode="numeric"></label>
+            <label class="text-xs text-white/50"><span data-i18n="prm.pay">Paga</span><input id="prm-pay" type="number" min="0" max="19" value="1" class="field mt-1" inputmode="numeric"></label>
+          </div>
+          <label id="prm-f-pct" class="block text-xs text-white/50" hidden><span data-i18n="prm.pct">% de descuento</span><input id="prm-pct" class="field mt-1" inputmode="decimal"></label>
+          <label id="prm-f-price" class="block text-xs text-white/50" hidden><span data-i18n="prm.price">Precio por pieza</span><input id="prm-price" class="field mt-1" inputmode="decimal"></label>
+          <div class="grid grid-cols-2 gap-2">
+            <select id="prm-target-kind" class="field" aria-label="Aplica a">
+              <option value="drink" data-i18n="prm.target.drink">Una bebida</option>
+              <option value="category" data-i18n="prm.target.category">Una categoría</option>
+            </select>
+            <select id="prm-target" class="field" aria-label="Bebida o categoría"></select>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="text-xs text-white/50"><span data-i18n="prm.from">Desde (opcional)</span><input id="prm-from" type="time" class="field mt-1"></label>
+            <label class="text-xs text-white/50"><span data-i18n="prm.to">Hasta (opcional)</span><input id="prm-to" type="time" class="field mt-1"></label>
+          </div>
+          <p id="prm-error" class="text-xs text-red-300" hidden></p>
+          <button id="btn-prm-add" type="submit" class="ev2-button rounded-lg px-4 py-2 text-sm" data-i18n="prm.add">Crear promoción</button>
+        </form>
       </div>
 
       <div id="tab-payouts" class="space-y-3" hidden>
@@ -1286,6 +1334,7 @@
 <script src="js/password-gate.js"></script>
 <script src="js/warehouse.js"></script>
 <script src="js/terminal-charge.js"></script>
+<script src="js/promotions.js"></script>
 <script src="js/manager.js"></script>
 <script src="js/staff-admin.js"></script>
 <script src="js/payouts.js"></script>

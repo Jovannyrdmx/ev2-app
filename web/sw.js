@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v62';
+const VERSION = 'ev2-v63';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -62,6 +62,8 @@ const SHELL = [
   // El cajón y el cambio en efectivo (D96): la caja y la puerta los usan en cada cobro.
   'js/cash-drawer.js',
   'js/ui.js',
+  // Promociones por evento (D102): el precio de oferta en las listas.
+  'js/promotions.js',
   // Mi consumo (D101): el personal pide para sí desde su teléfono.
   'consumo.html', 'js/consumo-screen.js', 'js/staff-order.js',
   // Las notificaciones (D90): el recuadro para activarlas y el sonido con la app abierta.

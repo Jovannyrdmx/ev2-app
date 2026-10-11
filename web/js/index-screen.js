@@ -1035,7 +1035,7 @@
         ${thumb(d)}
         <div class="flex-1 min-w-0">
           <p class="font-semibold leading-snug">${escape(EV2Client.displayName(d.name))}</p>
-          <p class="text-sm mt-0.5 ${out ? 'text-white/50' : ''}">${money(d.price, d.currency)}${out ? ` · <span class="text-xs">${escape(t('menu.soldOut'))}</span>` : ''}</p>
+          <p class="text-sm mt-0.5 ${out ? 'text-white/50' : ''}">${EV2Promos.priceHtml(d, money, escape)}${out ? ` · <span class="text-xs">${escape(t('menu.soldOut'))}</span>` : ''}</p>
         </div>
         ${out ? '' : `
         <div class="flex items-center gap-2">
@@ -1622,7 +1622,7 @@
           <p class="font-semibold">${escape(EV2Client.displayName(d.name))}</p>
           ${preview.category ? '' : `<p class="text-xs text-white/50">${escape(d.category || '')}</p>`}
         </div>
-        <p class="text-sm font-semibold">${money(d.price, d.currency)}</p>
+        <p class="text-sm font-semibold text-right">${EV2Promos.priceHtml(d, money, escape)}</p>
       </div>`).join('') || `<p class="text-white/40 text-sm text-center py-10">${escape(t(preview.search ? 'menu.noMatch' : 'menu.empty'))}</p>`;
   }
 
