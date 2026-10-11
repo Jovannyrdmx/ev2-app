@@ -4884,11 +4884,15 @@
     for (const trago of lista) {
       const card = document.createElement('article');
       card.className = `card rounded-xl px-3 py-2 flex items-center gap-3 ${trago.available ? '' : 'opacity-50'}`;
+      card.dataset.drink = trago.id;
 
+      // El nombre se lee COMPLETO (sin `truncate`): en el teléfono un trago como
+      // "BUCHANANS 18 - AGUA MINERAL" tiene que verse entero, aunque ocupe dos líneas.
       const izq = document.createElement('div');
       izq.className = 'min-w-0 flex-1';
       const nombre = document.createElement('p');
-      nombre.className = 'text-sm font-semibold truncate';
+      nombre.className = 'text-sm font-semibold break-words';
+      nombre.dataset.role = 'drink-name';
       nombre.textContent = trago.name;
       const cat = document.createElement('p');
       cat.className = 'text-xs text-white/50 truncate';
@@ -4896,11 +4900,24 @@
         .filter(Boolean).join(' · ');
       izq.append(nombre, cat);
 
+      // El precio, con su signo. La caja lleva ancho propio EN LÍNEA: `.field` pone
+      // `width: 100%` y le ganaba a `w-24`, así que el campo se comía la tarjeta y
+      // empujaba el nombre y el botón fuera de la pantalla.
+      const bloquePrecio = document.createElement('label');
+      bloquePrecio.className = 'flex items-center gap-1 shrink-0 text-sm text-white/60';
+      const signo = document.createElement('span');
+      signo.textContent = '$';
+      signo.setAttribute('aria-hidden', 'true');
+
       const precio = document.createElement('input');
       precio.type = 'number';
       precio.min = '0';
       precio.step = '1';
-      precio.className = 'field w-24 text-right shrink-0';
+      precio.className = 'field text-right';
+      precio.style.width = '5.5rem';
+      precio.style.flex = '0 0 auto';
+      precio.dataset.role = 'drink-price';
+      precio.setAttribute('aria-label', t('inv.menuPrice'));
       precio.value = Number(trago.price);
       precio.onchange = async () => {
         const nuevo = Number(precio.value);
@@ -4934,7 +4951,8 @@
         } catch (err) { listo(); showError(err); }
       };
 
-      card.append(izq, precio, prender);
+      bloquePrecio.append(signo, precio);
+      card.append(izq, bloquePrecio, prender);
       caja.appendChild(card);
     }
   }
