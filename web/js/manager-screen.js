@@ -252,6 +252,7 @@
       loadTerminals(),
       loadExchangeRate(),
       loadTills(),
+      loadWaiters(),
       loadTerminalCharges(),
       loadTips(),
       loadLostFound(),
@@ -910,6 +911,46 @@
       state.tills = data.tills || [];
     } catch { state.tills = []; }
     renderTills();
+  }
+
+  // ---------------------------------------------------------------- meseros: saldo y tope (D110)
+
+  async function loadWaiters() {
+    if (!$('w-list')) return;
+    try {
+      const [bal, ctl] = await Promise.all([
+        api.get(`/nightclubs/${clubId()}/waiters/balances`),
+        api.get(`/nightclubs/${clubId()}/reports/control`),
+      ]);
+      const lim = bal.limits || {};
+      if (document.activeElement !== $('w-amount')) $('w-amount').value = lim.max_unpaid_amount ? Number(lim.max_unpaid_amount) : '';
+      if (document.activeElement !== $('w-minutes')) $('w-minutes').value = lim.max_unpaid_minutes || '';
+      const ws = bal.waiters || [];
+      $('w-empty').hidden = ws.length > 0;
+      $('w-list').innerHTML = ws.map((w) => `
+        <div class="rounded-xl p-3 flex justify-between gap-2" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)">
+          <div class="min-w-0"><p class="font-semibold truncate">${escape(w.name)}</p>
+            <p class="text-xs text-white/50">${escape(t('mgr.wOldest', { n: w.oldest_delivered_minutes }))}</p></div>
+          <div class="text-right"><p class="font-semibold">${escape(money(w.delivered_unpaid_total, 'MXN'))}</p>
+            ${w.over_limit ? `<span class="pill pill-bad">${escape(t('mgr.wOver'))}</span>` : ''}</div>
+        </div>`).join('');
+      $('w-control').innerHTML = (ctl.people || []).map((p) => `<p>${escape(t('mgr.wControlRow', {
+        name: p.name, c: p.cancellations, m: p.wastes, d: p.door_courtesies,
+        s: p.cut_differences, v: p.manual_vouchers }))}</p>`).join('');
+    } catch { /* la tarjeta queda como estaba */ }
+  }
+
+  if ($('w-form')) {
+    $('w-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const num = (id) => (($(id).value || '').trim() === '' ? null : Number($(id).value));
+      try {
+        await api.put(`/nightclubs/${clubId()}/waiter-limits`, {
+          max_unpaid_amount: num('w-amount'), max_unpaid_minutes: num('w-minutes') });
+        toast(t('mgr.wSaved'), 'ok');
+        loadWaiters();
+      } catch (err) { toast(err.message, 'error'); }
+    };
   }
 
   const TONE_PILL = { ok: 'pill-ok', bad: 'pill-bad', wait: 'pill-wait', on: 'pill-on' };
@@ -4518,7 +4559,7 @@
   }
 
   const TAB_LOADERS = {
-    summary: () => Promise.all([loadTills()]),
+    summary: () => Promise.all([loadTills(), loadWaiters()]),
     cash: () => Promise.all([loadShiftCuts(), loadTerminalCharges(), loadTips(), loadTills()]),
     lost: () => loadLostFound(),
     club: () => Promise.all([loadExchangeRate(), loadTerminals(), loadPrinting(), loadPushStatus()]),

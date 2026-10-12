@@ -179,6 +179,21 @@
           <div id="s-tills" class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3"></div>
         </div>
 
+        <!-- Meseros: lo entregado sin pagar y su tope (D110). -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="mgr.wTitle">Meseros: lo que traen sin pagar</p>
+          <p id="w-empty" class="text-sm text-white/40" data-i18n="mgr.wNone" hidden>Ningún mesero trae pedidos por cobrar.</p>
+          <div id="w-list" class="space-y-2"></div>
+          <form id="w-form" class="grid grid-cols-2 gap-2 items-end">
+            <label class="text-xs text-white/60"><span data-i18n="mgr.wCapAmount">Tope en pesos</span><input id="w-amount" type="number" min="1" step="1" inputmode="numeric" class="field"></label>
+            <label class="text-xs text-white/60"><span data-i18n="mgr.wCapMinutes">Tope en minutos</span><input id="w-minutes" type="number" min="1" step="1" inputmode="numeric" class="field"></label>
+            <p class="col-span-2 text-[11px] text-white/40" data-i18n="mgr.wCapHint">Vacío = sin tope.</p>
+            <button class="btn-secondary rounded-lg px-3 py-2 text-xs col-span-2" data-i18n="mgr.wSave">Guardar tope</button>
+          </form>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="mgr.wControl">Control por persona (18 h)</p>
+          <div id="w-control" class="space-y-1 text-xs text-white/70"></div>
+        </div>
+
         <div class="card rounded-xl p-4 space-y-2">
           <div class="flex justify-between items-baseline">
             <span class="text-sm text-white/60" data-i18n="manager.clubRevenue">Caja del club</span>
