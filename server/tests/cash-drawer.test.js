@@ -18,6 +18,7 @@ const escpos = require('../src/services/escpos');
 const printing = require('../src/services/printing');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { fullCut } = require('./helpers/cut');
 
 let club; let manager; let cajero; let hostess; let waiter; let table; let beer; let pinGerente;
 
@@ -303,7 +304,8 @@ describe('El cambio en la puerta', () => {
     await vender({ usd_received: 20, exchange_rate_id: tipo }); // $300 con dólares, $47 de cambio
     const res = await api().get(url('/shifts/me/cut')).set(auth(hostess));
     expect(res.status).toBe(200);
-    const totals = res.body.totals || res.body.cut || res.body;
+    // La anfitriona cuenta a ciegas (D105): los montos se leen como los ve el gerente.
+    const totals = (await fullCut(club.id, hostess)).totals;
     const porMetodo = Object.fromEntries((totals.by_method || []).map((l) => [l.method, l.amount]));
     expect(porMetodo.cash).toBe('300.00');
     expect(porMetodo.cash_usd).toBe('300.00');

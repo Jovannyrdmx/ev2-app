@@ -14,6 +14,7 @@ const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const pins = require('../src/services/pins');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { fullCut, declareAndClose } = require('./helpers/cut');
 
 let club; let manager; let luis; let sol; let guest;
 
@@ -35,7 +36,12 @@ beforeEach(async () => {
 
 const url = (p) => `/api/nightclubs/${club.id}${p}`;
 const abrirTurno = (user) => api().post(url('/staff/shifts/start')).set(auth(user)).send({});
-const miCorte = (user) => api().get(url('/shifts/me/cut')).set(auth(user));
+// Los números del corte, como los ve el gerente: la anfitriona cuenta a ciegas (D105).
+const miCorte = async (user) => {
+  const res = await api().get(url('/shifts/me/cut')).set(auth(user));
+  if (!res.body || !res.body.shift) return res;
+  return { status: res.status, body: await fullCut(club.id, user) };
+};
 
 /** Un renglón del libro por cobrar, como el de un pedido. */
 async function porCobrar(amount = '450.00') {
@@ -78,9 +84,8 @@ const retirar = (user, amount, reason, pin) => api()
   .send({ amount, reason, manager_pin: pin });
 
 /** El corte completo, en un acto: lo declarado, lo contado y el código. */
-const cortar = (user, declared, counted, pin, extra = {}) => api()
-  .post(url('/shifts/me/closing')).set(auth(user))
-  .send({ declared_cash: declared, counted_cash: counted, manager_pin: pin, ...extra });
+const cortar = (user, declared, counted, pin, extra = {}) => declareAndClose(club.id, user,
+  { declared_cash: declared, counted_cash: counted, manager_pin: pin, ...extra });
 
 const turnoAbierto = async (userId) => (await pool.query(
   'SELECT ended_at FROM staff_shifts WHERE user_id = $1', [userId])).rows[0];
@@ -252,7 +257,9 @@ describe('El retiro parcial de efectivo', () => {
     await cobrar(luis, 1000);
     const res = await retirar(luis, 4000, 'Me equivoqué de tecla', pin);
     expect(res.status).toBe(422);
-    expect(res.body.error.message).toMatch(/Solo trae/);
+    // A ciegas (D105) el rechazo no le dice cuánto trae.
+    expect(res.body.error.message).toMatch(/mayor que el efectivo/);
+    expect(res.body.error.message).not.toMatch(/1000/);
   });
 
   it('el gerente ve los retiros con su motivo y quién los autorizó', async () => {

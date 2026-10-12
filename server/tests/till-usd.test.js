@@ -14,6 +14,7 @@ const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const pins = require('../src/services/pins');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { declareAndClose } = require('./helpers/cut');
 
 let club; let manager; let cajero; let waiter; let table; let beer; let pinGerente;
 
@@ -62,8 +63,8 @@ const pedido = async () => {
 const pagar = (order, body) => api().post(url('/till/payments')).set(auth(cajero))
   .send({ transaction_id: order.transaction_id, ...body });
 
-const cortar = (body) => api().post(url('/shifts/me/closing')).set(auth(cajero))
-  .send({ manager_pin: pinGerente, declared_cash: 0, ...body });
+const cortar = (body) => declareAndClose(club.id, cajero,
+  { manager_pin: pinGerente, declared_cash: 0, ...body });
 
 describe('Cobrar en dólares', () => {
   it('sin tipo de cambio no se cobra en dólares', async () => {
@@ -155,9 +156,13 @@ describe('El corte con dólares', () => {
     const tipo = await fijarTipo(17.35);
     await pagar(await pedido(), { method: 'cash_usd', usd_received: 10, exchange_rate_id: tipo }); // cambio 53
 
-    const sinDolares = await cortar({ counted_cash: 947 });
+    // A ciegas (D105): el conteo de un turno con dólares no se guarda sin los dólares,
+    // y el mensaje no dice cuántos debería haber.
+    const sinDolares = await api().post(url('/shifts/me/declaration')).set(auth(cajero))
+      .send({ declared_cash: 947 });
     expect(sinDolares.status).toBe(422);
-    expect(sinDolares.body.error.message).toMatch(/US\$10\.00/);
+    expect(sinDolares.body.error.message).toMatch(/dólares/);
+    expect(sinDolares.body.error.message).not.toMatch(/10\.00/);
 
     const res = await cortar({ counted_cash: 947, counted_usd: 10 });
     expect(res.status).toBe(201);
@@ -197,7 +202,9 @@ describe('El corte con dólares', () => {
 
     const demasiado = await retirar({ amount: 20, currency: 'USD' });
     expect(demasiado.status).toBe(422);
-    expect(demasiado.body.error.message).toMatch(/US\$10\.00 en dólares/);
+    // A ciegas (D105) el rechazo no dice cuántos dólares hay.
+    expect(demasiado.body.error.message).toMatch(/mayor que el efectivo/);
+    expect(demasiado.body.error.message).not.toMatch(/10\.00/);
 
     const ok = await retirar({ amount: 6, currency: 'USD' });
     expect(ok.status).toBe(201);

@@ -215,3 +215,83 @@ describe('El corte con dólares (D86)', () => {
     expect(Cut.dropBlocker(2947, c, base)).toBeNull();
   });
 });
+
+describe('El corte a ciegas (D105)', () => {
+  const ciego = (over = {}) => corteAbierto({
+    blind: true,
+    cash_to_hand: null,
+    totals: {
+      currency: 'MXN',
+      by_method: [
+        { method: 'cash', currency: 'MXN', amount: null, count: 6 },
+        { method: 'card_terminal', currency: 'MXN', amount: '4500.00', count: 3 },
+      ],
+      cash_collected: null,
+      total_collected: null,
+      usd: { received: null, change_given_mxn: null, count: 0, any: false },
+      tips: { amount: '0.00', count: 0 },
+    },
+    declaration: null,
+    ...over,
+  });
+
+  function montar(cut, posts = []) {
+    const dom = new JSDOM('<!doctype html><body></body>');
+    const hoja = Cut.createSheet({
+      document: dom.window.document,
+      api: { get: () => Promise.resolve(cut), post: (u, b) => { posts.push([u, b]); return Promise.resolve({}); } },
+      clubId: () => 'c1',
+      t: (k, v) => (v ? `${k}:${JSON.stringify(v)}` : k),
+      money: (n) => `$${Number(n).toFixed(2)}`,
+      errorMessage: (e) => e.message,
+    });
+    return { hoja, doc: dom.window.document };
+  }
+
+  it('sabe en qué paso va: contar, y luego que el gerente cierre', () => {
+    expect(Cut.blindStep(corteAbierto())).toBeNull();
+    expect(Cut.blindStep(ciego())).toBe('count');
+    expect(Cut.blindStep(ciego({ declaration: { declared_cash: '2900.00', declared_usd: null } }))).toBe('close');
+  });
+
+  it('el conteo pide un número, y con dólares pide también los dólares', () => {
+    expect(Cut.countBlocker('', ciego())).toBe('cut.errAmount');
+    expect(Cut.countBlocker('2900', ciego())).toBeNull();
+    const conUsd = ciego({ totals: { ...ciego().totals, usd: { received: null, count: 1, any: true } } });
+    expect(Cut.countBlocker('2900', conUsd)).toBe('cut.errUsdCounted');
+    expect(Cut.countBlocker('2900', conUsd, { usd: '20' })).toBeNull();
+  });
+
+  it('no compara contra lo esperado: eso lo hace el servidor con el código del gerente', () => {
+    const cut = ciego({ declaration: { declared_cash: '2900.00', declared_usd: null } });
+    expect(Cut.closeBlocker(2900, cut, { counted: '2800', pin: '123456' })).toBeNull();
+    expect(Cut.dropBlocker(999999, cut, { reason: 'retiro', pin: '123456' })).toBeNull();
+  });
+
+  it('al abrirla no enseña ni pone lo que toca entregar; los montos en efectivo salen ocultos', async () => {
+    const { hoja, doc } = montar(ciego());
+    await hoja.open();
+    expect(doc.getElementById('cut-tohand-row').hidden).toBe(true);
+    expect(doc.getElementById('cut-amount').value).toBe('');
+    expect(doc.getElementById('cut-blind').hidden).toBe(false);
+    expect(doc.getElementById('cut-lines').textContent).toMatch(/cut\.hidden/);
+    expect(doc.getElementById('cut-lines').textContent).toMatch(/4500\.00/);
+    expect(doc.getElementById('cut-declare').textContent).toBe('cut.saveCount');
+    expect(doc.getElementById('cut-counted').hidden).toBe(true);
+  });
+
+  it('ya guardado el conteo, el botón cierra el corte sin volver a mandar lo declarado', async () => {
+    const posts = [];
+    const { hoja, doc } = montar(ciego({ declaration: { declared_cash: '2900.00', declared_usd: null } }), posts);
+    await hoja.open();
+    expect(doc.getElementById('cut-declare').textContent).toBe('cut.closeCut');
+    expect(doc.getElementById('cut-blind').textContent).toMatch(/cut\.countSaved/);
+    doc.getElementById('cut-pin').value = '123456';
+    doc.getElementById('cut-declare').click();
+    await new Promise((r) => setTimeout(r, 0));
+    const cierre = posts.find(([u]) => u.endsWith('/shifts/me/closing'));
+    expect(cierre).toBeTruthy();
+    expect(cierre[1].declared_cash).toBeUndefined();
+    expect(cierre[1].manager_pin).toBe('123456');
+  });
+});

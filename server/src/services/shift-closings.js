@@ -232,6 +232,7 @@ async function shiftSummary(runner, { nightclubId, shift }) {
             difference_usd::text AS difference_usd,
             opening_float::text AS opening_float, pending_orders, pending_total::text AS pending_total
        FROM shift_closings WHERE shift_id = $1`, [shift.id]);
+  const declaracion = await declarationOf(runner, shift.id);
 
   // La caja (D77): el fondo con el que abrió es dinero del club que también se
   // devuelve al cerrar, y lo que su barra tiene sin cobrar es lo que el corte pregunta.
@@ -264,7 +265,91 @@ async function shiftSummary(runner, { nightclubId, shift }) {
     // Lo que FALTA por cobrar (D79): un pedido con una parte pagada solo debe el resto.
     pending_total: money(pendientes.reduce((n, o) => round2(n + Number(o.remaining)), 0)),
     closing: rows[0] || null,
+    declaration: declaracion,
   };
+}
+
+// ---------------------------------------------------------------- corte a ciegas (D105)
+
+/**
+ * Quienes cuentan su cajón a ciegas: el cajero en su barra y la anfitriona en la
+ * puerta. Son los que tienen efectivo del club en la mano.
+ */
+const BLIND_ROLES = COLLECTING_ROLES;
+const isBlind = (role) => BLIND_ROLES.includes(role);
+
+/** Lo que esa persona declaró haber contado, si ya lo hizo. */
+async function declarationOf(runner, shiftId) {
+  const { rows } = await runner.query(
+    `SELECT id, declared_cash::text AS declared_cash, declared_usd::text AS declared_usd,
+            created_at
+       FROM shift_declarations WHERE shift_id = $1`, [shiftId]);
+  return rows[0] || null;
+}
+
+/**
+ * El corte como lo ve quien lo va a contar.
+ *
+ * A ciegas, mientras el corte no esté hecho, no se le dice cuánto efectivo debería
+ * tener — ni directo (`cash_to_hand`) ni de forma que se pueda sacar con una resta
+ * (lo cobrado en efectivo, el total cobrado, los dólares recibidos). Sí ve cuántos
+ * cobros hizo, lo cobrado con tarjeta, su fondo, sus retiros y lo que su barra tiene
+ * pendiente: todo lo que necesita para trabajar y nada para "cuadrar" el cajón.
+ * Una vez hecho el corte ya no hay nada que esconder.
+ */
+function forEmployee(resumen, role) {
+  if (!isBlind(role) || resumen.closing || !resumen.shift) {
+    return { ...resumen, blind: false };
+  }
+  const ocultos = ['cash', 'cash_usd'];
+  return {
+    ...resumen,
+    blind: true,
+    totals: {
+      ...resumen.totals,
+      by_method: resumen.totals.by_method.map((l) => (ocultos.includes(l.method)
+        ? { ...l, amount: null } : l)),
+      cash_collected: null,
+      total_collected: null,
+      usd: {
+        received: null,
+        change_given_mxn: null,
+        count: resumen.totals.usd.count,
+        any: Number(resumen.totals.usd.received) > 0,
+      },
+    },
+    cash_to_hand: null,
+    usd_to_hand: null,
+  };
+}
+
+/**
+ * La persona declara lo que contó, antes de saber lo esperado. Una vez por turno.
+ */
+async function declare(client, { nightclubId, shift, declaredCash, declaredUsd = null }) {
+  if (shift.ended_at) throw ApiError.conflict('Ese turno ya se cerró');
+  const ya = await client.query('SELECT 1 FROM shift_closings WHERE shift_id = $1', [shift.id]);
+  if (ya.rowCount > 0) throw ApiError.conflict('El corte de ese turno ya está hecho');
+  const resumen = await shiftSummary(client, { nightclubId, shift });
+  const huboDolares = Number(resumen.totals.usd.received) > 0;
+  if (huboDolares && (declaredUsd === null || declaredUsd === undefined)) {
+    throw ApiError.unprocessable('Este turno recibió dólares: cuéntalos también.');
+  }
+  try {
+    const { rows } = await client.query(
+      `INSERT INTO shift_declarations (nightclub_id, shift_id, user_id, declared_cash, declared_usd)
+       VALUES ($1,$2,$3,$4,$5)
+       RETURNING id, declared_cash::text AS declared_cash, declared_usd::text AS declared_usd,
+                 created_at`,
+      [nightclubId, shift.id, shift.user_id, round2(declaredCash).toFixed(2),
+        huboDolares ? round2(declaredUsd).toFixed(2) : null]);
+    return rows[0];
+  } catch (err) {
+    if (err.code === '23505') {
+      throw ApiError.conflict('Ya declaraste tu conteo de este turno; no se puede cambiar.');
+    }
+    throw err;
+  }
 }
 
 /**
@@ -278,7 +363,7 @@ async function shiftSummary(runner, { nightclubId, shift }) {
  * `authorizer` ya viene verificado por `manager-auth`: aquí no se ve ningún PIN.
  */
 async function withdraw(client, {
-  nightclubId, shift, amount, reason, authorizer, currency = 'MXN',
+  nightclubId, shift, amount, reason, authorizer, currency = 'MXN', role = null,
 }) {
   const resumen = await shiftSummary(client, { nightclubId, shift });
   if (resumen.closing) throw ApiError.conflict('Ese turno ya tiene su corte hecho');
@@ -291,6 +376,11 @@ async function withdraw(client, {
   }
   // Retirar de más no es un descuido: o el número está mal tecleado, o ese dinero no
   // es del club. Las dos cosas se paran antes de que alguien suelte los billetes.
+  if (monto > disponible && isBlind(role)) {
+    // A ciegas no se dice cuánto hay (D105): el gerente lo ve en su panel de cajas.
+    throw ApiError.unprocessable(
+      'Ese retiro es mayor que el efectivo que debe haber en el cajón. Revisa el monto con el gerente.');
+  }
   if (monto > disponible) {
     throw ApiError.unprocessable(
       enDolares
@@ -313,7 +403,8 @@ async function withdraw(client, {
     id: rows[0].id,
     amount: money(monto),
     currency,
-    remaining: money(round2(disponible - monto)),
+    // A ciegas (D105) no se dice cuánto queda: sería decir cuánto había.
+    remaining: isBlind(role) ? null : money(round2(disponible - monto)),
     authorized_by: authorizer.name,
   };
 }
@@ -358,6 +449,20 @@ async function close(client, {
       `Tu barra tiene ${porCobrar.length} pedido(s) sin cobrar por ${resumen.pending_total}. `
       + 'Cóbralos o cancélalos, o que el gerente autorice cerrar con ellos pendientes.',
       { pending_orders: porCobrar, pending_total: resumen.pending_total });
+  }
+
+  // A ciegas (D105): lo declarado es lo que se contó ANTES de ver lo esperado, y ya
+  // está escrito. Lo que llegue en esta petición no lo cambia.
+  if (isBlind(role)) {
+    if (!resumen.declaration) {
+      throw ApiError.unprocessable(
+        'Primero cuenta tu efectivo y guarda tu conteo; luego el gerente cierra el corte.');
+    }
+    declaredCash = Number(resumen.declaration.declared_cash);
+    if (countedCash === null || countedCash === undefined) countedCash = declaredCash;
+    if ((countedUsd === null || countedUsd === undefined) && resumen.declaration.declared_usd !== null) {
+      countedUsd = Number(resumen.declaration.declared_usd);
+    }
   }
 
   const esperado = Number(resumen.cash_to_hand);
@@ -451,7 +556,8 @@ async function close(client, {
 }
 
 module.exports = {
-  CASH_METHODS, COLLECTING_ROLES,
+  CASH_METHODS, COLLECTING_ROLES, BLIND_ROLES,
   collected, dropsOf, receivedTotal, pendingDrops, shiftSummary,
   withdraw, close, money, round2,
+  isBlind, declarationOf, forEmployee, declare,
 };

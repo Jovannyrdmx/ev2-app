@@ -975,7 +975,10 @@
     $('d-inside').textContent = String(s.inside);
     $('d-general').textContent = String(s.door.generales);
     $('d-extras').textContent = String(s.door.extras_vip);
-    $('d-taken').textContent = money(s.door.cobrado, s.door.currency);
+    // La anfitriona cuenta a ciegas (D105): el servidor no le manda lo cobrado.
+    const cobrado = s.door.cobrado;
+    $('d-taken').closest('.stat-card').hidden = cobrado === null || cobrado === undefined;
+    if (cobrado !== null && cobrado !== undefined) $('d-taken').textContent = money(cobrado, s.door.currency);
   }
 
   function renderAll() {

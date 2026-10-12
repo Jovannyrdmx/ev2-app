@@ -69,7 +69,49 @@ router.get('/nightclubs/:nightclubId/shifts/me/cut',
     const resumen = await cuts.shiftSummary(pool, {
       nightclubId: req.params.nightclubId, shift,
     });
-    return res.json(resumen);
+    // A ciegas para quien maneja el efectivo (D105).
+    return res.json(cuts.forEmployee(resumen, req.user.role));
+  }));
+
+/**
+ * Corte a ciegas, primer paso (D105): la persona cuenta su cajón y guarda lo que contó
+ * sin haber visto lo esperado. Queda escrito y no se cambia; después el gerente cuenta
+ * delante de ella, teclea su código y cierra el corte.
+ */
+router.post('/nightclubs/:nightclubId/shifts/me/declaration',
+  requireRole(...STAFF_ROLES),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      declared_cash: z.number().min(0).max(1_000_000),
+      declared_usd: z.number().min(0).max(1_000_000).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const shift = await shiftToCut(pool, { nightclubId, userId: req.user.id });
+    if (!shift) throw ApiError.conflict('No tienes un turno que cortar');
+    const client = await pool.connect();
+    let hecha;
+    try {
+      await client.query('BEGIN');
+      hecha = await cuts.declare(client, {
+        nightclubId, shift,
+        declaredCash: req.body.declared_cash,
+        declaredUsd: req.body.declared_usd ?? null,
+      });
+      await client.query(
+        `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
+         VALUES ($1,$2,'shift.blind_declaration','staff_shift',$3,$4,$5)`,
+        [nightclubId, req.user.id, shift.id, JSON.stringify(hecha), req.ip || null]);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    res.status(201).json({ declaration: hecha });
   }));
 
 // ---------------------------------------------------------------- entregas parciales
@@ -121,6 +163,7 @@ router.post('/nightclubs/:nightclubId/shifts/me/cash-drops',
         currency: req.body.currency,
         reason: req.body.reason,
         authorizer: autoriza,
+        role: req.user.role,
       });
       await client.query('COMMIT');
     } catch (err) {
@@ -515,8 +558,10 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
   validate({
     params: z.object({ nightclubId: uuid }),
     body: z.object({
-      declared_cash: z.number().min(0).max(1_000_000),
-      counted_cash: z.number().min(0).max(1_000_000),
+      // A ciegas (D105) lo declarado ya está guardado y no se manda; para los demás
+      // puestos sigue siendo obligatorio.
+      declared_cash: z.number().min(0).max(1_000_000).optional(),
+      counted_cash: z.number().min(0).max(1_000_000).optional(),
       // Los dólares del cajón (D86). Obligatorio solo si el turno recibió dólares.
       counted_usd: z.number().min(0).max(1_000_000).optional(),
       difference_reason: z.string().trim().max(280).optional(),
@@ -531,6 +576,10 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
     const { nightclubId } = req.params;
     const shift = await shiftToCut(pool, { nightclubId, userId: req.user.id });
     if (!shift) throw ApiError.conflict('No tienes un turno que cortar');
+    if (!cuts.isBlind(req.user.role)
+        && (req.body.declared_cash === undefined || req.body.counted_cash === undefined)) {
+      throw ApiError.badRequest('Indica lo que entregas y lo que contó el gerente');
+    }
 
     const autoriza = await managerAuth.authorize(pool, {
       nightclubId, pin: req.body.manager_pin, selfId: req.user.id, ip: req.ip,

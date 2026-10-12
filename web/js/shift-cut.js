@@ -49,7 +49,22 @@
 
   /** Si este turno recibió dólares (D86): entonces el corte cuenta dólares aparte. */
   const hasUsd = (cut) => Boolean(cut && cut.totals && cut.totals.usd
-    && Number(cut.totals.usd.received) > 0);
+    && (cut.totals.usd.any === true || Number(cut.totals.usd.received) > 0));
+
+  /** El conteo a ciegas que falta guardar (D105). */
+  function countBlocker(amount, cut, { usd = '' } = {}) {
+    const n = Number(amount);
+    if (amount === '' || !Number.isFinite(n) || n < 0) return 'cut.errAmount';
+    if (!cut || !cut.shift) return 'cut.errNoShift';
+    if (cut.closing) return 'cut.errAlready';
+    if (hasUsd(cut) && (usd === '' || !Number.isFinite(Number(usd)) || Number(usd) < 0)) {
+      return 'cut.errUsdCounted';
+    }
+    return null;
+  }
+
+  /** En qué paso del corte a ciegas está: contar, o que el gerente cierre. */
+  const blindStep = (cut) => (cut && cut.blind ? (cut.declaration ? 'close' : 'count') : null);
   const usdText = (n) => `US$${money(n)}`;
 
   /**
@@ -65,7 +80,8 @@
     if (cut.shift.ended_at) return 'cut.errShiftClosed';
     // Pesos y dólares salen cada uno de lo que hay de esa moneda (D86).
     const hay = currency === 'USD' ? cut.usd_to_hand : cut.cash_to_hand;
-    if (n > Number(hay || 0)) return 'cut.errTooMuch';
+    // A ciegas (D105) la pantalla no sabe cuánto hay: lo revisa el servidor.
+    if (!cut.blind && n > Number(hay || 0)) return 'cut.errTooMuch';
     // El motivo y el código no son formalidades: son la función entera. Un retiro sin
     // ellos es exactamente el hueco que esto vino a tapar.
     if (String(reason).trim().length < 3) return 'cut.errReason';
@@ -92,6 +108,9 @@
     const contado = counted === null || counted === '' ? n : Number(counted);
     if (!Number.isFinite(contado) || contado < 0) return 'cut.errCounted';
     if (!/^\d{6}$/.test(String(pin))) return 'cut.errPin';
+    // A ciegas (D105) la diferencia la calcula el servidor después del código del
+    // gerente; la pantalla no tiene con qué compararla.
+    if (cut.blind) return null;
     const diferencia = Math.round((contado - Number(cut.cash_to_hand)) * 100) / 100;
     // Con dólares en el turno, se cuentan: "no los conté" no es "conté cero" (D86).
     let difUsd = 0;
@@ -146,7 +165,8 @@
       cash: isCash(l.method),
     })));
     // El cambio en pesos que se dio por cobros en dólares salió del cajón (D86).
-    if (hasUsd(cut) && Number(cut.totals.usd.change_given_mxn) > 0) {
+    if (hasUsd(cut) && cut.totals.usd.change_given_mxn !== null
+        && Number(cut.totals.usd.change_given_mxn) > 0) {
       out2.push({
         key: 'usd_change', label: t('cut.usdChange'), value: money(-Number(cut.totals.usd.change_given_mxn)),
         count: 0, cash: true,
@@ -203,7 +223,8 @@
             <span class="text-sm text-white/60" id="cut-handed-label">—</span>
             <span id="cut-handed" class="text-sm">—</span>
           </div>
-          <div class="flex justify-between items-baseline">
+          <p id="cut-blind" class="text-sm text-amber-100" hidden></p>
+          <div id="cut-tohand-row" class="flex justify-between items-baseline">
             <span class="font-display" id="cut-tohand-label">—</span>
             <span id="cut-tohand" class="font-display text-2xl" style="color:var(--ev2-gold)">—</span>
           </div>
@@ -280,7 +301,8 @@
         fila.innerHTML = '<span></span><span></span>';
         fila.firstChild.textContent = `${l.label}${l.count ? ` · ${l.count}` : ''}`;
         fila.firstChild.className = l.aside ? 'text-white/40' : 'text-white/60';
-        fila.lastChild.textContent = Number(l.value) < 0 ? `-${dinero(Math.abs(Number(l.value)))}` : dinero(l.value);
+        if (l.value === null || l.value === undefined) fila.lastChild.textContent = t('cut.hidden');
+        else fila.lastChild.textContent = Number(l.value) < 0 ? `-${dinero(Math.abs(Number(l.value)))}` : dinero(l.value);
         if (l.aside) fila.lastChild.className = 'text-white/40';
         box.appendChild(fila);
       }
@@ -294,9 +316,17 @@
       if (pendientes === 0) $('cut-ack').checked = false;
 
       $('cut-handed').textContent = dinero(cut && cut.drops_received);
+      const paso = blindStep(cut);
+      // A ciegas (D105): sin "te toca entregar"; en su lugar, qué hacer.
+      $('cut-tohand-row').hidden = Boolean(paso);
+      $('cut-blind').hidden = !paso;
+      $('cut-blind').textContent = paso === 'close'
+        ? t('cut.countSaved', { amount: dinero(cut.declaration.declared_cash)
+          + (cut.declaration.declared_usd !== null ? ` + ${usdText(cut.declaration.declared_usd)}` : '') })
+        : t('cut.blindHint');
       $('cut-tohand').textContent = dinero(cut && cut.cash_to_hand);
       const dolares = hasUsd(cut);
-      $('cut-usd-row').hidden = !dolares;
+      $('cut-usd-row').hidden = !dolares || Boolean(paso);
       $('cut-usd-label').textContent = t('cut.usdToHand');
       $('cut-usd').textContent = usdText(cut && cut.usd_to_hand);
       $('cut-usd-counted').hidden = !dolares;
@@ -324,9 +354,41 @@
       const puede = Boolean(cut && cut.shift && !cut.closing);
       $('cut-drop').disabled = !puede || Boolean(cut.shift.ended_at);
       $('cut-declare').disabled = !puede;
+      // Los campos según el paso del corte a ciegas.
+      $('cut-amount').placeholder = paso === 'count' ? t('cut.blindAmount') : t('cut.amount');
+      $('cut-usd-counted').placeholder = paso === 'count' ? t('cut.blindUsd') : t('cut.usdCounted');
+      $('cut-counted').placeholder = paso === 'close' ? t('cut.managerCounted') : t('cut.counted');
+      $('cut-counted').hidden = paso === 'count';
+      $('cut-declare').textContent = paso === 'count' ? t('cut.saveCount')
+        : (paso === 'close' ? t('cut.closeCut') : t('cut.declare'));
       for (const id of ['cut-amount', 'cut-counted', 'cut-reason', 'cut-pin', 'cut-ack',
         'cut-usd-counted', 'cut-currency']) {
         $(id).disabled = !puede;
+      }
+    }
+
+    /** Corte a ciegas, primer paso (D105): guardar lo contado, sin ver lo esperado. */
+    async function guardarConteo(cantidad, dolares) {
+      const bloqueo = countBlocker(cantidad, estado.cut, { usd: dolares });
+      if (bloqueo) { avisar(t(bloqueo, { amount: '' })); return; }
+      const texto = dinero(cantidad) + (hasUsd(estado.cut) ? ` + ${usdText(dolares)}` : '');
+      if (!(await ask(t('cut.confirmSaveCount', { amount: texto })))) return;
+      estado.busy = true;
+      $('cut-declare').disabled = true;
+      try {
+        await api.post(`/nightclubs/${clubId()}/shifts/me/declaration`, {
+          declared_cash: Number(cantidad),
+          ...(hasUsd(estado.cut) ? { declared_usd: Number(dolares) } : {}),
+        });
+        $('cut-amount').value = '';
+        $('cut-usd-counted').value = '';
+        if (deps.toast) deps.toast(t('cut.countSavedOk'), 'ok');
+        await refrescar();
+      } catch (err) {
+        avisar(deps.errorMessage ? deps.errorMessage(err) : String(err.message || err));
+      } finally {
+        estado.busy = false;
+        $('cut-declare').disabled = false;
       }
     }
 
@@ -350,9 +412,15 @@
       const contadoUsd = $('cut-usd-counted').value;
       const moneda = $('cut-currency').hidden ? 'MXN' : ($('cut-currency').value || 'MXN');
 
+      const paso = blindStep(estado.cut);
+      if (tipo === 'declare' && paso === 'count') {
+        await guardarConteo($('cut-amount').value, contadoUsd);
+        return;
+      }
+      const declarado = paso === 'close' ? Number(estado.cut.declaration.declared_cash) : monto;
       const bloqueo = tipo === 'drop'
         ? dropBlocker(monto, estado.cut, { reason: motivo, pin, currency: moneda })
-        : closeBlocker(monto, estado.cut, {
+        : closeBlocker(declarado, estado.cut, {
           counted: contado, reason: motivo, pin, acknowledgePending: $('cut-ack').checked,
           countedUsd: contadoUsd,
         });
@@ -371,7 +439,7 @@
         avisar(t(bloqueo, vars));
         return;
       }
-      if (tipo === 'declare'
+      if (tipo === 'declare' && !paso
         && !(await ask(t('cut.confirmDeclare', { amount: dinero(monto) })))) return;
 
       estado.busy = true;
@@ -393,11 +461,12 @@
           }
         } else {
           const hecho = await api.post(`/nightclubs/${clubId()}/shifts/me/closing`, {
-            declared_cash: monto,
-            counted_cash: contado === '' ? monto : Number(contado),
+            // A ciegas lo declarado ya está guardado en el servidor (D105).
+            ...(paso ? {} : { declared_cash: monto }),
+            ...(paso && contado === '' ? {} : { counted_cash: contado === '' ? monto : Number(contado) }),
             ...(motivo.trim() ? { difference_reason: motivo.trim() } : {}),
             ...(pendingCount(estado.cut) > 0 ? { acknowledge_pending: $('cut-ack').checked } : {}),
-            ...(hasUsd(estado.cut) ? { counted_usd: Number(contadoUsd) } : {}),
+            ...(hasUsd(estado.cut) && contadoUsd !== '' ? { counted_usd: Number(contadoUsd) } : {}),
             manager_pin: pin,
           });
           if (deps.toast) {
@@ -434,7 +503,10 @@
         await refrescar();
         // Lo que falta entregar viene puesto: es el caso normal al cerrar el turno,
         // y teclearlo a las tres de la mañana es como se equivoca.
-        if (estado.cut && estado.cut.cash_to_hand) $('cut-amount').value = estado.cut.cash_to_hand;
+        // A ciegas (D105) no se pone nada: el número lo trae quien contó.
+        if (estado.cut && !estado.cut.blind && estado.cut.cash_to_hand) {
+          $('cut-amount').value = estado.cut.cash_to_hand;
+        }
       },
       close() { caja.hidden = true; },
       refresh: refrescar,
@@ -444,6 +516,6 @@
 
   return {
     METHOD_KEY, methodKey, isCash, money, lines, statusKey, hasUsd, usdDifference,
-    dropBlocker, closeBlocker, difference, pendingCount, isTill, createSheet,
+    dropBlocker, closeBlocker, countBlocker, blindStep, difference, pendingCount, isTill, createSheet,
   };
 }));

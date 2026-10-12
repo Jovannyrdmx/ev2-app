@@ -53,7 +53,7 @@ DECLARE
     'terminal_charge_events','terminal_refunds','manual_payments','reservations',
     'reservation_addons','guest_passes','guest_pass_events','door_admissions',
     'door_id_checks','tips','staff_drinks','song_requests','song_request_votes',
-    'shift_closings','shift_cash_drops','staff_shifts','table_occupants',
+    'shift_closings','shift_cash_drops','shift_declarations','staff_shifts','table_occupants',
     'taxi_requests','valet_tickets','withdrawals','flirts','flirt_reactions',
     'user_reports','lost_items',
     -- se conservan, algunas con valores en cero (48)
@@ -90,7 +90,7 @@ TRUNCATE TABLE
   terminal_charges, terminal_refunds, manual_payments, reservation_addons,
   reservations, guest_pass_events, guest_passes, door_admissions, door_id_checks,
   tips, staff_drinks, song_request_votes, song_requests, shift_cash_drops,
-  shift_closings, staff_shifts, table_occupants, taxi_requests, valet_tickets,
+  shift_declarations, shift_closings, staff_shifts, table_occupants, taxi_requests, valet_tickets,
   withdrawals, flirt_reactions, flirts, user_reports, lost_items
 RESTART IDENTITY;
 

@@ -10596,6 +10596,61 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
 
+  /api/nightclubs/{nightclubId}/shifts/me/declaration:
+    post:
+      operationId: declareBlindCount
+      tags: [Cortes de turno]
+      summary: Guardar el conteo a ciegas del cajón (D105)
+      description: |
+        Quien maneja efectivo cuenta su cajón **sin haber visto lo esperado** y guarda
+        aquí lo que contó. Una vez por turno; no se edita ni se borra (candado en la
+        base). Después el gerente cuenta, teclea su código y cierra con
+        `POST /shifts/me/closing`, que usa este número como lo declarado.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [declared_cash]
+              properties:
+                declared_cash: { type: number, minimum: 0, maximum: 1000000 }
+                declared_usd:
+                  type: number
+                  minimum: 0
+                  maximum: 1000000
+                  description: Obligatorio si el turno recibió dólares.
+      responses:
+        '201':
+          description: Conteo guardado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  declaration:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      declared_cash: { type: string }
+                      declared_usd: { type: [string, 'null'] }
+                      created_at: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Sin turno, con el corte hecho, o el conteo ya estaba guardado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: El turno recibió dólares y no se contaron
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /api/nightclubs/{nightclubId}/shifts/me/closing:
     post:
       operationId: closeShiftCut
@@ -10618,6 +10673,11 @@ paths:
         El ticket se imprime **después** de cerrar y fuera de la transacción: el corte
         ya es definitivo, así que si la impresora falla lo que hay que resolver es la
         impresora. Por eso `ticket` puede venir en `null` con el corte hecho.
+
+        **Corte a ciegas (D105):** el cajero y la anfitriona guardan antes su conteo con
+        `POST /shifts/me/declaration`; para ellos `declared_cash` se ignora (manda lo
+        guardado) y `counted_cash` vacío vale lo mismo que su conteo. Sin conteo guardado
+        contesta 422. Los demás puestos siguen mandando `declared_cash` y `counted_cash`.
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/NightclubId' }]
       requestBody:
@@ -10626,9 +10686,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [declared_cash, counted_cash, manager_pin]
+              required: [manager_pin]
               properties:
-                declared_cash: { type: number, minimum: 0, maximum: 1000000 }
+                declared_cash: { type: number, minimum: 0, maximum: 1000000, description: Obligatorio salvo en el corte a ciegas. }
                 counted_cash:
                   type: number
                   minimum: 0
@@ -12384,10 +12444,10 @@ components:
                 type: object
                 properties:
                   method: { type: string, example: cash }
-                  amount: { type: string, example: '3000.00' }
+                  amount: { type: [string, 'null'], example: '3000.00' }
                   count: { type: integer }
-            cash_collected: { type: string, example: '3000.00' }
-            total_collected: { type: string, example: '7500.00' }
+            cash_collected: { type: [string, 'null'], example: '3000.00' }
+            total_collected: { type: [string, 'null'], example: '7500.00' }
             payments_count: { type: integer }
             door_people: { type: integer }
             tips:
@@ -12401,7 +12461,25 @@ components:
           items: { $ref: '#/components/schemas/CashDrop' }
         drops_received: { type: string, description: Lo entregado Y contado., example: '1000.00' }
         drops_pending: { type: integer }
-        cash_to_hand: { type: string, description: 'Lo que tiene que entregar ahora: fondo + efectivo cobrado − retiros.', example: '2000.00' }
+        cash_to_hand:
+          type: [string, 'null']
+          description: >-
+            Lo que tiene que entregar ahora: fondo + efectivo cobrado − retiros. `null` en
+            el corte a ciegas (cajero y anfitriona antes de cerrar, D105), igual que
+            `usd_to_hand`, `totals.cash_collected`, `totals.total_collected`, los montos de
+            efectivo de `totals.by_method` y los de `totals.usd`.
+          example: '2000.00'
+        blind:
+          type: boolean
+          description: El corte se cuenta a ciegas (D105) y los montos de efectivo vienen ocultos.
+        declaration:
+          type: [object, 'null']
+          description: El conteo a ciegas ya guardado, si lo hay.
+          properties:
+            id: { type: string, format: uuid }
+            declared_cash: { type: string }
+            declared_usd: { type: [string, 'null'] }
+            created_at: { type: string, format: date-time }
         closing:
           type: [object, 'null']
           description: El corte de ese turno, si ya se declaró.

@@ -18,6 +18,7 @@ const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const pins = require('../src/services/pins');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { fullCut, declareAndClose } = require('./helpers/cut');
 
 let club; let manager; let cajero; let waiter; let guest; let table; let beer; let night;
 let pinGerente;
@@ -87,8 +88,7 @@ const cobrar = (order, user = cajero, over = {}) => api()
     ...over,
   });
 
-const cortar = (body) => api().post(url('/shifts/me/closing')).set(auth(cajero))
-  .send({ manager_pin: pinGerente, ...body });
+const cortar = (body) => declareAndClose(club.id, cajero, { manager_pin: pinGerente, ...body });
 
 // ============================================================================
 
@@ -288,7 +288,7 @@ describe('El corte de la caja', () => {
     await cobrar(await pedidoDelMesero()); // 120 en efectivo
     await cobrar(await pedidoDelMesero(), cajero, { method: 'card_terminal', reference: 'VCH-1001' });
 
-    const corte = await api().get(url('/shifts/me/cut')).set(auth(cajero));
+    const corte = { body: await fullCut(club.id, cajero) };
     expect(corte.body.opening_float).toBe('1000.00');
     expect(corte.body.totals.cash_collected).toBe('120.00');
     expect(corte.body.totals.total_collected).toBe('240.00');
@@ -491,7 +491,7 @@ describe('Cobrar en caja: cambio y dos formas de pago (D79)', () => {
     expect((await miCaja()).body.pending_orders).toHaveLength(0);
 
     // Y el corte ve cada parte en su método.
-    const corte = await api().get(url('/shifts/me/cut')).set(auth(cajero));
+    const corte = { body: await fullCut(club.id, cajero) };
     const metodo = Object.fromEntries(corte.body.totals.by_method.map((l) => [l.method, l.amount]));
     expect(metodo).toMatchObject({ cash: '50.00', card_terminal: '70.00' });
   });

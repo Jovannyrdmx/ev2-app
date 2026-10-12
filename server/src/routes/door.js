@@ -1225,6 +1225,8 @@ router.get('/nightclubs/:nightclubId/door/summary',
     ]);
     const r = reservas.rows[0];
     const v = ventas.rows[0];
+    // La anfitriona cuenta su cajón a ciegas (D105): no ve cuánto lleva cobrado.
+    if (!['manager', 'admin'].includes(req.user.role)) v.cobrado = null;
     res.json({
       reservations: r,
       door: v,
