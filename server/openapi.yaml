@@ -3741,6 +3741,13 @@ paths:
       tags: [Puerta]
       summary: Vender un acceso general o un extra VIP (hostess)
       description: |
+        **Quién autoriza qué (D109):** la tarjeta tecleada a mano (`card`) ya no se acepta
+        (422): en la puerta la tarjeta se cobra con la terminal (`point`). Si quien vende
+        es la anfitriona, `courtesy` pide `notes` (el motivo) y `transfer` pide
+        `payment_reference` (el folio); las dos llevan `manager_pin`, el PIN de un
+        gerente tecleado por él (sin él 403). Queda en `door_admissions.authorized_by` y
+        en `audit_log`.
+
         Registra lo que se cobra en la entrada y lo asienta en `transactions`, que es
         el único libro del club. Un `vip_extra` **exige** `reservation_id`: es lo que
         permite responder «reservó 8, entraron 10, pagó 2 extras». Una cortesía se
@@ -13511,6 +13518,15 @@ components:
             reclama una sola vez (`409` la segunda) y solo si Mercado Pago ya lo aprobó
             por el mismo importe del cover.
         notes: { type: string, maxLength: 200 }
+        manager_pin:
+          type: string
+          pattern: '^\d{6}$'
+          description: Con `courtesy` o `transfer` vendidos por la anfitriona, el PIN de un gerente (D109).
+        payment_reference:
+          type: string
+          minLength: 3
+          maxLength: 60
+          description: Con `transfer`, el folio o clave de rastreo (D109).
         event_id: { type: string, format: uuid }
         labels:
           type: array

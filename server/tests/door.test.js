@@ -15,6 +15,7 @@
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { managerPin } = require('./helpers/voucher');
 const { loadPriceList } = require('../seeds/price-list');
 const guestPasses = require('../src/services/guest-passes');
 
@@ -298,7 +299,8 @@ describe('lo que se vende en la entrada', () => {
       .send({ kind: 'general', quantity: 2, unit_price: 150, payment_method: 'cash' });
     expect(pagado.status).toBe(201);
     await api().post(url('/door/admissions')).set(auth(hostess))
-      .send({ kind: 'general', quantity: 1, unit_price: 150, payment_method: 'courtesy' });
+      .send({ kind: 'general', quantity: 1, unit_price: 150, payment_method: 'courtesy',
+        notes: 'invitado', manager_pin: (await managerPin(club.id)).pin });
 
     const { rows } = await pool.query(
       `SELECT printer_id, kind FROM print_jobs WHERE kind = 'receipt'`);
@@ -315,6 +317,49 @@ describe('lo que se vende en la entrada', () => {
     expect(res.body.pass.extras_bought).toBe(2);
   });
 
+  describe('lo que la anfitriona no decide sola (D109)', () => {
+    it('la tarjeta tecleada a mano ya no entra: se cobra con la terminal', async () => {
+      const res = await api().post(url('/door/admissions')).set(auth(hostess))
+        .send({ kind: 'general', quantity: 2, unit_price: 150, payment_method: 'card' });
+      expect(res.status).toBe(422);
+      expect(res.body.error.message).toMatch(/terminal/);
+    });
+
+    it('una cortesía sin PIN de gerente no entra, ni sin motivo', async () => {
+      const sinPin = await api().post(url('/door/admissions')).set(auth(hostess))
+        .send({ kind: 'general', quantity: 4, unit_price: 300, payment_method: 'courtesy', notes: 'amigos' });
+      expect(sinPin.status).toBe(403);
+      const sinMotivo = await api().post(url('/door/admissions')).set(auth(hostess))
+        .send({ kind: 'general', quantity: 4, unit_price: 300, payment_method: 'courtesy',
+          manager_pin: (await managerPin(club.id)).pin });
+      expect(sinMotivo.status).toBe(400);
+      const { rows } = await pool.query('SELECT count(*)::int AS n FROM door_admissions');
+      expect(rows[0].n).toBe(0);
+    });
+
+    it('una transferencia pide folio y PIN, y queda quién la autorizó', async () => {
+      const sinFolio = await api().post(url('/door/admissions')).set(auth(hostess))
+        .send({ kind: 'general', quantity: 1, unit_price: 300, payment_method: 'transfer' });
+      expect(sinFolio.status).toBe(400);
+      const { pin, manager: autoriza } = await managerPin(club.id);
+      const ok = await api().post(url('/door/admissions')).set(auth(hostess))
+        .send({ kind: 'general', quantity: 1, unit_price: 300, payment_method: 'transfer',
+          payment_reference: 'SPEI-88123', manager_pin: pin });
+      expect(ok.status).toBe(201);
+      const { rows } = await pool.query(
+        'SELECT authorized_by, payment_reference FROM door_admissions WHERE id = $1', [ok.body.admission.id]);
+      expect(rows[0]).toEqual({ authorized_by: autoriza.id, payment_reference: 'SPEI-88123' });
+      const log = await pool.query(`SELECT action FROM audit_log WHERE entity_id = $1`, [ok.body.admission.id]);
+      expect(log.rows).toEqual([{ action: 'door.transfer_authorized' }]);
+    });
+
+    it('el gerente en la puerta no necesita PIN', async () => {
+      const res = await api().post(url('/door/admissions')).set(auth(manager))
+        .send({ kind: 'general', quantity: 1, unit_price: 300, payment_method: 'courtesy', notes: 'prensa' });
+      expect(res.status).toBe(201);
+    });
+  });
+
   it('un extra VIP sin reservación se rechaza: sería dinero que no se le puede cobrar a nadie', async () => {
     const res = await api().post(url('/door/admissions')).set(auth(hostess))
       .send({ kind: 'vip_extra', quantity: 1, unit_price: 100 });
@@ -323,7 +368,8 @@ describe('lo que se vende en la entrada', () => {
 
   it('una cortesía se registra pero NO inventa un cobro de cero pesos', async () => {
     const res = await api().post(url('/door/admissions')).set(auth(hostess))
-      .send({ kind: 'general', quantity: 1, unit_price: 0, payment_method: 'courtesy' });
+      .send({ kind: 'general', quantity: 1, unit_price: 0, payment_method: 'courtesy',
+        notes: 'cumpleaños del dueño', manager_pin: (await managerPin(club.id)).pin });
     expect(res.status).toBe(201);
     const { rows } = await pool.query(`SELECT count(*)::int AS n FROM transactions WHERE type = 'cover'`);
     expect(rows[0].n).toBe(0);

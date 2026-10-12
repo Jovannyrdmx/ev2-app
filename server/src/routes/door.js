@@ -13,6 +13,7 @@
 
 const express = require('express');
 const { pool } = require('../db/pool');
+const managerAuth = require('../services/manager-auth');
 const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
@@ -680,6 +681,10 @@ const admissionBase = z.object({
   usd_received: z.number().positive().max(100_000).optional(),
   // El tipo de cambio que vio la anfitriona: si ya no es el vigente, 409.
   exchange_rate_id: z.union([z.string().regex(/^\d+$/), z.number().int().positive()]).optional(),
+  // Cortesía y transferencia (D109): el PIN de un gerente, tecleado por él; la
+  // cortesía con su motivo (`notes`) y la transferencia con su folio.
+  manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos').optional(),
+  payment_reference: z.string().trim().min(3).max(60).optional(),
 });
 const admissionSchema = admissionBase.refine((b) => b.kind !== 'vip_extra' || b.reservation_id, {
   message: 'Un extra VIP va contra una reservación', path: ['reservation_id'],
@@ -983,6 +988,31 @@ router.post('/nightclubs/:nightclubId/door/admissions',
       }
     }
 
+    // La tarjeta en la puerta se cobra con la terminal (D100, D109): tecleada a mano
+    // era una venta en efectivo que dejaba de esperarse en el cajón.
+    if (b.payment_method === 'card') {
+      throw ApiError.unprocessable(
+        'La tarjeta en la puerta se cobra con la terminal Mercado Pago. Si la terminal falla, avisa al gerente.');
+    }
+    // Cortesía y transferencia no las decide la anfitriona sola (D109).
+    let autoriza = null;
+    if (['courtesy', 'transfer'].includes(b.payment_method) && req.user.role === 'hostess') {
+      if (b.payment_method === 'courtesy' && !(b.notes && b.notes.trim().length >= 3)) {
+        throw ApiError.badRequest('Escribe el motivo de la cortesía');
+      }
+      if (b.payment_method === 'transfer' && !b.payment_reference) {
+        throw ApiError.badRequest('Captura el folio de la transferencia');
+      }
+      if (!b.manager_pin) {
+        throw ApiError.forbidden(b.payment_method === 'courtesy'
+          ? 'Una cortesía necesita el PIN de un gerente'
+          : 'Una transferencia necesita el PIN de un gerente');
+      }
+      autoriza = await managerAuth.authorize(pool, {
+        nightclubId, pin: b.manager_pin, selfId: req.user.id, ip: req.ip,
+      });
+    }
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -1066,9 +1096,10 @@ router.post('/nightclubs/:nightclubId/door/admissions',
                                       transaction_id, sold_by, notes,
                                       client_request_id, price_source, cover_price_id,
                                       cash_received, usd_received, exchange_rate, exchange_rate_id,
-                                      usd_amount, usd_change, change_given, terminal_charge_id)
+                                      usd_amount, usd_change, change_given, terminal_charge_id,
+                                      authorized_by, payment_reference)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::text,$15,
-                 $16,$17,$18,$19,$20,$21,$22,$23)
+                 $16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
          RETURNING id, kind, quantity, unit_price::text, total::text, currency,
                    payment_method, reservation_id, price_source, created_at,
                    cash_received::text, usd_received::text, exchange_rate::text,
@@ -1084,8 +1115,19 @@ router.post('/nightclubs/:nightclubId/door/admissions',
           pago && pago.usd ? pago.usd.amount : null,
           pago && pago.usd ? pago.usd.change : null,
           pago ? pago.change : null,
-          cobroPoint ? cobroPoint.id : null],
+          cobroPoint ? cobroPoint.id : null,
+          autoriza ? autoriza.id : null,
+          b.payment_reference || null],
       );
+      if (autoriza) {
+        await client.query(
+          `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
+           VALUES ($1,$2,$3,'door_admission',$4,$5,$6)`,
+          [nightclubId, req.user.id, `door.${b.payment_method}_authorized`, rows[0].id,
+            JSON.stringify({ authorized_by: autoriza.id, total, quantity: b.quantity,
+              notes: b.notes || null, reference: b.payment_reference || null }),
+            req.ip || null]);
+      }
 
       let rpOut = null;
       if (b.rp_code) {

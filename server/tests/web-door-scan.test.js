@@ -119,7 +119,9 @@ describe('vender la entrada', () => {
   });
 
   it('las formas de pago son las que el servidor acepta', () => {
-    expect(Scan.METHODS).toEqual(['cash', 'card', 'transfer', 'courtesy']);
+    // La tarjeta va por la terminal ('point', se agrega si hay terminal en la puerta);
+    // la tecleada a mano ya no se acepta (D109).
+    expect(Scan.METHODS).toEqual(['cash', 'transfer', 'courtesy']);
     expect(Scan.admissionPayload('general', { unitPrice: 150 }).payment_method).toBe('cash');
   });
 });

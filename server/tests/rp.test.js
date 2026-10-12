@@ -14,6 +14,7 @@ const { randomUUID } = require('crypto');
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { managerPin } = require('./helpers/voucher');
 
 let club; let manager; let hostess; let waiter; let guest; let rpA; let rpB;
 let table; let otherTable; let beer; let night; let reservationId;
@@ -171,13 +172,15 @@ describe('La comisión', () => {
   it('el cover vendido con su código suma, y una cortesía no', async () => {
     const code = await codeOf(rpA);
     const venta = (over = {}) => api().post(url('/door/admissions')).set(auth(hostess)).send({
-      kind: 'general', quantity: 2, unit_price: 200, payment_method: 'card', event_id: night.id,
+      kind: 'general', quantity: 2, unit_price: 200, payment_method: 'cash', event_id: night.id,
       rp_code: code, ...over,
     });
     const a = await venta();
     expect(a.status).toBe(201);
     expect(a.body.rp).toMatchObject({ ok: true, display_name: 'Rafa RP' });
-    const c = await venta({ payment_method: 'courtesy' });
+    // La cortesía la autoriza un gerente, con su motivo (D109).
+    const c = await venta({ payment_method: 'courtesy', notes: 'invitado del DJ',
+      manager_pin: (await managerPin(club.id)).pin });
     expect(c.status).toBe(201);
     const mala = await venta({ rp_code: 'ZZZZZZ' });
     expect(mala.status).toBe(201);               // el cover se vende igual

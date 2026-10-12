@@ -794,6 +794,21 @@
       }
       return;
     }
+    // Cortesía y transferencia las autoriza un gerente (D109): motivo o folio, y su PIN.
+    const rolPuerta = api.session.user && api.session.user.role;
+    if (['courtesy', 'transfer'].includes(body.payment_method) && rolPuerta === 'hostess') {
+      const pedir = (texto, opts) => (window.EV2UI ? window.EV2UI.prompt(texto, opts) : Promise.resolve(window.prompt(texto)));
+      const dato = await pedir(t(body.payment_method === 'courtesy' ? 'sell.courtesyWhy' : 'sell.transferRef'), { ok: t('till.voucherGo') });
+      if (!dato || dato.trim().length < 3) { boton.disabled = false; return; }
+      const pin = await pedir(t('sell.managerPin'), { ok: t('till.voucherGo'), secret: true, inputmode: 'numeric' });
+      if (pin === null) { boton.disabled = false; return; }
+      if (!/^\d{6}$/.test(String(pin).trim())) {
+        error.textContent = t('cut.errPin'); error.hidden = false; boton.disabled = false; return;
+      }
+      if (body.payment_method === 'courtesy') body.notes = dato.trim();
+      else body.payment_reference = dato.trim();
+      body.manager_pin = String(pin).trim();
+    }
     try {
       const data = await api.post(`/nightclubs/${clubId()}/door/admissions`, body);
       if ($('sell-rp')) $('sell-rp').value = '';

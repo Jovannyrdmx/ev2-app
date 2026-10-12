@@ -256,7 +256,9 @@
   const canSellExtra = (v) => Boolean(v && v.reservationId
     && (v.result === 'ok' || v.result === 'already_in'));
 
-  const METHODS = ['cash', 'card', 'transfer', 'courtesy'];
+  // La tarjeta en la puerta va por la terminal ('point', D100); la tecleada a mano ya
+  // no se acepta (D109).
+  const METHODS = ['cash', 'transfer', 'courtesy'];
   const methodKey = (m) => `sell.m_${m}`;
 
   return {
