@@ -156,7 +156,9 @@ services:
       MERCADOPAGO_WEBHOOK_RATE_LIMIT_PER_MIN: ${MERCADOPAGO_WEBHOOK_RATE_LIMIT_PER_MIN:-}
       PAIRING_RATE_LIMIT_PER_MIN: ${PAIRING_RATE_LIMIT_PER_MIN:-}
       AGENT_DOWNLOAD_RATE_LIMIT_PER_MIN: ${AGENT_DOWNLOAD_RATE_LIMIT_PER_MIN:-}
-      DB_POOL_MAX: ${DB_POOL_MAX:-}
+      # Conexiones a Postgres de la API. Con 10 una ráfaga de pedidos del mismo producto
+      # llenaba el pool (D104); 30 deja holgura y queda lejos del máximo de Postgres (100).
+      DB_POOL_MAX: ${DB_POOL_MAX:-30}
       # Apagada por omisión desde D65: encenderla publica el mapa de los 310 endpoints.
       SERVE_API_DOCS: ${SERVE_API_DOCS:-false}
       # ---------------------------------------------------------------- lectura de tickets

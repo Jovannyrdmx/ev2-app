@@ -517,16 +517,17 @@ async function apply(pool, { chargeId, read, source, requestId = null, rawPayloa
     // La tarjeta SÍ cobró y no pudimos asentarlo. El caso típico es que el renglón ya
     // estuviera pagado por otra vía. Da igual el motivo: hay dinero cobrado que el
     // libro no refleja, y eso tiene que quedar marcado y visible en vez de perderse
-    // con el ROLLBACK. Se escribe con `pool`, fuera de la transacción que acaba de
-    // deshacerse.
+    // con el ROLLBACK. Se escribe con la misma conexión, ya fuera de la transacción que
+    // acaba de deshacerse: pedir otra al pool mientras se retiene esta es lo que
+    // congelaba el sistema con el pool lleno (D104).
     if (read && read.status === 'processed') {
-      await pool.query(
+      await client.query(
         `UPDATE terminal_charges
             SET status = 'action_required', status_detail = $2::text, updated_at = now()
           WHERE id = $1 AND status NOT IN ('processed','refunded')`,
         [chargeId, 'reconciliation_required'],
       ).catch(() => {});
-      await record(pool, {
+      await record(client, {
         chargeId, source, action: 'settle_failed', status: 'error',
         payload: { message: err.message, code: err.code || null, read },
       });

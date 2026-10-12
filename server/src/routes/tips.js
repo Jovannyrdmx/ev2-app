@@ -297,14 +297,14 @@ router.post('/nightclubs/:nightclubId/tips',
       } catch (err) {
         if (err.code === '23505') {
           await client.query('ROLLBACK');
-          const again = await pool.query(`${TIP_SELECT} WHERE t.client_request_id = $1`, [b.client_request_id]);
+          const again = await client.query(`${TIP_SELECT} WHERE t.client_request_id = $1`, [b.client_request_id]);
           res.set('Idempotent-Replay', 'true');
           return res.status(200).json({ tip: again.rows[0] });
         }
         throw err;
       }
       await client.query('COMMIT');
-      const full = await pool.query(`${TIP_SELECT} WHERE t.id = $1`, [tipId]);
+      const full = await client.query(`${TIP_SELECT} WHERE t.id = $1`, [tipId]);
       return res.status(201).json({
         tip: full.rows[0],
         payment: { status: 'pending', note: 'El cobro con tarjeta se conecta en la fase 3; el gerente puede confirmar propinas en efectivo.' },
@@ -395,7 +395,7 @@ router.post('/nightclubs/:nightclubId/tips/:tipId/confirm',
         payload: { tip_id: tipId, amount: tip.amount, currency: tip.currency },
       });
       await client.query('COMMIT');
-      const full = await pool.query(`${TIP_SELECT} WHERE t.id = $1`, [tipId]);
+      const full = await client.query(`${TIP_SELECT} WHERE t.id = $1`, [tipId]);
       res.json({ tip: full.rows[0] });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -427,7 +427,7 @@ router.post('/nightclubs/:nightclubId/tips/:tipId/cancel',
         [tip.transaction_id, JSON.stringify({ cancel_reason: req.body.reason, cancelled_by: req.user.id })]);
       await client.query(`UPDATE tips SET status = 'cancelled' WHERE id = $1`, [tipId]);
       await client.query('COMMIT');
-      const full = await pool.query(`${TIP_SELECT} WHERE t.id = $1`, [tipId]);
+      const full = await client.query(`${TIP_SELECT} WHERE t.id = $1`, [tipId]);
       res.json({ tip: full.rows[0] });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -528,7 +528,7 @@ router.post('/nightclubs/:nightclubId/staff/:userId/drinks',
           subtotal: order.subtotal, currency: order.currency },
       });
       await client.query('COMMIT');
-      const full = await pool.query(`${STAFF_DRINK_SELECT} WHERE sd.id = $1`, [sd.rows[0].id]);
+      const full = await client.query(`${STAFF_DRINK_SELECT} WHERE sd.id = $1`, [sd.rows[0].id]);
       return res.status(201).json({ staff_drink: full.rows[0] });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -569,7 +569,7 @@ router.post('/nightclubs/:nightclubId/staff-drinks/:id/accept',
         audience: { userIds: [sd.from_user_id] }, payload: { staff_drink_id: sd.id },
       });
       await client.query('COMMIT');
-      const full = await pool.query(`${STAFF_DRINK_SELECT} WHERE sd.id = $1`, [sd.id]);
+      const full = await client.query(`${STAFF_DRINK_SELECT} WHERE sd.id = $1`, [sd.id]);
       res.json({ staff_drink: full.rows[0] });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -608,7 +608,7 @@ router.post('/nightclubs/:nightclubId/staff-drinks/:id/decline',
         payload: { order_id: sd.drink_order_id, staff_drink_id: sd.id, returned: returned.rowCount > 0 },
       });
       await client.query('COMMIT');
-      const full = await pool.query(`${STAFF_DRINK_SELECT} WHERE sd.id = $1`, [sd.id]);
+      const full = await client.query(`${STAFF_DRINK_SELECT} WHERE sd.id = $1`, [sd.id]);
       res.json({ staff_drink: full.rows[0] });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -746,7 +746,7 @@ router.post('/nightclubs/:nightclubId/song-requests',
         payload: { song_request_id: requestId, title: b.song_title, artist: b.artist || null, tip: tipAmount },
       });
       await client.query('COMMIT');
-      const full = await pool.query(`${SONG_SELECT} WHERE s.id = $1`, [requestId]);
+      const full = await client.query(`${SONG_SELECT} WHERE s.id = $1`, [requestId]);
       return res.status(merged ? 200 : 201).json({ song_request: full.rows[0], merged });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -828,7 +828,7 @@ router.post('/nightclubs/:nightclubId/song-requests/:id/play',
         payload: { song_request_id: s.id, title: s.song_title, artist: s.artist },
       });
       await client.query('COMMIT');
-      const full = await pool.query(`${SONG_SELECT} WHERE s.id = $1`, [s.id]);
+      const full = await client.query(`${SONG_SELECT} WHERE s.id = $1`, [s.id]);
       res.json({ song_request: full.rows[0] });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});

@@ -259,7 +259,7 @@ router.post('/nightclubs/:nightclubId/flirts',
       }
       await client.query('COMMIT');
 
-      const full = await pool.query(`${FLIRT_SELECT} WHERE f.id = $1`, [created.rows[0].id]);
+      const full = await client.query(`${FLIRT_SELECT} WHERE f.id = $1`, [created.rows[0].id]);
       return res.status(201).json({ flirt: full.rows[0] });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -320,7 +320,7 @@ router.post('/nightclubs/:nightclubId/flirts/:flirtId/view',
             WHERE id = $1`, [f.id]);
       }
       await client.query('COMMIT');
-      const full = await pool.query(`${FLIRT_SELECT} WHERE f.id = $1`, [f.id]);
+      const full = await client.query(`${FLIRT_SELECT} WHERE f.id = $1`, [f.id]);
       res.json({ flirt: full.rows[0] });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -370,7 +370,7 @@ router.post('/nightclubs/:nightclubId/flirts/:flirtId/react',
       });
       await client.query('COMMIT');
 
-      const full = await pool.query(`${FLIRT_SELECT} WHERE f.id = $1`, [f.id]);
+      const full = await client.query(`${FLIRT_SELECT} WHERE f.id = $1`, [f.id]);
       res.json({ flirt: full.rows[0] });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -566,7 +566,7 @@ router.patch('/nightclubs/:nightclubId/reports/:reportId',
           [cur.rows[0].reported_id]);
       }
       await client.query('COMMIT');
-      const full = await pool.query(`${REPORT_SELECT} WHERE r.id = $1`, [reportId]);
+      const full = await client.query(`${REPORT_SELECT} WHERE r.id = $1`, [reportId]);
       res.json({ report: full.rows[0] });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});

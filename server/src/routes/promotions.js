@@ -134,7 +134,7 @@ router.post('/nightclubs/:nightclubId/events/:eventId/promotions',
           b.starts_time || null, b.ends_time || null, req.user.id]);
       await audit(client, req, 'promotion.create', ins.rows[0].id, null, b);
       await client.query('COMMIT');
-      const { rows } = await pool.query(`${SELECT} WHERE p.id = $1`, [ins.rows[0].id]);
+      const { rows } = await client.query(`${SELECT} WHERE p.id = $1`, [ins.rows[0].id]);
       res.status(201).json({ promotion: rows[0] });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});

@@ -410,7 +410,7 @@ router.post('/nightclubs/:nightclubId/door/check-in',
       }
       await client.query('COMMIT');
 
-      const fresco = await pool.query(`${GUEST_PASS_SELECT} WHERE p.id = $1`, [row.id]);
+      const fresco = await client.query(`${GUEST_PASS_SELECT} WHERE p.id = $1`, [row.id]);
       return res.status(200).json({
         pass: presentGuestPass(fresco.rows[0], { status: passes.PASS_STATUS.ok, ok: true }),
         admitted: true,
@@ -1170,7 +1170,7 @@ router.post('/nightclubs/:nightclubId/door/admissions',
       // Los dos toques llegaron a la vez y el índice único paró al segundo. No es un
       // error para quien está en la puerta: la entrada SÍ se vendió.
       if (err.code === '23505' && b.client_request_id) {
-        const yaEsta = await pool.query(
+        const yaEsta = await client.query(
           `SELECT id, kind, quantity, unit_price::text, total::text, currency,
                   payment_method, reservation_id, created_at
              FROM door_admissions WHERE client_request_id = $1 AND nightclub_id = $2`,

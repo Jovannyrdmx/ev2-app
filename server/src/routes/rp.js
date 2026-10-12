@@ -206,7 +206,7 @@ router.patch('/nightclubs/:nightclubId/rps/:userId', ...guard, requireRole(...MA
          VALUES ($1,$2,'rp.update','user',$3,$4)`,
         [nightclubId, req.user.id, userId, JSON.stringify(b)]);
       await client.query('COMMIT');
-      const { rows } = await pool.query(
+      const { rows } = await client.query(
         `SELECT code, commission_pct::text AS commission_pct, active FROM rp_profiles WHERE user_id = $1`,
         [userId]);
       res.json({ profile: rows[0] });

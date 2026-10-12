@@ -311,7 +311,7 @@ router.post('/nightclubs/:nightclubId/drivers',
         [userId]);
       await client.query('COMMIT');
 
-      const full = await pool.query(`${DRIVER_SELECT} WHERE d.id = $1`, [driverId]);
+      const full = await client.query(`${DRIVER_SELECT} WHERE d.id = $1`, [driverId]);
       // The temporary password travels exactly once, here. It is never stored in clear.
       res.status(201).json({ driver: full.rows[0], temporary_password: temp });
     } catch (err) {

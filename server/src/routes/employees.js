@@ -191,7 +191,7 @@ router.post('/nightclubs/:nightclubId/employees',
       }
       await client.query('COMMIT');
 
-      const full = await pool.query(`${EMPLOYEE_SELECT} WHERE u.id = $1`, [user.id]);
+      const full = await client.query(`${EMPLOYEE_SELECT} WHERE u.id = $1`, [user.id]);
       // El PIN y la contraseña temporal viajan exactamente una vez, aquí. Ninguno se
       // guarda en claro, y la pantalla tiene que enseñarlos antes de repintar nada.
       res.status(201).json({
@@ -330,7 +330,7 @@ router.patch('/nightclubs/:nightclubId/employees/:userId',
       }
       await client.query('COMMIT');
 
-      const full = await pool.query(`${EMPLOYEE_SELECT} WHERE u.id = $1`, [userId]);
+      const full = await client.query(`${EMPLOYEE_SELECT} WHERE u.id = $1`, [userId]);
       const out = { employee: full.rows[0] };
       if (temporaryPasswordOut) out.temporary_password = temporaryPasswordOut;
       // Igual que el del alta: viaja una vez y no se vuelve a poder leer.
@@ -389,7 +389,7 @@ router.put('/employees/me', authenticate, requireEmployee,
         await client.query('UPDATE users SET phone = $2 WHERE id = $1', [req.user.id, b.phone]);
       }
       await client.query('COMMIT');
-      const { rows } = await pool.query(`${EMPLOYEE_SELECT} WHERE u.id = $1`, [req.user.id]);
+      const { rows } = await client.query(`${EMPLOYEE_SELECT} WHERE u.id = $1`, [req.user.id]);
       res.json({ employee: rows[0] });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -720,7 +720,7 @@ router.post('/employees/me/withdrawals', authenticate, requireEmployee,
         throw err;
       }
       await client.query('COMMIT');
-      const full = await pool.query(`${WITHDRAWAL_SELECT} WHERE w.id = $1`, [created.rows[0].id]);
+      const full = await client.query(`${WITHDRAWAL_SELECT} WHERE w.id = $1`, [created.rows[0].id]);
       res.status(201).json({ withdrawal: publicWithdrawal(full.rows[0]) });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -782,7 +782,7 @@ router.post('/nightclubs/:nightclubId/withdrawals/:withdrawalId/approve',
           WHERE id = $1`,
         [withdrawalId, req.user.id, rate, amountPaid, req.body.note || null]);
       await client.query('COMMIT');
-      const full = await pool.query(`${WITHDRAWAL_SELECT} WHERE w.id = $1`, [withdrawalId]);
+      const full = await client.query(`${WITHDRAWAL_SELECT} WHERE w.id = $1`, [withdrawalId]);
       res.json({ withdrawal: publicWithdrawal(full.rows[0]) });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -807,7 +807,7 @@ router.post('/nightclubs/:nightclubId/withdrawals/:withdrawalId/reject',
                 rejection_reason = $3, updated_at = now() WHERE id = $1`,
         [withdrawalId, req.user.id, req.body.reason]);
       await client.query('COMMIT');
-      const full = await pool.query(`${WITHDRAWAL_SELECT} WHERE w.id = $1`, [withdrawalId]);
+      const full = await client.query(`${WITHDRAWAL_SELECT} WHERE w.id = $1`, [withdrawalId]);
       res.json({ withdrawal: publicWithdrawal(full.rows[0]) });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -846,7 +846,7 @@ router.post('/nightclubs/:nightclubId/withdrawals/:withdrawalId/paid',
           WHERE id = $1`,
         [withdrawalId, tx.rows[0].id]);
       await client.query('COMMIT');
-      const full = await pool.query(`${WITHDRAWAL_SELECT} WHERE w.id = $1`, [withdrawalId]);
+      const full = await client.query(`${WITHDRAWAL_SELECT} WHERE w.id = $1`, [withdrawalId]);
       res.json({ withdrawal: publicWithdrawal(full.rows[0]) });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});

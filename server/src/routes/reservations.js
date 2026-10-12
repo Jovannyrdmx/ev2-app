@@ -487,7 +487,7 @@ router.post('/nightclubs/:nightclubId/reservations',
       });
 
       await client.query('COMMIT');
-      const full = await pool.query(`${RESERVATION_SELECT} WHERE r.id = $1`, [reservation.id]);
+      const full = await client.query(`${RESERVATION_SELECT} WHERE r.id = $1`, [reservation.id]);
       return res.status(201).json({
         reservation: full.rows[0],
         payment: {

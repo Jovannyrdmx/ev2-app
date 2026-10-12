@@ -83,7 +83,7 @@ agentRouter.post('/pair',
       // Un código equivocado le cuesta a todos los códigos vivos: pasados unos
       // cuantos fallos se queman solos, y adivinar deja de ser posible antes de que
       // valga la pena empezar.
-      if (err.status === 403) await printing.countFailedPairing(pool).catch(() => {});
+      if (err.status === 403) await printing.countFailedPairing(client).catch(() => {});
       throw err;
     } finally {
       client.release();

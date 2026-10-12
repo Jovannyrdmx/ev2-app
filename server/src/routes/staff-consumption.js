@@ -124,7 +124,7 @@ router.post('/nightclubs/:nightclubId/staff-orders',
       } catch (err) {
         if (err.code === '23505') {
           await client.query('ROLLBACK');
-          const again = await pool.query(
+          const again = await client.query(
             `${ORDER_SELECT} WHERE o.client_request_id = $1 AND o.nightclub_id = $2 AND o.sender_id = $3`,
             [b.client_request_id, nightclubId, user.id]);
           res.set('Idempotent-Replay', 'true');
@@ -155,7 +155,7 @@ router.post('/nightclubs/:nightclubId/staff-orders',
       });
       await client.query('COMMIT');
 
-      const full = await pool.query(`${ORDER_SELECT} WHERE o.id = $1`, [order.id]);
+      const full = await client.query(`${ORDER_SELECT} WHERE o.id = $1`, [order.id]);
       res.status(201).json({
         order: full.rows[0],
         consumption: {
