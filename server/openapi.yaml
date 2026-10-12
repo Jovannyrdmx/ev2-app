@@ -10504,6 +10504,25 @@ paths:
         - {name: hours, in: query, schema: {type: integer, minimum: 1, maximum: 744, default: 18}}
       responses:
         '200': {description: 'Cancelaciones, mermas, cortesías, diferencias y vouchers por persona'}
+  /api/nightclubs/{nightclubId}/till/payments/batch:
+    post:
+      operationId: tillPaymentsBatch
+      summary: Cobra en efectivo todo lo entregado y no pagado de un mesero (cajero)
+      parameters:
+        - {name: nightclubId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [waiter_id, cash_received]
+              properties:
+                waiter_id: {type: string, format: uuid}
+                cash_received: {type: number}
+      responses:
+        '201': {description: Pedidos cobrados con un solo cambio}
+        '422': {description: Efectivo insuficiente o nada por cobrar}
   /api/nightclubs/{nightclubId}/till/open:
     post:
       operationId: openTill

@@ -437,6 +437,101 @@ router.post('/nightclubs/:nightclubId/till/payments',
   }));
 
 /**
+ * Cobrar de un jalón todo lo que un mesero entregó y no ha pagado (D112).
+ *
+ * El mesero llega con el dinero de varias mesas. En vez de cobrar pedido por pedido,
+ * la caja le cobra en efectivo lo entregado en una sola operación: un solo monto
+ * recibido, un solo cambio, un solo pulso del cajón. Cada pedido se asienta como su
+ * propio cobro (mismo libro, mismo recibo) y todo va en una transacción: o se cobra
+ * todo o no se cobra nada. Solo efectivo y solo pedidos entregados sin pago previo.
+ */
+router.post('/nightclubs/:nightclubId/till/payments/batch',
+  requireRole('cashier'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      waiter_id: uuid,
+      cash_received: z.number().positive().max(1_000_000),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const caja = await till.openTill(pool, { nightclubId, userId: req.user.id });
+    if (!caja) throw ApiError.conflict('Abre tu caja antes de cobrar');
+
+    const cents = (n) => Math.round(Number(n) * 100);
+    const money = (c) => (c / 100).toFixed(2);
+
+    const client = await pool.connect();
+    const hechos = [];
+    let drawer = null;
+    let total = 0;
+    try {
+      await client.query('BEGIN');
+      const pedidos = (await till.pendingOrders(client, { nightclubId, locationId: caja.location_id }))
+        .filter((o) => o.taken_by === req.body.waiter_id && o.status === 'delivered'
+          && cents(o.paid_amount) === 0 && o.payment_status !== 'pending_manual');
+      if (pedidos.length === 0) {
+        throw ApiError.unprocessable('Ese mesero no tiene pedidos entregados por cobrar en tu barra');
+      }
+      if (new Set(pedidos.map((o) => o.currency)).size > 1) {
+        throw ApiError.unprocessable('Los pedidos están en monedas distintas; cóbralos por separado');
+      }
+      total = pedidos.reduce((a, o) => a + cents(o.remaining), 0);
+      const recibido = cents(req.body.cash_received);
+      if (recibido < total) {
+        throw ApiError.unprocessable(
+          `Recibiste ${money(recibido)} y lo entregado suma ${money(total)}: faltan ${money(total - recibido)}.`,
+          { cash_received: money(recibido), total: money(total) });
+      }
+      let acumulado = 0;
+      for (let i = 0; i < pedidos.length; i += 1) {
+        const o = pedidos[i];
+        const monto = cents(o.remaining);
+        const esUltimo = i === pedidos.length - 1;
+        // El cambio sale en el último cobro: ahí se junta todo lo recibido de más.
+        const recibidoAqui = esUltimo ? recibido - acumulado : monto;
+        // eslint-disable-next-line no-await-in-loop
+        hechos.push(await till.collect(client, {
+          nightclubId, user: req.user, transactionId: o.transaction_id, method: 'cash',
+          amount: Number(money(monto)), cashReceived: Number(money(recibidoAqui)),
+        }));
+        acumulado += monto;
+      }
+      const printer = await cashDrawer.tillPrinter(client, { nightclubId, locationId: caja.location_id });
+      drawer = await cashDrawer.open(client, {
+        nightclubId, printer, refId: hechos[0].tx.id, createdBy: req.user.id,
+        reason: `cobro por lote de ${pedidos.length} pedidos, ${money(total)}`,
+      });
+      await client.query(
+        `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, after, ip)
+         VALUES ($1,$2,'payment.batch_collect','user',$3,$4)`,
+        [nightclubId, req.user.id, JSON.stringify({
+          waiter_id: req.body.waiter_id, orders: pedidos.length, total: money(total),
+          cash_received: money(recibido),
+        }), req.ip || null]);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    for (const h of hechos) {
+      // eslint-disable-next-line no-await-in-loop
+      await payments.publishConfirmed({ nightclubId, ...h });
+    }
+    return res.status(201).json({
+      orders: hechos.length,
+      total: money(total),
+      cash_received: money(cents(req.body.cash_received)),
+      change_given: money(cents(req.body.cash_received) - total),
+      drawer,
+    });
+  }));
+
+/**
  * Abrir el cajón sin cobrar (D96): para dar cambio, cambiar un billete o contar.
  *
  * Lo pide quien tiene el cajón —el cajero en su caja, la anfitriona en la puerta— y lo

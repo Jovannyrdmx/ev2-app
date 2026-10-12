@@ -225,6 +225,27 @@
 
   // ---------------------------------------------------------------- datos
 
+  // Cobrar de un jalón lo que el mesero entregó y no ha pagado (D112): solo efectivo.
+  function batchButton(g) {
+    const listos = g.orders.filter((o) => o.status === 'delivered'
+      && Number(o.paid_amount) === 0 && o.payment_status !== 'pending_manual' && o.taken_by);
+    if (listos.length < 2) return '';
+    const total = listos.reduce((a, o) => a + Number(o.remaining), 0);
+    return `<button class="btn-secondary rounded-lg px-3 py-2 text-xs w-full" data-batch="${escape(listos[0].taken_by)}" data-batch-total="${escape(total.toFixed(2))}">${escape(t('till.batch', { n: listos.length, amount: money(total) }))}</button>`;
+  }
+
+  async function collectBatch(waiterId, total) {
+    const typed = window.prompt(t('till.batchAsk', { amount: money(total) }), Number(total).toFixed(2));
+    if (typed === null) return;
+    const received = Number(String(typed).replace(',', '.'));
+    if (!(received > 0)) { toast(t('till.batchBad'), 'error'); return; }
+    try {
+      const res = await api.post(`/nightclubs/${clubId()}/till/payments/batch`, { waiter_id: waiterId, cash_received: received });
+      toast(t('till.batchDone', { n: res.orders, change: money(res.change_given) }), 'ok');
+      await loadTill();
+    } catch (err) { toast(err.message, 'error'); }
+  }
+
   async function loadTill() {
     try {
       state.till = await api.get(`/nightclubs/${clubId()}/till`);
@@ -287,6 +308,7 @@
           <p class="font-display">${escape(g.name)}</p>
           <p class="text-sm text-white/60">${escape(t('till.waiterTotal', { n: g.orders.length, amount: money(g.total) }))}</p>
         </div>
+        ${batchButton(g)}
         ${g.orders.map((o) => orderRow(o, now)).join('')}
       </div>`).join('');
 
@@ -295,6 +317,9 @@
     $('awaiting-list').innerHTML = apartados.map((o) => `
       <div class="card rounded-xl p-3">${orderRow(o, now, o.sender_name)}</div>`).join('');
 
+    for (const el of document.querySelectorAll('[data-batch]')) {
+      el.onclick = () => collectBatch(el.dataset.batch, Number(el.dataset.batchTotal));
+    }
     for (const el of document.querySelectorAll('[data-charge]')) {
       el.onclick = () => openCharge(el.dataset.charge);
     }
