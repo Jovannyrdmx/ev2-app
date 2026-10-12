@@ -12,6 +12,23 @@
   'use strict';
   const ask = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
     ? window.EV2UI.confirm(text, opts) : Promise.resolve(window.confirm(text)));
+  const askText = (text, opts) => (typeof window !== 'undefined' && window.EV2UI
+    ? window.EV2UI.prompt(text, opts) : Promise.resolve(window.prompt(text)));
+
+  /**
+   * El voucher de tarjeta tecleado a mano (D107): por qué no fue con la terminal, y el
+   * PIN de un gerente tecleado por él. `null` si se arrepienten.
+   */
+  async function voucherAuth() {
+    const motivo = await askText(t('till.voucherWhy'), { ok: t('till.voucherGo') });
+    if (!motivo || !motivo.trim()) return null;
+    const pin = await askText(t('till.voucherPin'), {
+      ok: t('till.voucherGo'), secret: true, inputmode: 'numeric',
+    });
+    if (pin === null) return null;
+    if (!/^\d{6}$/.test(String(pin).trim())) throw new Error(t('cut.errPin'));
+    return { voucher_reason: motivo.trim(), manager_pin: String(pin).trim() };
+  }
 
   const $ = (id) => document.getElementById(id);
   const meta = (name, fallback) => {
@@ -563,8 +580,13 @@
         sheet().watch(res.charge);
         return { waiting: true };
       }
-      const res = await api.post(`/nightclubs/${clubId()}/till/payments`,
-        EV2Cashier.paymentPayload(order, step, keys[i]));
+      const body = EV2Cashier.paymentPayload(order, step, keys[i]);
+      if (step.method === 'card_terminal') {
+        const permiso = await voucherAuth();
+        if (!permiso) return { waiting: false, aborted: true };
+        Object.assign(body, permiso);
+      }
+      const res = await api.post(`/nightclubs/${clubId()}/till/payments`, body);
       if (res.change_given && Number(res.change_given) > 0) cambio += Number(res.change_given);
       if (res.drawer) cajon = res.drawer;
       if (res.paid) { pagado = true; ultimo = res; }
@@ -591,6 +613,7 @@
     const order = c.order;
     try {
       const out = await runSteps(order, plan.steps, c.keys);
+      if (out.aborted) return;
       if (!out.waiting) {
         closeCharge();
         await loadTill();
@@ -825,8 +848,14 @@
           sheet().watch(res.charge);
           return;
         }
-        cobro = await api.post(`/nightclubs/${clubId()}/manual-payments/register`,
-          EV2OrderTaking.chargePayload({ order, method, reference }));
+        const cuerpo = EV2OrderTaking.chargePayload({ order, method, reference });
+        if (cuerpo.method === 'card_terminal') {
+          const permiso = await voucherAuth();
+          // Sin permiso el pedido queda en la caja por cobrar: se cobra desde ahí.
+          if (!permiso) { closeSale(); await loadTill(); return; }
+          Object.assign(cuerpo, permiso);
+        }
+        cobro = await api.post(`/nightclubs/${clubId()}/manual-payments/register`, cuerpo);
       }
       chargedToast(t('till.saleDone', { total: money(order.subtotal, order.currency) }), cobro);
       closeSale();

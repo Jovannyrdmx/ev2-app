@@ -14,6 +14,7 @@ const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const pins = require('../src/services/pins');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { voucherAuth } = require('./helpers/voucher');
 const { fullCut, declareAndClose } = require('./helpers/cut');
 
 let club; let manager; let luis; let sol; let guest;
@@ -60,7 +61,9 @@ const cobrar = async (user, amount, method = 'cash') => api()
     method,
     amount,
     currency: 'MXN',
-    ...(method === 'cash' ? {} : { reference: `VCH${Math.random().toString().slice(2, 8)}` }),
+    ...(method === 'cash' ? {} : {
+      reference: `VCH${Math.random().toString().slice(2, 8)}`, ...(await voucherAuth(club.id)),
+    }),
   });
 
 /**
@@ -158,7 +161,8 @@ describe('El retiro parcial de efectivo', () => {
     const res = await retirar(luis, 3000, 'Traía mucho efectivo encima', pin);
 
     expect(res.status).toBe(201);
-    expect(res.body.withdrawal).toMatchObject({ amount: '3000.00', remaining: '2000.00' });
+    // A ciegas (D105) la anfitriona no ve cuánto le queda.
+    expect(res.body.withdrawal).toMatchObject({ amount: '3000.00', remaining: null });
     expect(res.body.withdrawal.authorized_by).toBe('Gerente');
   });
 

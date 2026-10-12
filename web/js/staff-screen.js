@@ -1857,8 +1857,21 @@
         sheet().watch(res.charge);
         return;
       }
-      await api.post(`/nightclubs/${clubId()}/manual-payments/register`,
-        EV2OrderTaking.chargePayload({ order: take.order, method, reference }));
+      const cuerpo = EV2OrderTaking.chargePayload({ order: take.order, method, reference });
+      // El voucher tecleado a mano lo autoriza un gerente (D107), salvo que lo cobre él.
+      const rol = api.session.user && api.session.user.role;
+      if (cuerpo.method === 'card_terminal' && ['hostess', 'cashier'].includes(rol)) {
+        const motivo = window.EV2UI ? await window.EV2UI.prompt(t('till.voucherWhy'), { ok: t('till.voucherGo') })
+          : window.prompt(t('till.voucherWhy'));
+        if (!motivo || !motivo.trim()) return;
+        const pin = window.EV2UI ? await window.EV2UI.prompt(t('till.voucherPin'), {
+          ok: t('till.voucherGo'), secret: true, inputmode: 'numeric',
+        }) : window.prompt(t('till.voucherPin'));
+        if (pin === null) return;
+        if (!/^\d{6}$/.test(String(pin).trim())) { showError(new Error(t('cut.errPin'))); return; }
+        Object.assign(cuerpo, { voucher_reason: motivo.trim(), manager_pin: String(pin).trim() });
+      }
+      await api.post(`/nightclubs/${clubId()}/manual-payments/register`, cuerpo);
       toast(t('take.charged'), 'ok');
       closeTake();
       await Promise.all([loadOrders(), loadTables()]);

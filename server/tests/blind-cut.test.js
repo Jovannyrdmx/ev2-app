@@ -12,6 +12,7 @@ const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const pins = require('../src/services/pins');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { voucherAuth } = require('./helpers/voucher');
 
 let club; let manager; let cajero; let waiter; let hostess; let table; let beer; let pinGerente;
 
@@ -58,7 +59,7 @@ const cerrar = (body) => api().post(url('/shifts/me/closing')).set(auth(cajero))
 describe('Lo que ve el cajero antes de contar', () => {
   it('no ve lo esperado ni nada de lo que pueda sacarlo', async () => {
     await cobrado('cash');
-    await cobrado('card_terminal', { reference: 'VCH-1001' });
+    await cobrado('card_terminal', { reference: 'VCH-1001', ...(await voucherAuth(club.id)) });
     const res = await miCorte();
     expect(res.status).toBe(200);
     expect(res.body.blind).toBe(true);

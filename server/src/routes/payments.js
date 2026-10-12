@@ -13,6 +13,7 @@ const { validate, z, uuid, currency, pagination } = require('../middleware/valid
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const till = require('../services/till');
 const payments = require('../services/payments');
+const manualVoucher = require('../services/manual-voucher');
 const events = require('../services/events');
 const paymentConfig = require('../config/payments');
 const mercadopago = require('../services/mercadopago');
@@ -501,7 +502,12 @@ router.post('/nightclubs/:nightclubId/manual-payments/register',
   requireRole(...STAFF_ROLES),
   validate({
     params: z.object({ nightclubId: uuid }),
-    body: declareBody.omit({ on_behalf_of: true }).extend({ on_behalf_of: uuid.optional() }),
+    body: declareBody.omit({ on_behalf_of: true }).extend({
+      on_behalf_of: uuid.optional(),
+      // El voucher tecleado a mano (D107).
+      manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos').optional(),
+      voucher_reason: z.string().trim().max(200).optional(),
+    }),
   }),
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
@@ -519,6 +525,10 @@ router.post('/nightclubs/:nightclubId/manual-payments/register',
     if (!payments.CASH_METHODS.includes(b.method) && !b.reference) {
       throw ApiError.unprocessable('Captura el folio del voucher de la terminal');
     }
+    const autorizaVoucher = await manualVoucher.authorize(pool, {
+      nightclubId, user: req.user, method: b.method,
+      pin: b.manager_pin, reason: b.voucher_reason, ip: req.ip,
+    });
 
     const client = await pool.connect();
     let outcome;
@@ -545,6 +555,9 @@ router.post('/nightclubs/:nightclubId/manual-payments/register',
         if (err.code === '23505') throw ApiError.conflict('Ese cobro ya tiene un pago registrado');
         throw err;
       }
+      await manualVoucher.record(client, {
+        nightclubId, paymentId: created.id, user: req.user, authorizer: autorizaVoucher, ip: req.ip,
+      });
       const settled = await payments.settle(client, {
         payment: created, reviewerId: req.user.id, nightclubId,
       });

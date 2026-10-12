@@ -18,6 +18,7 @@ const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const pins = require('../src/services/pins');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { voucherAuth } = require('./helpers/voucher');
 const { fullCut, declareAndClose } = require('./helpers/cut');
 
 let club; let manager; let cajero; let waiter; let guest; let table; let beer; let night;
@@ -287,7 +288,7 @@ describe('El corte de la caja', () => {
 
   it('espera el fondo más el efectivo cobrado; la terminal se enseña pero no se entrega', async () => {
     await cobrar(await pedidoDelMesero()); // 120 en efectivo
-    await cobrar(await pedidoDelMesero(), cajero, { method: 'card_terminal', reference: 'VCH-1001' });
+    await cobrar(await pedidoDelMesero(), cajero, { method: 'card_terminal', reference: 'VCH-1001', ...(await voucherAuth(club.id)) });
 
     const corte = { body: await fullCut(club.id, cajero) };
     expect(corte.body.opening_float).toBe('1000.00');
@@ -481,7 +482,7 @@ describe('Cobrar en caja: cambio y dos formas de pago (D79)', () => {
     expect(abierto).toMatchObject({ paid_amount: '50.00', remaining: '70.00' });
     expect(caja.body.pending_total).toBe('70.00');
 
-    const dos = await pagar(pedido, { method: 'card_terminal', amount: 70, reference: 'VCH-5521' });
+    const dos = await pagar(pedido, { method: 'card_terminal', amount: 70, reference: 'VCH-5521', ...(await voucherAuth(club.id)) });
     expect(dos.status).toBe(201);
     expect(dos.body).toMatchObject({ paid: true, remaining: '0.00' });
 
@@ -509,7 +510,7 @@ describe('Cobrar en caja: cambio y dos formas de pago (D79)', () => {
   it('ninguna parte puede pasarse de lo que falta', async () => {
     const pedido = await pedidoDelMesero();
     await pagar(pedido, { method: 'cash', amount: 50 });
-    const otra = await pagar(pedido, { method: 'card_terminal', amount: 80, reference: 'VCH-1' });
+    const otra = await pagar(pedido, { method: 'card_terminal', amount: 80, reference: 'VCH-1', ...(await voucherAuth(club.id)) });
     expect(otra.status).toBe(422);
     expect(otra.body.error.details.remaining).toBe('70.00');
   });
@@ -517,7 +518,7 @@ describe('Cobrar en caja: cambio y dos formas de pago (D79)', () => {
   it('la segunda parte tiene que completar: no hay una tercera', async () => {
     const pedido = await pedidoDelMesero();
     await pagar(pedido, { method: 'cash', amount: 50 });
-    const otra = await pagar(pedido, { method: 'card_terminal', amount: 30, reference: 'VCH-2' });
+    const otra = await pagar(pedido, { method: 'card_terminal', amount: 30, reference: 'VCH-2', ...(await voucherAuth(club.id)) });
     expect(otra.status).toBe(422);
     expect(otra.body.error.message).toMatch(/2 formas de pago/);
   });

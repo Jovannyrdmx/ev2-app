@@ -4,6 +4,7 @@ const { randomUUID } = require('crypto');
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { voucherAuth } = require('./helpers/voucher');
 const pins = require('../src/services/pins');
 
 let club; let guest; let other; let bartender; let waiter; let manager; let cashier; let table;
@@ -504,7 +505,7 @@ describe('El pedido trae su cobro', () => {
 
     const conFolio = await api().post(url('/manual-payments/register')).set(auth(cashier)).send({
       transaction_id: charge.id, method: 'card_terminal', amount: 120, currency: 'MXN',
-      reference: 'VOUCHER-448120',
+      reference: 'VOUCHER-448120', ...(await voucherAuth(club.id)),
     });
     expect(conFolio.status).toBe(201);
     expect((await chargeOf(res.body.order.id)).status).toBe('paid');

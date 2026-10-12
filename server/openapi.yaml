@@ -8412,11 +8412,22 @@ paths:
         Desde D77 el mesero y el bartender **no** registran pagos (403). El cajero solo
         cobra pedidos de **su** barra y con la caja abierta (403 / 409); lo mismo vale
         para `POST /terminal-charges`.
+
+        **Voucher tecleado a mano (D107):** con `method=card_terminal`, el cajero y la
+        anfitriona mandan además `manager_pin` (de un gerente, tecleado por él) y
+        `voucher_reason`. Sin PIN 403, sin motivo 400. Queda en el pago
+        (`authorized_by`) y en `audit_log` (`payment.manual_voucher`).
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/ManualPaymentDeclare' }
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ManualPaymentDeclare'
+                - type: object
+                  properties:
+                    manager_pin: { type: string, pattern: '^\d{6}$' }
+                    voucher_reason: { type: string, maxLength: 200 }
       responses:
         '201':
           description: Pago registrado y confirmado
@@ -10543,6 +10554,16 @@ paths:
                   maximum: 1000000
                   description: Solo con `cash`. Tiene que cubrir `amount`.
                 client_request_id: { type: string, format: uuid }
+                manager_pin:
+                  type: string
+                  pattern: '^\d{6}$'
+                  description: >-
+                    Con `card_terminal` (voucher tecleado a mano, D107): el PIN de un gerente,
+                    tecleado por él. Sin él contesta 403.
+                voucher_reason:
+                  type: string
+                  maxLength: 200
+                  description: Con `card_terminal`, por qué no se cobró con la terminal. Sin él 400.
       responses:
         '200':
           description: Repetición de una petición ya asentada

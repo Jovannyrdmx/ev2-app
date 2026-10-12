@@ -17,6 +17,7 @@ const { randomUUID } = require('crypto');
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { voucherAuth } = require('./helpers/voucher');
 const tickets = require('../src/services/tickets');
 
 let club; let guest; let waiter; let bartender; let manager; let admin; let cashier; let table;
@@ -334,8 +335,9 @@ describe('La cuenta de la mesa', () => {
 
   it('lo cancelado no se cobra', async () => {
     const uno = await pedir();
+    // El mesero cancela con el PIN de un gerente (D106).
     await api().post(url(`/orders/${uno.body.order.id}/status`)).set(auth(waiter))
-      .send({ status: 'cancelled', reason: 'se fue' });
+      .send({ status: 'cancelled', reason: 'se fue', manager_pin: (await voucherAuth(club.id)).manager_pin });
     const res = await api().get(url(`/tables/${table.id}/bill`)).set(auth(waiter));
     expect(res.body.bill.total).toBe('0.00');
   });
@@ -393,7 +395,9 @@ describe('El recibo de cobro', () => {
 
   it('sale cuando la caja cobra, con el método y el folio', async () => {
     const pedido = await pedir();
-    await cobrar(pedido.body.order.id, { method: 'card_terminal', reference: 'VCH-99812' });
+    await cobrar(pedido.body.order.id, {
+      method: 'card_terminal', reference: 'VCH-99812', ...(await voucherAuth(club.id)),
+    });
     const [recibo] = await jobs('receipt');
     // En la impresora de la caja, no en la de meseros.
     expect(recibo.printer_id).toBe(impresoraCaja.id);

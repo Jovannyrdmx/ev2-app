@@ -18,6 +18,7 @@ const escpos = require('../src/services/escpos');
 const printing = require('../src/services/printing');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { voucherAuth } = require('./helpers/voucher');
 const { fullCut } = require('./helpers/cut');
 
 let club; let manager; let cajero; let hostess; let waiter; let table; let beer; let pinGerente;
@@ -111,7 +112,7 @@ describe('La caja abre su cajón al cobrar en efectivo', () => {
 
   it('con voucher de terminal no se abre', async () => {
     await cajaConCajon();
-    const res = await pagar(await pedido(), { method: 'card_terminal', amount: 120, reference: 'VCH123' });
+    const res = await pagar(await pedido(), { method: 'card_terminal', amount: 120, reference: 'VCH123', ...(await voucherAuth(club.id)) });
     expect(res.status).toBe(201);
     expect(res.body.drawer).toBeNull();
     expect(await drawerJobs()).toHaveLength(0);

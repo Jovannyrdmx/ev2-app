@@ -24,6 +24,7 @@ const { validate, z, uuid, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const cuts = require('../services/shift-closings');
 const managerAuth = require('../services/manager-auth');
+const manualVoucher = require('../services/manual-voucher');
 const cashDrawer = require('../services/cash-drawer');
 const tickets = require('../services/tickets');
 const events = require('../services/events');
@@ -339,6 +340,9 @@ router.post('/nightclubs/:nightclubId/till/payments',
       // El tipo de cambio que el cajero vio: si ya no es el vigente, 409.
       exchange_rate_id: z.union([z.string().regex(/^\d+$/), z.number().int().positive()]).optional(),
       client_request_id: uuid.optional(),
+      // El voucher tecleado a mano (D107): PIN de un gerente y por qué no fue terminal.
+      manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos').optional(),
+      voucher_reason: z.string().trim().max(200).optional(),
     }).refine((b) => ['cash_usd', 'vip_credit'].includes(b.method) || b.amount !== undefined,
       { message: 'Indica el monto a cobrar', path: ['amount'] }),
   }),
@@ -362,6 +366,12 @@ router.post('/nightclubs/:nightclubId/till/payments',
       }
     }
 
+    // El voucher manual se autoriza ANTES de abrir la transacción (D107).
+    const autorizaVoucher = await manualVoucher.authorize(pool, {
+      nightclubId, user: req.user, method: b.method,
+      pin: b.manager_pin, reason: b.voucher_reason, ip: req.ip,
+    });
+
     const client = await pool.connect();
     let hecho;
     try {
@@ -377,6 +387,9 @@ router.post('/nightclubs/:nightclubId/till/payments',
         usdReceived: b.usd_received ?? null,
         exchangeRateId: b.exchange_rate_id === undefined ? null : String(b.exchange_rate_id),
         clientRequestId: b.client_request_id || null,
+      });
+      await manualVoucher.record(client, {
+        nightclubId, paymentId: hecho.payment.id, user: req.user, authorizer: autorizaVoucher, ip: req.ip,
       });
       // Efectivo: el cajón de esta caja se abre solo (D96), en la misma transacción
       // que asienta el cobro.
