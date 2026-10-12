@@ -99,3 +99,15 @@ describe('Por el registro directo', () => {
     expect(ok.status).toBe(201);
   });
 });
+
+describe('Adivinar el PIN', () => {
+  it('al quinto fallo queda una alerta para el gerente, una sola vez', async () => {
+    const o = await pedido();
+    for (let i = 0; i < 6; i += 1) {
+      await voucher(o, { manager_pin: '123456', voucher_reason: 'sin señal' });
+    }
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM audit_log WHERE action = 'pin.brute_force_alert'`);
+    expect(rows[0].n).toBe(1);
+  });
+});

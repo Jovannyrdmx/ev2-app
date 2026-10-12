@@ -45,3 +45,12 @@ test('solo el gerente fija el tope, y el tope por minutos bloquea', async () => 
   await pool.query(`UPDATE drink_orders SET status = 'delivered', delivered_at = now() - interval '10 minutes' WHERE id = $1`, [o.id]);
   expect((await pedir()).status).toBe(409);
 });
+
+test('el reporte de control cuenta por persona y es solo de gerencia', async () => {
+  const o = (await pedir()).body.order;
+  await pool.query(`UPDATE drink_orders SET status = 'cancelled', cancelled_by = $2 WHERE id = $1`, [o.id, waiter.id]);
+  expect((await api().get(url('/reports/control')).set(auth(waiter))).status).toBe(403);
+  const res = await api().get(url('/reports/control')).set(auth(manager));
+  expect(res.status).toBe(200);
+  expect(res.body.people).toEqual([expect.objectContaining({ user_id: waiter.id, cancellations: 1 })]);
+});

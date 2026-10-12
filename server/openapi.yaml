@@ -10454,6 +10454,56 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/nightclubs/{nightclubId}/waiters/balances:
+    get:
+      operationId: waitersBalances
+      summary: Lo que trae cada mesero sin pagar (caja y gerencia)
+      parameters:
+        - {name: nightclubId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Saldos y tope vigente}
+  /api/nightclubs/{nightclubId}/waiters/me/balance:
+    get:
+      operationId: waitersMyBalance
+      summary: El saldo del mesero que consulta
+      parameters:
+        - {name: nightclubId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Saldo propio y si pasó el tope}
+  /api/nightclubs/{nightclubId}/waiter-limits:
+    get:
+      operationId: waiterLimitsGet
+      summary: Tope de lo entregado sin pagar
+      parameters:
+        - {name: nightclubId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Tope del club}
+    put:
+      operationId: waiterLimitsSet
+      summary: Fija el tope (gerente/admin); null en un campo = sin ese tope
+      parameters:
+        - {name: nightclubId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [max_unpaid_amount, max_unpaid_minutes]
+              properties:
+                max_unpaid_amount: {type: [number, 'null']}
+                max_unpaid_minutes: {type: [integer, 'null']}
+      responses:
+        '200': {description: Tope guardado}
+  /api/nightclubs/{nightclubId}/reports/control:
+    get:
+      operationId: controlReport
+      summary: Control por persona (gerente/admin)
+      parameters:
+        - {name: nightclubId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: hours, in: query, schema: {type: integer, minimum: 1, maximum: 744, default: 18}}
+      responses:
+        '200': {description: 'Cancelaciones, mermas, cortesías, diferencias y vouchers por persona'}
   /api/nightclubs/{nightclubId}/till/open:
     post:
       operationId: openTill

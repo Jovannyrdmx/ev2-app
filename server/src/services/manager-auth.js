@@ -45,6 +45,9 @@ const pins = require('./pins');
 /** Quién puede autorizar que salga dinero. */
 const AUTHORIZING_ROLES = ['manager', 'admin'];
 
+/** Fallos en la ventana a partir de los cuales se avisa al gerente. */
+const ALERT_AFTER_FAILURES = 5;
+
 /**
  * Comprueba el PIN y devuelve a quién autoriza, o truena.
  *
@@ -78,6 +81,15 @@ async function authorize(runner, { nightclubId, pin, selfId = null, ip = null })
   await pins.recordAttempt(runner, {
     nightclubId, ip, ok: vale, userId: user ? user.id : null,
   });
+
+  // Al quinto fallo en la ventana queda una alerta para el gerente (D108): alguien
+  // está adivinando PIN en la caja. Una sola vez por racha, no una por intento.
+  if (!vale && fallos + 1 === ALERT_AFTER_FAILURES) {
+    await runner.query(
+      `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, after, ip)
+       VALUES ($1,$2,'pin.brute_force_alert','pin_attempts',$3,$4)`,
+      [nightclubId, selfId, JSON.stringify({ failures: fallos + 1, window_minutes: pins.WINDOW_MINUTES }), ip]);
+  }
 
   if (!vale) throw ApiError.forbidden('Código de autorización inválido');
   return {
