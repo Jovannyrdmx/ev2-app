@@ -70,6 +70,7 @@ router.get('/nightclubs/:nightclubId/tables',
     const { rows } = await pool.query(
       `SELECT t.id, t.code, t.table_number, t.name, t.section, t.floor, t.type,
               t.capacity, t.x, t.y, t.radius, t.color, t.status, t.bottle_service,
+              t.vip_price, t.vip_capacity,
               COALESCE(o.occupants, '[]'::json) AS occupants
          FROM tables t
          LEFT JOIN LATERAL (
@@ -110,6 +111,7 @@ router.get('/nightclubs/:nightclubId/floor-plan',
       const tables = await client.query(
         `SELECT t.id, t.code, t.table_number, t.name, t.section, t.floor, t.type, t.capacity,
                 t.x, t.y, t.radius, t.color, t.status, t.bottle_service,
+                t.vip_price, t.vip_capacity,
                 COALESCE(o.seated, 0)::int AS seated
            FROM tables t
            LEFT JOIN LATERAL (
@@ -384,6 +386,9 @@ const layoutItem = z.object({
   capacity: z.number().int().positive().optional(),
   status: z.enum(['available', 'occupied', 'reserved', 'blocked', 'cleaning']).optional(),
   bottle_service: z.boolean().optional(),
+  // Precio y personas propios de la mesa VIP (D103); null los quita y vuelve a la zona.
+  vip_price: z.number().min(0).max(1000000).nullable().optional(),
+  vip_capacity: z.number().int().positive().max(50).nullable().optional(),
 });
 
 router.put('/nightclubs/:nightclubId/tables/layout',

@@ -1277,6 +1277,14 @@ paths:
                         type: string
                         enum: [available, occupied, reserved, blocked, cleaning]
                       bottle_service: { type: boolean }
+                      vip_price:
+                        type: [number, 'null']
+                        minimum: 0
+                        description: Precio propio de la mesa VIP (D103). null vuelve al precio de la zona.
+                      vip_capacity:
+                        type: [integer, 'null']
+                        minimum: 1
+                        description: Personas incluidas en el precio de la mesa (D103). null vuelve al de la zona.
       responses:
         '200':
           description: Mesas actualizadas
@@ -12787,6 +12795,12 @@ components:
         radius: { type: string }
         status: { type: string, enum: [available, occupied, reserved, blocked, cleaning] }
         bottle_service: { type: boolean }
+        vip_price:
+          type: [string, 'null']
+          description: Precio propio de la mesa VIP; null usa el de su zona (D103).
+        vip_capacity:
+          type: [integer, 'null']
+          description: Personas incluidas en el precio de la mesa; null usa las de su zona (D103).
         occupants:
           type: array
           items:

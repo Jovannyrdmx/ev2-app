@@ -162,14 +162,14 @@ router.put('/nightclubs/:nightclubId/reservations/rules',
 async function availableTables({ nightclubId, eventId, guests, section, floor, runner = pool }) {
   const { rows } = await runner.query(
     `SELECT t.id, t.code, t.table_number, t.name, t.section, t.floor, t.type, t.capacity,
-            t.x, t.y, t.radius, t.color, t.bottle_service
+            t.x, t.y, t.radius, t.color, t.bottle_service, t.vip_price, t.vip_capacity
        FROM tables t
        JOIN zone_pricing z ON z.nightclub_id = t.nightclub_id AND z.section = t.section
       WHERE t.nightclub_id = $1
         AND t.active
         AND t.status <> 'blocked'
         AND z.active AND z.reservable
-        AND (z.included_tickets + z.max_extras) >= $3
+        AND (COALESCE(t.vip_capacity, z.included_tickets) + z.max_extras) >= $3
         AND ($4::text IS NULL OR t.section = $4)
         AND ($5::text IS NULL OR t.floor = $5)
         AND NOT EXISTS (
@@ -209,7 +209,7 @@ router.get('/nightclubs/:nightclubId/reservations/availability',
 
     const tables = [];
     for (const table of free) {
-      const zone = byZone.get(table.section);
+      const zone = eventPricing.forTable(byZone.get(table.section), table);
       if (!zone) continue;
       let quote;
       try {
@@ -291,15 +291,16 @@ async function buildQuote(nightclubId, body, runner = pool) {
   const event = await getBookableEvent(nightclubId, body.event_id, runner);
 
   const t = await runner.query(
-    `SELECT id, code, table_number, section, floor, capacity, active
+    `SELECT id, code, table_number, section, floor, capacity, active, vip_price, vip_capacity
        FROM tables WHERE id = $1 AND nightclub_id = $2`,
     [body.table_id, nightclubId]);
   if (t.rowCount === 0 || !t.rows[0].active) throw ApiError.notFound('Table not found');
   const table = t.rows[0];
 
-  const { zone } = await eventPricing.zoneFor({
+  const { zone: zonaBase } = await eventPricing.zoneFor({
     nightclubId, eventId: body.event_id, section: table.section, runner,
   });
+  const zone = eventPricing.forTable(zonaBase, table);
   if (!zone) throw ApiError.unprocessable(`La zona '${table.section}' no tiene precio configurado`);
 
   const addons = await resolveAddons(nightclubId, body.addons || [], runner);

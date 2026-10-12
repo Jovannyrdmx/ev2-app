@@ -41,6 +41,9 @@ async function getEventPricing({ nightclubId, eventId, runner = pool }) {
             COALESCE(o.reservable, z.reservable)             AS reservable,
             z.currency, z.color, z.includes, z.sort_order,
             (o.id IS NOT NULL)                               AS overridden,
+            -- Que la NOCHE fije el precio o las personas manda sobre la mesa (D103).
+            (o.base_price IS NOT NULL)                       AS base_price_overridden,
+            (o.included_tickets IS NOT NULL)                 AS included_overridden,
             o.note                                           AS override_note
        FROM zone_pricing z
        LEFT JOIN event_zone_pricing o ON o.section = z.section AND o.event_id = $2
@@ -57,6 +60,23 @@ async function zoneFor({ nightclubId, eventId, section, runner = pool }) {
   const { zones, event } = await getEventPricing({ nightclubId, eventId, runner });
   const zone = zones.find((z) => z.section === section) || null;
   return { event, zone };
+}
+
+/**
+ * La zona tal como le toca a UNA mesa (D103): si la mesa tiene su propio precio o sus
+ * propias personas, mandan sobre los de la zona, salvo que el gerente haya fijado ese
+ * dato para la noche. Los extras y si se reserva siguen siendo de la zona.
+ */
+function forTable(zone, table) {
+  if (!zone || !table) return zone;
+  const out = { ...zone };
+  if (table.vip_price !== null && table.vip_price !== undefined && !zone.base_price_overridden) {
+    out.base_price = table.vip_price;
+  }
+  if (table.vip_capacity !== null && table.vip_capacity !== undefined && !zone.included_overridden) {
+    out.included_tickets = table.vip_capacity;
+  }
+  return out;
 }
 
 /**
@@ -182,6 +202,6 @@ function depositFor(total, event, rules) {
 }
 
 module.exports = {
-  getEventPricing, zoneFor, quote, arrivalDeadline, round, depositPctFor, depositFor,
+  getEventPricing, zoneFor, forTable, quote, arrivalDeadline, round, depositPctFor, depositFor,
   nightEnd, nightIsOver, bookingArrivalDeadline,
 };
