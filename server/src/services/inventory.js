@@ -318,6 +318,25 @@ async function restore(client, { nightclubId, orderId, userId, reason = null }) 
 }
 
 /**
+ * Un pedido cancelado que la barra YA preparó (D106): lo que salió del estante no
+ * regresa — se sirvió —, y queda en el kardex como merma, con quién canceló y quién lo
+ * autorizó. Se escribe como devolución + merma del mismo monto: el saldo no se mueve,
+ * pero el kardex dice la verdad (salió por un pedido que no se cobró) y el reporte de
+ * la noche lo cuenta como pérdida.
+ */
+async function writeOff(client, { nightclubId, orderId, userId, authorizedBy = null, reason }) {
+  const restored = await restore(client, { nightclubId, orderId, userId, reason });
+  for (const r of restored) {
+    await move(client, {
+      nightclubId, supplyId: r.supply_id, locationId: r.location_id,
+      kind: 'waste', quantity: -r.quantity,
+      referenceType: 'drink_order', referenceId: orderId, reason, userId, authorizedBy,
+    });
+  }
+  return restored;
+}
+
+/**
  * Entrada de mercancia: sube la existencia de un lugar y recalcula el costo
  * promedio ponderado del insumo.
  *
@@ -524,6 +543,7 @@ module.exports = {
   neededBySupply,
   consume,
   restore,
+  writeOff,
   receive,
   transfer,
   adjust,

@@ -235,8 +235,9 @@ describe('Lo que la caja tiene por cobrar', () => {
     const cobrado = await pedidoDelMesero();
     await cobrar(cobrado);
     const cancelado = await pedidoDelMesero();
+    // El mesero cancela con el PIN del gerente (D106).
     await api().post(url(`/orders/${cancelado.id}/status`)).set(auth(waiter))
-      .send({ status: 'cancelled', reason: 'se fue' });
+      .send({ status: 'cancelled', reason: 'se fue', manager_pin: pinGerente });
     // Una mesa que atiende la barra de arriba.
     await pool.query(
       `INSERT INTO zone_bars (nightclub_id, section, location_id) VALUES ($1,'TERRAZA',$2)`,
@@ -381,7 +382,8 @@ describe('El corte de la caja', () => {
     const retiro = await api().post(url('/shifts/me/cash-drops')).set(auth(cajero))
       .send({ amount: 1100, reason: 'Llevar a bóveda', manager_pin: pinGerente });
     expect(retiro.status).toBe(201);
-    expect(retiro.body.withdrawal.remaining).toBe('20.00');
+    // A ciegas (D105) el cajero no ve cuánto le queda; el corte lo dice.
+    expect(retiro.body.withdrawal.remaining).toBeNull();
 
     const res = await cortar({ declared_cash: 20, counted_cash: 20 });
     expect(res.status).toBe(201);
@@ -524,7 +526,7 @@ describe('Cobrar en caja: cambio y dos formas de pago (D79)', () => {
     const pedido = await pedidoDelMesero();
     await pagar(pedido, { method: 'cash', amount: 50 });
     const res = await api().post(url(`/orders/${pedido.id}/status`)).set(auth(waiter))
-      .send({ status: 'cancelled', reason: 'se fue' });
+      .send({ status: 'cancelled', reason: 'se fue', manager_pin: pinGerente });
     expect(res.status).toBe(409);
     expect(res.body.error.message).toMatch(/cobra el resto/);
   });

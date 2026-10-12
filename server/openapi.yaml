@@ -1570,12 +1570,18 @@ paths:
         Un cliente solo puede **cancelar su propio pedido mientras siga en `pending`**.
         Cancelar devuelve las existencias al inventario.
 
-        **El `bartender` no cancela solo (D101):** para pasar un pedido a `cancelled`
+        **Bartender, mesero y cajero no cancelan solos (D101, D106):** para pasar un pedido a `cancelled`
         debe mandar `manager_pin` (el PIN de seis dígitos de un gerente o admin del club,
         tecleado por el gerente) y `reason`. Sin PIN, con un PIN que no es de gerencia o
         con el suyo propio responde 403 sin tocar el pedido; sin `reason`, 400. Quién
         autorizó queda en `audit_log` (`order.cancel_authorized`) y en el evento
-        `order_cancelled` (`authorized_by`). Gerente y admin cancelan sin PIN.
+        `order_cancelled` (`authorized_by`). Gerente y admin cancelan sin PIN. Toda
+        cancelación del personal queda en el pedido (`cancelled_by`, `cancel_reason`,
+        `cancel_authorized_by`) y en `audit_log`.
+
+        **Lo ya preparado es merma (D106):** si el pedido estaba en `preparing`, o se manda
+        `served: true`, lo consumido no regresa al inventario: queda en el kardex como
+        merma (`waste`) a nombre de quien canceló y de quien lo autorizó.
       parameters:
         - { $ref: '#/components/parameters/NightclubId' }
         - { $ref: '#/components/parameters/OrderId' }
@@ -1594,7 +1600,10 @@ paths:
                 manager_pin:
                   type: string
                   pattern: '^\d{6}$'
-                  description: Obligatorio cuando quien cancela es un bartender.
+                  description: Obligatorio cuando quien cancela es bartender, mesero o cajero.
+                served:
+                  type: boolean
+                  description: Al cancelar, el trago ya se preparó o sirvió (cuenta como merma).
       responses:
         '200':
           description: Estado actualizado

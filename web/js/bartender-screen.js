@@ -444,6 +444,12 @@
         if (!/^\d{6}$/.test(String(pin).trim())) { showError(new Error(t('cut.errPin'))); return; }
         extra = { reason: motivo.trim(), manager_pin: String(pin).trim() };
       } else if (!(await ask(t('bar.confirmCancel'), { danger: true }))) return;
+      // Ya preparado no regresa al estante: cuenta como merma (D106). Si la tarjeta ya
+      // dice "preparando", el servidor lo da por hecho; si no, se pregunta.
+      const actual = state.orders.find((o) => o.id === orderId);
+      if (actual && actual.status === 'confirmed') {
+        extra.served = Boolean(await ask(t('bar.cancelServed'), { ok: t('bar.cancelServedYes') }));
+      }
     }
 
     state.busy.add(orderId);

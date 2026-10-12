@@ -74,7 +74,8 @@
    * el PIN de un gerente y un motivo. Gerente y admin ya son gerencia. El servidor
    * manda igual; esto solo evita mandar una petición que se sabe que será rechazada.
    */
-  const cancelNeedsPin = (role) => role === 'bartender';
+  // Bartender, mesero y cajero cancelan con el PIN de un gerente (D101, D106).
+  const cancelNeedsPin = (role) => ['bartender', 'waiter', 'cashier'].includes(role);
 
   // ---------------------------------------------------------------- la cola
 

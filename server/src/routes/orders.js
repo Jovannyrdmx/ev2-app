@@ -45,6 +45,10 @@ const TAKING_ROLES = ['waiter', 'cashier', 'manager', 'admin'];
 // cajero— sigue la regla de siempre: llega a la barra cuando está pagado.
 const PAY_AT_TILL_ROLES = ['waiter'];
 
+// Quienes no cancelan solos: motivo y el PIN de un gerente (D101 para el bartender,
+// D106 para el mesero y el cajero). Gerente y admin ya son gerencia.
+const CANCEL_PIN_ROLES = ['bartender', 'waiter', 'cashier'];
+
 const createSchema = z.object({
   client_request_id: uuid,
   table_id: uuid.optional(),
@@ -327,6 +331,9 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
       status: z.enum(['confirmed', 'preparing', 'ready', 'delivered', 'cancelled']),
       reason: z.string().trim().max(200).optional(),
       manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos').optional(),
+      // El trago ya se preparó (D106): no regresa al inventario, cuenta como merma. Un
+      // pedido en "preparando" se da por preparado aunque no se diga.
+      served: z.boolean().optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
@@ -334,12 +341,13 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
     const next = req.body.status;
     const staffRoles = STAFF_ROLES;
 
-    // El bartender prepara, no decide qué pedido se pierde: cancelar le pide el PIN de
-    // un gerente y un motivo. Se verifica ANTES de abrir la transacción, y el rechazo
-    // no toca ni el pedido, ni el estante, ni el cobro. Gerente y admin ya son
-    // gerencia, y el cliente solo cancela lo suyo mientras está pendiente (más abajo).
+    // Bartender, mesero y cajero no deciden solos qué pedido se pierde: cancelar les
+    // pide el PIN de un gerente y un motivo (D101, D106). Se verifica ANTES de abrir la
+    // transacción, y el rechazo no toca ni el pedido, ni el estante, ni el cobro.
+    // Gerente y admin ya son gerencia, y el cliente solo cancela lo suyo mientras está
+    // pendiente (más abajo).
     let autoriza = null;
-    if (next === 'cancelled' && req.user.role === 'bartender') {
+    if (next === 'cancelled' && CANCEL_PIN_ROLES.includes(req.user.role)) {
       if (!req.body.manager_pin) {
         throw ApiError.forbidden('Para cancelar un pedido necesitas el PIN de un gerente');
       }
@@ -424,11 +432,30 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
       // Cancelling returns the stock -- lo que de verdad salio por este pedido, leido
       // del kardex. Recalcular la receta devolveria otra cantidad si alguien la
       // corrigio entremedio, y el estante no sabe de correcciones.
+      // Lo que ya se preparó no vuelve al estante (D106): se sirvió, y fingir que
+      // regresó es justo como se esconde un trago regalado. Cuenta como merma, a nombre
+      // de quien canceló y de quien lo autorizó.
+      const servido = next === 'cancelled' && isStaff
+        && (order.status === 'preparing' || req.body.served === true);
       if (next === 'cancelled') {
-        await inventory.restore(client, {
-          nightclubId, orderId, userId: req.user.id,
-          reason: req.body.reason || 'Pedido cancelado',
-        });
+        const motivo = req.body.reason || 'Pedido cancelado';
+        if (servido) {
+          await inventory.writeOff(client, {
+            nightclubId, orderId, userId: req.user.id,
+            authorizedBy: autoriza ? autoriza.id : null,
+            reason: `Cancelado ya preparado: ${motivo}`,
+          });
+        } else {
+          await inventory.restore(client, {
+            nightclubId, orderId, userId: req.user.id, reason: motivo,
+          });
+        }
+        await client.query(
+          `UPDATE drink_orders
+              SET cancelled_by = $2, cancel_reason = $3, cancel_authorized_by = $4,
+                  cancel_served = $5
+            WHERE id = $1`,
+          [orderId, req.user.id, req.body.reason || null, autoriza ? autoriza.id : null, servido]);
         // ...and closes the charge, but only while it is still unpaid. Money already
         // received is never erased from the ledger: that is a refund, with its own
         // entry and its own signature (step 3.7), not a row quietly turned off.
@@ -472,15 +499,22 @@ router.post('/nightclubs/:nightclubId/orders/:orderId/status',
           transaction_id: order.transaction_id || null,
           refund_due: refundDue,
           authorized_by: autoriza ? autoriza.id : null,
+          cancelled_by: next === 'cancelled' ? req.user.id : null,
+          served: next === 'cancelled' ? servido : null,
         },
       });
-      if (autoriza) {
+      if (next === 'cancelled' && isStaff) {
         await client.query(
           `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
-           VALUES ($1,$2,'order.cancel_authorized','drink_order',$3,$4,$5)`,
+           VALUES ($1,$2,$6,'drink_order',$3,$4,$5)`,
           [nightclubId, req.user.id, orderId,
-            JSON.stringify({ reason: req.body.reason, authorized_by: autoriza.id }),
-            req.ip || null]);
+            JSON.stringify({
+              reason: req.body.reason || null,
+              authorized_by: autoriza ? autoriza.id : null,
+              served: servido,
+              from_status: order.status,
+            }),
+            req.ip || null, autoriza ? 'order.cancel_authorized' : 'order.cancelled']);
       }
       await client.query('COMMIT');
       res.json({ order: rows[0] });
