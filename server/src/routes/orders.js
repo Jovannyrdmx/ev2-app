@@ -15,6 +15,7 @@ const payments = require('../services/payments');
 const vipCredit = require('../services/vip-credit');
 const managerAuth = require('../services/manager-auth');
 const staffConsumption = require('../services/staff-consumption');
+const waiterBalance = require('../services/waiter-balance');
 
 const router = express.Router({ mergeParams: true });
 
@@ -126,6 +127,10 @@ router.post('/nightclubs/:nightclubId/orders',
       return res.status(200).json({ order: existing.rows[0] });
     }
 
+    // El mesero: con su entrada checada y sin pasar su tope de lo entregado sin pagar
+    // (D110). Antes de abrir la transacción: el rechazo no toca nada.
+    await waiterBalance.assertCanOrder(pool, { nightclubId, user: req.user });
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -200,6 +205,15 @@ router.post('/nightclubs/:nightclubId/orders',
       // y sale su comanda, sin esperar el cobro. El cobro queda abierto en el libro
       // y lo cierra la caja de esa barra cuando el mesero le entrega el dinero.
       if (payAtTill) {
+        // La caja de esa barra ya cerró (D111): nadie lo cobraría esta noche.
+        const cerrada = await till.closedTonight(client, {
+          nightclubId, locationId: order.barLocationId,
+        });
+        if (cerrada) {
+          throw ApiError.conflict(
+            `La caja de ${cerrada.location_name} está cerrada. Avisa al gerente antes de levantar el pedido.`,
+            { reason: 'till_closed', location_id: order.barLocationId });
+        }
         await client.query(
           `UPDATE drink_orders SET status = 'confirmed', confirmed_at = now(), updated_at = now()
             WHERE id = $1 AND status = 'pending'`, [order.id]);

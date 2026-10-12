@@ -43,7 +43,7 @@ beforeEach(async () => {
 
   manager = await f.createUser(club.id, { role: 'manager' });
   bartender = await f.createUser(club.id, { role: 'bartender' });
-  waiter = await f.createUser(club.id, { role: 'waiter' });
+  waiter = await f.createUser(club.id, { role: 'waiter', on_shift: true });
   warehouse = await f.createUser(club.id, { role: 'warehouse' });
   guest = await f.createUser(club.id, { role: 'guest' });
   hostess = await f.createUser(club.id, { role: 'hostess' });

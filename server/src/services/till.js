@@ -505,8 +505,34 @@ async function insertAndSettle(client, {
   return { till, payment: created, ...settled };
 }
 
+/**
+ * La caja de esa barra ya cerró esta noche y no hay otra abierta (D111).
+ *
+ * Un pedido que se cobra en caja y entra a una barra sin caja ya no lo cobra nadie
+ * esta noche. Antes de que abra la primera caja no se bloquea: lo que se pida se
+ * cobra en cuanto abra.
+ */
+async function closedTonight(runner, { nightclubId, locationId }) {
+  if (!locationId) return null;
+  const { rows } = await runner.query(
+    `SELECT l.name AS location_name,
+            bool_or(s.ended_at IS NULL) AS hay_abierta,
+            bool_or(s.ended_at IS NOT NULL) AS hubo_cerrada
+       FROM supply_locations l
+       LEFT JOIN staff_shifts s
+              ON s.location_id = l.id AND s.nightclub_id = l.nightclub_id
+             AND s.started_at > now() - interval '18 hours'
+      WHERE l.id = $1 AND l.nightclub_id = $2
+      GROUP BY l.name`,
+    [locationId, nightclubId]);
+  const r = rows[0];
+  if (!r || r.hay_abierta || !r.hubo_cerrada) return null;
+  return { location_name: r.location_name };
+}
+
 module.exports = {
   CASHIER,
+  closedTonight,
   OPEN_BEFORE_DOORS_HOURS,
   DEFAULT_NIGHT_HOURS,
   assignedBar,

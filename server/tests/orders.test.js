@@ -18,7 +18,7 @@ beforeEach(async () => {
   guest = await f.createUser(club.id, { role: 'guest' });
   other = await f.createUser(club.id, { role: 'guest' });
   bartender = await f.createUser(club.id, { role: 'bartender' });
-  waiter = await f.createUser(club.id, { role: 'waiter' });
+  waiter = await f.createUser(club.id, { role: 'waiter', on_shift: true });
   manager = await f.createUser(club.id, { role: 'manager' });
   // La caja de la barra de planta baja, que es de donde salen los pedidos de estas
   // pruebas: desde D77 el dinero de los tragos lo recibe el cajero de cada barra.

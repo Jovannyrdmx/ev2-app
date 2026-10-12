@@ -24,7 +24,7 @@ beforeEach(async () => {
   club = await f.createNightclub({ slug: 'ev2-sustituir' });
   manager = await f.createUser(club.id, { role: 'manager', display_name: 'Gerente' });
   bartender = await f.createUser(club.id, { role: 'bartender', display_name: 'Beto' });
-  waiter = await f.createUser(club.id, { role: 'waiter', display_name: 'Luis' });
+  waiter = await f.createUser(club.id, { role: 'waiter', on_shift: true, display_name: 'Luis' });
   guest = await f.createUser(club.id, { role: 'guest' });
   table = await f.createTable(club.id, { code: 'T-1', section: 'ZONA ROJA', capacity: 4 });
   // Buchanan's agotado en la barra; Black Label sí hay. Misma unidad (ml).

@@ -52,7 +52,7 @@ beforeEach(async () => {
   await truncateAll();
   club = await f.createNightclub({ slug: 'ev2-promos' });
   manager = await f.createUser(club.id, { role: 'manager', display_name: 'Gerente' });
-  waiter = await f.createUser(club.id, { role: 'waiter', display_name: 'Luis Pérez' });
+  waiter = await f.createUser(club.id, { role: 'waiter', on_shift: true, display_name: 'Luis Pérez' });
   beer = await f.createDrink(club.id, { name: 'Cerveza', price: 60, category: 'beer', stock: 100 });
   gin = await f.createDrink(club.id, { name: 'Gin', price: 200, category: 'spirits', stock: 100 });
   event = await crearEvento();

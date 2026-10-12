@@ -172,7 +172,7 @@ describe('La caja cobra por su terminal', () => {
   });
 
   it('sin mandar terminal, cobra en la de su barra', async () => {
-    const waiter = await f.createUser(club.id, { role: 'waiter' });
+    const waiter = await f.createUser(club.id, { role: 'waiter', on_shift: true });
     const table = await f.createTable(club.id, { code: 'T-3', section: 'ZONA ROJA', capacity: 4 });
     const beer = await f.createDrink(club.id, { name: 'Cerveza', price: 60, stock: 40 });
     const pedido = await api().post(url('/orders')).set(await auth(waiter)).send({

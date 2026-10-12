@@ -48,7 +48,7 @@ beforeEach(async () => {
   ana = await f.createUser(club.id, { role: 'guest', display_name: 'Ana', accept_flirts: false });
   beto = await f.createUser(club.id, { role: 'guest', display_name: 'Beto', accept_flirts: true });
   bailarina = await f.createUser(club.id, { role: 'dancer', display_name: 'Sol' });
-  mesero = await f.createUser(club.id, { role: 'waiter', display_name: 'Luis' });
+  mesero = await f.createUser(club.id, { role: 'waiter', on_shift: true, display_name: 'Luis' });
 });
 
 const url = (p) => `/api/nightclubs/${club.id}${p}`;

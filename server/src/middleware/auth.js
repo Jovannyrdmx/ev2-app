@@ -39,10 +39,14 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-async function issueRefreshToken(userId, deviceInfo) {
+/**
+ * `runner`: quien ya tiene una conexión retenida la pasa, para no pedirle otra al pool
+ * mientras la retiene (D104).
+ */
+async function issueRefreshToken(userId, deviceInfo, runner = pool) {
   const token = crypto.randomBytes(48).toString('base64url');
   const expiresAt = new Date(Date.now() + REFRESH_TTL_DAYS * 86_400_000);
-  await pool.query(
+  await runner.query(
     `INSERT INTO refresh_tokens (user_id, token_hash, device_info, expires_at) VALUES ($1,$2,$3,$4)`,
     [userId, hashToken(token), deviceInfo || null, expiresAt],
   );

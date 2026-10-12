@@ -91,6 +91,11 @@ async function createUser(nightclubId, overrides = {}) {
     `INSERT INTO user_preferences (user_id, accept_flirts) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
     [rows[0].id, overrides.accept_flirts ?? false],
   );
+  // Con su entrada ya checada (D110: el mesero sin turno no levanta pedidos).
+  if (overrides.on_shift) {
+    await pool.query('INSERT INTO staff_shifts (nightclub_id, user_id) VALUES ($1,$2)',
+      [nightclubId, rows[0].id]);
+  }
   return rows[0];
 }
 

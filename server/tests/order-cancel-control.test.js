@@ -24,7 +24,7 @@ beforeEach(async () => {
   await truncateAll();
   club = await f.createNightclub({ slug: 'ev2-cancelar' });
   manager = await f.createUser(club.id, { role: 'manager', display_name: 'Gerente' });
-  waiter = await f.createUser(club.id, { role: 'waiter' });
+  waiter = await f.createUser(club.id, { role: 'waiter', on_shift: true });
   cajero = await f.createUser(club.id, { role: 'cashier' });
   bartender = await f.createUser(club.id, { role: 'bartender' });
   table = await f.createTable(club.id, { section: 'ROJA' });

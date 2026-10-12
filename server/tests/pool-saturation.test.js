@@ -27,7 +27,7 @@ beforeEach(truncateAll);
 
 test('una ráfaga de pedidos del mismo producto con el pool lleno no da error', async () => {
   const club = await f.createNightclub({ slug: 'ev2-pool' });
-  const waiter = await f.createUser(club.id, { role: 'waiter' });
+  const waiter = await f.createUser(club.id, { role: 'waiter', on_shift: true });
   const table = await f.createTable(club.id, { section: 'ROJA' });
   const drink = await f.createDrink(club.id, { name: 'Cerveza promo', price: 50, stock: 20 });
 

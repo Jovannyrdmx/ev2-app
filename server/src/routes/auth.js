@@ -98,7 +98,7 @@ router.post('/register', validate({ body: registerSchema }), asyncHandler(async 
     );
     await client.query('COMMIT');
 
-    const refresh = await issueRefreshToken(user.id, req.headers['user-agent']);
+    const refresh = await issueRefreshToken(user.id, req.headers['user-agent'], client);
     res.status(201).json({
       user: publicUser(user),
       access_token: signAccessToken(user),
@@ -676,7 +676,7 @@ router.post('/oauth/complete',
          ON CONFLICT DO NOTHING`, [user.id]);
       await client.query('COMMIT');
 
-      const refresh = await issueRefreshToken(user.id, req.headers['user-agent']);
+      const refresh = await issueRefreshToken(user.id, req.headers['user-agent'], client);
       return res.status(201).json({
         user: publicUser(user),
         access_token: signAccessToken(user),
