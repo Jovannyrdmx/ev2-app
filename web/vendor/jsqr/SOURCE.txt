@@ -1,0 +1,4 @@
+Vendored, unmodified, from npm:
+  jsQR.js  <- jsqr@1.4.0  dist/jsQR.js  (Apache-2.0, see LICENSE)
+  sha256   bc40c8a15196236b2314db0856f72ca0b49980cd5413b8c852a7349f5fee0859
+Used by js/staff-screen.js as the QR reader when the browser has no BarcodeDetector (iPhone/Safari).

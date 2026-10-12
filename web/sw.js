@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v54';
+const VERSION = 'ev2-v55';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -65,6 +65,8 @@ const SHELL = [
   'checador.html', 'js/checador.js',
   'vendor/digitalpersona/websdk.client.ui.js', 'vendor/digitalpersona/dp.core.js',
   'vendor/digitalpersona/dp.devices.js',
+  // El lector de QR de la puerta en iPhone: sin él guardado, la cámara no lee sin señal.
+  'vendor/jsqr/jsQR.js',
   // La hoja de estilo, las letras y los iconos viven aquí mismo (D71): sin señal la app
   // abre con su diseño, no con los botones grises del navegador.
   'css/ev2.css',

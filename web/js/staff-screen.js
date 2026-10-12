@@ -239,8 +239,9 @@
     // El botón de la cámara solo aparece si este teléfono de verdad puede leer un
     // QR. Enseñarlo y que falle al tocarlo es peor que no enseñarlo: en la puerta
     // eso son diez segundos perdidos con alguien esperando.
+    scan.mode = await modoCamara();
     const camara = $('btn-scan-toggle');
-    if (camara) camara.hidden = !camaraDisponible();
+    if (camara) camara.hidden = !scan.mode;
     renderAll();
   }
 
@@ -304,7 +305,7 @@
    * aparece cuando de verdad se puede usar, y el campo del código está siempre
    * disponible.
    */
-  const scan = { stream: null, timer: null, last: null };
+  const scan = { stream: null, timer: null, last: null, mode: null };
 
   /**
    * La revisión de identificación que está viva ahora mismo.
@@ -321,10 +322,24 @@
     { key: 'idc.rejectOther', reason: 'otro motivo' },
   ];
 
-  const camaraDisponible = () => (
-    typeof window.BarcodeDetector === 'function'
-    && navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function'
-  );
+  /**
+   * Con qué lee este teléfono: 'native', 'jsqr' o null. Se pregunta una vez al cargar,
+   * porque saber si `BarcodeDetector` lee QR es asíncrono y el botón no puede esperar.
+   */
+  async function modoCamara() {
+    const hasBarcodeDetector = typeof window.BarcodeDetector === 'function';
+    let nativeFormats = null;
+    if (hasBarcodeDetector && typeof window.BarcodeDetector.getSupportedFormats === 'function') {
+      try { nativeFormats = await window.BarcodeDetector.getSupportedFormats(); } catch { nativeFormats = []; }
+    }
+    return EV2DoorScan.cameraMode({
+      hasGetUserMedia: Boolean(navigator.mediaDevices
+        && typeof navigator.mediaDevices.getUserMedia === 'function'),
+      hasBarcodeDetector,
+      nativeFormats,
+      hasJsQR: typeof window.jsQR === 'function',
+    });
+  }
 
   function pintarResultado(respuesta) {
     const v = EV2DoorScan.view(respuesta);
@@ -420,6 +435,10 @@
     const viva = Boolean(idc.check);
     $('scan-code').disabled = !viva;
     $('btn-scan-code').disabled = !viva;
+    // La cámara tampoco se abre sin revisión: leía el QR, lo tiraba con "primero
+    // revisa la identificación" y había que volver a escanear.
+    $('btn-scan-toggle').disabled = !viva;
+    if (!viva && scan.stream) pararCamara();
     $('scan-blocked').hidden = viva;
 
     const estado = $('idc-state');
@@ -601,7 +620,43 @@
     $('btn-scan-toggle').textContent = t('scan.start');
   }
 
+  /**
+   * Un lector de cuadros: recibe el video y devuelve el texto del QR o null.
+   * Dos formas, la misma firma, para que el ciclo de lectura no sepa cuál usa.
+   */
+  function crearLector(modo, video) {
+    if (modo === 'native') {
+      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      return async () => {
+        const codes = await detector.detect(video);
+        return codes && codes.length ? codes[0].rawValue : null;
+      };
+    }
+    // jsQR: se copia el cuadro a un canvas reducido y se lee ahí.
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    return async () => {
+      const tam = EV2DoorScan.frameSize(video.videoWidth, video.videoHeight);
+      if (!tam) return null; // el video todavía no trae cuadros
+      canvas.width = tam.width;
+      canvas.height = tam.height;
+      ctx.drawImage(video, 0, 0, tam.width, tam.height);
+      const img = ctx.getImageData(0, 0, tam.width, tam.height);
+      // `attemptBoth`: el pase en modo oscuro de algunos teléfonos sale invertido.
+      const r = window.jsQR(img.data, tam.width, tam.height, { inversionAttempts: 'attemptBoth' });
+      return r && r.data ? r.data : null;
+    };
+  }
+
   async function arrancarCamara() {
+    if (!idc.check) {
+      toast(t('scan.errNoIdCheck'), 'error');
+      return;
+    }
+    if (!scan.mode) {
+      toast(t('scan.noCamera'), 'error');
+      return;
+    }
     try {
       scan.stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' }, audio: false,
@@ -612,27 +667,49 @@
       $('scan-camera').hidden = false;
       $('btn-scan-toggle').textContent = t('scan.stop');
 
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      let modo = scan.mode;
+      let leer = crearLector(modo, video);
       let ocupado = false;
+      let fallos = 0;
       scan.timer = setInterval(async () => {
-        if (ocupado) return;
+        if (ocupado || !scan.stream) return;
         ocupado = true;
         try {
-          const codes = await detector.detect(video);
-          if (codes && codes.length) {
-            const valor = codes[0].rawValue;
+          const valor = await leer();
+          fallos = 0;
+          if (valor) {
             await pararCamara();
             await leerPase(valor);
           }
-        } catch { /* un cuadro ilegible no es un error: viene otro en 300ms */ } finally {
+        } catch (err) {
+          // Un cuadro ilegible no es un error: viene otro en 250 ms. Muchos seguidos sí:
+          // el lector nativo no sirve en este teléfono. Se cambia a jsQR si está, y si
+          // no, se dice en vez de dejar la cámara prendida sin leer nada.
+          fallos += 1;
+          if (fallos >= EV2DoorScan.MAX_DETECT_ERRORS) {
+            if (modo === 'native' && typeof window.jsQR === 'function') {
+              console.warn('[EV2] BarcodeDetector falla en este telefono; se usa jsQR', err);
+              modo = 'jsqr';
+              scan.mode = 'jsqr';
+              leer = crearLector(modo, video);
+              fallos = 0;
+            } else {
+              console.warn('[EV2] el lector de QR no responde', err);
+              await pararCamara();
+              toast(t('scan.noCamera'), 'error');
+              $('scan-code').focus();
+            }
+          }
+        } finally {
           ocupado = false;
         }
-      }, 300);
-    } catch {
-      // Permiso negado, sin cámara, o el navegador no deja. Se dice y se sigue
-      // tecleando, que es lo que de verdad no falla.
+      }, 250);
+    } catch (err) {
+      // Permiso negado, sin cámara, o la cámara ocupada por otra app. Cada uno tiene
+      // su aviso, y el campo para teclear queda listo para seguir.
+      console.warn('[EV2] no se pudo abrir la camara', err);
       await pararCamara();
-      toast(t('scan.noCamera'), 'error');
+      toast(t(EV2DoorScan.cameraErrorKey(err)), 'error');
       $('scan-code').focus();
     }
   }
@@ -992,6 +1069,11 @@
     if (limpio !== input.value) input.value = limpio;
   };
   $('btn-scan-toggle').onclick = () => (scan.stream ? pararCamara() : arrancarCamara());
+  // Teléfono bloqueado o la app en segundo plano: la cámara se suelta. Si no, queda
+  // tomada (otra app no la puede usar) y la luz de grabación sigue prendida.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && scan.stream) pararCamara();
+  });
   $('btn-idc-accept').onclick = aceptarIdentificacion;
   $('btn-idc-reject').onclick = () => { idc.rejecting = !idc.rejecting; renderIdCheck(); };
   $('look-form').onsubmit = (ev) => { ev.preventDefault(); buscarSinCodigo($('look-q').value); };

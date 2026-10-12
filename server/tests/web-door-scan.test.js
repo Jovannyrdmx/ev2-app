@@ -171,3 +171,93 @@ describe('el doble toque de la puerta', () => {
     expect('client_request_id' in body).toBe(false);
   });
 });
+
+describe('la cámara de la puerta', () => {
+  const base = { hasGetUserMedia: true, hasBarcodeDetector: false, nativeFormats: null, hasJsQR: true };
+
+  it('en iPhone (sin BarcodeDetector) la cámara funciona con jsQR', () => {
+    expect(Scan.cameraMode(base)).toBe('jsqr');
+  });
+
+  it('con BarcodeDetector que lee QR se usa el nativo', () => {
+    expect(Scan.cameraMode({ ...base, hasBarcodeDetector: true, nativeFormats: ['qr_code', 'ean_13'] }))
+      .toBe('native');
+  });
+
+  it('un BarcodeDetector que NO lee QR no se usa: la cámara se vería y nunca leería', () => {
+    expect(Scan.cameraMode({ ...base, hasBarcodeDetector: true, nativeFormats: ['ean_13'] })).toBe('jsqr');
+    expect(Scan.cameraMode({
+      ...base, hasBarcodeDetector: true, nativeFormats: ['ean_13'], hasJsQR: false,
+    })).toBeNull();
+  });
+
+  it('sin getUserMedia (página sin HTTPS) no hay cámara que ofrecer', () => {
+    expect(Scan.cameraMode({ ...base, hasGetUserMedia: false })).toBeNull();
+  });
+
+  it('cada falla de la cámara tiene su aviso, y el permiso negado no se confunde con "no puede"', () => {
+    expect(Scan.cameraErrorKey({ name: 'NotAllowedError' })).toBe('scan.camDenied');
+    expect(Scan.cameraErrorKey({ name: 'SecurityError' })).toBe('scan.camDenied');
+    expect(Scan.cameraErrorKey({ name: 'NotFoundError' })).toBe('scan.camNotFound');
+    expect(Scan.cameraErrorKey({ name: 'NotReadableError' })).toBe('scan.camBusy');
+    expect(Scan.cameraErrorKey(new Error('x'))).toBe('scan.noCamera');
+    expect(Scan.cameraErrorKey(null)).toBe('scan.noCamera');
+  });
+
+  it('el cuadro se reduce sin deformarse y no se agranda', () => {
+    expect(Scan.frameSize(1920, 1080)).toEqual({ width: 640, height: 360 });
+    expect(Scan.frameSize(720, 1280)).toEqual({ width: 360, height: 640 });
+    expect(Scan.frameSize(320, 240)).toEqual({ width: 320, height: 240 });
+    expect(Scan.frameSize(0, 0)).toBeNull();
+  });
+
+  it('cada aviso nuevo existe en español y en inglés', () => {
+    const fs = require('fs');
+    const fmt = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'js', 'format.js'), 'utf8');
+    for (const k of ['scan.camDenied', 'scan.camNotFound', 'scan.camBusy']) {
+      expect(fmt.split(`'${k}':`).length - 1).toBe(2);
+    }
+  });
+});
+
+describe('jsQR lee el QR que dibuja el servidor', () => {
+  const QRCode = require('qrcode');
+  const jsQR = require(path.join(__dirname, '..', '..', 'web', 'vendor', 'jsqr', 'jsQR.js'));
+
+  /** Pinta los módulos del QR como lo vería la cámara: píxeles RGBA con margen blanco. */
+  function rgba(texto, { escala = 6, margen = 4, invertido = false } = {}) {
+    const qr = QRCode.create(texto, { errorCorrectionLevel: 'M' });
+    const n = qr.modules.size;
+    const lado = (n + margen * 2) * escala;
+    const data = new Uint8ClampedArray(lado * lado * 4);
+    for (let y = 0; y < lado; y += 1) {
+      for (let x = 0; x < lado; x += 1) {
+        const mx = Math.floor(x / escala) - margen;
+        const my = Math.floor(y / escala) - margen;
+        const negro = Boolean(mx >= 0 && my >= 0 && mx < n && my < n && qr.modules.get(my, mx));
+        const v = (negro !== invertido) ? 0 : 255;
+        const i = (y * lado + x) * 4;
+        data[i] = v; data[i + 1] = v; data[i + 2] = v; data[i + 3] = 255;
+      }
+    }
+    return { data, lado };
+  }
+
+  it('el pase firmado sale tal cual, para que el servidor lo verifique', () => {
+    const texto = 'EV2.K7M3-P9QX.ABCDEF1234567890';
+    const { data, lado } = rgba(texto);
+    expect(jsQR(data, lado, lado, { inversionAttempts: 'attemptBoth' }).data).toBe(texto);
+  });
+
+  it('el enlace de WhatsApp también se lee', () => {
+    const texto = 'https://ev2clandestinoz.com/pase.html?p=EV2.K7M3-P9QX.ABCDEF1234567890';
+    const { data, lado } = rgba(texto);
+    expect(jsQR(data, lado, lado, { inversionAttempts: 'attemptBoth' }).data).toBe(texto);
+  });
+
+  it('un QR invertido (pantalla en modo oscuro) se lee con attemptBoth', () => {
+    const texto = 'EV2.K7M3-P9QX.ABCDEF1234567890';
+    const { data, lado } = rgba(texto, { invertido: true });
+    expect(jsQR(data, lado, lado, { inversionAttempts: 'attemptBoth' }).data).toBe(texto);
+  });
+});

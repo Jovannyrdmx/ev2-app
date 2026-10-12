@@ -256,6 +256,59 @@
   const canSellExtra = (v) => Boolean(v && v.reservationId
     && (v.result === 'ok' || v.result === 'already_in'));
 
+  // -------------------------------------------------------------- la cámara
+
+  /**
+   * Con qué se va a leer el QR, o null si este teléfono no puede.
+   *
+   * `native` es `BarcodeDetector` (Chrome en Android): rápido y sin descargar nada.
+   * `jsqr` es la librería que vive en `vendor/jsqr`: lee cuadros de la cámara en
+   * JavaScript, y es lo que hace funcionar la cámara en iPhone, donde Safari —y
+   * cualquier navegador de iPhone, que por dentro es Safari— no trae
+   * `BarcodeDetector`. Sin `getUserMedia` (página abierta sin HTTPS, navegador muy
+   * viejo) no hay cámara que pedir y el botón ni se enseña.
+   */
+  function cameraMode({ hasGetUserMedia, hasBarcodeDetector, nativeFormats, hasJsQR }) {
+    if (!hasGetUserMedia) return null;
+    // `BarcodeDetector` puede existir y NO saber leer QR: algunos Android lo traen
+    // solo para códigos de barras. Sin esta comprobación la cámara se ve y ningún
+    // código se lee nunca.
+    const nativoSirve = hasBarcodeDetector
+      && (nativeFormats == null || (Array.isArray(nativeFormats) && nativeFormats.includes('qr_code')));
+    if (nativoSirve) return 'native';
+    if (hasJsQR) return 'jsqr';
+    return null;
+  }
+
+  /**
+   * El aviso según POR QUÉ no abrió la cámara. Un permiso negado se arregla en diez
+   * segundos dándolo en el navegador; decir "este teléfono no puede" manda a teclear
+   * toda la noche a quien solo tocó "No permitir" una vez.
+   */
+  function cameraErrorKey(err) {
+    const nombre = err && err.name;
+    if (nombre === 'NotAllowedError' || nombre === 'SecurityError') return 'scan.camDenied';
+    if (nombre === 'NotFoundError' || nombre === 'OverconstrainedError') return 'scan.camNotFound';
+    if (nombre === 'NotReadableError' || nombre === 'AbortError') return 'scan.camBusy';
+    return 'scan.noCamera';
+  }
+
+  /**
+   * Cuántos cuadros seguidos pueden fallar al leerse antes de dar el lector nativo por
+   * roto. Un cuadro borroso falla y es normal; treinta seguidos (unos nueve segundos)
+   * ya no es mala suerte, es que ese lector no sirve en este teléfono.
+   */
+  const MAX_DETECT_ERRORS = 30;
+
+  /** El tamaño del cuadro que se le pasa a jsQR: más grande es más lento, no más fiable. */
+  function frameSize(videoWidth, videoHeight, max = 640) {
+    const w = Number(videoWidth) || 0;
+    const h = Number(videoHeight) || 0;
+    if (!w || !h) return null;
+    const escala = Math.min(1, max / Math.max(w, h));
+    return { width: Math.round(w * escala), height: Math.round(h * escala) };
+  }
+
   const METHODS = ['cash', 'card', 'transfer', 'courtesy'];
   const methodKey = (m) => `sell.m_${m}`;
 
@@ -263,5 +316,6 @@
     RESULTS, TONES, view, admissionPayload, total, sellBlocker, canSellExtra, METHODS, methodKey,
     ID_DOCUMENTS, documentKey, idCheckPayload, idRejectionPayload, scanBlocker,
     idCheckRemaining, lookupBlocker, contingencyPayload, contingencyBlocker, lookupSummary,
+    cameraMode, cameraErrorKey, MAX_DETECT_ERRORS, frameSize,
   };
 }));
