@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v63';
+const VERSION = 'ev2-v64';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -64,6 +64,8 @@ const SHELL = [
   'js/ui.js',
   // Promociones por evento (D102): el precio de oferta en las listas.
   'js/promotions.js',
+  // Precio y personas por mesa VIP (D103): la pantalla del gerente.
+  'js/table-pricing.js',
   // Mi consumo (D101): el personal pide para sí desde su teléfono.
   'consumo.html', 'js/consumo-screen.js', 'js/staff-order.js',
   // Las notificaciones (D90): el recuadro para activarlas y el sonido con la app abierta.

@@ -329,6 +329,7 @@
     staff: ['tab-staff'],
     staffcons: ['tab-staffcons'],
     promos: ['tab-promos'],
+    tableprice: ['tab-tableprice'],
     inventory: ['tab-inventory'],
     payouts: ['tab-payouts'],
     club: ['tab-club'],
@@ -356,6 +357,7 @@
     renderStaff();
     renderStaffCons();
     renderPromos();
+    renderTablePrices();
     renderPayouts();
     renderReports();
     renderCoverQuick();
@@ -4292,6 +4294,114 @@
     };
   }
 
+  // ---------------------------------------------------------------- precios de mesas (D103)
+  //
+  // Precio y personas propios de cada mesa VIP. Vacío = usa los de su zona. Lo escrito se
+  // guarda en `tpr.edits` (no en el DOM) para que un re-pintado no borre lo que se estaba
+  // tecleando; al guardar solo se mandan las mesas que cambiaron.
+
+  const tpr = { tables: [], zones: [], edits: new Map(), loaded: false };
+
+  async function loadTablePrices() {
+    const club = clubId();
+    try {
+      const [mesas, zonas] = await Promise.all([
+        api.get(`/nightclubs/${club}/tables`),
+        api.get(`/nightclubs/${club}/zone-pricing`),
+      ]);
+      tpr.tables = mesas.tables || [];
+      tpr.zones = zonas.zones || [];
+      tpr.edits = new Map();
+      tpr.loaded = true;
+    } catch (err) {
+      if (state.tab === 'tableprice') showError(err);
+    }
+    renderTablePrices();
+  }
+
+  const tprValue = (table, field) => {
+    const e = tpr.edits.get(table.id);
+    if (e) return e[field];
+    const v = field === 'price' ? table.vip_price : table.vip_capacity;
+    return v === null || v === undefined ? '' : String(field === 'price' ? Number(v) : v);
+  };
+
+  /** Lo que verá el cliente con lo que hay escrito ahora (aunque no esté guardado). */
+  function tprSees(table, zone) {
+    const price = EV2TablePricing.parseField('price', tprValue(table, 'price'));
+    const people = EV2TablePricing.parseField('people', tprValue(table, 'people'));
+    if (price.error || people.error) return '';
+    const eff = EV2TablePricing.effective(
+      { ...table, vip_price: price.value, vip_capacity: people.value }, zone);
+    const z = t('tpr.fromZone');
+    return t('tpr.sees', {
+      price: `${money(eff.price, zone.currency)}${eff.priceFromTable ? '' : ` (${z})`}`,
+      people: `${eff.people}${eff.peopleFromTable ? '' : ` (${z})`}`,
+    });
+  }
+
+  function tprRefreshSave() {
+    const { changes, errors } = EV2TablePricing.diff(tpr.tables, tpr.edits);
+    $('btn-tpr-save').disabled = changes.length === 0 || errors.length > 0;
+    const err = $('tpr-error');
+    err.hidden = errors.length === 0;
+    if (errors.length) err.textContent = t(`tpr.bad.${errors[0].field}`);
+  }
+
+  function renderTablePrices() {
+    if (!$('tab-tableprice')) return;
+    const grupos = EV2TablePricing.groupByZone(tpr.tables, tpr.zones);
+    $('tpr-empty').hidden = grupos.length > 0 || !tpr.loaded;
+    $('tpr-list').innerHTML = grupos.map((g) => `
+      <div class="card rounded-xl p-4 space-y-3" data-tpr-zone="${escape(g.section)}">
+        <div>
+          <p class="font-display">${escape(g.zone.display_name || g.section)}</p>
+          <p class="text-xs text-white/50">${escape(t('tpr.zone', {
+    price: money(g.zone.base_price, g.zone.currency), people: g.zone.included_tickets,
+  }))}</p>
+        </div>
+        ${g.tables.map((tb) => `
+        <div class="rounded-lg border border-white/10 p-3 space-y-2" data-tpr-row="${escape(tb.id)}">
+          <p class="text-sm font-semibold">${escape(t('tpr.table', { n: tb.table_number || tb.code }))}</p>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="text-xs text-white/50">${escape(t('tpr.price'))}
+              <input class="field mt-1" inputmode="decimal" data-tpr-price="${escape(tb.id)}" value="${escape(tprValue(tb, 'price'))}" placeholder="${escape(t('tpr.sameAsZone'))}">
+            </label>
+            <label class="text-xs text-white/50">${escape(t('tpr.people'))}
+              <input class="field mt-1" inputmode="numeric" data-tpr-people="${escape(tb.id)}" value="${escape(tprValue(tb, 'people'))}" placeholder="${escape(t('tpr.sameAsZone'))}">
+            </label>
+          </div>
+          <p class="text-xs text-white/60" data-role="tpr-sees">${escape(tprSees(tb, g.zone))}</p>
+        </div>`).join('')}
+      </div>`).join('');
+
+    const onEdit = (id) => {
+      const row = document.querySelector(`[data-tpr-row="${CSS.escape(id)}"]`);
+      tpr.edits.set(id, {
+        price: row.querySelector('[data-tpr-price]').value,
+        people: row.querySelector('[data-tpr-people]').value,
+      });
+      const tb = tpr.tables.find((x) => x.id === id);
+      const zone = tpr.zones.find((z) => z.section === tb.section);
+      row.querySelector('[data-role="tpr-sees"]').textContent = tprSees(tb, zone);
+      tprRefreshSave();
+    };
+    document.querySelectorAll('[data-tpr-price]').forEach((el) => { el.oninput = () => onEdit(el.dataset.tprPrice); });
+    document.querySelectorAll('[data-tpr-people]').forEach((el) => { el.oninput = () => onEdit(el.dataset.tprPeople); });
+    tprRefreshSave();
+
+    $('btn-tpr-save').onclick = async () => {
+      const { changes, errors } = EV2TablePricing.diff(tpr.tables, tpr.edits);
+      if (errors.length || changes.length === 0) return;
+      const listo = ocupado($('btn-tpr-save'), 'prn.saving');
+      try {
+        await api.put(`/nightclubs/${clubId()}/tables/vip-pricing`, { tables: changes });
+        toast(t('tpr.saved', { n: changes.length }), 'ok');
+        await loadTablePrices();
+      } catch (err) { showError(err); } finally { listo(); }
+    };
+  }
+
   // ---------------------------------------------------------------- promociones (D102)
   //
   // Bebidas en oferta para UNA noche. El precio lo calcula el servidor al crear el pedido;
@@ -4416,6 +4526,7 @@
     rps: () => loadRps(),
     staffcons: () => loadStaffCons(),
     promos: () => loadPromos(),
+    tableprice: () => loadTablePrices(),
   };
 
   function goTab(tab) {

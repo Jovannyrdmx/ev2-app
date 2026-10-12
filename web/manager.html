@@ -125,6 +125,7 @@
       <button data-tab="payouts" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-wallet mgr-icon"></i><span data-i18n="mgr.tabPayouts">Pagos al personal</span></button>
       <p class="mgr-group" data-i18n="mgr.groupSetup">Configuración</p>
       <button data-tab="club" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-gear mgr-icon"></i><span data-i18n="mgr.tabClub">Club</span></button>
+      <button data-tab="tableprice" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-chair mgr-icon"></i><span data-i18n="tpr.tab">Precios de mesas</span></button>
       <button data-tab="exit" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-taxi mgr-icon"></i><span data-i18n="mgr.tabExit">Salida segura</span></button>
       <button data-tab="parking" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-car mgr-icon"></i><span data-i18n="mgr.tabValet">Valet</span></button>
       <button data-tab="printing" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-print mgr-icon"></i><span data-i18n="prn.tab">Impresoras</span></button>
@@ -443,6 +444,23 @@
           <p id="prm-error" class="text-xs text-red-300" hidden></p>
           <button id="btn-prm-add" type="submit" class="ev2-button rounded-lg px-4 py-2 text-sm" data-i18n="prm.add">Crear promoción</button>
         </form>
+      </div>
+
+      <!--
+        Precio y personas por mesa VIP (D103): una mesa con dato propio manda sobre su zona;
+        vacío, usa el de la zona. Solo se mandan las mesas que cambiaron.
+      -->
+      <div id="tab-tableprice" class="space-y-4" hidden>
+        <div class="card rounded-xl p-4 space-y-2">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tpr.title">Precio y personas por mesa</p>
+          <p class="text-[11px] text-white/40" data-i18n="tpr.help">Deja vacío un campo para que la mesa use el de su zona. Si pones un precio para una noche en particular en la zona, ese precio manda sobre el de la mesa.</p>
+          <p id="tpr-error" class="text-xs text-red-300" hidden></p>
+          <p id="tpr-empty" class="text-sm text-white/50" hidden data-i18n="tpr.empty">No hay mesas con precio de zona.</p>
+        </div>
+        <div id="tpr-list" class="space-y-4"></div>
+        <div class="sticky bottom-2">
+          <button id="btn-tpr-save" class="ev2-button rounded-lg px-4 py-3 text-sm w-full" disabled data-i18n="tpr.save">Guardar cambios</button>
+        </div>
       </div>
 
       <div id="tab-payouts" class="space-y-3" hidden>
@@ -1335,6 +1353,7 @@
 <script src="js/warehouse.js"></script>
 <script src="js/terminal-charge.js"></script>
 <script src="js/promotions.js"></script>
+<script src="js/table-pricing.js"></script>
 <script src="js/manager.js"></script>
 <script src="js/staff-admin.js"></script>
 <script src="js/payouts.js"></script>

@@ -432,6 +432,71 @@ router.put('/nightclubs/:nightclubId/tables/layout',
     }
   }));
 
+// Gerente: precio y personas propios de cada mesa VIP (D103). Solo esos dos datos: no toca
+// el plano, asi que no sube la version del diseno. `null` quita el dato y la mesa vuelve a
+// usar el de su zona.
+const vipItem = z.object({
+  id: uuid,
+  vip_price: z.number().min(0).max(1000000).nullable(),
+  vip_capacity: z.number().int().positive().max(50).nullable(),
+});
+
+router.put('/nightclubs/:nightclubId/tables/vip-pricing',
+  requireRole('manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({ tables: z.array(vipItem).min(1).max(200) }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const ids = req.body.tables.map((t) => t.id);
+    if (new Set(ids).size !== ids.length) throw ApiError.badRequest('Una mesa viene repetida');
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const found = await client.query(
+        `SELECT id, code, vip_price::text AS vip_price, vip_capacity
+           FROM tables WHERE nightclub_id = $1 AND id = ANY($2::uuid[]) AND active
+          ORDER BY id FOR UPDATE`,
+        [nightclubId, ids]);
+      if (found.rowCount !== ids.length) throw ApiError.notFound('Una o más mesas no existen');
+      const before = new Map(found.rows.map((r) => [r.id, r]));
+
+      let changed = 0;
+      for (const t of req.body.tables) {
+        const prev = before.get(t.id);
+        const same = (prev.vip_price === null ? null : Number(prev.vip_price)) === t.vip_price
+          && prev.vip_capacity === t.vip_capacity;
+        if (same) continue;
+        await client.query(
+          'UPDATE tables SET vip_price = $3, vip_capacity = $4 WHERE id = $2 AND nightclub_id = $1',
+          [nightclubId, t.id, t.vip_price, t.vip_capacity]);
+        await client.query(
+          `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, before, after, ip)
+           VALUES ($1,$2,'table.vip_pricing','table',$3,$4,$5,$6)`,
+          [nightclubId, req.user.id, t.id,
+            JSON.stringify({ code: prev.code, vip_price: prev.vip_price, vip_capacity: prev.vip_capacity }),
+            JSON.stringify({ vip_price: t.vip_price, vip_capacity: t.vip_capacity }), req.ip || null]);
+        changed += 1;
+      }
+      if (changed > 0) {
+        await events.publish({
+          nightclubId, type: 'table_updated', client,
+          audience: { roles: ['waiter', 'hostess', 'manager', 'admin'] },
+          payload: { action: 'vip_pricing_changed', count: changed },
+        });
+      }
+      await client.query('COMMIT');
+      res.json({ updated: changed });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }));
+
 // ---------------------------------------------------------------------------
 // Puntos de entrega
 //
