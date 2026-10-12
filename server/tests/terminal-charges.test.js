@@ -740,10 +740,27 @@ describe('Dar de alta una terminal nunca deja al gerente atorado', () => {
     const ahora = await api().patch(url).set(await tokenDe(manager)).send({ set_pdv: true });
     expect(ahora.status).toBe(200);
     expect(ahora.body.terminal.operating_mode).toBe('PDV');
-    // PDV is ready, but test mode must never send an order to physical hardware.
+    // Ya en PDV, la Point física cobra también con credenciales de prueba: así se
+    // ensaya el aparato real con el vendedor de prueba antes de pasar a producción.
+    mpFake.calls = [];
     const charge = await empezar(await cobroPendiente(), t);
-    expect(charge.status).toBe(422);
-    expect(charge.body.error.message).toMatch(/terminal virtual/);
+    expect(charge.status).toBe(201);
+    const orden = mpFake.calls.find((c) => c.path === '/v1/orders');
+    expect(orden.body.config.point.terminal_id).toBe(FISICA);
+  });
+
+  it('con credenciales reales la terminal virtual NO cobra, y no se le pide nada a Mercado Pago', async () => {
+    const t = await altaTerminal('Virtual');
+    process.env.MERCADOPAGO_ENV = 'live';
+    try {
+      mpFake.calls = [];
+      const charge = await empezar(await cobroPendiente(), t);
+      expect(charge.status).toBe(422);
+      expect(charge.body.error.message).toMatch(/terminal virtual solo sirve con credenciales de prueba/);
+      expect(mpFake.calls.filter((c) => c.path === '/v1/orders')).toHaveLength(0);
+    } finally {
+      process.env.MERCADOPAGO_ENV = 'test';
+    }
   });
 
   it('un nombre repetido se rechaza ANTES de tocar la terminal', async () => {
@@ -1182,11 +1199,14 @@ describe('Point: notification and recovery safety', () => {
     expect((await empezar(tx, terminal)).body.charge.id).toBe(started.body.charge.id);
   });
 
-  it('cannot charge a physical terminal in test mode', async () => {
+  it('a physical terminal can be charged in test mode (test seller on the real Point)', async () => {
     const terminal = await altaTerminal('Physical', 'NEWLAND_N950__REALDEVICE');
     const tx = await cobroPendiente();
-    expect((await empezar(tx, terminal)).status).toBe(422);
-    expect(mpFake.calls.filter((c) => c.method === 'POST' && c.path === '/v1/orders')).toHaveLength(0);
+    mpFake.calls = [];
+    expect((await empezar(tx, terminal)).status).toBe(201);
+    const orders = mpFake.calls.filter((c) => c.method === 'POST' && c.path === '/v1/orders');
+    expect(orders).toHaveLength(1);
+    expect(orders[0].body.config.point.terminal_id).toBe('NEWLAND_N950__REALDEVICE');
   });
 
   it('does not allow another club to inspect a charge', async () => {
