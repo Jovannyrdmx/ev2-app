@@ -11,6 +11,7 @@ const { randomUUID } = require('crypto');
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { managerPin } = require('./helpers/voucher');
 
 let club; let manager; let bartender; let guest; let waiter; let table;
 
@@ -275,12 +276,33 @@ describe('Conteo físico: la diferencia es el dato', () => {
     expect(mov.body.movements[0]).toMatchObject({ kind: 'waste', reason: 'Se cayó una botella' });
   });
 
-  it('el cantinero SÍ reporta la merma de su barra: es donde se rompen las botellas', async () => {
+  it('el cantinero SÍ reporta la merma de su barra, con el PIN de un gerente (D108)', async () => {
     const { whisky } = await barraBuchanans();
+    const { pin, manager: autoriza } = await managerPin(club.id);
     const res = await api().post(url(`/supplies/${whisky.id}/adjust`)).set(auth(bartender))
-      .send({ location_id: club.bar_id, kind: 'waste', quantity: 750, reason: 'Se cayó' });
+      .send({ location_id: club.bar_id, kind: 'waste', quantity: 750, reason: 'Se cayó', manager_pin: pin });
     expect(res.status).toBe(200);
     expect(res.body.supply.stock).toBe(750);
+    const { rows } = await pool.query(
+      `SELECT authorized_by, created_by FROM supply_movements WHERE supply_id = $1 AND kind = 'waste'`, [whisky.id]);
+    expect(rows).toEqual([{ authorized_by: autoriza.id, created_by: bartender.id }]);
+  });
+
+  it.each(['waste', 'courtesy', 'issue'])(
+    'sin el PIN de un gerente el cantinero no da de baja nada (%s)', async (kind) => {
+      const { whisky } = await barraBuchanans();
+      const res = await api().post(url(`/supplies/${whisky.id}/adjust`)).set(auth(bartender))
+        .send({ location_id: club.bar_id, kind, quantity: 750, reason: 'Se cayó' });
+      expect(res.status).toBe(403);
+      expect(await f.supplyStock(whisky.id)).toBe(1500);
+    });
+
+  it('con un PIN que no es de gerencia tampoco', async () => {
+    const { whisky } = await barraBuchanans();
+    const res = await api().post(url(`/supplies/${whisky.id}/adjust`)).set(auth(bartender))
+      .send({ location_id: club.bar_id, kind: 'courtesy', quantity: 750, reason: 'Para el DJ', manager_pin: '123456' });
+    expect(res.status).toBe(403);
+    expect(await f.supplyStock(whisky.id)).toBe(1500);
   });
 
   it('pero NO corrige un saldo: por ahí se tapa un faltante', async () => {

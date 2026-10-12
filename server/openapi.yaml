@@ -9887,7 +9887,9 @@ paths:
         robo. Merma, cortesía y salida SIEMPRE restan, aunque el número venga en
         positivo. La corrección (`adjustment`) es la única que puede subir la existencia
         sin mercancía, y por eso solo la autoriza la gerencia. El cantinero puede
-        reportar la merma de su barra, que es donde se rompen las botellas.
+        reportar la merma de su barra, que es donde se rompen las botellas, pero con el
+        PIN de un gerente (`manager_pin`, D108): sin él 403. Quien autorizó queda en el
+        kardex (`authorized_by`).
       parameters:
         - { $ref: '#/components/parameters/NightclubId' }
         - { $ref: '#/components/parameters/SupplyId' }
@@ -14890,6 +14892,10 @@ components:
         quantity: { type: number }
         packages: { type: number }
         reason: { type: string, minLength: 3, maxLength: 200 }
+        manager_pin:
+          type: string
+          pattern: '^\d{6}$'
+          description: Obligatorio cuando quien da de baja es un bartender (D108).
 
     SupplyMovement:
       type: object

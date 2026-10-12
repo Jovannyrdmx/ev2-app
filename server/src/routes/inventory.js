@@ -23,6 +23,7 @@ const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const inventory = require('../services/inventory');
+const managerAuth = require('../services/manager-auth');
 const receiving = require('../services/receiving');
 const receiptPhotos = require('./receipts');
 const substitutions = require('../services/substitutions');
@@ -655,6 +656,9 @@ router.post('/nightclubs/:nightclubId/supplies/:supplyId/adjust',
       quantity: z.number().refine((n) => n !== 0, 'La cantidad no puede ser cero').optional(),
       packages: z.number().refine((n) => n !== 0, 'La cantidad no puede ser cero').optional(),
       reason: z.string().trim().min(3).max(200),
+      // El bartender no da de baja producto solo (D108): merma, cortesía o salida
+      // llevan el PIN de un gerente tecleado por él.
+      manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos').optional(),
     }).refine((b) => (b.quantity === undefined) !== (b.packages === undefined),
       { message: 'Captura la cantidad en presentaciones o en la unidad base, no en las dos' }),
   }),
@@ -666,6 +670,18 @@ router.post('/nightclubs/:nightclubId/supplies/:supplyId/adjust',
     if (b.kind === 'adjustment' && !['manager', 'admin'].includes(req.user.role)) {
       throw ApiError.forbidden('Una correccion de saldo la autoriza la gerencia');
     }
+    // Merma y cortesía sin control eran la forma de cuadrar el estante después de
+    // servir por fuera: la botella "se rompió". Al bartender se las autoriza un
+    // gerente (D108).
+    let autoriza = null;
+    if (req.user.role === 'bartender') {
+      if (!b.manager_pin) {
+        throw ApiError.forbidden('Para dar de baja producto necesitas el PIN de un gerente');
+      }
+      autoriza = await managerAuth.authorize(pool, {
+        nightclubId, pin: b.manager_pin, selfId: req.user.id, ip: req.ip,
+      });
+    }
     await inTransaction(async (client) => {
       await findLocation(client, nightclubId, b.location_id);
       const { rows } = await client.query(
@@ -675,7 +691,7 @@ router.post('/nightclubs/:nightclubId/supplies/:supplyId/adjust',
       const quantity = b.quantity !== undefined ? b.quantity : b.packages * Number(rows[0].package_size);
       return inventory.adjust(client, {
         nightclubId, supplyId, locationId: b.location_id, kind: b.kind, quantity,
-        reason: b.reason, userId: req.user.id,
+        reason: b.reason, userId: req.user.id, authorizedBy: autoriza ? autoriza.id : null,
       });
     });
     const full = await pool.query(`${SUPPLY_SELECT} WHERE s.id = $1`, [supplyId]);

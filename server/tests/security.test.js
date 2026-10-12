@@ -26,6 +26,7 @@ const { randomUUID } = require('crypto');
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
 const f = require('./helpers/factories');
+const { managerPin } = require('./helpers/voucher');
 
 let club; let otro;
 let manager; let bartender; let waiter; let warehouse; let guest; let hostess;
@@ -157,7 +158,9 @@ describe('Cada rol hace solo lo suyo', () => {
   it('el cantinero VE existencias y reporta merma de su barra, y nada más', async () => {
     expect((await api().get(url('/supplies')).set(auth(bartender))).status).toBe(200);
     expect((await api().post(url(`/supplies/${whisky.id}/adjust`)).set(auth(bartender))
-      .send({ location_id: club.bar_id, kind: 'waste', quantity: 30, reason: 'Se cayó' })).status).toBe(200);
+      .send({ location_id: club.bar_id, kind: 'waste', quantity: 30, reason: 'Se cayó',
+        // La merma del cantinero la autoriza un gerente (D108).
+        manager_pin: (await managerPin(club.id)).pin })).status).toBe(200);
 
     const prohibido = [
       ['post', `/supplies/${whisky.id}/receive`, { location_id: club.bar_id, packages: 1 }],
