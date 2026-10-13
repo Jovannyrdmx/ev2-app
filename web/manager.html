@@ -623,6 +623,38 @@
         </div>
 
         <!--
+          Anticipos por transferencia (D113). Arriba: los comprobantes que mandaron los
+          clientes al reservar, para aprobarlos contra el banco (tambien los ve y aprueba
+          la anfitriona en la puerta). Abajo: las cuentas que el cliente ve para transferir.
+        -->
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="dpo.queueTitle">Anticipos por revisar</p>
+            <button id="btn-depq-refresh" class="card rounded-lg px-3 py-2 text-xs" data-i18n="dpo.refresh">Actualizar</button>
+          </div>
+          <div id="depq-list" class="space-y-2"></div>
+        </div>
+
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="mpo.title">Cuentas para transferir el anticipo</p>
+          <p class="text-[11px] text-white/40 leading-snug" data-i18n="mpo.note">Es lo que el cliente ve al reservar. Revisa cada número dos veces: un dígito mal es dinero que llega a otra persona.</p>
+          <div id="mpo-list" class="space-y-2"></div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <select id="mpo-method" class="px-3 py-3 rounded-xl bg-white/5 border border-white/10">
+              <option value="spei" data-i18n="dpo.m_spei">SPEI (CLABE)</option>
+              <option value="bank_transfer" data-i18n="dpo.m_bank_transfer">Transferencia / depósito</option>
+              <option value="zelle" data-i18n="dpo.m_zelle">Zelle</option>
+              <option value="cash_app" data-i18n="dpo.m_cash_app">Cash App</option>
+            </select>
+            <input id="mpo-label" class="px-3 py-3 rounded-xl bg-white/5 border border-white/10" maxlength="80" data-i18n-placeholder="mpo.labelPh" placeholder="Banco (ej. BBVA)">
+            <input id="mpo-destination" class="px-3 py-3 rounded-xl bg-white/5 border border-white/10 sm:col-span-2 tracking-wider" maxlength="120" autocomplete="off" data-i18n-placeholder="mpo.destPh" placeholder="CLABE, número de cuenta o usuario">
+            <textarea id="mpo-instructions" rows="2" class="px-3 py-3 rounded-xl bg-white/5 border border-white/10 sm:col-span-2" maxlength="2000" data-i18n-placeholder="mpo.instPh" placeholder="Beneficiario y lo que el cliente debe poner en el concepto"></textarea>
+          </div>
+          <p id="mpo-error" class="text-sm text-red-300" hidden></p>
+          <button id="btn-mpo-add" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="mpo.add">Agregar cuenta</button>
+        </div>
+
+        <!--
           Las terminales del club (D47). Va ARRIBA de todo lo demas en esta pestana a
           proposito: es lo primero que hay que hacer para poder cobrar con tarjeta, y
           una terminal sin dar de alta no da ningun error visible -- simplemente no
@@ -1367,6 +1399,8 @@
 <script src="js/password-gate.js"></script>
 <script src="js/warehouse.js"></script>
 <script src="js/terminal-charge.js"></script>
+<script src="js/deposit.js"></script>
+<script src="js/deposit-review.js"></script>
 <script src="js/promotions.js"></script>
 <script src="js/table-pricing.js"></script>
 <script src="js/manager.js"></script>

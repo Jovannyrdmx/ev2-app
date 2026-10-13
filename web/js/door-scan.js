@@ -42,6 +42,8 @@
     // Falta la revisión de identificación, o no sirve. Ámbar: se arregla
     // volviendo a pedir la INE, y el pase NO se gastó.
     no_id_check: { tone: 'warn', key: 'scan.noIdCheck' },
+    // Pagó el anticipo pero falta el resto (D113). Ámbar: se cobra ahí mismo y entra.
+    balance_due: { tone: 'warn', key: 'scan.balanceDue' },
     cancelled: { tone: 'bad', key: 'scan.cancelled' },
     revoked: { tone: 'bad', key: 'scan.revoked' },
     forged: { tone: 'bad', key: 'scan.forged' },
@@ -90,6 +92,10 @@
       idCheckReason: r.id_check && r.id_check.ok === false ? r.id_check.reason : null,
       admitted: r.admitted === true,
       seated: r.seated === true,
+      // Lo que falta de la mesa y, si no ha pagado el anticipo, el comprobante que
+      // espera revisión (D113).
+      balance: r.balance && Number(r.balance.due) > 0 ? r.balance : null,
+      depositReview: r.deposit_review || null,
     };
   }
 

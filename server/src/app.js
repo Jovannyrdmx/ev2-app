@@ -29,6 +29,7 @@ const waiterRoutes = require('./routes/waiters');
 const promotionsRoutes = require('./routes/promotions');
 const tableRoutes = require('./routes/tables');
 const reservationRoutes = require('./routes/reservations');
+const reservationDepositRoutes = require('./routes/reservation-deposits');
 const eventRoutes = require('./routes/events');
 const flirtRoutes = require('./routes/flirts');
 const employeeRoutes = require('./routes/employees');
@@ -241,6 +242,7 @@ function createApp() {
   app.use('/api', promotionsRoutes);
   app.use('/api', tableRoutes);
   app.use('/api', reservationRoutes);
+  app.use('/api', reservationDepositRoutes);
   app.use('/api', doorRoutes);
   app.use('/api', passRoutes);
   app.use('/api', eventRoutes);

@@ -5,7 +5,7 @@
  * y `EV2Roles`. Las decisiones viven en `staff-floor.js` y están probadas ahí.
  */
 /* global EV2Drawer, EV2Push, EV2TerminalCharge, EV2ShiftCut, EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan,
-          EV2Client, EV2DrinkArt, EV2OrderTaking */
+          EV2Client, EV2DrinkArt, EV2OrderTaking, EV2Deposit */
 (function () {
   'use strict';
   // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
@@ -220,6 +220,7 @@
           (d) => { state.reservations = d.reservations || []; })
         : Promise.resolve(),
       isDoorRole() ? loadDoorSummary() : Promise.resolve(),
+      isDoorRole() ? loadDepositReviews() : Promise.resolve(),
       canConfirmExit() ? loadDepartures() : Promise.resolve(),
       // Los covers del club. Sin catálogo la puerta sigue vendiendo con el importe
       // tecleado (y el servidor lo marca como tecleado); con catálogo, el precio deja
@@ -380,6 +381,18 @@
     $('btn-sell-extra').disabled = !EV2DoorScan.canSellExtra(v);
     renderVenta();
 
+    // El resto de la mesa y el comprobante por revisar (D113).
+    const saldo = $('scan-balance');
+    saldo.hidden = !(v.result === 'balance_due' && v.balance);
+    if (!saldo.hidden) {
+      $('scan-balance-amount').textContent = EV2Format.money(v.balance.due, v.balance.currency);
+      $('scan-balance-cash').value = '';
+      $('scan-balance-change').textContent = '';
+      $('scan-balance-error').hidden = true;
+      $('btn-balance-card').hidden = !puertaTerminal();
+    }
+    $('btn-scan-deposit').hidden = !(v.result === 'unpaid' && v.depositReview);
+
     if (v.ok) {
       toast(t('scan.letIn', { name: v.guest || '' }), 'ok');
       try { if (navigator.vibrate) navigator.vibrate(120); } catch { /* algunos lo bloquean */ }
@@ -421,7 +434,15 @@
       // esa identificación ya se miró y la siguiente persona necesita la suya.
       // Solo se conserva cuando lo que falló fue la propia revisión, para que el
       // guardia pueda leer el motivo antes de volver a pedirla.
-      if (!(data.id_check && data.id_check.ok === false)) limpiarIdCheck();
+      //
+      // Y cuando la mesa solo tiene que PAGAR (el resto, o un comprobante que se
+      // revisa ahí mismo, D113): el servidor no gastó ni el pase ni la revisión, y al
+      // cobrar se vuelve a escanear sola con la misma identificación.
+      const resultado = data.pass && data.pass.result;
+      const esperaPago = resultado === 'balance_due'
+        || (resultado === 'unpaid' && data.deposit_review);
+      scan.pendingCode = esperaPago ? limpio : null;
+      if (!esperaPago && !(data.id_check && data.id_check.ok === false)) limpiarIdCheck();
     } catch (err) {
       showError(err);
     } finally {
@@ -841,6 +862,103 @@
     }
   }
 
+  // ------------------------------------------------- el resto de la mesa (D113)
+
+  /** Después de cobrar (o aprobar el anticipo): se vuelve a escanear el mismo pase. */
+  async function reescanear() {
+    const code = scan.pendingCode;
+    if (!code) return;
+    if (idc.check) { await leerPase(code); return; }
+    scan.pendingCode = null;
+    toast(t('bal.rescan'), 'ok');
+  }
+
+  function renderCambio() {
+    const v = scan.last;
+    if (!v || !v.balance) return;
+    const c = EV2Deposit.cashChange(v.balance.due, $('scan-balance-cash').value.trim());
+    $('scan-balance-change').textContent = c.ok
+      ? t('bal.change', { amount: EV2Format.money(c.change, v.balance.currency) })
+      : t('bal.missing', { amount: EV2Format.money(c.missing, v.balance.currency) });
+  }
+
+  async function cobrarResto(method) {
+    const v = scan.last;
+    if (!v || !v.balance) return;
+    const error = $('scan-balance-error');
+    error.hidden = true;
+    const body = { method, client_request_id: state.balanceRequestId || (state.balanceRequestId = EV2.uuid()) };
+    if (method === 'cash') {
+      const recibido = $('scan-balance-cash').value.trim();
+      const c = EV2Deposit.cashChange(v.balance.due, recibido);
+      if (!c.ok) {
+        error.textContent = t('bal.missing', { amount: EV2Format.money(c.missing, v.balance.currency) });
+        error.hidden = false;
+        return;
+      }
+      if (recibido) body.cash_received = Number(recibido);
+      if (!(await ask(t('bal.confirmCash', {
+        amount: EV2Format.money(v.balance.due, v.balance.currency),
+        change: EV2Format.money(c.change, v.balance.currency),
+      })))) return;
+    } else {
+      delete body.client_request_id;
+    }
+    const botones = [$('btn-balance-cash'), $('btn-balance-card')];
+    botones.forEach((b) => { b.disabled = true; });
+    try {
+      const res = await api.post(
+        `/nightclubs/${clubId()}/door/reservations/${v.balance.reservation_id}/balance`, body);
+      if (method === 'point') {
+        state.balancePoint = { chargeId: res.charge.id };
+        sheet().watch(res.charge);
+        return;
+      }
+      state.balanceRequestId = null;
+      const partes = [t('bal.paid')];
+      if (res.change_given && Number(res.change_given) > 0) {
+        partes.push(t('sell.giveChange', { amount: EV2Format.money(res.change_given, v.balance.currency) }));
+      }
+      const cajon = EV2Drawer.notice(res.drawer);
+      if (cajon) partes.push(t(cajon.key));
+      toast(partes.join(' '), cajon ? 'warn' : 'ok', Number(res.change_given) > 0 ? 9000 : 4000);
+      $('scan-balance').hidden = true;
+      await reescanear();
+    } catch (err) {
+      error.textContent = EV2Format.errorMessage(err);
+      error.hidden = false;
+    } finally {
+      botones.forEach((b) => { b.disabled = false; });
+    }
+  }
+
+  // La cola de comprobantes en la puerta: la misma pieza que en el panel del gerente.
+  let depositoPuerta = null;
+  function colaDepositos() {
+    if (!depositoPuerta && window.EV2DepositReview && $('depr-list')) {
+      depositoPuerta = window.EV2DepositReview.create({
+        api, clubId, t, money: (a, c) => EV2Format.money(a, c || state.currency),
+        dateTime: (d) => EV2Format.dateTime(d), toast,
+        errorMessage: (e) => EV2Format.errorMessage(e),
+        container: $('depr-list'),
+        onChange: async (cambio) => {
+          $('btn-scan-deposit').hidden = true;
+          $('depr-card').hidden = depositoPuerta.count() === 0;
+          if (cambio.approved) await reescanear();
+        },
+      });
+    }
+    return depositoPuerta;
+  }
+  async function loadDepositReviews() {
+    const q = colaDepositos();
+    if (!q || !isDoorRole()) return;
+    try {
+      await q.load();
+      $('depr-card').hidden = q.count() === 0;
+    } catch { /* la cola no es lo único de la puerta: no tapa la pantalla con un error */ }
+  }
+
   // ------------------------------------------------- cover con la terminal (D100)
 
   /**
@@ -1191,6 +1309,15 @@
     if (limpio !== input.value) input.value = limpio;
   };
   $('btn-scan-toggle').onclick = () => (scan.stream ? pararCamara() : arrancarCamara());
+  $('scan-balance-cash').oninput = renderCambio;
+  $('btn-balance-cash').onclick = () => cobrarResto('cash');
+  $('btn-balance-card').onclick = () => cobrarResto('point');
+  $('btn-scan-deposit').onclick = async () => {
+    const v = scan.last;
+    const q = colaDepositos();
+    if (!v || !v.depositReview || !q) return;
+    if (!(await q.open(v.depositReview.payment_id))) toast(t('dpo.alreadyReviewed'), 'ok');
+  };
   $('btn-idc-accept').onclick = aceptarIdentificacion;
   $('btn-idc-reject').onclick = () => { idc.rejecting = !idc.rejecting; renderIdCheck(); };
   $('look-form').onsubmit = (ev) => { ev.preventDefault(); buscarSinCodigo($('look-q').value); };
@@ -1833,6 +1960,14 @@
         errorMessage: (err) => EV2Format.errorMessage(err),
         confirm: (texto) => ask(texto),
         onPaid: async (charge) => {
+          // El resto de una mesa (D113): pagado, se vuelve a escanear su pase.
+          if (state.balancePoint && state.balancePoint.chargeId === charge.id) {
+            state.balancePoint = null;
+            $('scan-balance').hidden = true;
+            toast(t('bal.paidCard'), 'ok');
+            await reescanear();
+            return;
+          }
           // El cover de la puerta (D100): la tarjeta pasó, ahora se asienta la entrada.
           if (state.doorPoint && state.doorPoint.chargeId === charge.id) {
             await asentarPoint(state.doorPoint);
@@ -1841,7 +1976,7 @@
           toast(t('take.charged'), 'ok');
           await Promise.all([loadOrders(), loadTables()]);
         },
-        onClose: () => { if (!state.doorPoint) closeTake(); },
+        onClose: () => { if (!state.doorPoint && !state.balancePoint) closeTake(); },
       });
     }
     return terminalSheet;

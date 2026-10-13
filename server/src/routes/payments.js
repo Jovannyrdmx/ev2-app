@@ -39,6 +39,18 @@ function isStaff(user) {
   return isManager(user) || STAFF_ROLES.includes(user.role);
 }
 
+/**
+ * Quién aprueba un pago declarado. El gerente, todos. La anfitriona, solo el anticipo
+ * de una reservación (D113): es quien recibe a esa mesa en la puerta y la que ve llegar
+ * el comprobante. Cualquier otro pago manual sigue siendo cosa del gerente con el
+ * estado de cuenta enfrente.
+ */
+function assertCanReview(user, payment) {
+  if (isManager(user)) return;
+  if (user.role === 'hostess' && payment.transaction_type === 'reservation_deposit') return;
+  throw ApiError.forbidden('Este pago lo revisa el gerente');
+}
+
 router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
 
 // ------------------------------------------------------------------ providers
@@ -405,7 +417,7 @@ router.get('/nightclubs/:nightclubId/manual-payments/:paymentId',
   }));
 
 router.post('/nightclubs/:nightclubId/manual-payments/:paymentId/confirm',
-  requireRole('manager'),
+  requireRole('manager', 'hostess'),
   validate({ params: z.object({ nightclubId: uuid, paymentId: uuid }) }),
   asyncHandler(async (req, res) => {
     const { nightclubId, paymentId } = req.params;
@@ -414,12 +426,14 @@ router.post('/nightclubs/:nightclubId/manual-payments/:paymentId/confirm',
     try {
       await client.query('BEGIN');
       const found = await client.query(
-        `SELECT id, transaction_id, method, amount::text AS amount, currency, status,
-                declared_by, on_behalf_of, reference
-           FROM manual_payments WHERE id = $1 AND nightclub_id = $2 FOR UPDATE`,
+        `SELECT p.id, p.transaction_id, p.method, p.amount::text AS amount, p.currency, p.status,
+                p.declared_by, p.on_behalf_of, p.reference, t.type AS transaction_type
+           FROM manual_payments p JOIN transactions t ON t.id = p.transaction_id
+          WHERE p.id = $1 AND p.nightclub_id = $2 FOR UPDATE OF p`,
         [paymentId, nightclubId]);
       if (found.rowCount === 0) throw ApiError.notFound('Pago no encontrado');
       const payment = found.rows[0];
+      assertCanReview(req.user, payment);
       if (payment.status !== 'declared') {
         throw ApiError.conflict(`El pago ya está '${payment.status}'`);
       }
@@ -449,7 +463,7 @@ router.post('/nightclubs/:nightclubId/manual-payments/:paymentId/confirm',
   }));
 
 router.post('/nightclubs/:nightclubId/manual-payments/:paymentId/reject',
-  requireRole('manager'),
+  requireRole('manager', 'hostess'),
   validate({
     params: z.object({ nightclubId: uuid, paymentId: uuid }),
     body: z.object({ reason: z.string().trim().min(5).max(200) }),
@@ -461,11 +475,14 @@ router.post('/nightclubs/:nightclubId/manual-payments/:paymentId/reject',
     try {
       await client.query('BEGIN');
       const found = await client.query(
-        `SELECT id, transaction_id, status, declared_by, on_behalf_of
-           FROM manual_payments WHERE id = $1 AND nightclub_id = $2 FOR UPDATE`,
+        `SELECT p.id, p.transaction_id, p.status, p.declared_by, p.on_behalf_of,
+                t.type AS transaction_type
+           FROM manual_payments p JOIN transactions t ON t.id = p.transaction_id
+          WHERE p.id = $1 AND p.nightclub_id = $2 FOR UPDATE OF p`,
         [paymentId, nightclubId]);
       if (found.rowCount === 0) throw ApiError.notFound('Pago no encontrado');
       payment = found.rows[0];
+      assertCanReview(req.user, payment);
       if (payment.status !== 'declared') throw ApiError.conflict(`El pago ya está '${payment.status}'`);
 
       await client.query(

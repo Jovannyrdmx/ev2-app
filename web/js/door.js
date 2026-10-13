@@ -167,7 +167,9 @@
    * viaja en `event_type`; `type` siempre vale 'event'.
    */
   const DOOR_EVENTS = ['reservation_created', 'reservation_cancelled', 'reservation_confirmed',
-    'reservation_seated', 'reservation_completed', 'reservation_no_show'];
+    'reservation_seated', 'reservation_completed', 'reservation_no_show',
+    // Un comprobante de anticipo que llega o que alguien ya revisó (D113).
+    'deposit_proof_received', 'payment_rejected', 'payment_confirmed'];
 
   const affectsDoor = (message) => DOOR_EVENTS
     .includes(message && (message.event_type || message.type));

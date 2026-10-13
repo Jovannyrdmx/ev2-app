@@ -584,7 +584,7 @@
         <div id="dep-card" class="card rounded-xl p-4 space-y-3" hidden>
           <div id="dep-none" class="space-y-3" hidden>
             <div>
-              <p class="font-display text-lg" data-i18n="dep.title">¿Te vas sin taxi?</p>
+              <p class="font-display text-lg" data-i18n="dpo.title">¿Te vas sin taxi?</p>
               <p class="text-sm text-white/60" data-i18n="dep.hint">A pie o en el auto de alguien más: pide tu comprobante de salida y enséñalo a la hostess en la puerta.</p>
             </div>
             <button id="btn-dep-request" class="ev2-button w-full py-3 rounded-xl font-display"><i class="fa-solid fa-right-from-bracket mr-2"></i><span data-i18n="dep.request">Salgo por mi cuenta</span></button>
@@ -998,6 +998,71 @@
 
 
   <!--
+    El anticipo (D113). Se abre solo al reservar y desde "Mis reservaciones": cuánto
+    transferir, a qué cuenta (con copiar), y subir la foto del comprobante. Después dice
+    en qué va: en revisión, rechazado con el motivo, o confirmado con el crédito de
+    consumo de esa noche. El resto se paga al llegar, en la puerta.
+  -->
+  <div id="dpo-sheet" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/85 p-0 sm:p-5" hidden>
+    <div class="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 space-y-4" style="background:#12121f;border:1px solid rgba(255,255,255,.12);max-height:100dvh;overflow-y:auto">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="dpo.title">Anticipo de tu mesa</p>
+          <p id="dpo-where" class="font-display text-lg truncate">—</p>
+          <p id="dpo-when" class="text-xs text-white/50">—</p>
+        </div>
+        <button id="btn-dpo-close" class="text-white/50 px-3" aria-label="Cerrar"><i class="fa-solid fa-xmark text-xl"></i></button>
+      </div>
+
+      <div class="flex items-end justify-between gap-3">
+        <div>
+          <p class="text-[11px] uppercase tracking-wider text-white/40" data-i18n="dpo.toTransfer">Anticipo a transferir</p>
+          <p id="dpo-amount" class="font-display text-3xl">—</p>
+        </div>
+        <span id="dpo-stage" class="text-xs rounded-full px-3 py-1">—</span>
+      </div>
+      <p id="dpo-total" class="text-xs text-white/50">—</p>
+
+      <p id="dpo-rejected" class="rounded-xl bg-red-500/10 border border-red-400/30 p-3 text-sm text-red-200" hidden></p>
+
+      <!-- 1. Falta pagar: las cuentas y el comprobante. -->
+      <div id="dpo-pay" class="space-y-3" hidden>
+        <p class="text-sm text-white/70" data-i18n="dpo.howTo">Transfiere el anticipo a esta cuenta y sube la captura o foto del comprobante.</p>
+        <div id="dpo-accounts" class="space-y-2"></div>
+        <p id="dpo-no-accounts" class="text-sm text-amber-200" data-i18n="dpo.noAccounts" hidden>El club todavía no publica su cuenta para transferir. Contáctalo para pagar tu anticipo.</p>
+        <div id="dpo-option-row" class="space-y-1" hidden>
+          <label for="dpo-option" class="text-xs text-white/50" data-i18n="dpo.whichAccount">¿A qué cuenta transferiste?</label>
+          <select id="dpo-option" class="w-full px-3 py-3 rounded-xl bg-white/5 border border-white/10"></select>
+        </div>
+        <label class="block rounded-xl border border-dashed border-white/25 p-4 text-center cursor-pointer">
+          <input id="dpo-file" type="file" accept="image/*,application/pdf" class="sr-only">
+          <i class="fa-solid fa-receipt text-xl text-white/60"></i>
+          <span class="block text-sm mt-1" data-i18n="dpo.pickFile">Subir comprobante (foto, captura o PDF)</span>
+          <span id="dpo-file-name" class="block text-xs text-cyan-200 mt-1 break-all"></span>
+        </label>
+        <input id="dpo-ref" class="w-full px-3 py-3 rounded-xl bg-white/5 border border-white/10" maxlength="60" autocomplete="off" data-i18n-placeholder="dpo.refPlaceholder" placeholder="Folio o clave de rastreo (opcional)">
+        <button id="btn-dpo-send" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="dpo.send">Enviar comprobante</button>
+      </div>
+
+      <!-- 2. En revisión. -->
+      <div id="dpo-review" class="space-y-2" hidden>
+        <p class="text-sm text-white/70" data-i18n="dpo.reviewing">Recibimos tu comprobante. El club lo revisa contra su banco y te avisamos aquí y en tu teléfono.</p>
+        <button id="btn-dpo-withdraw" class="w-full py-2 text-sm text-white/50 underline" data-i18n="dpo.withdraw">¿Te equivocaste de foto? Retíralo y sube otro</button>
+      </div>
+
+      <!-- 3. Confirmado. -->
+      <div id="dpo-confirmed" class="space-y-2" hidden>
+        <p class="text-sm" style="color:var(--ev2-lime)" data-i18n="dpo.confirmedText">Tu anticipo está confirmado: la mesa es tuya.</p>
+        <p id="dpo-credit" class="text-sm text-white/80">—</p>
+        <p id="dpo-rest-due" class="text-xs text-white/50">—</p>
+      </div>
+
+      <p id="dpo-closed" class="text-sm text-white/50" data-i18n="dpo.closedText" hidden>Esta reservación ya no espera pagos.</p>
+      <p id="dpo-error" class="text-sm text-red-300" hidden></p>
+    </div>
+  </div>
+
+  <!--
     El pase. Se abre a pantalla completa porque es lo que el cliente le enseña a
     una persona en la puerta, de noche y con prisa: el QR grande y, debajo, el
     código escrito para cuando la pantalla está estrellada o el lector no enfoca.
@@ -1082,6 +1147,7 @@
 <script src="js/tipping.js"></script>
 <script src="js/songs.js"></script>
 <script src="js/booking.js"></script>
+<script src="js/deposit.js"></script>
 <script src="js/drink-art.js"></script>
 <script src="js/flirt.js"></script>
 <script src="js/social-login.js"></script>
@@ -1091,6 +1157,7 @@
 <script src="js/index-screen.js"></script>
 <script src="js/show-screen.js"></script>
 <script src="js/booking-screen.js"></script>
+<script src="js/deposit-screen.js"></script>
 <script src="js/flirt-screen.js"></script>
 <script src="js/lost-found-screen.js"></script>
 <script src="js/account-delete.js"></script>

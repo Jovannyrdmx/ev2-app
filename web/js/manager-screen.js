@@ -6,7 +6,7 @@
  * tarifas del taxi, y los cajones del estacionamiento — más el resumen del turno.
  */
 /* global EV2Push, EV2, EV2Format, EV2Manager, EV2Warehouse, EV2Roles, EV2PasswordGate, EV2StaffAdmin,
-   EV2Payouts, EV2NightReport, EV2Roster, EV2Clock */
+   EV2Payouts, EV2NightReport, EV2Roster, EV2Clock, EV2Deposit */
 (function () {
   'use strict';
   // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
@@ -250,6 +250,7 @@
       }),
       get(`/nightclubs/${club}/drivers?include_inactive=true&limit=200`, (d) => { state.drivers = d.drivers || []; }),
       loadTerminals(),
+      loadDepositQueue(),
       loadExchangeRate(),
       loadTills(),
       loadWaiters(),
@@ -4558,11 +4559,110 @@
     };
   }
 
+  // ---------------------------------------------------------------- anticipos (D113)
+
+  let depositQueue = null;
+  function depQueue() {
+    if (!depositQueue && window.EV2DepositReview) {
+      depositQueue = window.EV2DepositReview.create({
+        api, clubId, t, money,
+        dateTime: (d) => EV2Format.dateTime(d),
+        toast, errorMessage: (e) => EV2Format.errorMessage(e),
+        container: $('depq-list'),
+      });
+    }
+    return depositQueue;
+  }
+  async function loadDepositQueue() {
+    const q = depQueue();
+    if (!q || !$('depq-list')) return;
+    try { await q.load(); } catch (err) { showError(err); }
+  }
+
+  async function loadPaymentOptions() {
+    const box = $('mpo-list');
+    if (!box) return;
+    let opciones = [];
+    try {
+      const d = await api.get(`/nightclubs/${clubId()}/manual-payment-options`);
+      opciones = (d.options || []).filter((o) => o.method !== 'cash');
+    } catch (err) { showError(err); return; }
+    box.innerHTML = '';
+    if (opciones.length === 0) {
+      const p = document.createElement('p');
+      p.className = 'text-sm text-amber-200';
+      p.textContent = t('mpo.none');
+      box.appendChild(p);
+    }
+    for (const o of opciones) {
+      const fila = document.createElement('div');
+      fila.className = 'flex items-start justify-between gap-3 rounded-lg bg-white/5 px-3 py-2';
+      const info = document.createElement('div');
+      info.className = 'min-w-0';
+      const a = document.createElement('p');
+      a.className = 'text-sm';
+      a.textContent = `${o.label} · ${t(EV2Deposit.methodKey(o.method))}`;
+      const b = document.createElement('p');
+      b.className = 'font-display tracking-wider break-all';
+      b.textContent = o.destination || '';
+      const c = document.createElement('p');
+      c.className = 'text-[11px] text-white/50 whitespace-pre-line';
+      c.textContent = o.instructions || '';
+      info.append(a, b, c);
+      const quitar = document.createElement('button');
+      quitar.type = 'button';
+      quitar.className = 'text-xs text-red-300 underline shrink-0';
+      quitar.textContent = t('mpo.remove');
+      quitar.onclick = async () => {
+        if (!(await ask(t('mpo.removeAsk', { label: o.label }), { danger: true }))) return;
+        try {
+          await api.del(`/nightclubs/${clubId()}/manual-payment-options/${o.id}`);
+          await loadPaymentOptions();
+        } catch (err) { showError(err); }
+      };
+      fila.append(info, quitar);
+      box.appendChild(fila);
+    }
+  }
+
+  async function addPaymentOption() {
+    const err = $('mpo-error');
+    err.hidden = true;
+    const body = {
+      method: $('mpo-method').value,
+      label: $('mpo-label').value.trim(),
+      destination: $('mpo-destination').value.trim(),
+      instructions: $('mpo-instructions').value.trim() || null,
+      // Con la foto del comprobante el folio deja de ser obligatorio (D113).
+      requires_reference: false,
+    };
+    if (!body.label || !body.destination) {
+      err.textContent = t('mpo.errMissing');
+      err.hidden = false;
+      return;
+    }
+    if (!(await ask(t('mpo.confirmAdd', { label: body.label, dest: body.destination })))) return;
+    const boton = $('btn-mpo-add');
+    boton.disabled = true;
+    try {
+      await api.post(`/nightclubs/${clubId()}/manual-payment-options`, body);
+      ['mpo-label', 'mpo-destination', 'mpo-instructions'].forEach((id) => { $(id).value = ''; });
+      toast(t('mpo.added'), 'ok');
+      await loadPaymentOptions();
+    } catch (e) {
+      err.textContent = EV2Format.errorMessage(e);
+      err.hidden = false;
+    } finally { boton.disabled = false; }
+  }
+  if ($('btn-mpo-add')) $('btn-mpo-add').onclick = addPaymentOption;
+  if ($('btn-depq-refresh')) $('btn-depq-refresh').onclick = loadDepositQueue;
+
   const TAB_LOADERS = {
     summary: () => Promise.all([loadTills(), loadWaiters()]),
     cash: () => Promise.all([loadShiftCuts(), loadTerminalCharges(), loadTips(), loadTills()]),
     lost: () => loadLostFound(),
-    club: () => Promise.all([loadExchangeRate(), loadTerminals(), loadPrinting(), loadPushStatus()]),
+    club: () => Promise.all([loadExchangeRate(), loadTerminals(), loadPrinting(), loadPushStatus(),
+      loadDepositQueue(), loadPaymentOptions()]),
     printing: () => loadPrinting(),
     rps: () => loadRps(),
     staffcons: () => loadStaffCons(),

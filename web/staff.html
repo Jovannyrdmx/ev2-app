@@ -176,6 +176,12 @@
           <div class="stat-card"><div class="stat-number" id="d-guests">—</div><div class="stat-label" data-i18n="door.guests">Personas</div></div>
         </div>
 
+        <!-- Los comprobantes de anticipo que mandaron los clientes (D113). La anfitriona los aprueba contra el banco. -->
+        <div id="depr-card" class="card rounded-xl p-4 space-y-2" hidden>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="dpo.queueTitle">Anticipos por revisar</p>
+          <div id="depr-list" class="space-y-2"></div>
+        </div>
+
         <!--
           Salidas sin taxi por confirmar (D85). El cliente pidió su comprobante y se lo
           enseña a la hostess; al confirmar nace el folio. Solo aparece cuando hay
@@ -262,6 +268,21 @@
             <p id="scan-headline" class="font-display text-lg">—</p>
             <p id="scan-who" class="text-sm">—</p>
             <p id="scan-detail" class="text-xs text-white/60">—</p>
+            <!-- La mesa pagó el anticipo pero no el resto (D113): se cobra aquí y se vuelve a escanear. -->
+            <div id="scan-balance" class="pt-3 space-y-2" hidden>
+              <p class="text-[11px] uppercase tracking-wider text-white/50" data-i18n="bal.title">Resto por cobrar</p>
+              <p id="scan-balance-amount" class="font-display text-3xl">—</p>
+              <div class="flex items-center gap-2">
+                <input id="scan-balance-cash" class="flex-1 px-3 py-3 rounded-xl bg-white/5 border border-white/10" inputmode="decimal" autocomplete="off" data-i18n-placeholder="bal.receivedPh" placeholder="Recibido en efectivo (vacío = exacto)">
+                <span id="scan-balance-change" class="text-sm text-lime-200 shrink-0"></span>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <button id="btn-balance-cash" class="ev2-button py-3 rounded-xl font-display" data-i18n="bal.cash">Efectivo</button>
+                <button id="btn-balance-card" class="card py-3 rounded-xl font-display" data-i18n="bal.card">Tarjeta (terminal)</button>
+              </div>
+              <p id="scan-balance-error" class="text-sm text-red-300" hidden></p>
+            </div>
+            <button id="btn-scan-deposit" class="ev2-button w-full mt-2 py-3 rounded-xl font-display" data-i18n="dpo.reviewNow" hidden>Revisar su comprobante</button>
           </div>
         </div>
 
@@ -488,6 +509,8 @@
 <script src="js/staff-floor.js"></script>
 <script src="js/door.js"></script>
 <script src="js/door-scan.js"></script>
+<script src="js/deposit.js"></script>
+<script src="js/deposit-review.js"></script>
 <script src="js/promotions.js"></script>
 <script src="js/client.js"></script>
 <script src="js/drink-art.js"></script>

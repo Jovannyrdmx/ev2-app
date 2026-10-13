@@ -160,6 +160,9 @@ const PASS_STATUS = {
   used: 'used',
   expired: 'expired',
   noIdCheck: 'no_id_check',
+  // La mesa pagó su anticipo pero no el resto (D113): se cobra en la puerta y se
+  // vuelve a escanear. El pase NO se gasta.
+  balanceDue: 'balance_due',
   // Y los de la reservación, que se heredan tal cual de `door.checkPass` para
   // que la puerta vea un solo vocabulario: unpaid, cancelled, not_tonight.
   unpaid: door.PASS_STATUS.unpaid,

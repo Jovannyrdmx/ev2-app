@@ -3787,6 +3787,164 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/nightclubs/{nightclubId}/reservations/{reservationId}/payment:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/ReservationId'
+    get:
+      operationId: getReservationPayment
+      tags: [Reservaciones]
+      summary: La página del anticipo (dueño de la reservación, anfitriona o gerente)
+      description: |
+        Todo lo que la página del anticipo necesita (D113): total, anticipo, lo pagado y lo
+        que falta, el estado del anticipo, el último comprobante, las cuentas para
+        transferir (las que capturó el gerente, sin efectivo) y el crédito de consumo de
+        esa noche (D97). La reservación de otro cliente responde 404.
+      responses:
+        '200':
+          description: Estado del pago de la reservación
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reservation: { type: object }
+                  total: { type: string }
+                  deposit: { type: string }
+                  paid: { type: string }
+                  due: { type: string }
+                  deposit_status: { type: [string, 'null'] }
+                  deposit_amount_due: { type: [string, 'null'] }
+                  last_proof: { oneOf: [{ $ref: '#/components/schemas/ManualPayment' }, { type: 'null' }] }
+                  options: { type: array, items: { type: object } }
+                  credit: { type: [object, 'null'] }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/reservations/{reservationId}/deposit-proof:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/ReservationId'
+    post:
+      operationId: uploadDepositProof
+      tags: [Reservaciones]
+      summary: Subir la foto del comprobante del anticipo (dueño de la reservación)
+      description: |
+        Declara el anticipo con su comprobante (D113): JPG, PNG, WEBP, HEIC o PDF de hasta
+        10 MB, revisado por sus primeros bytes y no por lo que dice el navegador. Queda
+        `declared` y el renglón del libro `pending_manual` hasta que la anfitriona o el
+        gerente lo aprueben. Un comprobante en revisión bloquea otro (409); uno rechazado
+        deja subir otro. Avisa a la puerta y al gerente.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo: { type: string, format: binary }
+                option_id: { type: string, format: uuid, description: Obligatoria si el club tiene cuentas dadas de alta }
+                reference: { type: string, minLength: 3, maxLength: 60 }
+                note: { type: string, maxLength: 280 }
+                client_request_id: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Comprobante recibido, en revisión
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment: { $ref: '#/components/schemas/ManualPayment' }
+        '200': { description: Repetido por client_request_id; devuelve el mismo pago }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/nightclubs/{nightclubId}/manual-payments/{paymentId}/proof:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/PaymentId'
+    get:
+      operationId: getManualPaymentProof
+      tags: [Pagos manuales]
+      summary: La foto del comprobante (quien la subió, el gerente, o la anfitriona si es un anticipo)
+      description: Se sirve con `Cache-Control private, no-store` y `nosniff`. La ruta del disco nunca sale.
+      responses:
+        '200':
+          description: La imagen o el PDF
+          content:
+            image/*: { schema: { type: string, format: binary } }
+            application/pdf: { schema: { type: string, format: binary } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/deposit-reviews:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+    get:
+      operationId: listDepositReviews
+      tags: [Pagos manuales]
+      summary: Comprobantes de anticipo por revisar (anfitriona y gerente)
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [declared, confirmed, rejected, cancelled], default: declared } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: La cola, con la reservación de cada uno
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reviews:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        payment: { $ref: '#/components/schemas/ManualPayment' }
+                        reservation: { type: [object, 'null'] }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/door/reservations/{reservationId}/balance:
+    parameters:
+      - $ref: '#/components/parameters/NightclubId'
+      - $ref: '#/components/parameters/ReservationId'
+    post:
+      operationId: collectReservationBalance
+      tags: [Puerta]
+      summary: Cobrar en la puerta el resto de una reservación (anfitriona)
+      description: |
+        Lo que falta de la mesa (total menos lo pagado), antes de dejarla entrar (D113).
+        `cash`: queda pagado al momento a nombre de quien lo recibió, con el cambio y el
+        cajón de la puerta. `point`: despierta la terminal de Cover y el renglón se paga
+        cuando Mercado Pago aprueba. Lo pagado suma al crédito de consumo de esa noche.
+        Sin anticipo confirmado responde 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method]
+              properties:
+                method: { type: string, enum: [cash, point] }
+                cash_received: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+                client_request_id: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Efectivo cobrado (payment, change_given, drawer, balance) o terminal esperando la tarjeta (charge)
+          content:
+            application/json:
+              schema: { type: object }
+        '200': { description: Repetido por client_request_id }
+        '202': { description: Mercado Pago no contestó; el cobro quedó abierto y se resuelve solo }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
   /api/nightclubs/{nightclubId}/door/point-charges:
     parameters:
       - $ref: '#/components/parameters/NightclubId'
@@ -8507,7 +8665,7 @@ paths:
     post:
       operationId: confirmManualPayment
       tags: [Pagos manuales]
-      summary: Confirmar el pago contra el estado de cuenta (gerente)
+      summary: Confirmar el pago contra el estado de cuenta (gerente; la anfitriona solo anticipos de reservación, D113)
       description: |
         Lo único que mueve el asiento a `paid`. Si el cobro pagaba el depósito de una
         reservación, **la reservación pasa a `confirmed`** en la misma transacción SQL.
@@ -8536,7 +8694,7 @@ paths:
     post:
       operationId: rejectManualPayment
       tags: [Pagos manuales]
-      summary: Rechazar el pago (gerente)
+      summary: Rechazar el pago (gerente; la anfitriona solo anticipos de reservación, D113)
       description: |
         El cobro vuelve a `pending`, no a `failed`: el cliente corrige el folio y declara de
         nuevo. El motivo le llega en el evento `payment_rejected`.
@@ -14813,6 +14971,14 @@ components:
           properties:
             type: { type: string, examples: ['reservation_deposit'] }
             reference_type: { type: [string, 'null'] }
+        proof:
+          description: La foto del comprobante (D113), si la hay. La imagen se pide en /manual-payments/{paymentId}/proof.
+          oneOf:
+            - type: object
+              properties:
+                mime: { type: string }
+                uploaded_at: { type: string, format: date-time }
+            - type: 'null'
         declared_by:
           description: Solo para el gerente.
           oneOf:

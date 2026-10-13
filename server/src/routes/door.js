@@ -28,6 +28,7 @@ const tickets = require('../services/tickets');
 const rpService = require('../services/rp');
 const mercadopago = require('../services/mercadopago');
 const terminalCharges = require('../services/terminal-charges');
+const reservationMoney = require('../services/reservation-money');
 
 const router = express.Router({ mergeParams: true });
 
@@ -334,8 +335,40 @@ router.post('/nightclubs/:nightclubId/door/check-in',
       if (!check.ok) {
         await passes.audit(client, { passId: row.id, kind: 'denied', reason: check.status,
           actorId: req.user.id, idCheckId: rev.rows[0].id });
+        // Sin anticipo pagado, pero con un comprobante esperando: la anfitriona lo puede
+        // revisar ahí mismo (D113) en vez de mandar a la mesa a esperar al gerente.
+        let depositReview = null;
+        if (check.status === passes.PASS_STATUS.unpaid && row.reservation_id) {
+          const dec = await client.query(
+            `SELECT p.id, (p.proof_path IS NOT NULL) AS has_proof, p.amount::text AS amount
+               FROM manual_payments p JOIN transactions t ON t.id = p.transaction_id
+              WHERE t.reference_type = 'reservation' AND t.reference_id = $1
+                AND t.type = 'reservation_deposit' AND p.status = 'declared'
+              ORDER BY p.created_at DESC LIMIT 1`, [row.reservation_id]);
+          if (dec.rows[0]) {
+            depositReview = { payment_id: dec.rows[0].id, has_proof: dec.rows[0].has_proof,
+              amount: dec.rows[0].amount };
+          }
+        }
         await client.query('COMMIT');
-        return res.json({ pass: presentGuestPass(row, check) });
+        return res.json({ pass: presentGuestPass(row, check), deposit_review: depositReview });
+      }
+
+      // El resto de la mesa (D113): se cobra ANTES de entrar. El pase no se gasta y la
+      // revisión de identificación tampoco: se cobra y se vuelve a escanear.
+      if (row.reservation_id) {
+        const saldo = await reservationMoney.balanceOf(client, {
+          nightclubId, reservationId: row.reservation_id });
+        if (reservationMoney.balanceBlocksEntry(saldo)) {
+          await passes.audit(client, { passId: row.id, kind: 'denied',
+            reason: passes.PASS_STATUS.balanceDue, actorId: req.user.id, idCheckId: rev.rows[0].id });
+          await client.query('COMMIT');
+          return res.json({
+            pass: presentGuestPass(row, { status: passes.PASS_STATUS.balanceDue, ok: false }),
+            balance: { reservation_id: row.reservation_id, total: saldo.total, paid: saldo.paid,
+              due: saldo.due, currency: saldo.currency },
+          });
+        }
       }
 
       if (!usable.ok) {
@@ -842,6 +875,170 @@ async function resolvePrice(client, { nightclubId, body }) {
     unitPrice: body.unit_price, currency: body.currency, source: 'manual', coverPriceId: null,
   };
 }
+
+// ---------------------------------------------------------- el resto de la mesa (D113)
+
+const balanceSchema = z.object({
+  method: z.enum(['cash', 'point']),
+  // Lo que entregó el cliente, para dar el cambio. Si no se manda, se cobró exacto.
+  cash_received: z.number().positive().max(1_000_000).optional(),
+  client_request_id: uuid.optional(),
+}).refine((b) => b.method === 'cash' || b.cash_received === undefined, {
+  message: 'Lo recibido solo aplica al cobro en efectivo', path: ['cash_received'],
+});
+
+/**
+ * Cobrar en la puerta lo que le falta a una reservación (total menos lo pagado).
+ *
+ * Efectivo: queda registrado y pagado al momento, a nombre de quien lo recibió (cuenta
+ * en su corte), con el cambio y el cajón de la puerta. Tarjeta: se despierta la
+ * terminal de Cover y el renglón se paga cuando Mercado Pago lo aprueba; la pantalla
+ * sigue el cobro y después se vuelve a escanear el pase.
+ *
+ * Lo pagado aquí también se vuelve crédito de consumo de esa noche (D97, D113).
+ */
+router.post('/nightclubs/:nightclubId/door/reservations/:reservationId/balance',
+  requireRole(...DOOR_ROLES),
+  validate({ params: z.object({ nightclubId: uuid, reservationId: uuid }), body: balanceSchema }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, reservationId } = req.params;
+    const b = req.body;
+
+    if (b.method === 'cash' && b.client_request_id) {
+      const ya = await pool.query(
+        `${payments.PAYMENT_SELECT} WHERE p.client_request_id = $1 AND p.nightclub_id = $2`,
+        [b.client_request_id, nightclubId]);
+      if (ya.rowCount > 0) {
+        const saldo = await reservationMoney.balanceOf(pool, { nightclubId, reservationId });
+        res.set('Idempotent-Replay', 'true');
+        return res.status(200).json({
+          payment: payments.present(ya.rows[0], 'manager'), idempotent: true,
+          balance: saldo && { total: saldo.total, paid: saldo.paid, due: saldo.due, currency: saldo.currency },
+        });
+      }
+    }
+    if (b.method === 'point') mercadopago.assertUsable({ forCharge: true });
+
+    const client = await pool.connect();
+    let outcome = null;
+    let apartado = null;
+    try {
+      await client.query('BEGIN');
+      const saldo = await reservationMoney.balanceOf(client, { nightclubId, reservationId, lock: true });
+      if (!saldo) throw ApiError.notFound('Reservación no encontrada');
+      const st = saldo.reservation.status;
+      if (st === 'pending_payment') {
+        throw ApiError.conflict('Primero se confirma el anticipo: revisa su comprobante o cóbralo aquí.');
+      }
+      if (!['confirmed', 'seated'].includes(st)) {
+        throw ApiError.conflict(`La reservación está '${st}': ya no se le cobra el resto.`);
+      }
+      if (!(Number(saldo.due) > 0)) throw ApiError.conflict('Esta mesa ya pagó todo: vuelve a escanear el pase.');
+
+      if (b.method === 'point') {
+        if (saldo.currency !== 'MXN') {
+          throw ApiError.unprocessable('La terminal cobra solo en pesos: una mesa en dólares se cobra en efectivo.');
+        }
+        const cover = await client.query(
+          `SELECT id FROM supply_locations
+            WHERE nightclub_id = $1 AND kind = 'door' AND active
+            ORDER BY sort_order, code LIMIT 1`, [nightclubId]);
+        if (!cover.rows[0]) {
+          throw ApiError.unprocessable('El club no tiene el lugar Cover (puerta) dado de alta.');
+        }
+        const terminalId = await terminalCharges.resolveTerminal(client, {
+          nightclubId, locationId: cover.rows[0].id, strict: true,
+        });
+        const tx = await reservationMoney.openBalanceTransaction(client, {
+          nightclubId, balance: saldo, userId: req.user.id });
+        apartado = await terminalCharges.reserve(client, {
+          nightclubId, transactionId: tx.id, terminalId, userId: req.user.id,
+        });
+        await client.query('COMMIT');
+      } else {
+        const due = Number(saldo.due);
+        const recibido = b.cash_received === undefined ? due : Math.round(b.cash_received * 100) / 100;
+        if (Math.round(recibido * 100) < Math.round(due * 100)) {
+          throw ApiError.unprocessable(
+            `Faltan $${(due - recibido).toFixed(2)} para completar el resto de $${due.toFixed(2)}.`,
+            { missing: (due - recibido).toFixed(2), due: due.toFixed(2) });
+        }
+        const cambio = (Math.round(recibido * 100) - Math.round(due * 100)) / 100;
+        const tx = await reservationMoney.openBalanceTransaction(client, {
+          nightclubId, balance: saldo, userId: req.user.id });
+        let creado;
+        try {
+          const { rows } = await client.query(
+            `INSERT INTO manual_payments (nightclub_id, transaction_id, method, declared_by,
+                                          on_behalf_of, amount, currency, note, status,
+                                          reviewed_by, reviewed_at, client_request_id,
+                                          cash_received, change_given)
+             VALUES ($1,$2,'cash',$3,$4,$5,$6,'resto de la reservación en la puerta','confirmed',
+                     $3,now(),$7,$8,$9)
+             RETURNING id, transaction_id, method, amount::text AS amount, currency, status,
+                       declared_by, on_behalf_of, reference,
+                       cash_received::text AS cash_received, change_given::text AS change_given`,
+            [nightclubId, tx.id, req.user.id, saldo.reservation.user_id, saldo.due, saldo.currency,
+              b.client_request_id ?? null, recibido.toFixed(2), cambio.toFixed(2)]);
+          creado = rows[0];
+        } catch (err) {
+          if (err.code === '23505') throw ApiError.conflict('Ese resto ya tiene un pago registrado');
+          throw err;
+        }
+        const settled = await payments.settle(client, {
+          payment: creado, reviewerId: req.user.id, nightclubId,
+        });
+        // Efectivo en la puerta: el cajón se abre solo (D96).
+        const printer = await cashDrawer.doorPrinter(client, { nightclubId });
+        const drawer = await cashDrawer.open(client, {
+          nightclubId, printer, refId: tx.id, createdBy: req.user.id,
+          reason: `resto de mesa ${saldo.due} ${saldo.currency}`,
+        });
+        await client.query('COMMIT');
+        outcome = { payment: creado, ...settled, drawer, change: cambio.toFixed(2) };
+      }
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    if (outcome) {
+      await payments.publishConfirmed({ nightclubId, ...outcome });
+      const saldo = await reservationMoney.balanceOf(pool, { nightclubId, reservationId });
+      const full = await pool.query(`${payments.PAYMENT_SELECT} WHERE p.id = $1`, [outcome.payment.id]);
+      return res.status(201).json({
+        payment: payments.present(full.rows[0], 'manager'),
+        change_given: outcome.change,
+        drawer: outcome.drawer,
+        receipt: outcome.receipt ? { job_id: outcome.receipt.id, status: outcome.receipt.status } : null,
+        balance: { total: saldo.total, paid: saldo.paid, due: saldo.due, currency: saldo.currency },
+      });
+    }
+
+    // Tarjeta: fuera de la transacción, la red no puede tener bloqueado el renglón. Si
+    // ya había un cobro esperando en la terminal (doble toque), se devuelve ése y no se
+    // despierta la terminal otra vez.
+    let uncertain = false;
+    if (!apartado.resumed) {
+      try {
+        await terminalCharges.push(pool, {
+          charge: { ...apartado.charge, started_by: req.user.id },
+          tx: apartado.tx, terminal: apartado.terminal, nightclubId,
+        });
+      } catch (err) {
+        const saved = await pool.query('SELECT status FROM terminal_charges WHERE id = $1',
+          [apartado.charge.id]);
+        if (saved.rows[0]?.status !== 'creating') throw err;
+        uncertain = true;
+      }
+    }
+    const { rows } = await pool.query(`${terminalCharges.CHARGE_SELECT} WHERE c.id = $1`,
+      [apartado.charge.id]);
+    return res.status(uncertain ? 202 : 201)
+      .json({ charge: terminalCharges.present(rows[0]), pending_confirmation: uncertain });
+  }));
 
 // ---------------------------------------------------------- cover con la terminal (D100)
 

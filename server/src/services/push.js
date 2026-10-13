@@ -95,6 +95,7 @@ const TEXTS = {
     paymentRejected: ['Pago no aprobado', 'Revisa tu cuenta en la app.'],
     reservationConfirmed: ['Reservación confirmada', 'Tu pase ya está en la app.'],
     reservationNew: ['Reservación nueva', 'Revisa la lista de la puerta.'],
+    depositProof: ['Comprobante de anticipo', '{name} mandó su comprobante de {amount}. Revísalo contra el banco.'],
     valetRequested: ['Piden un auto', 'Boleto {code}'],
     valetRequestedPlate: ['Piden un auto', 'Boleto {code} · {plate}'],
     valetReady: ['Tu auto está listo', 'Te espera en {point}.'],
@@ -131,6 +132,7 @@ const TEXTS = {
     paymentRejected: ['Payment not approved', 'Check your account in the app.'],
     reservationConfirmed: ['Booking confirmed', 'Your pass is in the app.'],
     reservationNew: ['New booking', 'Check the door list.'],
+    depositProof: ['Deposit receipt', '{name} sent a receipt for {amount}. Check it against the bank.'],
     valetRequested: ['Car requested', 'Ticket {code}'],
     valetRequestedPlate: ['Car requested', 'Ticket {code} · {plate}'],
     valetReady: ['Your car is ready', 'It is waiting at {point}.'],
@@ -374,6 +376,17 @@ const CATALOG = {
   async reservation_created(db, ev) {
     const hostesses = await usersWithRoles(db, ev.nightclub_id, ['hostess']);
     return hostesses.map((u) => ({ ...u, key: 'reservationNew', tag: 'reservations' }));
+  },
+
+  // El cliente subió el comprobante del anticipo (D113): lo revisan el gerente o la
+  // anfitriona, que es quien lo va a recibir en la puerta.
+  async deposit_proof_received(db, ev) {
+    const staff = await usersWithRoles(db, ev.nightclub_id, ['hostess', 'manager']);
+    const p = ev.payload;
+    return staff.map((u) => ({
+      ...u, key: 'depositProof', tag: `deposit-${p.manual_payment_id}`,
+      vars: () => ({ name: p.guest_name || '', amount: money(p.amount, p.currency) }),
+    }));
   },
 
   async valet_requested(db, ev) {

@@ -528,6 +528,18 @@
         card.appendChild(pase);
       }
 
+      // El anticipo y el crédito (D113): pagarlo si falta, o ver en qué va y cuánto
+      // crédito de consumo trae para esa noche.
+      if (window.EV2DepositScreen && ['pending_payment', 'confirmed', 'seated'].includes(r.status)) {
+        const pago = document.createElement('button');
+        const falta = r.status === 'pending_payment';
+        pago.className = falta ? 'w-full py-2 rounded-lg text-sm font-display bg-amber-400/15 text-amber-100'
+          : 'w-full py-2 rounded-lg text-sm card';
+        pago.textContent = t(falta ? 'dpo.payDeposit' : 'dpo.seePayment');
+        pago.onclick = () => window.EV2DepositScreen.open(ctx, r.id, { onChanged: () => loadMine().catch(() => {}) });
+        card.appendChild(pago);
+      }
+
       if (EV2Booking.canCancel(r)) {
         const cancel = document.createElement('button');
         cancel.className = 'w-full py-2 text-sm text-red-300 underline';
@@ -586,7 +598,7 @@
     const button = $('btn-book-confirm');
     button.disabled = true;
     try {
-      await ctx.api.post(`/nightclubs/${ctx.clubId()}/reservations`,
+      const creada = await ctx.api.post(`/nightclubs/${ctx.clubId()}/reservations`,
         EV2Booking.bookingPayload(form, { clientRequestId: state.requestId || uuid() }));
       state.requestId = uuid();
       state.table = null;
@@ -595,6 +607,11 @@
       ctx.toast(t('book.done'), 'ok');
       await Promise.all([loadMine(), loadTables()]);
       renderQuote();
+      // La página del anticipo, de inmediato (D113): la mesa queda apartada pero sin
+      // anticipo no está confirmada, y el cliente tiene que ver a dónde transferir.
+      if (creada && creada.reservation && window.EV2DepositScreen) {
+        window.EV2DepositScreen.open(ctx, creada.reservation.id, { onChanged: () => loadMine().catch(() => {}) });
+      }
     } catch (err) {
       showError(window.EV2Format.errorMessage(err));
     } finally {

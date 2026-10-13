@@ -28,6 +28,7 @@ const PAYMENT_SELECT = `
   SELECT p.id, p.nightclub_id, p.transaction_id, p.option_id, p.method,
          p.amount::text AS amount, p.currency, p.reference, p.note, p.status,
          p.rejection_reason, p.reviewed_at, p.created_at,
+         (p.proof_path IS NOT NULL) AS has_proof, p.proof_mime, p.proof_uploaded_at,
          p.declared_by, du.display_name AS declared_by_name,
          p.on_behalf_of, bu.display_name AS on_behalf_of_name,
          p.reviewed_by, ru.display_name AS reviewed_by_name,
@@ -54,6 +55,9 @@ function present(row, viewer) {
     reviewed_at: row.reviewed_at,
     rejection_reason: row.rejection_reason,
     pays_for: { type: row.transaction_type, reference_type: row.reference_type },
+    // El comprobante (D113): si hay foto y de qué tipo. La foto misma se pide por su
+    // propia ruta, que comprueba quién la puede ver; la ruta del disco nunca sale.
+    proof: row.has_proof ? { mime: row.proof_mime, uploaded_at: row.proof_uploaded_at } : null,
   };
   if (viewer !== 'manager') return base;
   return {
@@ -87,6 +91,12 @@ async function applySideEffects(client, tx, nightclubId) {
     // Lo pagado por reservar se vuelve credito de consumo para esa noche (D97).
     await vipCredit.grant(client, { nightclubId, tx });
     return { reservation: rows[0] || null, order: null };
+  }
+  // El resto cobrado en la puerta (D113) también es dinero de la reservación, y por
+  // decisión del club también se consume esa noche: suma al mismo crédito.
+  if (tx.reference_type === 'reservation' && tx.type === 'reservation_balance') {
+    await vipCredit.grant(client, { nightclubId, tx });
+    return { reservation: null, order: null };
   }
 
   // A paid drink order is a ticket for the bar. Sending it there here, and nowhere
