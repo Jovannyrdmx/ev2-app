@@ -122,6 +122,7 @@
       <button data-tab="staffcons" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-martini-glass mgr-icon"></i><span data-i18n="scn.tab">Consumo del personal</span></button>
       <button data-tab="promos" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-tags mgr-icon"></i><span data-i18n="prm.tab">Promociones</span></button>
       <button data-tab="inventory" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-boxes-stacked mgr-icon"></i><span data-i18n="inv.tab">Inventario</span></button>
+      <button data-tab="purchasing" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-receipt mgr-icon"></i><span data-i18n="pur.tab">Compras y reabasto</span></button>
       <button data-tab="payouts" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-wallet mgr-icon"></i><span data-i18n="mgr.tabPayouts">Pagos al personal</span></button>
       <p class="mgr-group" data-i18n="mgr.groupSetup">Configuración</p>
       <button data-tab="club" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-gear mgr-icon"></i><span data-i18n="mgr.tabClub">Club</span></button>
@@ -438,6 +439,7 @@
             <option value="n_for_m" data-i18n="prm.kind.n_for_m">Lleva N, paga M (2x1)</option>
             <option value="percent" data-i18n="prm.kind.percent">Porcentaje de descuento</option>
             <option value="fixed_price" data-i18n="prm.kind.fixed_price">Precio fijo por pieza</option>
+            <option value="special" data-i18n="prm.kind.special">Trago especial (sin descuento)</option>
           </select>
           <div id="prm-f-n" class="grid grid-cols-2 gap-2">
             <label class="text-xs text-white/50"><span data-i18n="prm.buy">Lleva</span><input id="prm-buy" type="number" min="2" max="20" value="2" class="field mt-1" inputmode="numeric"></label>
@@ -456,6 +458,7 @@
             <label class="text-xs text-white/50"><span data-i18n="prm.from">Desde (opcional)</span><input id="prm-from" type="time" class="field mt-1"></label>
             <label class="text-xs text-white/50"><span data-i18n="prm.to">Hasta (opcional)</span><input id="prm-to" type="time" class="field mt-1"></label>
           </div>
+          <label class="block text-xs text-white/50"><span data-i18n="prm.expected">Piezas que esperas vender (opcional, para Compras y reabasto)</span><input id="prm-expected" type="number" min="1" step="1" class="field mt-1" inputmode="numeric"></label>
           <p id="prm-error" class="text-xs text-red-300" hidden></p>
           <button id="btn-prm-add" type="submit" class="ev2-button rounded-lg px-4 py-2 text-sm" data-i18n="prm.add">Crear promoción</button>
         </form>
@@ -957,6 +960,96 @@
         </div>
       </div>
 
+      <!-- ----------------------- COMPRAS Y REABASTO (D114) ----------------------- -->
+      <div id="tab-purchasing" class="space-y-4" hidden>
+        <!-- La noche que ya pasó: qué se vendió, qué se gastó y qué comprar. -->
+        <div class="card rounded-2xl p-4 space-y-3">
+          <p class="font-display text-lg" data-i18n="pur.reportTitle">Cómo salió la noche</p>
+          <p id="pur-no-nights" class="text-sm text-white/50" data-i18n="pur.noNights" hidden>Todavía no hay ninguna noche que haya abierto.</p>
+          <div id="pur-report" class="space-y-3">
+            <div class="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label class="label" for="pur-night" data-i18n="pur.night">Noche</label>
+                <select id="pur-night" class="field"></select>
+              </div>
+              <div>
+                <label class="label" for="pur-next" data-i18n="pur.nextLabel">Comprar pensando en</label>
+                <select id="pur-next" class="field"></select>
+              </div>
+            </div>
+            <div id="pur-report-body" class="space-y-4" hidden>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div class="stat-card"><div class="stat-number" id="pur-k-units">—</div><div class="stat-label" data-i18n="pur.kUnits">Tragos vendidos</div></div>
+                <div class="stat-card"><div class="stat-number" id="pur-k-revenue">—</div><div class="stat-label" data-i18n="pur.kRevenue">Venta de barra</div></div>
+                <div class="stat-card"><div class="stat-number" id="pur-k-spent">—</div><div class="stat-label" data-i18n="pur.kSpent">Costo de lo gastado</div></div>
+                <div class="stat-card"><div class="stat-number" id="pur-k-buy">—</div><div class="stat-label" data-i18n="pur.kBuy">Compra estimada</div><p id="pur-k-buy-note" class="text-[10px] text-amber-300" hidden></p></div>
+              </div>
+
+              <div class="space-y-2">
+                <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="pur.topTitle">Tragos más vendidos</p>
+                <p id="pur-drinks-empty" class="text-sm text-white/40" data-i18n="pur.topEmpty" hidden>Esa noche no se entregó ningún trago.</p>
+                <div id="pur-drinks" class="space-y-2"></div>
+                <button id="pur-drinks-more" type="button" class="text-xs underline text-white/60" hidden></button>
+              </div>
+
+              <div class="space-y-2">
+                <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="pur.spentTitle">Insumos que se gastaron</p>
+                <p id="pur-spent-empty" class="text-sm text-white/40" data-i18n="pur.spentEmpty" hidden>No salió ningún insumo de los estantes esa noche.</p>
+                <div id="pur-spent" class="space-y-2"></div>
+              </div>
+
+              <div class="space-y-2">
+                <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="pur.buyTitle">Lista de compra</p>
+                <p class="text-[11px] text-white/40" data-i18n="pur.buyRule">Se compra lo mayor entre lo gastado y lo que pide la próxima noche, más el mínimo de barras y almacén, menos lo que ya hay. En botellas o cajas completas.</p>
+                <p id="pur-next-info" class="text-sm text-white/60"></p>
+                <p id="pur-next-norecipe" class="text-[11px] text-amber-300" hidden></p>
+                <p id="pur-buy-empty" class="text-sm flex items-center gap-2" hidden><i class="fa-solid fa-circle-check" style="color:var(--ev2-lime)"></i><span data-i18n="pur.buyEmpty">Con lo que hay alcanza: no hace falta comprar.</span></p>
+                <div id="pur-buy" class="space-y-3"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- La noche que viene: promociones, tragos especiales y lo que van a pedir. -->
+        <div class="card rounded-2xl p-4 space-y-3">
+          <p class="font-display text-lg" data-i18n="pur.planTitle">Próxima noche: promociones e insumos</p>
+          <p id="pur-no-upcoming" class="text-sm text-white/50" data-i18n="pur.noUpcoming" hidden>No hay ninguna noche por venir. Ábrela en Noches para planearla.</p>
+          <div id="pur-plan-box" class="space-y-3">
+            <div>
+              <label class="label" for="pur-plan-night" data-i18n="pur.night">Noche</label>
+              <select id="pur-plan-night" class="field"></select>
+            </div>
+            <div id="pur-plan-body" class="space-y-4" hidden>
+              <p id="pur-plan-history" class="text-[11px] text-white/50"></p>
+
+              <div class="space-y-2">
+                <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="pur.promosTitle">Promociones y tragos especiales</p>
+                <p class="text-[11px] text-white/40" data-i18n="pur.promosWhy">Las de la sección Promociones. Si una de una bebida trae las piezas que esperas vender, ese número reemplaza al pronóstico.</p>
+                <p id="pur-promos-empty" class="text-sm text-white/40" data-i18n="pur.promosEmpty" hidden>Esta noche no tiene promociones.</p>
+                <div id="pur-promos" class="space-y-2"></div>
+                <button id="pur-go-promos" type="button" class="btn-secondary rounded-lg px-3 py-2 text-xs" data-i18n="pur.editPromos">Editar en Promociones</button>
+              </div>
+
+              <div class="space-y-2">
+                <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="pur.planDrinksTitle">Lo que se espera vender</p>
+                <p id="pur-plan-drinks-empty" class="text-sm text-white/40" data-i18n="pur.planDrinksEmpty" hidden>Sin historial ni promociones no hay nada que planear todavía.</p>
+                <div id="pur-plan-drinks" class="space-y-2"></div>
+                <p id="pur-plan-norecipe" class="text-[11px] text-amber-300" hidden></p>
+              </div>
+
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="pur.planBuyTitle">Insumos que faltan para esa noche</p>
+                  <p id="pur-plan-total" class="text-sm font-display"></p>
+                </div>
+                <p id="pur-plan-buy-empty" class="text-sm flex items-center gap-2" hidden><i class="fa-solid fa-circle-check" style="color:var(--ev2-lime)"></i><span data-i18n="pur.buyEmpty">Con lo que hay alcanza: no hace falta comprar.</span></p>
+                <div id="pur-plan-buy" class="space-y-3"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div id="tab-parking" class="space-y-4" hidden>
         <div class="grid grid-cols-3 gap-2">
           <div class="stat-card"><div class="stat-number" id="p-total">—</div><div class="stat-label" data-i18n="manager.parkingTotal">Cajones</div></div>
@@ -1407,6 +1500,7 @@
 <script src="js/staff-admin.js"></script>
 <script src="js/payouts.js"></script>
 <script src="js/night-report.js"></script>
+<script src="js/purchasing.js"></script>
 <script src="js/roster.js"></script>
 <script src="js/substitutions.js"></script>
 <script src="js/push.js"></script>

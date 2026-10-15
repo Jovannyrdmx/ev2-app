@@ -6,7 +6,7 @@
  * tarifas del taxi, y los cajones del estacionamiento — más el resumen del turno.
  */
 /* global EV2Push, EV2, EV2Format, EV2Manager, EV2Warehouse, EV2Roles, EV2PasswordGate, EV2StaffAdmin,
-   EV2Payouts, EV2NightReport, EV2Roster, EV2Clock, EV2Deposit */
+   EV2Payouts, EV2NightReport, EV2Roster, EV2Clock, EV2Deposit, EV2Purchasing */
 (function () {
   'use strict';
   // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
@@ -333,6 +333,7 @@
     promos: ['tab-promos'],
     tableprice: ['tab-tableprice'],
     inventory: ['tab-inventory'],
+    purchasing: ['tab-purchasing'],
     payouts: ['tab-payouts'],
     club: ['tab-club'],
     exit: ['tab-drivers', 'tab-taxi'],
@@ -4476,8 +4477,10 @@
     let texto;
     if (p.kind === 'n_for_m') texto = t('prm.d.n', { what: que, n: p.buy_qty, m: p.pay_qty });
     else if (p.kind === 'percent') texto = t('prm.d.percent', { what: que, pct: Number(p.value) });
+    else if (p.kind === 'special') texto = t('prm.d.special', { what: que });
     else texto = t('prm.d.fixed', { what: que, price: money(p.value) });
     if (p.starts_time) texto += ` · ${t('prm.d.window', { from: p.starts_time, to: p.ends_time })}`;
+    if (p.expected_units) texto += ` · ${t('prm.d.expected', { n: p.expected_units })}`;
     return texto;
   }
 
@@ -4520,6 +4523,9 @@
     $('prm-f-n').hidden = kind !== 'n_for_m';
     $('prm-f-pct').hidden = kind !== 'percent';
     $('prm-f-price').hidden = kind !== 'fixed_price';
+    // El trago especial (D114) es siempre de una bebida.
+    if (kind === 'special') $('prm-target-kind').value = 'drink';
+    $('prm-target-kind').disabled = kind === 'special';
     $('prm-kind').onchange = renderPromos;
     const porCategoria = $('prm-target-kind').value === 'category';
     const previo = $('prm-target').value;
@@ -4541,6 +4547,7 @@
         drinkId: $('prm-target-kind').value === 'drink' ? $('prm-target').value : '',
         category: $('prm-target-kind').value === 'category' ? $('prm-target').value : '',
         from: $('prm-from').value, to: $('prm-to').value,
+        expected: $('prm-expected').value,
       });
       const err = $('prm-error');
       if (r.error) {
@@ -4554,6 +4561,7 @@
         await api.post(`/nightclubs/${clubId()}/events/${prm.night}/promotions`, r.body);
         toast(t('prm.saved'), 'ok');
         $('prm-name').value = '';
+        $('prm-expected').value = '';
         await loadPromos();
       } catch (e) { showError(e); } finally { listo(); }
     };
@@ -4657,7 +4665,23 @@
   if ($('btn-mpo-add')) $('btn-mpo-add').onclick = addPaymentOption;
   if ($('btn-depq-refresh')) $('btn-depq-refresh').onclick = loadDepositQueue;
 
+  // Compras y reabasto (D114): su pantalla vive en js/purchasing.js y se monta la
+  // primera vez que se abre la sección.
+  let purchasingView = null;
+  function purchasing() {
+    if (!purchasingView) {
+      purchasingView = EV2Purchasing.mount({
+        api, clubId, t, money, toast, showError,
+        getNights: () => state.nights,
+        dateTime: (iso) => EV2Format.dateTime(iso),
+        goTab: (tab) => goTab(tab),
+      });
+    }
+    return purchasingView;
+  }
+
   const TAB_LOADERS = {
+    purchasing: () => purchasing().load(),
     summary: () => Promise.all([loadTills(), loadWaiters()]),
     cash: () => Promise.all([loadShiftCuts(), loadTerminalCharges(), loadTips(), loadTills()]),
     lost: () => loadLostFound(),

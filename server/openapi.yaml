@@ -1783,6 +1783,11 @@ paths:
         `n_for_m` usa `buy_qty` y `pay_qty` (lleva N, paga M, con M menor que N). El horario
         (`starts_time` y `ends_time`, hora del club) es opcional y puede cruzar la
         medianoche. Queda en `audit_log`.
+
+        `special` (D114) es el trago de la noche sin descuento: siempre de una bebida, sin
+        precio, y nunca cambia el cobro. `expected_units` (opcional, solo de una bebida)
+        son las piezas que se esperan vender: reemplazan al pronóstico en Compras y
+        reabasto.
       parameters:
         - { $ref: '#/components/parameters/NightclubId' }
         - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1827,6 +1832,8 @@ paths:
                 pay_qty: { type: integer }
                 starts_time: { type: [string, 'null'], example: '22:00' }
                 ends_time: { type: [string, 'null'], example: '00:30' }
+                kind: { type: string, enum: [fixed_price, percent, n_for_m, special] }
+                expected_units: { type: [integer, 'null'], minimum: 1, maximum: 100000 }
       responses:
         '200':
           description: Promoción actualizada
@@ -2325,6 +2332,71 @@ paths:
                     properties:
                       id: { type: string, format: uuid }
                       closed_at: { type: string, format: date-time }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/nights/{eventId}/purchasing:
+    get:
+      operationId: getNightclubsByNightclubIdNightsByEventIdPurchasing
+      tags: [Inventario]
+      summary: Lo más vendido de una noche, los insumos gastados y la lista de compra (D114)
+      description: |
+        Solo gerencia (gerente y administrador).
+
+        - **Tragos:** solo pedidos entregados, igual que el corte de la noche.
+        - **Insumos gastados:** salen del kardex, no de las recetas: lo vendido neto
+          de devoluciones, más cortesía y merma, valuado al costo promedio.
+        - **Compra:** por insumo, `máx(gastado, lo que pide la próxima noche) +
+          mínimo de todos los lugares − existencia del club`, en presentaciones
+          completas. También entra el insumo que ya está bajo su mínimo. El costo de
+          la presentación es el último del proveedor; si no hay, el promedio del
+          kardex; si tampoco, `null` (y se cuenta en `totals.without_cost`).
+
+        La próxima noche es la primera del calendario que aún no abre (borrador o
+        publicada); `next_event_id` permite escoger otra.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: next_event_id, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: El reporte de compras de la noche
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report: { $ref: '#/components/schemas/PurchasingReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/nightclubs/{nightclubId}/events/{eventId}/supply-plan:
+    get:
+      operationId: getNightclubsByNightclubIdEventsByEventIdSupplyPlan
+      tags: [Inventario]
+      summary: Plan de insumos de una noche por venir (D114)
+      description: |
+        Pronóstico por trago = promedio de las últimas 4 noches **cerradas** del
+        mismo día de la semana (redondeado hacia arriba, dividiendo entre todas las
+        noches). Si una promoción de esa noche tiene `expected_units`, ese número
+        reemplaza al pronóstico del trago (solo las activas y de una bebida; las de
+        categoría se listan pero no cambian el plan). Los tragos sin receta van en
+        `without_recipe` y no suman insumos.
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: El plan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan: { $ref: '#/components/schemas/SupplyPlan' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
@@ -13087,7 +13159,7 @@ components:
           properties:
             id: { type: string, format: uuid }
             name: { type: string }
-            kind: { type: string, enum: [fixed_price, percent, n_for_m] }
+            kind: { type: string, enum: [fixed_price, percent, n_for_m, special] }
             badge: { type: string }
             unit_price: { type: [number, 'null'] }
             buy_qty: { type: [integer, 'null'] }
@@ -13098,7 +13170,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
-        kind: { type: string, enum: [fixed_price, percent, n_for_m] }
+        kind: { type: string, enum: [fixed_price, percent, n_for_m, special] }
         drink_id: { type: [string, 'null'], format: uuid }
         category: { type: [string, 'null'] }
         value: { type: [number, 'null'] }
@@ -13116,7 +13188,7 @@ components:
         id: { type: string, format: uuid }
         event_id: { type: string, format: uuid }
         name: { type: string }
-        kind: { type: string, enum: [fixed_price, percent, n_for_m] }
+        kind: { type: string, enum: [fixed_price, percent, n_for_m, special] }
         drink_id: { type: [string, 'null'], format: uuid }
         drink_name: { type: [string, 'null'] }
         category: { type: [string, 'null'] }
@@ -13125,6 +13197,7 @@ components:
         pay_qty: { type: [integer, 'null'] }
         starts_time: { type: [string, 'null'], example: '22:00' }
         ends_time: { type: [string, 'null'], example: '00:30' }
+        expected_units: { type: [integer, 'null'], description: Piezas que se esperan vender (D114). }
         active: { type: boolean }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -13134,7 +13207,7 @@ components:
       required: [name, kind]
       properties:
         name: { type: string, maxLength: 120 }
-        kind: { type: string, enum: [fixed_price, percent, n_for_m] }
+        kind: { type: string, enum: [fixed_price, percent, n_for_m, special] }
         drink_id: { type: string, format: uuid }
         category: { type: string, maxLength: 40 }
         value: { type: number, minimum: 0 }
@@ -13142,6 +13215,7 @@ components:
         pay_qty: { type: integer, minimum: 0, maximum: 19 }
         starts_time: { type: string, example: '22:00' }
         ends_time: { type: string, example: '00:30' }
+        expected_units: { type: [integer, 'null'], minimum: 1, maximum: 100000, description: Solo en promociones de una bebida (D114). }
 
     DrinkCreate:
       type: object
@@ -15193,6 +15267,142 @@ components:
           format: uuid
           description: El pedido de barra que originó este traspaso, cuando lo hubo.
 
+    PlanPromotion:
+      type: object
+      description: Promoción activa de la noche, como la lee el plan de insumos (D114).
+      properties:
+        id: { type: string, format: uuid }
+        event_id: { type: string, format: uuid }
+        title: { type: string }
+        kind: { type: string, enum: [fixed_price, percent, n_for_m, special] }
+        drink_id: { type: [string, 'null'], format: uuid }
+        drink_name: { type: [string, 'null'] }
+        category: { type: [string, 'null'] }
+        expected_units: { type: [integer, 'null'] }
+        has_recipe: { type: boolean }
+    PurchaseRow:
+      type: object
+      description: Un insumo a comprar. Cantidades en la unidad base del insumo.
+      properties:
+        supply_id: { type: string, format: uuid }
+        name: { type: string }
+        category: { type: [string, 'null'] }
+        unit: { type: string, enum: [ml, g, pza] }
+        package_size: { type: number }
+        package_label: { type: [string, 'null'] }
+        spent: { type: number, description: Lo que salió del estante en la noche del reporte. }
+        planned_need: { type: number, description: Lo que pide el plan de la próxima noche. }
+        stock: { type: number, description: 'Existencia del club, todos los lugares activos.' }
+        min_stock: { type: number, description: Suma de mínimos de todos los lugares activos. }
+        to_buy: { type: number }
+        to_buy_packages: { type: integer }
+        package_cost: { type: [number, 'null'] }
+        cost_source: { type: [string, 'null'], enum: [supplier, average, null] }
+        estimated_cost: { type: [number, 'null'] }
+        supplier:
+          type: [object, 'null']
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+    PurchaseTotals:
+      type: object
+      properties:
+        supplies_to_buy: { type: integer }
+        packages_to_buy: { type: integer }
+        estimated_cost: { type: number }
+        without_cost: { type: integer, description: Renglones a comprar sin costo conocido. }
+    PurchasingReport:
+      type: object
+      properties:
+        event:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            event_date: { type: string }
+            doors_open_at: { type: string, format: date-time }
+            status: { type: string }
+        window:
+          type: object
+          properties:
+            from: { type: string, format: date-time }
+            to: { type: string, format: date-time }
+        currency: { type: string, enum: [MXN, USD] }
+        drinks:
+          type: array
+          items:
+            type: object
+            properties:
+              rank: { type: integer }
+              drink_id: { type: string, format: uuid }
+              name: { type: string }
+              category: { type: [string, 'null'] }
+              units: { type: integer }
+              revenue: { type: number }
+              share: { type: number, description: Porcentaje de las unidades de la noche. }
+              has_recipe: { type: boolean }
+        drinks_total:
+          type: object
+          properties:
+            units: { type: integer }
+            revenue: { type: number }
+            without_recipe: { type: integer }
+        supplies_spent:
+          type: array
+          items:
+            type: object
+            properties:
+              supply_id: { type: string, format: uuid }
+              name: { type: string }
+              unit: { type: string }
+              package_size: { type: number }
+              package_label: { type: [string, 'null'] }
+              sold: { type: number }
+              courtesy: { type: number }
+              waste: { type: number }
+              total: { type: number }
+              packages: { type: number }
+              cost: { type: number }
+        supplies_spent_cost: { type: number }
+        next_event:
+          type: [object, 'null']
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            event_date: { type: string }
+            doors_open_at: { type: string, format: date-time }
+            history_nights: { type: integer }
+            promotions: { type: integer }
+            without_recipe: { type: array, items: { type: object } }
+        purchase: { type: array, items: { $ref: '#/components/schemas/PurchaseRow' } }
+        totals: { $ref: '#/components/schemas/PurchaseTotals' }
+    SupplyPlan:
+      type: object
+      properties:
+        event: { type: object }
+        history:
+          type: object
+          properties:
+            nights_used: { type: integer }
+            nights_wanted: { type: integer }
+            nights: { type: array, items: { type: object } }
+        promotions: { type: array, items: { $ref: '#/components/schemas/PlanPromotion' } }
+        drinks:
+          type: array
+          items:
+            type: object
+            properties:
+              drink_id: { type: string, format: uuid }
+              name: { type: [string, 'null'] }
+              category: { type: [string, 'null'] }
+              history_average: { type: number }
+              forecast_units: { type: integer }
+              promotion: { type: [object, 'null'] }
+              planned_units: { type: integer }
+              source: { type: string, enum: [promotion, history, no_history] }
+        without_recipe: { type: array, items: { type: object } }
+        supplies: { type: array, items: { $ref: '#/components/schemas/PurchaseRow' } }
+        totals: { $ref: '#/components/schemas/PurchaseTotals' }
     NightStats:
       type: object
       description: |

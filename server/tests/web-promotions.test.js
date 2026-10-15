@@ -143,3 +143,20 @@ describe('panel, textos y PWA', () => {
     expect(read('sw.js')).toContain("'js/promotions.js'");
   });
 });
+
+describe('trago especial y piezas esperadas en el formulario (D114)', () => {
+  const base = { name: 'X', targetKind: 'drink', drinkId: 'd1' };
+  it('el especial no lleva precio y solo va en una bebida', () => {
+    expect(P.payload({ ...base, kind: 'special', price: '50' })).toEqual({ body: { name: 'X', kind: 'special', drink_id: 'd1' } });
+    expect(P.payload({ ...base, kind: 'special', targetKind: 'category', category: 'Tequila' })).toEqual({ error: 'special' });
+  });
+  it('las piezas esperadas son enteras y solo de una bebida', () => {
+    expect(P.payload({ ...base, kind: 'percent', pct: '10', expected: ' 30 ' }).body.expected_units).toBe(30);
+    expect(P.payload({ ...base, kind: 'percent', pct: '10', expected: '' }).body.expected_units).toBeUndefined();
+    for (const bad of ['0', '2.5', 'diez']) {
+      expect(P.payload({ ...base, kind: 'percent', pct: '10', expected: bad })).toEqual({ error: 'expected' });
+    }
+    expect(P.payload({ name: 'X', kind: 'percent', pct: '10', targetKind: 'category', category: 'Tequila', expected: '5' }))
+      .toEqual({ error: 'expectedCategory' });
+  });
+});

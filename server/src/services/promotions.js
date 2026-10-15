@@ -17,6 +17,8 @@ const cents = (n) => Math.round(Number(n) * 100);
 function totalCents(listPrice, quantity, promo) {
   const list = cents(listPrice);
   if (!promo) return list * quantity;
+  // El trago especial (D114) no tiene descuento: existe para planear, no para cobrar.
+  if (promo.kind === 'special') return list * quantity;
   if (promo.kind === 'fixed_price') return Math.min(list, cents(promo.value)) * quantity;
   if (promo.kind === 'percent') {
     return Math.round(list * (1 - Number(promo.value) / 100)) * quantity;
@@ -121,6 +123,7 @@ function promosForDrink(promos) {
 
 /** Etiqueta corta para mostrar: «2x1», «-20%», «$60». */
 function badge(p) {
+  if (p.kind === 'special') return '★';
   if (p.kind === 'n_for_m') return `${p.buy_qty}x${p.pay_qty}`;
   if (p.kind === 'percent') return `-${Number(p.value)}%`;
   return `$${Number(p.value).toFixed(2).replace(/\.00$/, '')}`;

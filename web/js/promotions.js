@@ -64,7 +64,8 @@
 
   /**
    * Lo que manda el formulario del gerente, validado. Devuelve `{ body }` o `{ error }`
-   * con la clave del problema (name, value, buy, pay, target, window), para que la
+   * con la clave del problema (name, value, buy, pay, target, window, special, expected,
+   * expectedCategory), para que la
    * pantalla diga cual campo esta mal sin reinventar las reglas del servidor.
    */
   function payload(f) {
@@ -86,6 +87,9 @@
       const v = Number(String(f.pct).replace(',', '.'));
       if (String(f.pct).trim() === '' || !Number.isFinite(v) || v <= 0 || v > 100) return { error: 'value' };
       body.value = v;
+    } else if (f.kind === 'special') {
+      // El trago de la noche (D114): sin precio, siempre de una bebida.
+      if (f.targetKind === 'category') return { error: 'special' };
     } else if (f.kind === 'n_for_m') {
       const n = Number(f.buy);
       const m = Number(f.pay);
@@ -94,6 +98,14 @@
       body.buy_qty = n;
       body.pay_qty = m;
     } else return { error: 'value' };
+    // Piezas que se esperan vender (D114): vacío = usar el pronóstico.
+    const expected = String(f.expected == null ? '' : f.expected).trim();
+    if (expected !== '') {
+      const n = Number(expected);
+      if (!Number.isInteger(n) || n < 1 || n > 100000) return { error: 'expected' };
+      if (f.targetKind === 'category') return { error: 'expectedCategory' };
+      body.expected_units = n;
+    }
     const from = String(f.from || '');
     const to = String(f.to || '');
     if (from || to) {

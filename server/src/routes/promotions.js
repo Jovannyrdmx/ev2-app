@@ -6,6 +6,9 @@
  *   POST  /events/:eventId/promotions             crear (gerente)
  *   PATCH /promotions/:promotionId                editar o apagar (gerente)
  *
+ * `special` (D114) es el trago de la noche SIN descuento: no tiene precio y nunca cambia
+ * el cobro; con `expected_units` sirve para planear insumos en Compras y reabasto.
+ *
  * No se borran: se apagan. Un pedido ya hecho conserva su precio (`line_total`) y el
  * nombre de la promocion que se le aplico.
  */
@@ -25,7 +28,7 @@ const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM');
 
 const fields = {
   name: z.string().trim().min(1).max(120),
-  kind: z.enum(['fixed_price', 'percent', 'n_for_m']),
+  kind: z.enum(['fixed_price', 'percent', 'n_for_m', 'special']),
   drink_id: uuid.optional(),
   category: z.string().trim().min(1).max(40).optional(),
   value: z.number().min(0).max(100000).optional(),
@@ -33,6 +36,8 @@ const fields = {
   pay_qty: z.number().int().min(0).max(19).optional(),
   starts_time: hhmm.optional(),
   ends_time: hhmm.optional(),
+  // Piezas que se esperan vender (D114). null = usar el pronóstico.
+  expected_units: z.number().int().min(1).max(100000).nullable().optional(),
 };
 
 /** Las reglas que el CHECK de la base tambien impone, con un mensaje que el gerente entiende. */
@@ -52,6 +57,19 @@ function checkShape(b) {
       throw ApiError.unprocessable('Lleva N paga M: M debe ser menor que N');
     }
   }
+  if (b.kind === 'special' && !b.drink_id) {
+    throw ApiError.unprocessable('El trago especial es de una bebida, no de una categoría');
+  }
+  if (b.expected_units != null && !b.drink_id) {
+    throw ApiError.unprocessable('Las piezas esperadas solo van en una promoción de una bebida');
+  }
+}
+
+/** El precio y las cantidades que guarda cada tipo: el especial no lleva ninguno. */
+function priceColumns(b) {
+  if (b.kind === 'n_for_m') return { value: null, buy_qty: b.buy_qty, pay_qty: b.pay_qty };
+  if (b.kind === 'special') return { value: null, buy_qty: null, pay_qty: null };
+  return { value: b.value, buy_qty: null, pay_qty: null };
 }
 
 const SELECT = `
@@ -59,7 +77,7 @@ const SELECT = `
          p.value::text AS value, p.buy_qty, p.pay_qty,
          to_char(p.starts_time, 'HH24:MI') AS starts_time,
          to_char(p.ends_time, 'HH24:MI') AS ends_time,
-         p.active, p.created_at, p.updated_at
+         p.expected_units, p.active, p.created_at, p.updated_at
     FROM event_promotions p LEFT JOIN drinks d ON d.id = p.drink_id`;
 
 async function audit(client, req, action, id, before, after) {
@@ -126,12 +144,12 @@ router.post('/nightclubs/:nightclubId/events/:eventId/promotions',
       await client.query('BEGIN');
       const ins = await client.query(
         `INSERT INTO event_promotions (nightclub_id, event_id, name, kind, drink_id, category,
-                                       value, buy_qty, pay_qty, starts_time, ends_time, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+                                       value, buy_qty, pay_qty, starts_time, ends_time, created_by,
+                                       expected_units)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
         [nightclubId, eventId, b.name, b.kind, b.drink_id || null, b.category || null,
-          b.kind === 'n_for_m' ? null : b.value,
-          b.kind === 'n_for_m' ? b.buy_qty : null, b.kind === 'n_for_m' ? b.pay_qty : null,
-          b.starts_time || null, b.ends_time || null, req.user.id]);
+          priceColumns(b).value, priceColumns(b).buy_qty, priceColumns(b).pay_qty,
+          b.starts_time || null, b.ends_time || null, req.user.id, b.expected_units ?? null]);
       await audit(client, req, 'promotion.create', ins.rows[0].id, null, b);
       await client.query('COMMIT');
       const { rows } = await client.query(`${SELECT} WHERE p.id = $1`, [ins.rows[0].id]);
@@ -173,10 +191,13 @@ router.patch('/nightclubs/:nightclubId/promotions/:promotionId',
       pay_qty: b.pay_qty !== undefined ? b.pay_qty : before.pay_qty ?? undefined,
       starts_time: b.starts_time !== undefined ? b.starts_time || undefined : before.starts_time || undefined,
       ends_time: b.ends_time !== undefined ? b.ends_time || undefined : before.ends_time || undefined,
+      expected_units: b.expected_units !== undefined ? b.expected_units : before.expected_units,
     };
+    // Al pasar a una categoría, las piezas esperadas de la bebida ya no aplican.
+    if (merged.category && b.expected_units === undefined) merged.expected_units = null;
     checkShape(merged);
     await assertTargets(pool, nightclubId, merged);
-    const isN = merged.kind === 'n_for_m';
+    const cols = priceColumns(merged);
 
     const client = await pool.connect();
     try {
@@ -185,13 +206,13 @@ router.patch('/nightclubs/:nightclubId/promotions/:promotionId',
         `UPDATE event_promotions
             SET name = $3, kind = $4, drink_id = $5, category = $6, value = $7,
                 buy_qty = $8, pay_qty = $9, starts_time = $10, ends_time = $11,
-                active = $12, updated_at = now()
+                active = $12, expected_units = $13, updated_at = now()
           WHERE id = $1 AND nightclub_id = $2`,
         [promotionId, nightclubId, b.name || before.name, merged.kind,
           merged.drink_id || null, merged.category || null,
-          isN ? null : merged.value, isN ? merged.buy_qty : null, isN ? merged.pay_qty : null,
+          cols.value, cols.buy_qty, cols.pay_qty,
           merged.starts_time || null, merged.ends_time || null,
-          b.active !== undefined ? b.active : before.active]);
+          b.active !== undefined ? b.active : before.active, merged.expected_units ?? null]);
       await audit(client, req, b.active === false ? 'promotion.disable' : 'promotion.update',
         promotionId, before, b);
       await client.query('COMMIT');

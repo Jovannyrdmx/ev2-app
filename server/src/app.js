@@ -23,6 +23,7 @@ const inventoryRoutes = require('./routes/inventory');
 const supplierRoutes = require('./routes/suppliers');
 const receiptPhotoRoutes = require('./routes/receipts');
 const nightRoutes = require('./routes/nights');
+const purchasingRoutes = require('./routes/purchasing');
 const orderRoutes = require('./routes/orders');
 const staffConsumptionRoutes = require('./routes/staff-consumption');
 const waiterRoutes = require('./routes/waiters');
@@ -236,6 +237,7 @@ function createApp() {
   app.use('/api', supplierRoutes);
   app.use('/api', receiptPhotoRoutes);
   app.use('/api', nightRoutes);
+  app.use('/api', purchasingRoutes);
   app.use('/api', orderRoutes);
   app.use('/api', staffConsumptionRoutes);
   app.use('/api', waiterRoutes);
