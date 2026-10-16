@@ -85,7 +85,7 @@
   /** "2× Corona, 1× Margarita". */
   function itemsSummary(order) {
     return ((order && order.items) || [])
-      .map((i) => `${i.quantity}× ${i.name || ''}`.trim())
+      .map((i) => `${i.quantity}× ${i.name || ''}${Array.isArray(i.mixers) && i.mixers.length ? ` (+ ${i.mixers.map((x) => `${x.quantity} ${x.name}`).join(', ')})` : ''}`.trim())
       .join(', ');
   }
 

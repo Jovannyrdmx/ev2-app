@@ -118,10 +118,14 @@
   function orderPayload({ tableId, guestId, cart, requestId, deliveryPointId, barLocationId }) {
     const body = {
       client_request_id: requestId,
-      items: (cart || []).map((line) => ({
-        drink_id: line.drink.id,
-        quantity: line.quantity,
-      })),
+      items: (cart || []).map((line) => {
+        const item = { drink_id: line.drink.id, quantity: line.quantity };
+        // Servicio de botella (D117): qué mezcladores lleva. El precio lo pone el servidor.
+        if (line.mixers && line.mixers.length) {
+          item.mixers = line.mixers.map((m) => ({ mixer_id: m.mixer_id, quantity: m.quantity }));
+        }
+        return item;
+      }),
     };
     if (tableId) body.table_id = tableId;
     else if (deliveryPointId) body.delivery_point_id = deliveryPointId;

@@ -20,6 +20,7 @@ const accountRoutes = require('./routes/account');
 const nightclubRoutes = require('./routes/nightclubs');
 const drinkRoutes = require('./routes/drinks');
 const inventoryRoutes = require('./routes/inventory');
+const bottleServiceRoutes = require('./routes/bottle-service');
 const supplierRoutes = require('./routes/suppliers');
 const receiptPhotoRoutes = require('./routes/receipts');
 const nightRoutes = require('./routes/nights');
@@ -234,6 +235,7 @@ function createApp() {
   app.use('/api', nightclubRoutes);
   app.use('/api', drinkRoutes);
   app.use('/api', inventoryRoutes);
+  app.use('/api', bottleServiceRoutes);
   app.use('/api', supplierRoutes);
   app.use('/api', receiptPhotoRoutes);
   app.use('/api', nightRoutes);

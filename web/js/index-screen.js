@@ -802,6 +802,12 @@
       const data = await api.get(`/nightclubs/${clubId()}/drinks`);
       state.drinks = data.drinks || [];
       state.categories = EV2Client.orderCategories(state.drinks.map((d) => d.category));
+      // Servicio de botella (D117): los mezcladores que se pueden elegir. Si falla,
+      // la carta sigue: la botella se pide sin elegir y el mesero lo resuelve.
+      try {
+        const m = await api.get(`/nightclubs/${clubId()}/bottle-mixers`);
+        state.mixers = m.mixers || [];
+      } catch { state.mixers = []; }
       renderMenu();
     } catch (err) { showError(err); }
   }
@@ -1036,6 +1042,9 @@
         <div class="flex-1 min-w-0">
           <p class="font-semibold leading-snug">${escape(EV2Client.displayName(d.name))}</p>
           <p class="text-sm mt-0.5 ${out ? 'text-white/50' : ''}">${EV2Promos.priceHtml(d, money, escape)}${out ? ` · <span class="text-xs">${escape(t('menu.soldOut'))}</span>` : ''}</p>
+          ${qty > 0 && conServicio(d) ? `
+          <button type="button" data-mixers="${d.id}" class="mt-1 text-xs underline text-fuchsia-200 text-left">
+            ${escape(EV2MixerPicker.summary(cart.mixersOf(d.id)) || t('mix.choose'))}</button>` : ''}
         </div>
         ${out ? '' : `
         <div class="flex items-center gap-2">
@@ -1054,13 +1063,36 @@
     $('menu-list').querySelectorAll('[data-more]').forEach((b) => {
       b.onclick = () => {
         const drink = state.drinks.find((d) => d.id === b.dataset.more);
+        const primera = cart.quantityOf(drink.id) === 0;
         // El tope no es un capricho: pedir más de lo que hay solo produce un error al final.
         if (!cart.add(drink)) toast(t('menu.noStock'));
         renderMenu(); renderCart();
+        // La primera botella con servicio abre el selector de mezcladores (D117).
+        if (primera && cart.quantityOf(drink.id) > 0 && conServicio(drink)) abrirMezcladores(drink);
       };
+    });
+    $('menu-list').querySelectorAll('[data-mixers]').forEach((b) => {
+      b.onclick = () => abrirMezcladores(state.drinks.find((d) => d.id === b.dataset.mixers));
     });
     $('menu-list').querySelectorAll('[data-less]').forEach((b) => {
       b.onclick = () => { cart.remove(b.dataset.less); renderMenu(); renderCart(); };
+    });
+  }
+
+  /** Si esa botella se ofrece con servicio y hay mezcladores dados de alta (D117). */
+  function conServicio(drink) {
+    return EV2Client.hasMixerService(drink) && (state.mixers || []).length > 0;
+  }
+
+  function abrirMezcladores(drink) {
+    if (!drink) return;
+    EV2MixerPicker.open({
+      drink,
+      quantity: cart.quantityOf(drink.id),
+      mixers: state.mixers || [],
+      selection: cart.mixersOf(drink.id),
+      money,
+      onSave: (sel) => { cart.setMixers(drink.id, sel); renderMenu(); renderCart(); },
     });
   }
 
@@ -1125,7 +1157,7 @@
 
     $('orders-list').innerHTML = state.orders.map((o) => {
       const pct = Math.round(EV2Client.orderProgress(o.status) * 100);
-      const items = (o.items || []).map((i) => `${i.quantity}× ${escape(EV2Client.displayName(i.name || i.drink_name || ''))}`).join(', ');
+      const items = (o.items || []).map((i) => `${i.quantity}× ${escape(EV2Client.displayName(i.name || i.drink_name || '') + (Array.isArray(i.mixers) && i.mixers.length ? ` (+ ${i.mixers.map((x) => `${x.quantity} ${x.name}`).join(', ')})` : ''))}`).join(', ');
       // Un pedido sin pagar no lo está preparando nadie. Decirlo aquí evita la espera
       // más frustrante que hay: la de un trago que nunca se empezó a servir.
       const porPagar = o.payment_status === 'pending' || o.payment_status === 'pending_manual';
