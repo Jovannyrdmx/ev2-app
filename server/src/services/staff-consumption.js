@@ -9,9 +9,13 @@
 
 const { ApiError } = require('../middleware/errors');
 
-/** Quien puede pedir para si. Gerente y admin no: no son personal con descuento. */
+/**
+ * Quien puede pedir para si. El gerente tambien (D116): el dueno lo pidio, y su
+ * consumo entra al mismo reporte semanal de descuento por nomina que el de todos.
+ * El admin no: es el dueno, no personal con descuento.
+ */
 const STAFF_ROLES = ['waiter', 'bartender', 'cashier', 'dancer', 'dj', 'light_tech',
-  'valet', 'hostess', 'rp'];
+  'valet', 'hostess', 'rp', 'manager'];
 
 const ROLE_LABEL_ES = {
   waiter: 'Mesero', bartender: 'Bartender', cashier: 'Cajero', dancer: 'Bailarina',
