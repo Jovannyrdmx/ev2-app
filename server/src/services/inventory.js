@@ -193,10 +193,27 @@ function neededBySupply(items, recipes) {
  * que obliga al cantinero a adivinar cual de los cinco ingredientes falto ni de
  * donde tiene que traerlo.
  */
-async function consume(client, { nightclubId, locationId, items, orderId, userId }) {
+async function consume(client, { nightclubId, locationId, items, orderId, userId,
+  extraSupplies = [] }) {
   const drinkIds = [...new Set(items.map((i) => i.drink_id))];
   const recipes = await recipesFor(client, { nightclubId, drinkIds, locationId });
   const needed = neededBySupply(items, recipes);
+  // Lo que no viene de una receta sino del pedido: los mezcladores que se eligieron
+  // para una botella (D117). Bajan de la misma barra y con las mismas reglas.
+  if (extraSupplies.length) {
+    const { rows } = await client.query(
+      `SELECT id AS supply_id, name, unit, active FROM supplies
+        WHERE id = ANY($1::uuid[]) AND nightclub_id = $2`,
+      [extraSupplies.map((e) => e.supply_id), nightclubId]);
+    const meta = new Map(rows.map((r) => [r.supply_id, r]));
+    for (const e of extraSupplies) {
+      const supply = meta.get(e.supply_id);
+      if (!supply) throw ApiError.notFound('Insumo del servicio no encontrado');
+      const prev = needed.get(e.supply_id);
+      if (prev) prev.quantity = round3(prev.quantity + Number(e.quantity));
+      else needed.set(e.supply_id, { supply, quantity: round3(Number(e.quantity)) });
+    }
+  }
   if (needed.size === 0) return [];
   if (!locationId) throw ApiError.unprocessable('Este pedido no tiene barra asignada');
 

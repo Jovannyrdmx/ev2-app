@@ -1355,7 +1355,7 @@
     const busy = group.orders.some((o) => state.busy.has(o.id));
     const bars = [...new Set(group.orders.map((o) => o.bar_name).filter(Boolean))];
     const detail = group.orders.map((o) => `
-        <p class="text-sm text-white/70">${escape((o.items || []).map((i) => `${i.quantity}× ${EV2Client.displayName(i.name || '')}`).join(', '))}
+        <p class="text-sm text-white/70">${escape((o.items || []).map((i) => `${i.quantity}× ${EV2Client.displayName(i.name || '')}` + (Array.isArray(i.mixers) && i.mixers.length ? ` (+ ${i.mixers.map((x) => `${x.quantity} ${x.name}`).join(', ')})` : '')).join(', '))}
           <span class="text-white/40">· ${escape(o.recipient_name ? `${t('bar.gift')}: ${o.recipient_name}` : (o.taken_by_name || o.sender_name || ''))}</span></p>`).join('');
     return `
       <article class="card wait-${group.urgency}${flash} rounded-xl p-4" data-tray="${escape(group.key)}">
@@ -1632,7 +1632,7 @@
         <div class="min-w-0">
           <p class="text-sm truncate">${escape(order.sender_name || '—')}
             <span class="text-white/40">${order.table_code ? escape(`· ${t('floor.tableShort')} ${order.table_code}`) : ''}</span></p>
-          <p class="text-xs text-white/50 truncate">${escape((order.items || []).map((i) => `${i.quantity}× ${i.name}`).join(', '))}</p>
+          <p class="text-xs text-white/50 truncate">${escape((order.items || []).map((i) => `${i.quantity}× ${i.name}` + (Array.isArray(i.mixers) && i.mixers.length ? ` (+ ${i.mixers.map((x) => `${x.quantity} ${x.name}`).join(', ')})` : '')).join(', '))}</p>
         </div>
         ${cobraAqui ? `<button class="ev2-button rounded-lg px-3 py-2 text-xs font-display flex-none">
           ${escape(money(order.subtotal, order.currency))}
@@ -1670,6 +1670,11 @@
         try {
           const d = await api.get(`/nightclubs/${clubId()}/drinks`);
           state.drinks = d.drinks || [];
+          // Servicio de botella (D117). Si falla, se pide sin elegir mezcladores.
+          try {
+            const m = await api.get(`/nightclubs/${clubId()}/bottle-mixers`);
+            state.mixers = m.mixers || [];
+          } catch { state.mixers = []; }
         } catch (err) { showError(err); } finally { drinksLoading = null; }
       })();
     }
@@ -1855,6 +1860,9 @@
           <div class="min-w-0 flex-1">
             <p class="text-sm truncate">${escape(EV2Client.displayName(drink.name))}</p>
             <p class="text-xs text-white/50">${EV2Promos.priceHtml(drink, money, escape)}</p>
+            ${take.cart.quantityOf(drink.id) > 0 && conServicio(drink) ? `
+            <button type="button" data-mixers="1" class="text-xs underline text-fuchsia-200 text-left">
+              ${escape(EV2MixerPicker.summary(take.cart.mixersOf(drink.id)) || t('mix.choose'))}</button>` : ''}
           </div>
           <div class="flex items-center gap-2 flex-none">
             <button class="card rounded-lg w-9 h-9 text-lg" data-minus="1" aria-label="-">−</button>
@@ -1869,7 +1877,14 @@
 
       $('take-menu').querySelectorAll('[data-drink]').forEach((el) => {
         const drink = state.drinks.find((d) => d.id === el.dataset.drink);
-        el.querySelector('[data-plus]').onclick = () => { take.cart.add(drink); renderTake(); };
+        el.querySelector('[data-plus]').onclick = () => {
+          const primera = take.cart.quantityOf(drink.id) === 0;
+          take.cart.add(drink); renderTake();
+          // La primera botella con servicio abre el selector de mezcladores (D117).
+          if (primera && take.cart.quantityOf(drink.id) > 0 && conServicio(drink)) abrirMezcladores(drink);
+        };
+        const mx = el.querySelector('[data-mixers]');
+        if (mx) mx.onclick = () => abrirMezcladores(drink);
         el.querySelector('[data-minus]').onclick = () => { take.cart.remove(drink.id); renderTake(); };
       });
     }
@@ -1877,7 +1892,9 @@
     const lines = cobrando ? (take.order.items || []).map((i) => ({
       name: i.name, quantity: i.quantity, subtotal: null,
     })) : take.cart.lines.map((l) => ({
-      name: EV2Client.displayName(l.drink.name), quantity: l.quantity, subtotal: l.subtotal,
+      name: EV2Client.displayName(l.drink.name)
+        + (l.mixers && l.mixers.length ? ` + ${EV2MixerPicker.summary(l.mixers)}` : ''),
+      quantity: l.quantity, subtotal: l.subtotal,
     }));
     $('take-cart').innerHTML = lines.map((l) => `
       <div class="flex justify-between text-xs">
@@ -1893,6 +1910,24 @@
       || EV2OrderTaking.orderBlocker({
         tableId: mesa && mesa.id, deliveryPointId: take.pointId, cart: take.cart.lines,
       }) !== null;
+  }
+
+  /** Si esa botella se ofrece con servicio y hay mezcladores dados de alta (D117). */
+  function conServicio(drink) {
+    return EV2Client.hasMixerService(drink) && (state.mixers || []).length > 0;
+  }
+
+  function abrirMezcladores(drink) {
+    const take = state.take;
+    if (!drink || !take) return;
+    EV2MixerPicker.open({
+      drink,
+      quantity: take.cart.quantityOf(drink.id),
+      mixers: state.mixers || [],
+      selection: take.cart.mixersOf(drink.id),
+      money,
+      onSave: (sel) => { take.cart.setMixers(drink.id, sel); renderTake(); },
+    });
   }
 
   function takeError(key) {

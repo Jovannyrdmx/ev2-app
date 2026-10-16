@@ -198,10 +198,16 @@
     return ids;
   }
 
+  /** Los mezcladores del servicio de botella (D117): " (+ 2 Sprite 3 L, 1 Agua mineral)". */
+  function mixersText(item) {
+    const m = (item && Array.isArray(item.mixers)) ? item.mixers : [];
+    return m.length ? ` (+ ${m.map((x) => `${x.quantity} ${x.name}`).join(', ')})` : '';
+  }
+
   /** "2× Corona, 1× Margarita". Lo que el bartender tiene que preparar, de un vistazo. */
   function itemsSummary(order) {
     return ((order && order.items) || [])
-      .map((i) => `${i.quantity}× ${i.name || i.drink_name || ''}`.trim())
+      .map((i) => `${i.quantity}× ${i.name || i.drink_name || ''}${mixersText(i)}`.trim())
       .join(', ');
   }
 

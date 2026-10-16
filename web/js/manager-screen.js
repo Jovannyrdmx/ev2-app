@@ -41,7 +41,7 @@
     // precio; en cuanto tiene uno, el servidor deja de aceptar importes sueltos.
     covers: [],
     // Inventario: lo que el gerente mira, no lo que el almacen opera.
-    supplies: [], locations: [], recipes: [], movements: [],
+    supplies: [], locations: [], recipes: [], movements: [], mixers: [],
     // Hasta que el inventario llegue de la API, la pestana NO pinta ceros: un
     // "MX$0.00" mientras carga no es "cargando", es un dato falso, y el gerente que
     // lo alcanza a leer se lleva la idea de que la bodega esta vacia.
@@ -280,6 +280,8 @@
       get(`/nightclubs/${club}/supply-locations`, (d) => { state.locations = d.locations || []; }),
       get(`/nightclubs/${club}/supplies`, (d) => { state.supplies = d.supplies || []; }),
       get(`/nightclubs/${club}/recipes`, (d) => { state.recipes = d.recipes || []; }),
+      // Servicio de botella (D117): el catálogo de mezcladores, incluidos los apagados.
+      get(`/nightclubs/${club}/bottle-mixers`, (d) => { state.mixers = d.mixers || []; }),
       // La carta completa, incluidos los tragos apagados: apagar uno es lo que lo
       // quita del menú del cliente, así que hay que poder verlo para volver a prenderlo.
       get(`/nightclubs/${club}/drinks`, (d) => { state.drinks = d.drinks || []; }),
@@ -5077,7 +5079,162 @@
     if (state.invView === 'recipes') return renderRecipeList();
     if (state.invView === 'kardex') return renderKardex();
     if (state.invView === 'menu') return renderMenuList();
+    if (state.invView === 'service') return renderBottleService();
     return renderStockList();
+  }
+
+  // ---------------------------------------------------------------- servicio de botella
+
+  /**
+   * Servicio de botella (D117). Arriba, los mezcladores que se pueden elegir al pedir
+   * una botella: de qué insumo bajan, cuánto descuenta cada uno y cuánto cuesta cuando
+   * se pasa del tope. Abajo, cada botella con su tope: cuántos incluye por pieza.
+   * Vacío = esa botella no ofrece servicio. Todo se guarda al salir del campo.
+   */
+  const esBotella = (d) => /botella|bottle/i.test(String(d.category || ''))
+    || (d.included_mixers !== null && d.included_mixers !== undefined);
+
+  async function reloadMixers() {
+    const club = clubId();
+    const [m, d] = await Promise.all([
+      api.get(`/nightclubs/${club}/bottle-mixers`),
+      api.get(`/nightclubs/${club}/drinks`),
+    ]);
+    state.mixers = m.mixers || [];
+    state.drinks = d.drinks || [];
+    renderInventory();
+  }
+
+  function renderBottleService() {
+    $('inv-empty').hidden = true;
+    const caja = $('inv-list');
+    const usados = new Set(state.mixers.map((m) => m.supply_id));
+    const disponibles = (state.supplies || []).filter((x) => x.active !== false && !usados.has(x.id))
+      .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    const botellas = (state.drinks || []).filter(esBotella)
+      .filter((d) => invMatches(d.name) || invMatches(d.category))
+      .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    const unidad = (u) => (u === 'ml' ? 'ml' : u === 'g' ? 'g' : 'pza');
+
+    caja.innerHTML = `
+      <section class="space-y-2">
+        <p class="text-sm font-semibold">${escape(t('bs.mixers'))}</p>
+        <p class="text-[11px] text-white/45">${escape(t('bs.mixersHelp'))}</p>
+        ${state.mixers.length ? '' : `<p class="text-xs text-white/50">${escape(t('bs.noMixers'))}</p>`}
+        ${state.mixers.map((m) => `
+          <article class="card rounded-xl px-3 py-2 space-y-2 ${m.active ? '' : 'opacity-50'}" data-mixer="${escape(m.id)}">
+            <div class="flex items-center gap-2">
+              <input class="field flex-1 text-sm" data-f="name" value="${escape(m.name)}" maxlength="80" aria-label="${escape(t('bs.name'))}">
+              <label class="text-xs flex items-center gap-1 shrink-0">
+                <input type="checkbox" data-f="active" ${m.active ? 'checked' : ''}> ${escape(t('bs.active'))}
+              </label>
+            </div>
+            <p class="text-[11px] text-white/45">${escape(t('bs.fromSupply', { supply: m.supply_name }))}</p>
+            <div class="flex flex-wrap items-center gap-3 text-xs">
+              <label class="flex items-center gap-1">${escape(t('bs.portion'))}
+                <input class="field" style="width:6rem" type="number" min="0.001" step="any" data-f="portion" value="${escape(m.portion)}"> ${unidad(m.unit)}</label>
+              <label class="flex items-center gap-1">${escape(t('bs.extra'))} $
+                <input class="field" style="width:6rem" type="number" min="0" step="0.01" data-f="extra_price" value="${escape(Number(m.extra_price).toFixed(2))}"></label>
+            </div>
+          </article>`).join('')}
+        <form id="bs-add" class="card rounded-xl p-3 space-y-2">
+          <p class="text-xs font-semibold">${escape(t('bs.add'))}</p>
+          <select id="bs-add-supply" class="field w-full text-sm" required>
+            <option value="">${escape(t('bs.pickSupply'))}</option>
+            ${disponibles.map((x) => `<option value="${escape(x.id)}">${escape(x.name)} (${unidad(x.unit)})</option>`).join('')}
+          </select>
+          <input id="bs-add-name" class="field w-full text-sm" maxlength="80" required placeholder="${escape(t('bs.namePh'))}">
+          <div class="flex flex-wrap gap-3 text-xs items-center">
+            <label class="flex items-center gap-1">${escape(t('bs.portion'))}
+              <input id="bs-add-portion" class="field" style="width:6rem" type="number" min="0.001" step="any" required>
+              <span id="bs-add-unit"></span></label>
+            <label class="flex items-center gap-1">${escape(t('bs.extra'))} $
+              <input id="bs-add-price" class="field" style="width:6rem" type="number" min="0" step="0.01" required value="0"></label>
+          </div>
+          <p id="bs-add-error" class="text-xs text-red-300" hidden></p>
+          <button class="ev2-button rounded-lg px-4 py-2 text-sm">${escape(t('bs.addBtn'))}</button>
+        </form>
+      </section>
+      <section class="space-y-2 pt-4">
+        <p class="text-sm font-semibold">${escape(t('bs.bottles'))}</p>
+        <p class="text-[11px] text-white/45">${escape(t('bs.bottlesHelp'))}</p>
+        ${botellas.length ? '' : `<p class="text-xs text-white/50">${escape(t('bs.noBottles'))}</p>`}
+        ${botellas.map((d) => `
+          <article class="card rounded-xl px-3 py-2 flex items-center gap-3" data-bottle="${escape(d.id)}">
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-semibold break-words">${escape(d.name)}</p>
+              <p class="text-xs text-white/50">${escape(money(d.price, d.currency))}</p>
+            </div>
+            <label class="text-xs flex items-center gap-1 shrink-0">${escape(t('bs.includes'))}
+              <input class="field" style="width:4.5rem" type="number" min="0" max="50" step="1"
+                     placeholder="—" value="${d.included_mixers === null || d.included_mixers === undefined ? '' : escape(d.included_mixers)}"></label>
+          </article>`).join('')}
+      </section>`;
+
+    // Guardar un mezclador al salir de cualquiera de sus campos.
+    caja.querySelectorAll('[data-mixer]').forEach((card) => {
+      const id = card.dataset.mixer;
+      const m = state.mixers.find((x) => x.id === id);
+      card.querySelectorAll('[data-f]').forEach((input) => {
+        const evento = input.type === 'checkbox' ? 'change' : 'change';
+        input.addEventListener(evento, async () => {
+          const f = input.dataset.f;
+          const body = {};
+          if (f === 'active') body.active = input.checked;
+          else if (f === 'name') body.name = input.value.trim();
+          else body[f] = Number(input.value);
+          if (f === 'name' && !body.name) { input.value = m.name; return; }
+          if ((f === 'portion' && !(body.portion > 0)) || (f === 'extra_price' && !(body.extra_price >= 0))) {
+            input.value = m[f]; toast(t('bs.badNumber'), 'error'); return;
+          }
+          try {
+            await api.patch(`/nightclubs/${clubId()}/bottle-mixers/${id}`, body);
+            toast(t('bs.saved'), 'ok');
+            await reloadMixers();
+          } catch (err) { showError(err); await reloadMixers(); }
+        });
+      });
+    });
+
+    const sel = caja.querySelector('#bs-add-supply');
+    sel.onchange = () => {
+      const x = (state.supplies || []).find((s2) => s2.id === sel.value);
+      if (!x) return;
+      if (!caja.querySelector('#bs-add-name').value) caja.querySelector('#bs-add-name').value = x.name;
+      // Por omisión, una presentación completa: una botella de Sprite de 3 L = 3000 ml.
+      caja.querySelector('#bs-add-portion').value = x.package_size || '';
+      caja.querySelector('#bs-add-unit').textContent = unidad(x.unit);
+    };
+    caja.querySelector('#bs-add').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const error = caja.querySelector('#bs-add-error');
+      error.hidden = true;
+      try {
+        await api.post(`/nightclubs/${clubId()}/bottle-mixers`, {
+          supply_id: sel.value,
+          name: caja.querySelector('#bs-add-name').value.trim(),
+          portion: Number(caja.querySelector('#bs-add-portion').value),
+          extra_price: Number(caja.querySelector('#bs-add-price').value),
+        });
+        toast(t('bs.saved'), 'ok');
+        await reloadMixers();
+      } catch (err) { showError(err, error); }
+    };
+
+    caja.querySelectorAll('[data-bottle]').forEach((card) => {
+      const input = card.querySelector('input');
+      input.addEventListener('change', async () => {
+        const raw = input.value.trim();
+        const value = raw === '' ? null : Math.floor(Number(raw));
+        if (value !== null && !(value >= 0 && value <= 50)) { toast(t('bs.badNumber'), 'error'); return; }
+        try {
+          await api.put(`/nightclubs/${clubId()}/drinks/${card.dataset.bottle}/included-mixers`,
+            { included_mixers: value });
+          toast(t('bs.saved'), 'ok');
+          await reloadMixers();
+        } catch (err) { showError(err); }
+      });
+    });
   }
 
   function invEmpty(message) {

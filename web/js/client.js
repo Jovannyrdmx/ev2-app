@@ -21,19 +21,56 @@
     ? Promos.lineCents(drink, qty) : toCents(drink.price) * qty);
 
   /**
+   * Servicio de botella (D117): cuánto se cobra de más por los mezcladores elegidos.
+   *
+   * La MISMA cuenta que hace el servidor (services/bottle-service.js), solo para
+   * enseñarla: incluye hasta `included_mixers` por botella, primero los más caros, y
+   * cobra el resto a su `extra_price`. Quien cobra es el servidor.
+   *
+   * @param {object} drink      con `included_mixers` (null = no lleva servicio)
+   * @param {number} quantity   cuántas botellas
+   * @param {Array}  selection  [{ mixer_id, name, extra_price, quantity }]
+   */
+  function mixerBreakdown(drink, quantity, selection) {
+    const lines = (selection || []).filter((m) => Number(m.quantity) > 0)
+      .map((m) => ({ ...m, quantity: Number(m.quantity) }))
+      .sort((a, b) => toCents(b.extra_price) - toCents(a.extra_price)
+        || String(a.name).localeCompare(String(b.name)));
+    let libres = drink && drink.included_mixers !== null && drink.included_mixers !== undefined
+      ? Number(drink.included_mixers) * Number(quantity || 0) : 0;
+    let extraCents = 0;
+    const out = lines.map((m) => {
+      const included = Math.min(libres, m.quantity);
+      libres -= included;
+      const charged = m.quantity - included;
+      extraCents += charged * toCents(m.extra_price);
+      return { ...m, included, charged };
+    });
+    return { lines: out, extraCents, extra: fromCents(extraCents) };
+  }
+
+  /** Si esa bebida se ofrece con servicio de mezcladores. */
+  const hasMixerService = (drink) => Boolean(drink)
+    && drink.included_mixers !== null && drink.included_mixers !== undefined;
+
+  /**
    * Carrito. Las cuentas se hacen en centavos enteros: en float, tres cervezas de 79.90
    * no suman 239.70, y el cliente ve un total que no cuadra con lo que se le cobra.
    */
   function createCart() {
-    const lines = new Map(); // drinkId -> { drink, quantity }
+    const lines = new Map(); // drinkId -> { drink, quantity, mixers }
     let requestId = null;
+    // Lo que cuesta un renglón: la bebida y, si es botella con servicio, sus extras.
+    const rowCents = (l) => lineCents(l.drink, l.quantity)
+      + (l.mixers && l.mixers.length ? mixerBreakdown(l.drink, l.quantity, l.mixers).extraCents : 0);
 
     return {
       get lines() {
         return [...lines.values()].map((l) => ({
           drink: l.drink,
           quantity: l.quantity,
-          subtotal: fromCents(lineCents(l.drink, l.quantity)),
+          mixers: l.mixers || [],
+          subtotal: fromCents(rowCents(l)),
         }));
       },
       get count() {
@@ -45,7 +82,7 @@
       },
       get total() {
         let cents = 0;
-        for (const l of lines.values()) cents += lineCents(l.drink, l.quantity);
+        for (const l of lines.values()) cents += rowCents(l);
         return fromCents(cents);
       },
       quantityOf(drinkId) {
@@ -59,7 +96,8 @@
         const current = this.quantityOf(drink.id);
         const next = Math.min(current + qty, stock, 20);
         if (next <= current) return false;
-        lines.set(drink.id, { drink, quantity: next });
+        const prev = lines.get(drink.id);
+        lines.set(drink.id, { drink, quantity: next, mixers: prev ? prev.mixers : [] });
         return true;
       },
       remove(drinkId, qty = 1) {
@@ -70,6 +108,20 @@
         return true;
       },
       clear() { lines.clear(); requestId = null; },
+      /** Los mezcladores elegidos para esa botella (D117). */
+      mixersOf(drinkId) {
+        return lines.has(drinkId) ? (lines.get(drinkId).mixers || []) : [];
+      },
+      /** Reemplaza la elección de mezcladores de esa botella. */
+      setMixers(drinkId, selection) {
+        const line = lines.get(drinkId);
+        if (!line) return false;
+        line.mixers = (selection || []).filter((m) => Number(m.quantity) > 0)
+          .map((m) => ({ mixer_id: m.mixer_id, name: m.name, extra_price: m.extra_price,
+            quantity: Math.min(50, Math.floor(Number(m.quantity))) }));
+        requestId = null;
+        return true;
+      },
       /**
        * La misma clave mientras el pedido no salga: si el botón se toca dos veces o la
        * red reintenta, el servidor devuelve el mismo pedido en vez de crear otro.
@@ -80,7 +132,13 @@
       },
       newRequestKey() { requestId = null; },
       toOrderItems() {
-        return [...lines.values()].map((l) => ({ drink_id: l.drink.id, quantity: l.quantity }));
+        return [...lines.values()].map((l) => {
+          const item = { drink_id: l.drink.id, quantity: l.quantity };
+          if (l.mixers && l.mixers.length) {
+            item.mixers = l.mixers.map((m) => ({ mixer_id: m.mixer_id, quantity: m.quantity }));
+          }
+          return item;
+        });
       },
     };
   }
@@ -337,7 +395,7 @@
   return {
     orderCategories, filterMenu, lastRepeatable, CATEGORY_ORDER,
     isSoldOut, displayName, menuSections, tonight,
-    createCart, orderLabel, orderProgress, isOpenOrder, groupFloorPlan,
+    createCart, mixerBreakdown, hasMixerService, orderLabel, orderProgress, isOpenOrder, groupFloorPlan,
     tableIsFull, tableIsSelectable, seatedCount, myTable, floorLabel, applyEvent,
     toCents, fromCents,
     ORDER_FLOW, ORDER_LABELS,

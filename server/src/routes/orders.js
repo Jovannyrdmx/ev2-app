@@ -69,6 +69,12 @@ const createSchema = z.object({
     drink_id: uuid,
     quantity: z.number().int().min(1).max(20).default(1),
     notes: z.string().trim().max(120).optional(),
+    // Servicio de botella (D117): qué mezcladores lleva y cuántos. El precio lo pone
+    // el servidor; aquí no viaja ni un peso.
+    mixers: z.array(z.object({
+      mixer_id: uuid,
+      quantity: z.number().int().min(1).max(50),
+    })).max(10).optional(),
   })).min(1).max(20),
 });
 

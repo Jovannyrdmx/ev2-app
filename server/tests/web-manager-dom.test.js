@@ -78,13 +78,14 @@ describe('la pestaña de inventario', () => {
     expect(doc.getElementById('tab-inventory').hasAttribute('hidden')).toBe(true);
   });
 
-  it('trae las cuatro vistas y abre en existencias', () => {
+  it('trae las cinco vistas y abre en existencias', () => {
     // `menu` es de D66: dar de alta un trago y cambiar un precio ya no exige tocar la
     // base de datos. Abrir en existencias sigue siendo lo correcto — es lo que el
     // gerente mira cada noche; la carta se toca una vez cada tanto.
     const doc = documento();
     const vistas = [...doc.querySelectorAll('[data-inv]')].map((b) => b.dataset.inv);
-    expect(vistas).toEqual(['stock', 'recipes', 'kardex', 'menu']);
+    // `service` es de D117: los mezcladores del servicio de botella y el tope de cada una.
+    expect(vistas).toEqual(['stock', 'recipes', 'kardex', 'menu', 'service']);
     expect(doc.querySelector('[data-inv].on').dataset.inv).toBe('stock');
   });
 

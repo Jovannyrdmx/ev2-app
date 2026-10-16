@@ -30,6 +30,7 @@
 const escpos = require('./escpos');
 const printing = require('./printing');
 const staffConsumption = require('./staff-consumption');
+const bottleService = require('./bottle-service');
 
 /** Cuánto hacia atrás mira una cuenta cuando la mesa no tiene a nadie sentado. */
 const FALLBACK_HOURS = 12;
@@ -154,7 +155,8 @@ async function orderData(runner, { nightclubId, orderId }) {
                   -- igual que en todo el resto del sistema: NUMERIC leído como número
                   -- de JavaScript es cómo se pierde un centavo sin que nadie lo vea.
                   'unit_price', oi.unit_price::text,
-                  'amount', COALESCE(oi.line_total, oi.unit_price * oi.quantity)::text
+                  'amount', COALESCE(oi.line_total, oi.unit_price * oi.quantity)::text,
+                  'mixers', ${bottleService.ITEM_MIXERS_JSON}
                 ) ORDER BY d.name) AS items
            FROM drink_order_items oi JOIN drinks d ON d.id = oi.drink_id
           WHERE oi.order_id = o.id) items ON true
@@ -266,6 +268,14 @@ function renderOrder(t, data, { club, settings, reprint = false }) {
     }
     // La nota va sangrada bajo el nombre, por `raw` y por lo mismo: es una columna.
     if (it.notes) for (const n of escpos.wrap(it.notes, t.width - QTY_COLUMN - 2)) t.raw(`${' '.repeat(QTY_COLUMN + 2)}${n}`);
+    // El servicio de la botella (D117): cada mezclador sangrado bajo la botella, con
+    // su cantidad, y lo que se cobra aparte con su importe.
+    for (const m of (Array.isArray(it.mixers) ? it.mixers : [])) {
+      const extra = m.charged > 0 ? ` (+${m.charged} ${money(m.line_total, data.currency)})` : '';
+      for (const n of escpos.wrap(`+ ${m.quantity} ${m.name}${extra}`, t.width - QTY_COLUMN - 2)) {
+        t.raw(`${' '.repeat(QTY_COLUMN + 2)}${n}`);
+      }
+    }
   }
   // Lo que se sirve con otro insumo (D84), en grande: es lo que el bartender tiene
   // que ver antes de agarrar la botella de siempre.
@@ -447,7 +457,20 @@ async function billData(runner, { nightclubId, tableId }) {
       WHERE o.nightclub_id = $1 AND o.table_id = $2
         AND o.created_at >= $3 AND o.status = ANY($4::text[])
       GROUP BY d.name, oi.unit_price, o.currency
-      ORDER BY d.name`,
+     UNION ALL
+     -- Los mezcladores del servicio de botella que se pasaron del tope (D117): se
+     -- cobraron aparte, así que van en la cuenta como su propio renglón.
+     SELECT 'Extra ' || m.name, sum(m.charged)::int, m.unit_price::text,
+            sum(m.line_total)::text, o.currency,
+            bool_and(COALESCE(tx.status, 'not_required') IN ('paid','not_required'))
+       FROM drink_orders o
+       JOIN drink_order_item_mixers m ON m.order_id = o.id AND m.charged > 0
+       LEFT JOIN transactions tx
+              ON tx.reference_type = 'drink_order' AND tx.reference_id = o.id
+      WHERE o.nightclub_id = $1 AND o.table_id = $2
+        AND o.created_at >= $3 AND o.status = ANY($4::text[])
+      GROUP BY m.name, m.unit_price, o.currency
+      ORDER BY 1`,
     [nightclubId, tableId, ventana.since, ORDER_STATES_ON_BILL]);
 
   // Lo pagado y lo pendiente se suman por separado y no se restan de un total: un
