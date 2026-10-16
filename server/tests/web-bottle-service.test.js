@@ -93,3 +93,25 @@ describe('las pantallas', () => {
     }
   });
 });
+
+describe('chicos y grandes', () => {
+  const b = { ...botella, included_mixers: 3, included_large_mixers: 1 };
+  const lata = { mixer_id: 'm3', name: 'Squirt lata', extra_price: '40.00', size: 'small' };
+  const grande = { ...sprite, size: 'large' };
+
+  test('3 chicos y 1 grande sin cargo', () => {
+    expect(EV2Client.mixerBreakdown(b, 1, [{ ...lata, quantity: 3 }, { ...grande, quantity: 1 }]).extra).toBe('0.00');
+  });
+
+  test('no se compensan: el segundo grande se cobra aunque sobren chicos', () => {
+    expect(EV2Client.mixerBreakdown(b, 1, [{ ...grande, quantity: 2 }]).extra).toBe('120.00');
+  });
+
+  test('el carrito conserva el tamaño de cada mezclador', () => {
+    const cart = EV2Client.createCart();
+    cart.add(b);
+    cart.setMixers('b1', [{ ...grande, quantity: 1 }, { ...lata, quantity: 4 }]);
+    expect(cart.mixersOf('b1').map((m) => m.size).sort()).toEqual(['large', 'small']);
+    expect(cart.total).toBe('2690.00');
+  });
+});

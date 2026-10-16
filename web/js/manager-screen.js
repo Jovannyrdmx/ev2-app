@@ -5135,6 +5135,11 @@
                 <input class="field" style="width:6rem" type="number" min="0.001" step="any" data-f="portion" value="${escape(m.portion)}"> ${unidad(m.unit)}</label>
               <label class="flex items-center gap-1">${escape(t('bs.extra'))} $
                 <input class="field" style="width:6rem" type="number" min="0" step="0.01" data-f="extra_price" value="${escape(Number(m.extra_price).toFixed(2))}"></label>
+              <label class="flex items-center gap-1">${escape(t('bs.size'))}
+                <select class="field" style="width:7rem" data-f="size">
+                  <option value="small" ${m.size === 'large' ? '' : 'selected'}>${escape(t('bs.small'))}</option>
+                  <option value="large" ${m.size === 'large' ? 'selected' : ''}>${escape(t('bs.large'))}</option>
+                </select></label>
             </div>
           </article>`).join('')}
         <form id="bs-add" class="card rounded-xl p-3 space-y-2">
@@ -5150,6 +5155,11 @@
               <span id="bs-add-unit"></span></label>
             <label class="flex items-center gap-1">${escape(t('bs.extra'))} $
               <input id="bs-add-price" class="field" style="width:6rem" type="number" min="0" step="0.01" required value="0"></label>
+            <label class="flex items-center gap-1">${escape(t('bs.size'))}
+              <select id="bs-add-size" class="field" style="width:7rem">
+                <option value="small">${escape(t('bs.small'))}</option>
+                <option value="large">${escape(t('bs.large'))}</option>
+              </select></label>
           </div>
           <p id="bs-add-error" class="text-xs text-red-300" hidden></p>
           <button class="ev2-button rounded-lg px-4 py-2 text-sm">${escape(t('bs.addBtn'))}</button>
@@ -5165,9 +5175,14 @@
               <p class="text-sm font-semibold break-words">${escape(d.name)}</p>
               <p class="text-xs text-white/50">${escape(money(d.price, d.currency))}</p>
             </div>
-            <label class="text-xs flex items-center gap-1 shrink-0">${escape(t('bs.includes'))}
-              <input class="field" style="width:4.5rem" type="number" min="0" max="50" step="1"
-                     placeholder="—" value="${d.included_mixers === null || d.included_mixers === undefined ? '' : escape(d.included_mixers)}"></label>
+            <div class="flex flex-col gap-1 shrink-0 text-xs">
+              <label class="flex items-center justify-end gap-1">${escape(t('bs.includesSmall'))}
+                <input class="field" style="width:4.5rem" type="number" min="0" max="50" step="1" data-cap="small"
+                       placeholder="—" value="${d.included_mixers === null || d.included_mixers === undefined ? '' : escape(d.included_mixers)}"></label>
+              <label class="flex items-center justify-end gap-1">${escape(t('bs.includesLarge'))}
+                <input class="field" style="width:4.5rem" type="number" min="0" max="50" step="1" data-cap="large"
+                       value="${escape(d.included_large_mixers || 0)}"></label>
+            </div>
           </article>`).join('')}
       </section>`;
 
@@ -5182,6 +5197,7 @@
           const body = {};
           if (f === 'active') body.active = input.checked;
           else if (f === 'name') body.name = input.value.trim();
+          else if (f === 'size') body.size = input.value;
           else body[f] = Number(input.value);
           if (f === 'name' && !body.name) { input.value = m.name; return; }
           if ((f === 'portion' && !(body.portion > 0)) || (f === 'extra_price' && !(body.extra_price >= 0))) {
@@ -5215,6 +5231,7 @@
           name: caja.querySelector('#bs-add-name').value.trim(),
           portion: Number(caja.querySelector('#bs-add-portion').value),
           extra_price: Number(caja.querySelector('#bs-add-price').value),
+          size: caja.querySelector('#bs-add-size').value,
         });
         toast(t('bs.saved'), 'ok');
         await reloadMixers();
@@ -5222,18 +5239,24 @@
     };
 
     caja.querySelectorAll('[data-bottle]').forEach((card) => {
-      const input = card.querySelector('input');
-      input.addEventListener('change', async () => {
-        const raw = input.value.trim();
+      const chicos = card.querySelector('[data-cap="small"]');
+      const grandes = card.querySelector('[data-cap="large"]');
+      const guardar = async () => {
+        const raw = chicos.value.trim();
         const value = raw === '' ? null : Math.floor(Number(raw));
-        if (value !== null && !(value >= 0 && value <= 50)) { toast(t('bs.badNumber'), 'error'); return; }
+        const large = grandes.value.trim() === '' ? 0 : Math.floor(Number(grandes.value));
+        if ((value !== null && !(value >= 0 && value <= 50)) || !(large >= 0 && large <= 50)) {
+          toast(t('bs.badNumber'), 'error'); return;
+        }
         try {
           await api.put(`/nightclubs/${clubId()}/drinks/${card.dataset.bottle}/included-mixers`,
-            { included_mixers: value });
+            { included_mixers: value, included_large_mixers: large });
           toast(t('bs.saved'), 'ok');
           await reloadMixers();
         } catch (err) { showError(err); }
-      });
+      };
+      chicos.addEventListener('change', guardar);
+      grandes.addEventListener('change', guardar);
     });
   }
 

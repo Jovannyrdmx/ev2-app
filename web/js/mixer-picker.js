@@ -43,28 +43,21 @@
     abierto = hoja;
 
     const eleccion = () => mixers.map((m) => ({
-      mixer_id: m.id, name: m.name, extra_price: m.extra_price, quantity: cantidades.get(m.id) || 0,
+      mixer_id: m.id, name: m.name, extra_price: m.extra_price,
+      size: m.size === 'large' ? 'large' : 'small', quantity: cantidades.get(m.id) || 0,
     })).filter((m) => m.quantity > 0);
+    const grupos = [
+      { size: 'small', label: t('mix.small', 'Chicos'), per: Number(drink.included_mixers || 0) },
+      { size: 'large', label: t('mix.large', 'Grandes'), per: Number(drink.included_large_mixers || 0) },
+    ].map((g) => ({ ...g, items: mixers.filter((m) => (m.size === 'large' ? 'large' : 'small') === g.size) }))
+      .filter((g) => g.items.length > 0);
 
-    function pintar() {
-      const tope = Number(drink.included_mixers || 0) * Number(quantity || 1);
-      const cuenta = root.EV2Client.mixerBreakdown(drink, quantity, eleccion());
-      const elegidos = eleccion().reduce((n, m) => n + m.quantity, 0);
-      hoja.innerHTML = `
-        <div class="card w-full sm:max-w-md max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-4 space-y-3 bg-[#14101c]">
-          <div>
-            <p class="font-display text-lg leading-tight">${escape(drink.name)}</p>
-            <p class="text-xs text-white/60" data-role="mix-included">${escape(tf('mix.included',
-    { n: tope, bottles: quantity }, `Incluye ${tope} mezclador(es)`))}</p>
-          </div>
-          ${mixers.length ? '' : `<p class="text-sm text-white/50">${escape(t('mix.none', 'No hay mezcladores dados de alta.'))}</p>`}
-          <div class="space-y-2">
-            ${mixers.map((m) => {
-    const q = cantidades.get(m.id) || 0;
-    const extra = Number(m.extra_price) > 0
-      ? tf('mix.extraEach', { price: fmt(m.extra_price, drink.currency) }, `${fmt(m.extra_price)} c/u extra`)
-      : t('mix.freeExtra', 'Sin costo extra');
-    return `
+    function fila(m) {
+      const q = cantidades.get(m.id) || 0;
+      const extra = Number(m.extra_price) > 0
+        ? tf('mix.extraEach', { price: fmt(m.extra_price, drink.currency) }, `${fmt(m.extra_price)} c/u extra`)
+        : t('mix.freeExtra', 'Sin costo extra');
+      return `
               <div class="flex items-center gap-3" data-mixer="${escape(m.id)}">
                 <div class="min-w-0 flex-1">
                   <p class="text-sm break-words">${escape(m.name)}</p>
@@ -74,10 +67,32 @@
                 <span class="w-6 text-center text-sm" data-role="qty">${q}</span>
                 <button type="button" class="ev2-button rounded-lg w-10 h-10 text-lg" data-more="1" aria-label="+">+</button>
               </div>`;
-  }).join('')}
+    }
+
+    function pintar() {
+      const cuenta = root.EV2Client.mixerBreakdown(drink, quantity, eleccion());
+      const elegidosDe = (size) => eleccion().filter((m) => m.size === size)
+        .reduce((n, m) => n + m.quantity, 0);
+      hoja.innerHTML = `
+        <div class="card w-full sm:max-w-md max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-4 space-y-3 bg-[#14101c]">
+          <div>
+            <p class="font-display text-lg leading-tight">${escape(drink.name)}</p>
+            <p class="text-xs text-white/60" data-role="mix-included">${escape(tf('mix.includedBoth', {
+    small: Number(drink.included_mixers || 0) * quantity,
+    large: Number(drink.included_large_mixers || 0) * quantity,
+    bottles: quantity,
+  }, ''))}</p>
           </div>
-          <div class="flex justify-between text-sm border-t border-white/10 pt-3">
-            <span data-role="mix-count">${escape(tf('mix.count', { n: elegidos, max: tope }, `${elegidos} de ${tope} incluidos`))}</span>
+          ${mixers.length ? '' : `<p class="text-sm text-white/50">${escape(t('mix.none', 'No hay mezcladores dados de alta.'))}</p>`}
+          ${grupos.map((g) => `
+          <div class="space-y-2" data-group="${g.size}">
+            <p class="text-xs uppercase tracking-wider text-white/50 flex justify-between">
+              <span>${escape(g.label)}</span>
+              <span data-role="mix-count">${escape(tf('mix.count', { n: elegidosDe(g.size), max: g.per * quantity }, ''))}</span>
+            </p>
+            ${g.items.map(fila).join('')}
+          </div>`).join('')}
+          <div class="flex justify-end text-sm border-t border-white/10 pt-3">
             <span data-role="mix-extra" class="${cuenta.extraCents > 0 ? 'text-amber-200' : 'text-white/50'}">
               ${escape(cuenta.extraCents > 0
     ? tf('mix.extraTotal', { amount: fmt(cuenta.extra, drink.currency) }, `+${fmt(cuenta.extra)}`)

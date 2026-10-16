@@ -169,3 +169,57 @@ describe('la barra y la cuenta', () => {
     expect(preview).toMatch(/\+ 2 Sprite 3 L/);
   });
 });
+
+describe('chicos y grandes (3 chicos y 1 grande)', () => {
+  let lata; let mxLata;
+  beforeEach(async () => {
+    lata = await f.createSupply(club.id, { name: 'Squirt 355 ml', unit: 'pza', package_size: 1, stock: 48 });
+    const a = await api().post(url('/bottle-mixers')).set(auth(manager))
+      .send({ supply_id: lata.id, name: 'Squirt lata', portion: 1, extra_price: 40, size: 'small' });
+    expect(a.status).toBe(201);
+    mxLata = a.body.mixer;
+    // Sprite 3 L pasa a ser GRANDE; agua y lata quedan chicos.
+    const p = await api().patch(url(`/bottle-mixers/${mxSprite.id}`)).set(auth(manager)).send({ size: 'large' });
+    expect(p.body.mixer.size).toBe('large');
+    const tope = await api().put(url(`/drinks/${botella.id}/included-mixers`)).set(auth(manager))
+      .send({ included_mixers: 3, included_large_mixers: 1 });
+    expect(tope.body.drink).toMatchObject({ included_mixers: 3, included_large_mixers: 1 });
+  });
+
+  it('3 chicos y 1 grande van incluidos', async () => {
+    const res = await pedir([{ drink_id: botella.id, quantity: 1, mixers: [
+      { mixer_id: mxLata.id, quantity: 2 }, { mixer_id: mxAgua.id, quantity: 1 },
+      { mixer_id: mxSprite.id, quantity: 1 }] }]);
+    expect(res.status).toBe(201);
+    expect(Number(res.body.order.subtotal)).toBe(2650);
+    const sprite3 = res.body.order.items[0].mixers.find((m) => m.name === 'Sprite 3 L');
+    expect(sprite3).toMatchObject({ size: 'large', included: 1, charged: 0 });
+  });
+
+  it('el segundo grande se cobra aunque sobren chicos (no se compensan)', async () => {
+    const res = await pedir([{ drink_id: botella.id, quantity: 1, mixers: [
+      { mixer_id: mxSprite.id, quantity: 2 }] }]);
+    expect(res.status).toBe(201);
+    expect(Number(res.body.order.subtotal)).toBe(2650 + 120);
+  });
+
+  it('el cuarto chico se cobra aunque no se haya pedido el grande', async () => {
+    const res = await pedir([{ drink_id: botella.id, quantity: 1, mixers: [
+      { mixer_id: mxLata.id, quantity: 4 }] }]);
+    expect(res.status).toBe(201);
+    expect(Number(res.body.order.subtotal)).toBe(2650 + 40);
+  });
+
+  it('dos botellas: 6 chicos y 2 grandes incluidos', async () => {
+    const res = await pedir([{ drink_id: botella.id, quantity: 2, mixers: [
+      { mixer_id: mxLata.id, quantity: 6 }, { mixer_id: mxSprite.id, quantity: 2 }] }]);
+    expect(res.status).toBe(201);
+    expect(Number(res.body.order.subtotal)).toBe(5300);
+  });
+
+  it('la carta trae los dos topes', async () => {
+    const carta = await api().get(url('/drinks')).set(auth(guest));
+    expect(carta.body.drinks.find((d) => d.id === botella.id))
+      .toMatchObject({ included_mixers: 3, included_large_mixers: 1 });
+  });
+});

@@ -105,7 +105,8 @@ async function createOrder({ client, nightclubId, senderId, recipientId, tableId
   const drinkIds = [...new Set(items.map((i) => i.drink_id))].sort();
 
   const drinks = await client.query(
-    `SELECT id, name, price, currency, available, category, included_mixers FROM drinks
+    `SELECT id, name, price, currency, available, category, included_mixers,
+            included_large_mixers FROM drinks
       WHERE id = ANY($1::uuid[]) AND nightclub_id = $2 AND active`,
     [drinkIds, nightclubId],
   );

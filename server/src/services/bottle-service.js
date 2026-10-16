@@ -12,6 +12,9 @@
  *   * Cada botella incluye hasta su tope (`drinks.included_mixers`) por pieza: dos
  *     botellas de un servicio de 4 incluyen 8 mezcladores.
  *   * Del tope en adelante, cada mezclador se cobra a su `extra_price`.
+ *   * Hay dos topes por botella: CHICOS (`included_mixers`) y GRANDES
+ *     (`included_large_mixers`), p. ej. 3 chicos y 1 grande. No se compensan: lo que
+ *     pase del tope de grandes se cobra aunque sobren chicos, y al revés.
  *
  * El precio lo decide SIEMPRE el servidor. El teléfono manda qué mezcladores y
  * cuántos; nunca cuánto cuestan ni cuáles van incluidos.
@@ -31,10 +34,10 @@ async function listMixers(runner, { nightclubId, activeOnly = false }) {
   const { rows } = await runner.query(
     `SELECT m.id, m.name, m.supply_id, s.name AS supply_name, s.unit,
             m.portion::float8 AS portion, m.extra_price::text AS extra_price,
-            m.active, m.sort_order
+            m.size, m.active, m.sort_order
        FROM bottle_mixers m JOIN supplies s ON s.id = m.supply_id
       WHERE m.nightclub_id = $1 AND ($2::boolean IS FALSE OR (m.active AND s.active))
-      ORDER BY m.sort_order, m.name`,
+      ORDER BY m.size, m.sort_order, m.name`,
     [nightclubId, activeOnly]);
   return rows;
 }
@@ -56,7 +59,7 @@ async function priceMixers(runner, { nightclubId, items, drinksById }) {
 
   const ids = [...new Set(items.flatMap((i) => (i.mixers || []).map((m) => m.mixer_id)))];
   const { rows } = await runner.query(
-    `SELECT m.id, m.name, m.supply_id, m.portion::float8 AS portion,
+    `SELECT m.id, m.name, m.supply_id, m.portion::float8 AS portion, m.size,
             m.extra_price::text AS extra_price, m.active AND s.active AS active
        FROM bottle_mixers m JOIN supplies s ON s.id = m.supply_id
       WHERE m.nightclub_id = $1 AND m.id = ANY($2::uuid[])`,
@@ -87,10 +90,15 @@ async function priceMixers(runner, { nightclubId, items, drinksById }) {
       .sort((a, b) => cents(b.mixer.extra_price) - cents(a.mixer.extra_price)
         || a.mixer.name.localeCompare(b.mixer.name));
 
-    let libres = Number(drink.included_mixers) * item.quantity;
+    // Un tope por tamaño, y cada uno se gasta solo con los de su tamaño.
+    const libres = {
+      small: Number(drink.included_mixers) * item.quantity,
+      large: Number(drink.included_large_mixers || 0) * item.quantity,
+    };
     for (const l of lineas) {
-      const included = Math.min(libres, l.quantity);
-      libres -= included;
+      const size = l.mixer.size === 'large' ? 'large' : 'small';
+      const included = Math.min(libres[size], l.quantity);
+      libres[size] -= included;
       const charged = l.quantity - included;
       const lineCents = charged * cents(l.mixer.extra_price);
       extraCents += lineCents;
@@ -98,6 +106,7 @@ async function priceMixers(runner, { nightclubId, items, drinksById }) {
         mixer_id: l.mixer.id,
         supply_id: l.mixer.supply_id,
         name: l.mixer.name,
+        size,
         portion: l.mixer.portion,
         quantity: l.quantity,
         included,
@@ -121,10 +130,10 @@ async function priceMixers(runner, { nightclubId, items, drinksById }) {
 async function saveMixers(client, { orderId, orderItemId, lines }) {
   for (const l of lines) {
     await client.query(
-      `INSERT INTO drink_order_item_mixers (order_id, order_item_id, mixer_id, supply_id, name,
+      `INSERT INTO drink_order_item_mixers (order_id, order_item_id, mixer_id, supply_id, name, size,
                                             portion, quantity, included, charged, unit_price, line_total)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [orderId, orderItemId, l.mixer_id, l.supply_id, l.name, l.portion, l.quantity,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [orderId, orderItemId, l.mixer_id, l.supply_id, l.name, l.size, l.portion, l.quantity,
         l.included, l.charged, l.unit_price, l.line_total]);
   }
 }
@@ -135,7 +144,7 @@ async function saveMixers(client, { orderId, orderItemId, lines }) {
  */
 const ITEM_MIXERS_JSON = `
   (SELECT json_agg(json_build_object(
-            'name', m.name, 'quantity', m.quantity, 'included', m.included,
+            'name', m.name, 'size', m.size, 'quantity', m.quantity, 'included', m.included,
             'charged', m.charged, 'unit_price', m.unit_price::text,
             'line_total', m.line_total::text) ORDER BY m.name)
      FROM drink_order_item_mixers m WHERE m.order_item_id = oi.id)`;

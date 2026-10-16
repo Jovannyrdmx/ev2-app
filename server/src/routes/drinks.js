@@ -58,7 +58,7 @@ router.get('/nightclubs/:nightclubId/drinks',
       // distinto de 0. Inventar un numero aqui era lo que hacia inutil al inventario
       // anterior (migracion 018).
       `SELECT d.id, d.name, d.category, d.price, d.currency, d.description, d.image_url,
-              d.available, d.sort_order, d.included_mixers,
+              d.available, d.sort_order, d.included_mixers, d.included_large_mixers,
               (r.lines > 0) AS stock_tracked,
               CASE WHEN COALESCE(r.lines, 0) = 0 THEN NULL
                    WHEN r.lines <> r.active_lines THEN 0
