@@ -11,10 +11,6 @@
 --   * Cada botella incluye hasta un TOPE propio de mezcladores sin costo; de ahí en
 --     adelante cada uno se cobra a su precio extra.
 --   * Solo se ofrecen los mezcladores que el gerente dio de alta para el servicio.
---   * Hay mezcladores CHICOS (lata, agua) y GRANDES (botella de 2-3 L). Cada botella
---     tiene un tope para cada tamaño -- por ejemplo, 3 chicos y 1 grande -- y los dos
---     topes NO se compensan: lo que pase del tope de grandes se cobra aunque sobren
---     chicos, y al revés.
 --
 -- Tres piezas:
 --   1. `bottle_mixers`: el catálogo del gerente. Cada uno apunta a un insumo y dice
@@ -36,8 +32,6 @@ CREATE TABLE IF NOT EXISTS bottle_mixers (
   -- Cuánto descuenta UN mezclador, en la unidad base del insumo (ml o pza).
   portion       NUMERIC(12,3) NOT NULL CHECK (portion > 0),
   extra_price   NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (extra_price >= 0),
-  -- Contra qué tope cuenta: el de chicos o el de grandes de la botella.
-  size          VARCHAR(5) NOT NULL DEFAULT 'small' CHECK (size IN ('small', 'large')),
   active        BOOLEAN NOT NULL DEFAULT true,
   sort_order    INTEGER NOT NULL DEFAULT 0,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -51,15 +45,11 @@ CREATE TRIGGER bottle_mixers_set_updated_at
   BEFORE UPDATE ON bottle_mixers
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- `included_mixers` es el tope de CHICOS y es también el interruptor del servicio
--- (NULL = esa botella no lo ofrece). `included_large_mixers` es el de GRANDES.
 ALTER TABLE drinks
-  ADD COLUMN IF NOT EXISTS included_mixers INTEGER,
-  ADD COLUMN IF NOT EXISTS included_large_mixers INTEGER NOT NULL DEFAULT 0;
+  ADD COLUMN IF NOT EXISTS included_mixers INTEGER;
 ALTER TABLE drinks DROP CONSTRAINT IF EXISTS drinks_included_mixers_valid;
 ALTER TABLE drinks ADD CONSTRAINT drinks_included_mixers_valid
-  CHECK ((included_mixers IS NULL OR included_mixers BETWEEN 0 AND 50)
-     AND included_large_mixers BETWEEN 0 AND 50);
+  CHECK (included_mixers IS NULL OR included_mixers BETWEEN 0 AND 50);
 
 CREATE TABLE IF NOT EXISTS drink_order_item_mixers (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -68,7 +58,6 @@ CREATE TABLE IF NOT EXISTS drink_order_item_mixers (
   mixer_id       UUID REFERENCES bottle_mixers(id) ON DELETE SET NULL,
   supply_id      UUID NOT NULL REFERENCES supplies(id) ON DELETE RESTRICT,
   name           VARCHAR(80) NOT NULL,
-  size           VARCHAR(5) NOT NULL DEFAULT 'small' CHECK (size IN ('small', 'large')),
   portion        NUMERIC(12,3) NOT NULL CHECK (portion > 0),
   quantity       INTEGER NOT NULL CHECK (quantity > 0),
   included       INTEGER NOT NULL CHECK (included >= 0),
