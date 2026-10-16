@@ -1370,20 +1370,37 @@ router.post('/nightclubs/:nightclubId/door/admissions',
         });
       }
 
-      // El recibo del cover sale en la impresora de Cover (D96), si el club la tiene.
-      // Nunca tumba el cobro: `printReceipt` encola con salvaguarda.
-      if (transactionId) {
-        const cover = await client.query(
-          `SELECT id FROM supply_locations
-            WHERE nightclub_id = $1 AND kind = 'door' AND active
-            ORDER BY sort_order, code LIMIT 1`, [nightclubId]);
-        if (cover.rows[0]) {
+      // Dos tickets en la impresora de Cover (D96, D115), si el club la tiene:
+      //   1. el del CLIENTE, sin dinero, con cuántos accesos compró;
+      //   2. la copia de la HOSTESS, con lo que se cobró, solo si hubo cobro.
+      // Una cortesía no tiene cobro: sale únicamente el del cliente. Ninguno de los
+      // dos tumba la venta: los dos encolan con salvaguarda.
+      const cover = await client.query(
+        `SELECT id FROM supply_locations
+          WHERE nightclub_id = $1 AND kind = 'door' AND active
+          ORDER BY sort_order, code LIMIT 1`, [nightclubId]);
+      if (cover.rows[0]) {
+        await tickets.printAdmission(client, {
+          nightclubId, admissionId: rows[0].id, locationId: cover.rows[0].id, userId: req.user.id,
+        });
+        if (transactionId) {
           await tickets.printReceipt(client, {
             nightclubId,
             transactionId,
             method: DOOR_RECEIPT_METHOD[b.payment_method] || b.payment_method,
             collectedBy: req.user.id,
             locationId: cover.rows[0].id,
+            copyLabel: 'COPIA HOSTESS',
+            accesses: b.quantity,
+            // Lo que entregó el cliente y el cambio, para que la copia cuadre el cajón.
+            parts: pago ? [{
+              method: DOOR_RECEIPT_METHOD[b.payment_method] || b.payment_method,
+              amount: total.toFixed(2),
+              cash_received: Number(pago.cashReceived) > 0 ? pago.cashReceived : null,
+              usd_received: pago.usd ? pago.usd.received : null,
+              exchange_rate: pago.usd ? pago.usd.rate : null,
+              change_given: pago.change,
+            }] : null,
           });
         }
       }

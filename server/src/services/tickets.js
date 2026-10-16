@@ -550,9 +550,13 @@ function renderReceipt(t, data, { club, settings }) {
   header(t, club, settings);
   t.center().bold().tall('RECIBO').normal().boldOff().left();
   t.row(`Folio ${folio(data.transaction_id)}`, localTime(data.at || new Date(), club.timezone));
+  // La copia que se queda la hostess en la puerta (D115): dice que es suya y
+  // cuántos accesos ampara, para cuadrarla contra el ticket que se llevó el cliente.
+  if (data.copy_label) t.center().bold().line(data.copy_label).boldOff().left();
   t.rule();
 
   if (data.concept) t.line(data.concept);
+  if (data.accesses) t.row('Accesos', String(data.accesses));
   if (data.table_code) t.line(`Mesa ${data.table_code}`);
   t.blank();
 
@@ -629,7 +633,7 @@ async function receiptData(runner, { nightclubId, transactionId, collectedBy }) 
  */
 async function printReceipt(client, {
   nightclubId, transactionId, method, reference = null, collectedBy = null, copies = 1,
-  parts = null, locationId = null,
+  parts = null, locationId = null, copyLabel = null, accesses = null,
 }) {
   const settings = await printing.settingsOf(client, nightclubId);
 
@@ -663,8 +667,69 @@ async function printReceipt(client, {
     refId: transactionId,
     copies,
     createdBy: collectedBy,
-    ...build(printer, (t) => renderReceipt(t, { ...data, method, reference, parts },
-      { club, settings })),
+    ...build(printer, (t) => renderReceipt(t, {
+      ...data, method, reference, parts, copy_label: copyLabel, accesses,
+    }, { club, settings })),
+  });
+}
+
+// ---------------------------------------------------------------- el acceso del cliente
+
+/**
+ * El ticket que se lleva el cliente al pagar el cover (D115).
+ *
+ * Sale junto con la copia de la hostess, y a propósito NO lleva dinero: es lo que
+ * enseña en la puerta para decir cuántos entran con él. Lo que se cobró está en la
+ * copia que se queda la hostess. El folio es el mismo en los dos papeles, así que
+ * cualquier reclamo se cruza en un vistazo.
+ */
+const ADMISSION_KIND_LABEL = { general: 'General', vip_extra: 'Extra VIP' };
+
+async function admissionData(runner, { nightclubId, admissionId }) {
+  const { rows } = await runner.query(
+    `SELECT a.id::text AS admission_id, a.transaction_id::text AS transaction_id, a.kind,
+            a.quantity, a.created_at, e.name AS event_name, t.code AS table_code
+       FROM door_admissions a
+       LEFT JOIN events_calendar e ON e.id = a.event_id
+       LEFT JOIN reservations r ON r.id = a.reservation_id
+       LEFT JOIN tables t ON t.id = r.table_id
+      WHERE a.id = $1 AND a.nightclub_id = $2`,
+    [admissionId, nightclubId]);
+  return rows[0] || null;
+}
+
+function renderAdmission(t, data, { club, settings }) {
+  header(t, club, settings);
+  t.center().bold().tall('ACCESO').normal().boldOff().left();
+  // El folio del cobro cuando lo hubo, para que coincida con la copia de la hostess;
+  // una cortesía no tiene cobro y usa el de la entrada.
+  t.row(`Folio ${folio(data.transaction_id || data.admission_id)}`,
+    localTime(data.created_at || new Date(), club.timezone));
+  t.rule();
+  if (data.event_name) t.row('Evento', data.event_name);
+  t.row('Tipo', ADMISSION_KIND_LABEL[data.kind] || data.kind);
+  if (data.table_code) t.row('Mesa', data.table_code);
+  t.blank();
+  t.center().bold().big(`ACCESOS: ${data.quantity}`).normal().boldOff().left();
+  footer(t, settings);
+  t.blank(2).cut();
+}
+
+/** Encola el ticket del cliente en la impresora de la puerta. Nunca tumba el cobro. */
+async function printAdmission(client, { nightclubId, admissionId, locationId, userId = null }) {
+  const data = await admissionData(client, { nightclubId, admissionId });
+  if (!data) return null;
+  const printer = await printing.resolvePrinter(client, { nightclubId, purpose: 'till', locationId });
+  if (!printer) return null;
+  const settings = await printing.settingsOf(client, nightclubId);
+  const club = await clubOf(client, nightclubId);
+  return printing.enqueueSafely(client, {
+    nightclubId,
+    printer,
+    kind: 'receipt',
+    refId: admissionId,
+    createdBy: userId,
+    ...build(printer, (t) => renderAdmission(t, data, { club, settings })),
   });
 }
 
@@ -990,6 +1055,7 @@ module.exports = {
   orderData, renderOrder, printOrder, reprintOrder, REPRINTABLE, orderPaymentLabel, itemLines,
   billWindow, billData, renderBill, printBill,
   receiptData, renderReceipt, printReceipt,
+  admissionData, renderAdmission, printAdmission, ADMISSION_KIND_LABEL,
   cutData, renderCut, printShiftCut, ROLE_LABEL,
   dropData, renderDrop, printCashDrop,
   build,
