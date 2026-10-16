@@ -24,24 +24,37 @@
    * Servicio de botella (D117): cuánto se cobra de más por los mezcladores elegidos.
    *
    * La MISMA cuenta que hace el servidor (services/bottle-service.js), solo para
-   * enseñarla: incluye hasta `included_mixers` por botella, primero los más caros, y
-   * cobra el resto a su `extra_price`. Quien cobra es el servidor.
+   * enseñarla: lugares de chico (`included_mixers`) que solo llena un chico, y
+   * lugares de "un grande o un chico" (`included_large_mixers`); siempre los más caros
+   * primero y el resto se cobra a su `extra_price`. Quien cobra es el servidor.
    *
    * @param {object} drink      con `included_mixers` (null = no lleva servicio)
    * @param {number} quantity   cuántas botellas
-   * @param {Array}  selection  [{ mixer_id, name, extra_price, quantity }]
+   * @param {Array}  selection  [{ mixer_id, name, extra_price, size, quantity }]
    */
   function mixerBreakdown(drink, quantity, selection) {
     const lines = (selection || []).filter((m) => Number(m.quantity) > 0)
       .map((m) => ({ ...m, quantity: Number(m.quantity) }))
       .sort((a, b) => toCents(b.extra_price) - toCents(a.extra_price)
         || String(a.name).localeCompare(String(b.name)));
-    let libres = drink && drink.included_mixers !== null && drink.included_mixers !== undefined
-      ? Number(drink.included_mixers) * Number(quantity || 0) : 0;
+    const servicio = drink && drink.included_mixers !== null && drink.included_mixers !== undefined;
+    let chicos = servicio ? Number(drink.included_mixers) * Number(quantity || 0) : 0;
+    let flex = servicio ? Number(drink.included_large_mixers || 0) * Number(quantity || 0) : 0;
+    const inc = lines.map((m) => {
+      if (m.size === 'large') return 0;
+      const n = Math.min(chicos, m.quantity);
+      chicos -= n;
+      return n;
+    });
+    lines.forEach((m, i) => {
+      const n = Math.min(flex, m.quantity - inc[i]);
+      flex -= n;
+      inc[i] += n;
+    });
     let extraCents = 0;
-    const out = lines.map((m) => {
-      const included = Math.min(libres, m.quantity);
-      libres -= included;
+    const out = lines.map((m, i) => {
+      const size = m.size === 'large' ? 'large' : 'small';
+      const included = inc[i];
       const charged = m.quantity - included;
       extraCents += charged * toCents(m.extra_price);
       return { ...m, included, charged };
@@ -118,6 +131,7 @@
         if (!line) return false;
         line.mixers = (selection || []).filter((m) => Number(m.quantity) > 0)
           .map((m) => ({ mixer_id: m.mixer_id, name: m.name, extra_price: m.extra_price,
+            size: m.size === 'large' ? 'large' : 'small',
             quantity: Math.min(50, Math.floor(Number(m.quantity))) }));
         requestId = null;
         return true;
