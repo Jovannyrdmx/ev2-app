@@ -24,10 +24,9 @@
    * Servicio de botella (D117): cuánto se cobra de más por los mezcladores elegidos.
    *
    * La MISMA cuenta que hace el servidor (services/bottle-service.js), solo para
-   * enseñarla: dos topes por botella, chicos (`included_mixers`) y grandes
-   * (`included_large_mixers`), que no se compensan; dentro de cada tamaño se incluyen
-   * primero los más caros y el resto se cobra a su `extra_price`. Quien cobra es el
-   * servidor.
+   * enseñarla: lugares de chico (`included_mixers`) que solo llena un chico, y
+   * lugares de "un grande o un chico" (`included_large_mixers`); siempre los más caros
+   * primero y el resto se cobra a su `extra_price`. Quien cobra es el servidor.
    *
    * @param {object} drink      con `included_mixers` (null = no lleva servicio)
    * @param {number} quantity   cuántas botellas
@@ -39,15 +38,23 @@
       .sort((a, b) => toCents(b.extra_price) - toCents(a.extra_price)
         || String(a.name).localeCompare(String(b.name)));
     const servicio = drink && drink.included_mixers !== null && drink.included_mixers !== undefined;
-    const libres = {
-      small: servicio ? Number(drink.included_mixers) * Number(quantity || 0) : 0,
-      large: servicio ? Number(drink.included_large_mixers || 0) * Number(quantity || 0) : 0,
-    };
+    let chicos = servicio ? Number(drink.included_mixers) * Number(quantity || 0) : 0;
+    let flex = servicio ? Number(drink.included_large_mixers || 0) * Number(quantity || 0) : 0;
+    const inc = lines.map((m) => {
+      if (m.size === 'large') return 0;
+      const n = Math.min(chicos, m.quantity);
+      chicos -= n;
+      return n;
+    });
+    lines.forEach((m, i) => {
+      const n = Math.min(flex, m.quantity - inc[i]);
+      flex -= n;
+      inc[i] += n;
+    });
     let extraCents = 0;
-    const out = lines.map((m) => {
+    const out = lines.map((m, i) => {
       const size = m.size === 'large' ? 'large' : 'small';
-      const included = Math.min(libres[size], m.quantity);
-      libres[size] -= included;
+      const included = inc[i];
       const charged = m.quantity - included;
       extraCents += charged * toCents(m.extra_price);
       return { ...m, included, charged };

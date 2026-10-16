@@ -103,8 +103,13 @@ describe('chicos y grandes', () => {
     expect(EV2Client.mixerBreakdown(b, 1, [{ ...lata, quantity: 3 }, { ...grande, quantity: 1 }]).extra).toBe('0.00');
   });
 
-  test('no se compensan: el segundo grande se cobra aunque sobren chicos', () => {
+  test('un grande nunca ocupa un lugar de chico: el segundo se cobra', () => {
     expect(EV2Client.mixerBreakdown(b, 1, [{ ...grande, quantity: 2 }]).extra).toBe('120.00');
+  });
+
+  test('sin grande, un cuarto chico va incluido; el quinto se cobra', () => {
+    expect(EV2Client.mixerBreakdown(b, 1, [{ ...lata, quantity: 4 }]).extra).toBe('0.00');
+    expect(EV2Client.mixerBreakdown(b, 1, [{ ...lata, quantity: 5 }]).extra).toBe('40.00');
   });
 
   test('el carrito conserva el tamaño de cada mezclador', () => {
@@ -112,6 +117,7 @@ describe('chicos y grandes', () => {
     cart.add(b);
     cart.setMixers('b1', [{ ...grande, quantity: 1 }, { ...lata, quantity: 4 }]);
     expect(cart.mixersOf('b1').map((m) => m.size).sort()).toEqual(['large', 'small']);
+    // 4 latas + 1 grande: el grande toma el lugar flexible y la cuarta lata se cobra.
     expect(cart.total).toBe('2690.00');
   });
 });

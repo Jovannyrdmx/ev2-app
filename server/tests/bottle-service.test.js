@@ -196,17 +196,30 @@ describe('chicos y grandes (3 chicos y 1 grande)', () => {
     expect(sprite3).toMatchObject({ size: 'large', included: 1, charged: 0 });
   });
 
-  it('el segundo grande se cobra aunque sobren chicos (no se compensan)', async () => {
+  it('un grande nunca ocupa un lugar de chico: el segundo se cobra', async () => {
     const res = await pedir([{ drink_id: botella.id, quantity: 1, mixers: [
       { mixer_id: mxSprite.id, quantity: 2 }] }]);
     expect(res.status).toBe(201);
     expect(Number(res.body.order.subtotal)).toBe(2650 + 120);
   });
 
-  it('el cuarto chico se cobra aunque no se haya pedido el grande', async () => {
+  it('si no quiere grande, el cuarto chico ocupa ese lugar sin costo', async () => {
     const res = await pedir([{ drink_id: botella.id, quantity: 1, mixers: [
       { mixer_id: mxLata.id, quantity: 4 }] }]);
     expect(res.status).toBe(201);
+    expect(Number(res.body.order.subtotal)).toBe(2650);
+  });
+
+  it('pero solo uno: el quinto chico se cobra', async () => {
+    const res = await pedir([{ drink_id: botella.id, quantity: 1, mixers: [
+      { mixer_id: mxLata.id, quantity: 5 }] }]);
+    expect(Number(res.body.order.subtotal)).toBe(2650 + 40);
+  });
+
+  it('con grande elegido, el cuarto chico se cobra', async () => {
+    const res = await pedir([{ drink_id: botella.id, quantity: 1, mixers: [
+      { mixer_id: mxLata.id, quantity: 4 }, { mixer_id: mxSprite.id, quantity: 1 }] }]);
+    // El lugar flexible se lo lleva el más caro (Sprite $120); la lata extra ($40) se cobra.
     expect(Number(res.body.order.subtotal)).toBe(2650 + 40);
   });
 

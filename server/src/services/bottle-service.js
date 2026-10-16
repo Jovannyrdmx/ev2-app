@@ -12,9 +12,12 @@
  *   * Cada botella incluye hasta su tope (`drinks.included_mixers`) por pieza: dos
  *     botellas de un servicio de 4 incluyen 8 mezcladores.
  *   * Del tope en adelante, cada mezclador se cobra a su `extra_price`.
- *   * Hay dos topes por botella: CHICOS (`included_mixers`) y GRANDES
- *     (`included_large_mixers`), p. ej. 3 chicos y 1 grande. No se compensan: lo que
- *     pase del tope de grandes se cobra aunque sobren chicos, y al revés.
+ *   * Dos topes por botella, p. ej. 3 + 1:
+ *       - `included_mixers`: lugares para CHICOS (3). Solo los llena un chico.
+ *       - `included_large_mixers`: lugares para "UN GRANDE O UN CHICO" (1). Lo llena
+ *         un grande, o un chico si el cliente no quiere grande.
+ *     Un grande nunca ocupa un lugar de chico: el segundo grande se cobra aunque
+ *     sobren chicos.
  *
  * El precio lo decide SIEMPRE el servidor. El teléfono manda qué mezcladores y
  * cuántos; nunca cuánto cuestan ni cuáles van incluidos.
@@ -90,15 +93,27 @@ async function priceMixers(runner, { nightclubId, items, drinksById }) {
       .sort((a, b) => cents(b.mixer.extra_price) - cents(a.mixer.extra_price)
         || a.mixer.name.localeCompare(b.mixer.name));
 
-    // Un tope por tamaño, y cada uno se gasta solo con los de su tamaño.
-    const libres = {
-      small: Number(drink.included_mixers) * item.quantity,
-      large: Number(drink.included_large_mixers || 0) * item.quantity,
-    };
+    // Primero los lugares de chico, solo con chicos (los más caros primero). Después
+    // el lugar de "un grande o un chico" con lo que quedó de los dos tamaños, también
+    // el más caro primero: es la cuenta que más le conviene al cliente.
+    const sizeOf = (l) => (l.mixer.size === 'large' ? 'large' : 'small');
+    let chicos = Number(drink.included_mixers) * item.quantity;
+    let flex = Number(drink.included_large_mixers || 0) * item.quantity;
+    const incluidos = new Map(lineas.map((l) => [l, 0]));
     for (const l of lineas) {
-      const size = l.mixer.size === 'large' ? 'large' : 'small';
-      const included = Math.min(libres[size], l.quantity);
-      libres[size] -= included;
+      if (sizeOf(l) !== 'small') continue;
+      const n = Math.min(chicos, l.quantity);
+      chicos -= n;
+      incluidos.set(l, n);
+    }
+    for (const l of lineas) {
+      const n = Math.min(flex, l.quantity - incluidos.get(l));
+      flex -= n;
+      incluidos.set(l, incluidos.get(l) + n);
+    }
+    for (const l of lineas) {
+      const size = sizeOf(l);
+      const included = incluidos.get(l);
       const charged = l.quantity - included;
       const lineCents = charged * cents(l.mixer.extra_price);
       extraCents += lineCents;
