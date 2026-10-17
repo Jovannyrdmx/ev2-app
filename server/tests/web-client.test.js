@@ -208,7 +208,7 @@ describe('Reintentos', () => {
 
   it('reintenta 503 en GET pero no 400', async () => {
     expect(EV2.shouldRetry('GET', 503)).toBe(true);
-    expect(EV2.shouldRetry('GET', 429)).toBe(true);
+    expect(EV2.shouldRetry('GET', 429)).toBe(false);
     expect(EV2.shouldRetry('GET', 400)).toBe(false);
     expect(EV2.shouldRetry('GET', 409)).toBe(false);
     expect(EV2.shouldRetry('POST', 503)).toBe(false);

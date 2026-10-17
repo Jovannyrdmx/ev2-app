@@ -14,6 +14,7 @@ const rateLimit = require('express-rate-limit');
 const pinoHttp = require('pino-http');
 
 const { errorHandler, notFoundHandler, ApiError } = require('./middleware/errors');
+const { rateLimitKey } = require('./middleware/rate-key');
 
 const authRoutes = require('./routes/auth');
 const accountRoutes = require('./routes/account');
@@ -123,6 +124,8 @@ function createApp() {
     limit: Number(process.env.RATE_LIMIT_PER_MIN || 300),
     standardHeaders: 'draft-7',
     legacyHeaders: false,
+    // Por usuario con sesión, por IP sin ella: todo el club sale por una sola IP.
+    keyGenerator: rateLimitKey,
     handler: (req, res, next) => next(ApiError.tooMany()),
   });
   const authLimiter = rateLimit({
