@@ -40,7 +40,10 @@
   };
 
   const isDj = () => (api.session.user && api.session.user.role) === 'dj';
-  const isRp = () => (api.session.user && api.session.user.role) === 'rp';
+  const isRpRole = () => (api.session.user && api.session.user.role) === 'rp';
+  // Desde D120 cualquier empleado puede tener codigo de RP sin dejar su puesto: la
+  // pestana aparece si el servidor le devolvio su perfil.
+  const isRp = () => isRpRole() || Boolean(state.rp && state.rp.profile);
   const clubId = () => api.session.user && api.session.user.nightclub_id;
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
@@ -174,6 +177,21 @@
 
   // ---------------------------------------------------------------- carga
 
+  async function loadRp() {
+    try {
+      state.rp = await api.get(`/nightclubs/${clubId()}/rp/me`);
+    } catch (err) {
+      state.rp = null;
+      state.rpNights = [];
+      if (err && err.status !== 404) showError(err);
+      return;
+    }
+    try {
+      const d = await api.get(`/nightclubs/${clubId()}/rp/me/nights`);
+      state.rpNights = d.nights || [];
+    } catch (err) { showError(err); }
+  }
+
   async function loadAll() {
     const get = async (path, apply) => {
       try { apply(await api.get(path)); } catch (err) { showError(err); }
@@ -196,12 +214,9 @@
         ? get(`/nightclubs/${clubId()}/dj/song-requests?status=requested&limit=50`,
           (d) => { state.songs = d.song_requests || []; })
         : Promise.resolve(),
-      isRp()
-        ? get(`/nightclubs/${clubId()}/rp/me`, (d) => { state.rp = d; })
-        : Promise.resolve(),
-      isRp()
-        ? get(`/nightclubs/${clubId()}/rp/me/nights`, (d) => { state.rpNights = d.nights || []; })
-        : Promise.resolve(),
+      // Se pregunta siempre: un 404 solo significa "sin codigo de RP", no es un error
+      // que la persona deba ver.
+      loadRp(),
       get(`/nightclubs/${clubId()}/staff/me/drinks?limit=30`,
         (d) => { state.drinks = d.staff_drinks || []; }),
       // El lugar de esta noche. Va en el mismo lote: es lo primero que la persona
@@ -227,7 +242,8 @@
     const rpTab = document.querySelector('[data-tab="rp"]');
     if (rpTab) rpTab.hidden = !isRp();
     if (state.tab === 'rp' && !isRp()) state.tab = 'money';
-    if (isRp() && !state.rpOpened) { state.rpOpened = true; state.tab = 'rp'; }
+    // Solo quien es RP de puesto abre directo en su pestana; los demas siguen en su dinero.
+    if (isRpRole() && isRp() && !state.rpOpened) { state.rpOpened = true; state.tab = 'rp'; }
 
     for (const tab of TABS) $(`tab-${tab}`).hidden = tab !== state.tab;
     document.querySelectorAll('[data-tab]').forEach((b) => {
