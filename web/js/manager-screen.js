@@ -961,8 +961,15 @@
 
   function tillCard(c) {
     const st = EV2Manager.tillState(c);
-    const usd = Number(c.usd_received) > 0
+    // Dólares: si entraron o si la caja abrió con dólares (D118).
+    const usd = Number(c.usd_received) > 0 || Number(c.opening_float_usd) > 0
       ? `<div class="flex justify-between text-xs"><span class="text-white/50">${escape(t('mgr.tillUsd'))}</span><span>US$${escape(Number(c.usd_to_hand).toFixed(2))}</span></div>` : '';
+    const fondoUsd = Number(c.opening_float_usd) > 0 ? ` + US$${Number(c.opening_float_usd).toFixed(2)}` : '';
+    const fondo = Number(c.opening_float) > 0 || fondoUsd
+      ? `<div class="flex justify-between text-xs"><span class="text-white/50">${escape(t('mgr.tillFloat'))}</span><span>${escape(money(c.opening_float, c.currency))}${escape(fondoUsd)}</span></div>` : '';
+    // La caja de Cover (D118): cuánta gente entró por ella.
+    const puerta = c.location_kind === 'door'
+      ? `<div class="flex justify-between text-xs"><span class="text-white/50">${escape(t('mgr.tillDoorPeople'))}</span><span>${escape(t('mgr.tillDoorPeopleN', { n: c.door_people || 0 }))}</span></div>` : '';
     const dif = c.closed && Number(c.difference || 0) !== 0
       ? `<p class="text-xs text-red-300">${escape(t('mgr.tillDiff', { amount: money(Math.abs(Number(c.difference)), c.currency) }))}</p>` : '';
     return `
@@ -974,6 +981,7 @@
           </div>
           <span class="pill ${TONE_PILL[st.tone] || 'pill-off'} shrink-0">${escape(t(st.key, { n: c.pending_orders }))}</span>
         </div>
+        ${fondo}${puerta}
         <div class="flex justify-between text-xs"><span class="text-white/50">${escape(t('mgr.tillCollected'))}</span><span>${escape(money(c.collected, c.currency))}</span></div>
         <div class="flex justify-between text-sm"><span class="text-white/60">${escape(t('mgr.tillToHand'))}</span><span class="font-semibold">${escape(money(c.cash_to_hand, c.currency))}</span></div>
         ${usd}${dif}
@@ -1825,7 +1833,9 @@
         const fondo = document.createElement('p');
         fondo.className = 'text-[11px] text-white/50';
         fondo.textContent = t('cuts.till', {
-          bar: c.location_name || '—', amount: money(c.opening_float, c.currency),
+          bar: c.location_name || '—',
+          amount: money(c.opening_float, c.currency)
+            + (Number(c.opening_float_usd) > 0 ? ` + US$${Number(c.opening_float_usd).toFixed(2)}` : ''),
         });
         card.appendChild(fondo);
       }
@@ -3823,11 +3833,13 @@
         r.roster.flatMap((p) => (p.targets || []).map((x) => x.section).filter(Boolean)),
       ),
     )];
-    const barrasConocidas = r.gaps.bars.concat(
-      r.roster.flatMap((p) => (p.targets || [])
+    // Las barras y Cover (D118): Cover sale de los huecos de caja cuando no hay
+    // anfitriona asignada, para que se vea vacío en vez de no aparecer.
+    const barrasConocidas = r.gaps.bars.map((b) => ({ ...b, kind: 'bar' }))
+      .concat((r.gaps.tills || []).filter((x) => x.kind === 'door'))
+      .concat(r.roster.flatMap((p) => (p.targets || [])
         .filter((x) => x.location_id)
-        .map((x) => ({ location_id: x.location_id, name: x.location_name }))),
-    );
+        .map((x) => ({ location_id: x.location_id, name: x.location_name, kind: x.location_kind || 'bar' }))));
     const porDestino = EV2Roster.byTarget({
       roster: r.roster, sections: zonasConocidas, bars: dedupeBars(barrasConocidas),
     });
@@ -3866,7 +3878,7 @@
         `<button class="chip tap px-3 shrink-0" data-add-section="${escape(z.section)}">+</button>`)),
       ...porDestino.bars.map((b) => bloque(b.name, b.people,
         `<button class="chip tap px-3 shrink-0" data-add-bar="${escape(b.location_id)}"
-                 data-bar-name="${escape(b.name)}">+</button>`)),
+                 data-bar-name="${escape(b.name)}" data-bar-kind="${escape(b.kind || 'bar')}">+</button>`)),
     ].join('');
 
     for (const boton of $('roster-body').querySelectorAll('[data-add-section]')) {
@@ -3875,6 +3887,7 @@
     for (const boton of $('roster-body').querySelectorAll('[data-add-bar]')) {
       boton.onclick = () => openPick({
         locationId: boton.dataset.addBar, name: boton.dataset.barName,
+        kind: boton.dataset.barKind || 'bar',
       });
     }
     for (const boton of $('roster-body').querySelectorAll('[data-unassign]')) {
@@ -3906,15 +3919,16 @@
 
     // Solo los candidatos del puesto que ESE destino necesita: ofrecer un mesero
     // para una barra es ofrecer un error.
-    const quiere = destino.section ? 'section' : 'location';
+    // Cover (D118) es para la anfitriona; una barra, para bartender y cajero.
     const gente = EV2Roster.candidates(state.staff)
-      .filter((p) => EV2Roster.ruleFor(p.role).target === quiere);
+      .filter((p) => EV2Roster.fitsTarget(p.role, destino));
 
     $('pick-list').innerHTML = gente.map((p) => {
       const problema = EV2Roster.check({
         person: p,
         section: destino.section || null,
         locationId: destino.locationId || null,
+        locationKind: destino.kind || null,
         roster: r.roster,
       });
       const bloqueado = problema !== null;

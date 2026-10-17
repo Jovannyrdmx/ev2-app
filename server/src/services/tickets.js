@@ -573,9 +573,13 @@ function renderReceipt(t, data, { club, settings }) {
   header(t, club, settings);
   t.center().bold().tall('RECIBO').normal().boldOff().left();
   t.row(`Folio ${folio(data.transaction_id)}`, localTime(data.at || new Date(), club.timezone));
+  // La copia que se queda la hostess en la puerta (D115): dice que es suya y
+  // cuántos accesos ampara, para cuadrarla contra el ticket que se llevó el cliente.
+  if (data.copy_label) t.center().bold().line(data.copy_label).boldOff().left();
   t.rule();
 
   if (data.concept) t.line(data.concept);
+  if (data.accesses) t.row('Accesos', String(data.accesses));
   if (data.table_code) t.line(`Mesa ${data.table_code}`);
   t.blank();
 
@@ -652,7 +656,7 @@ async function receiptData(runner, { nightclubId, transactionId, collectedBy }) 
  */
 async function printReceipt(client, {
   nightclubId, transactionId, method, reference = null, collectedBy = null, copies = 1,
-  parts = null, locationId = null,
+  parts = null, locationId = null, copyLabel = null, accesses = null,
 }) {
   const settings = await printing.settingsOf(client, nightclubId);
 
@@ -686,8 +690,69 @@ async function printReceipt(client, {
     refId: transactionId,
     copies,
     createdBy: collectedBy,
-    ...build(printer, (t) => renderReceipt(t, { ...data, method, reference, parts },
-      { club, settings })),
+    ...build(printer, (t) => renderReceipt(t, {
+      ...data, method, reference, parts, copy_label: copyLabel, accesses,
+    }, { club, settings })),
+  });
+}
+
+// ---------------------------------------------------------------- el acceso del cliente
+
+/**
+ * El ticket que se lleva el cliente al pagar el cover (D115).
+ *
+ * Sale junto con la copia de la hostess, y a propósito NO lleva dinero: es lo que
+ * enseña en la puerta para decir cuántos entran con él. Lo que se cobró está en la
+ * copia que se queda la hostess. El folio es el mismo en los dos papeles, así que
+ * cualquier reclamo se cruza en un vistazo.
+ */
+const ADMISSION_KIND_LABEL = { general: 'General', vip_extra: 'Extra VIP' };
+
+async function admissionData(runner, { nightclubId, admissionId }) {
+  const { rows } = await runner.query(
+    `SELECT a.id::text AS admission_id, a.transaction_id::text AS transaction_id, a.kind,
+            a.quantity, a.created_at, e.name AS event_name, t.code AS table_code
+       FROM door_admissions a
+       LEFT JOIN events_calendar e ON e.id = a.event_id
+       LEFT JOIN reservations r ON r.id = a.reservation_id
+       LEFT JOIN tables t ON t.id = r.table_id
+      WHERE a.id = $1 AND a.nightclub_id = $2`,
+    [admissionId, nightclubId]);
+  return rows[0] || null;
+}
+
+function renderAdmission(t, data, { club, settings }) {
+  header(t, club, settings);
+  t.center().bold().tall('ACCESO').normal().boldOff().left();
+  // El folio del cobro cuando lo hubo, para que coincida con la copia de la hostess;
+  // una cortesía no tiene cobro y usa el de la entrada.
+  t.row(`Folio ${folio(data.transaction_id || data.admission_id)}`,
+    localTime(data.created_at || new Date(), club.timezone));
+  t.rule();
+  if (data.event_name) t.row('Evento', data.event_name);
+  t.row('Tipo', ADMISSION_KIND_LABEL[data.kind] || data.kind);
+  if (data.table_code) t.row('Mesa', data.table_code);
+  t.blank();
+  t.center().bold().big(`ACCESOS: ${data.quantity}`).normal().boldOff().left();
+  footer(t, settings);
+  t.blank(2).cut();
+}
+
+/** Encola el ticket del cliente en la impresora de la puerta. Nunca tumba el cobro. */
+async function printAdmission(client, { nightclubId, admissionId, locationId, userId = null }) {
+  const data = await admissionData(client, { nightclubId, admissionId });
+  if (!data) return null;
+  const printer = await printing.resolvePrinter(client, { nightclubId, purpose: 'till', locationId });
+  if (!printer) return null;
+  const settings = await printing.settingsOf(client, nightclubId);
+  const club = await clubOf(client, nightclubId);
+  return printing.enqueueSafely(client, {
+    nightclubId,
+    printer,
+    kind: 'receipt',
+    refId: admissionId,
+    createdBy: userId,
+    ...build(printer, (t) => renderAdmission(t, data, { club, settings })),
   });
 }
 
@@ -717,6 +782,7 @@ async function cutData(runner, { nightclubId, closingId }) {
             s.section,
             c.location_id::text AS location_id, l.name AS location_name,
             c.opening_float::text AS opening_float,
+            c.opening_float_usd::text AS opening_float_usd,
             c.pending_orders, c.pending_total::text AS pending_total,
             c.usd_collected::text AS usd_collected, c.usd_change_given::text AS usd_change_given,
             c.usd_drops_total::text AS usd_drops_total, c.expected_usd::text AS expected_usd,
@@ -766,12 +832,15 @@ function renderCut(t, data, { club, settings }) {
   const totales = data.totals || {};
   for (const l of totales.by_method || []) {
     const veces = l.count ? ` (${l.count})` : '';
-    t.row(`${METHOD_LABEL[l.method] || l.method}${veces}`, money(l.amount, data.currency));
+    // Un renglón en dólares (cover con precio en dólares, D118) se escribe en dólares.
+    t.row(`${METHOD_LABEL[l.method] || l.method}${veces}`, money(l.amount, l.currency || data.currency));
   }
   if (!(totales.by_method || []).length) t.line('No cobró nada en este turno.');
   t.bold();
   t.row('Total cobrado', money(totales.total_collected || 0, data.currency));
   t.boldOff();
+  // La caja de Cover (D118): cuánta gente entró por esa caja.
+  if (Number(totales.door_people) > 0) t.row('Personas que entraron', String(totales.door_people));
 
   // La propina va aparte y NO se entrega: no es del club.
   const propinas = totales.tips || {};
@@ -832,6 +901,8 @@ function renderCut(t, data, { club, settings }) {
   if (data.expected_usd !== null && data.expected_usd !== undefined) {
     t.blank().rule();
     t.bold().line('DÓLARES').boldOff();
+    // El fondo en dólares (D118) también se devuelve, como dólares.
+    if (Number(data.opening_float_usd) > 0) t.row('Fondo en dólares', money(data.opening_float_usd, 'USD'));
     t.row('Dólares recibidos', money(data.usd_collected, 'USD'));
     if (Number(data.usd_drops_total) > 0) t.row('Menos retiros', `-${money(data.usd_drops_total, 'USD')}`);
     t.bold();
@@ -881,6 +952,30 @@ function renderCut(t, data, { club, settings }) {
 }
 
 /**
+ * Dónde sale el papel del dinero de un turno (corte y retiros).
+ *
+ *   - Una caja de barra: su impresora de caja; si no tiene, la de servicio de esa barra.
+ *   - La caja de Cover (D118): su impresora de caja; si no tiene, la de puerta; y si
+ *     tampoco, la de servicio por la regla de "si hay una sola, es esa" — que es por
+ *     donde salía el corte de la anfitriona antes de que Cover fuera caja.
+ *   - Un turno sin caja: la de servicio de su zona, como siempre.
+ */
+async function cashPaperPrinter(runner, { nightclubId, locationId = null, section = null }) {
+  if (locationId) {
+    const deCaja = await printing.resolvePrinter(runner, { nightclubId, purpose: 'till', locationId });
+    if (deCaja) return deCaja;
+    const { rows } = await runner.query('SELECT kind FROM supply_locations WHERE id = $1', [locationId]);
+    if (rows[0] && rows[0].kind === 'door') {
+      return (await printing.resolvePrinter(runner, { nightclubId, purpose: 'door' }))
+        || printing.resolvePrinter(runner, { nightclubId, purpose: 'service', section });
+    }
+  }
+  return printing.resolvePrinter(runner, {
+    nightclubId, purpose: 'service', section, locationId: locationId || null,
+  });
+}
+
+/**
  * El ticket del corte, después de cerrarlo.
  *
  * Se llama FUERA de la transacción que cierra el turno, y a propósito: el corte ya
@@ -892,12 +987,9 @@ async function printShiftCut(runner, { nightclubId, closingId, userId = null }) 
   const data = await cutData(runner, { nightclubId, closingId });
   if (!data) return null;
 
-  // El corte de una caja sale en la impresora de esa caja (D79), y si no tiene, en la
-  // de servicio de su barra; el de la puerta, por su zona, como siempre.
-  const printer = (data.location_id && await printing.resolvePrinter(runner, {
-    nightclubId, purpose: 'till', locationId: data.location_id,
-  })) || await printing.resolvePrinter(runner, {
-    nightclubId, purpose: 'service', section: data.section, locationId: data.location_id || null,
+  // El corte de una caja sale en la impresora de esa caja (D79, D118).
+  const printer = await cashPaperPrinter(runner, {
+    nightclubId, locationId: data.location_id, section: data.section,
   });
   if (!printer) return null;
 
@@ -969,10 +1061,8 @@ function renderDrop(t, data, { club, settings }) {
 async function printCashDrop(runner, { nightclubId, dropId, userId = null }) {
   const data = await dropData(runner, { nightclubId, dropId });
   if (!data) return null;
-  const printer = (data.location_id && await printing.resolvePrinter(runner, {
-    nightclubId, purpose: 'till', locationId: data.location_id,
-  })) || await printing.resolvePrinter(runner, {
-    nightclubId, purpose: 'service', section: data.section, locationId: data.location_id || null,
+  const printer = await cashPaperPrinter(runner, {
+    nightclubId, locationId: data.location_id, section: data.section,
   });
   if (!printer) return null;
   const club = await clubOf(runner, nightclubId);
@@ -1013,6 +1103,7 @@ module.exports = {
   orderData, renderOrder, printOrder, reprintOrder, REPRINTABLE, orderPaymentLabel, itemLines,
   billWindow, billData, renderBill, printBill,
   receiptData, renderReceipt, printReceipt,
+  admissionData, renderAdmission, printAdmission, ADMISSION_KIND_LABEL,
   cutData, renderCut, printShiftCut, ROLE_LABEL,
   dropData, renderDrop, printCashDrop,
   build,

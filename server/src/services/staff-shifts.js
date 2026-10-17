@@ -59,7 +59,9 @@ async function start(runner, { nightclubId, user, section = null }) {
  */
 async function end(runner, { nightclubId, userId }) {
   const abierto = await runner.query(
-    `SELECT id, user_id, section, started_at, ended_at FROM staff_shifts
+    `SELECT id, user_id, section, started_at, ended_at, location_id,
+            opening_float::text AS opening_float, opening_float_usd::text AS opening_float_usd
+       FROM staff_shifts
       WHERE user_id = $1 AND nightclub_id = $2 AND ended_at IS NULL`,
     [userId, nightclubId]);
   if (abierto.rowCount === 0) throw ApiError.conflict('No tienes un turno abierto');
@@ -73,19 +75,31 @@ async function end(runner, { nightclubId, userId }) {
   return rows[0];
 }
 
-/** La regla del corte, sola, para quien solo necesita preguntar. */
+/**
+ * La regla del corte, sola, para quien solo necesita preguntar.
+ *
+ * Una caja abierta (barra o Cover, D118) siempre necesita su corte, aunque no haya
+ * cobrado nada: abrió con un fondo del club, y ese fondo se devuelve contado. Sin
+ * caja, el corte hace falta si la persona cobró algo o trae dinero del club (pesos o
+ * dólares).
+ */
 async function assertCanClose(runner, { nightclubId, shift }) {
   const resumen = await shiftCuts.shiftSummary(runner, { nightclubId, shift });
-  if (Number(resumen.cash_to_hand) > 0 || Number(resumen.totals.total_collected) > 0) {
-    if (!resumen.closing) {
-      const err = ApiError.unprocessable(
-        `Cobraste ${resumen.totals.total_collected} en este turno: haz tu corte antes de `
+  if (resumen.closing) return;
+  const esCaja = Boolean(shift.location_id);
+  const traeDinero = Number(resumen.cash_to_hand) > 0
+    || Number(resumen.usd_to_hand) > 0
+    || Number(resumen.totals.total_collected) > 0;
+  if (!esCaja && !traeDinero) return;
+  const err = ApiError.unprocessable(
+    esCaja
+      ? 'Tienes la caja abierta: haz tu corte antes de cerrar el turno. Al hacerlo, el turno se cierra solo.'
+      : `Cobraste ${resumen.totals.total_collected} en este turno: haz tu corte antes de `
         + 'cerrarlo. Al cerrarlo, el turno se cierra solo.',
-        { cash_to_hand: resumen.cash_to_hand, total_collected: resumen.totals.total_collected });
-      err.needsCut = true;
-      throw err;
-    }
-  }
+    // De una caja no se dice cuánto hay: su corte es a ciegas (D105).
+    esCaja ? {} : { cash_to_hand: resumen.cash_to_hand, total_collected: resumen.totals.total_collected });
+  err.needsCut = true;
+  throw err;
 }
 
 module.exports = {

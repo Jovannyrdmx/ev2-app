@@ -40,7 +40,9 @@ const { ApiError } = require('../middleware/errors');
  */
 const ASSIGNABLE = {
   waiter: { target: 'section', multi: true },
-  hostess: { target: 'section', multi: true },
+  // La anfitriona atiende zonas y, además, puede ir a Cover (la puerta), que desde
+  // D118 es una caja: la que el gerente ponga en Cover es la que abre esa caja.
+  hostess: { target: 'section', multi: true, door: true },
   bartender: { target: 'location', multi: false },
   // El cajero tiene UNA caja, en UNA barra (D77). Su asignación es lo que decide de
   // qué barra cobra; él no la elige al abrir caja.
@@ -112,6 +114,18 @@ async function loadEvent(runner, { nightclubId, eventId }) {
  * existe, y el rol se ve completo mientras una zona real queda sin nadie.
  */
 async function checkTarget(runner, { nightclubId, rule, section, locationId }) {
+  if (rule.door && locationId && !section) {
+    const { rows } = await runner.query(
+      `SELECT id, kind FROM supply_locations
+        WHERE id = $1 AND nightclub_id = $2 AND active`,
+      [locationId, nightclubId],
+    );
+    if (rows.length === 0) throw ApiError.notFound('Ese lugar no existe');
+    if (rows[0].kind !== 'door') {
+      throw ApiError.unprocessable('A una anfitriona se le asigna una zona o Cover, no una barra');
+    }
+    return { section: null, locationId };
+  }
   if (rule.target === 'section') {
     if (!section) throw ApiError.badRequest('Falta la zona', [{ field: 'section', message: 'Required' }]);
     if (locationId) throw ApiError.unprocessable('A un mesero se le asigna una zona, no una barra');
@@ -228,6 +242,7 @@ async function rosterFor(runner, { nightclubId, eventId }) {
               'section', a.section,
               'location_id', a.location_id,
               'location_name', l.name,
+              'location_kind', l.kind,
               'note', a.note
             ) ORDER BY a.section, l.name) AS targets,
             (s.id IS NOT NULL) AS on_shift,
@@ -285,22 +300,24 @@ async function gapsFor(runner, { nightclubId, eventId }) {
     [nightclubId, eventId, 'bartender'],
   );
   // Desde D77 cada barra necesita también su caja: una barra con bartender y sin
-  // cajero prepara tragos que nadie va a cobrar.
+  // cajero prepara tragos que nadie va a cobrar. Desde D118 Cover también es caja, y
+  // la abre una anfitriona: sin nadie en Cover, nadie cobra la puerta.
   const cajas = await runner.query(
-    `SELECT l.id, l.name
+    `SELECT l.id, l.name, l.kind
        FROM supply_locations l
-      WHERE l.nightclub_id = $1 AND l.kind = 'bar' AND l.active
+      WHERE l.nightclub_id = $1 AND l.kind IN ('bar', 'door') AND l.active
         AND NOT EXISTS (
           SELECT 1 FROM shift_assignments a
-           WHERE a.event_id = $2 AND a.location_id = l.id AND a.role = $3::text
+           WHERE a.event_id = $2 AND a.location_id = l.id
+             AND a.role = CASE WHEN l.kind = 'door' THEN $4::text ELSE $3::text END
         )
-      ORDER BY l.name`,
-    [nightclubId, eventId, 'cashier'],
+      ORDER BY l.kind = 'door', l.name`,
+    [nightclubId, eventId, 'cashier', 'hostess'],
   );
   return {
     sections: zonas.rows.map((r) => r.section),
     bars: barras.rows.map((r) => ({ location_id: r.id, name: r.name })),
-    tills: cajas.rows.map((r) => ({ location_id: r.id, name: r.name })),
+    tills: cajas.rows.map((r) => ({ location_id: r.id, name: r.name, kind: r.kind })),
   };
 }
 

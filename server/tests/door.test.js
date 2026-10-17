@@ -33,6 +33,8 @@ beforeEach(async () => {
   waiter = await f.createUser(club.id, { role: 'waiter' });
   await loadPriceList({ slug: 'ev2' });
   mesa = await f.createTable(club.id, { code: '39', section: 'ZONA ROJA', capacity: 8, type: 'booth' });
+  // Desde D118 en la puerta cobra la anfitriona con la caja de Cover abierta.
+  await f.openDoorTill(club.id, { hostess, authorizer: manager });
 });
 
 const url = (p) => `/api/nightclubs/${club.id}${p}`;
@@ -285,10 +287,8 @@ describe('lo que se vende en la entrada', () => {
     expect(rows[0]).toMatchObject({ amount: '450.00', status: 'paid', provider: 'cash' });
   });
 
-  it('el recibo del cover sale en la impresora de Cover (D96); una cortesía no imprime', async () => {
-    const { rows: [cover] } = await pool.query(
-      `INSERT INTO supply_locations (nightclub_id, code, name, kind, sort_order)
-       VALUES ($1,'cover','Cover','door',3) RETURNING id`, [club.id]);
+  it('el cover imprime en la impresora de Cover (D96); una cortesía solo saca el ticket del cliente (D115)', async () => {
+    const cover = { id: await f.coverOf(club.id) };
     const prn = await api().post(url('/printers')).set(auth(manager)).send({
       location_id: cover.id, name: 'Cover · caja', purpose: 'till',
       connection: 'network', host: '192.168.1.60',
@@ -302,9 +302,42 @@ describe('lo que se vende en la entrada', () => {
       .send({ kind: 'general', quantity: 1, unit_price: 150, payment_method: 'courtesy',
         notes: 'invitado', manager_pin: (await managerPin(club.id)).pin });
 
+    // Pagado: el del cliente y la copia de la hostess. Cortesía: solo el del cliente.
     const { rows } = await pool.query(
-      `SELECT printer_id, kind FROM print_jobs WHERE kind = 'receipt'`);
-    expect(rows).toEqual([{ printer_id: prn.body.printer.id, kind: 'receipt' }]);
+      `SELECT printer_id, preview FROM print_jobs WHERE kind = 'receipt' ORDER BY created_at, id`);
+    expect(rows.map((r) => r.printer_id)).toEqual(Array(3).fill(prn.body.printer.id));
+    const accesos = rows.filter((r) => /ACCESO/.test(r.preview) && !/COPIA HOSTESS/.test(r.preview));
+    const copias = rows.filter((r) => /COPIA HOSTESS/.test(r.preview));
+    expect(accesos).toHaveLength(2);
+    expect(copias).toHaveLength(1);
+  });
+
+  it('el ticket del cliente dice cuántos accesos y no lleva dinero; la copia de la hostess sí (D115)', async () => {
+    const cover = { id: await f.coverOf(club.id) };
+    await api().post(url('/printers')).set(auth(manager)).send({
+      location_id: cover.id, name: 'Cover · caja', purpose: 'till',
+      connection: 'network', host: '192.168.1.60',
+    });
+    const res = await api().post(url('/door/admissions')).set(auth(hostess))
+      .send({ kind: 'general', quantity: 3, unit_price: 150, payment_method: 'cash', cash_received: 500 });
+    expect(res.status).toBe(201);
+
+    const { rows } = await pool.query(
+      `SELECT preview, ref_id FROM print_jobs WHERE kind = 'receipt' ORDER BY created_at, id`);
+    expect(rows).toHaveLength(2);
+    const cliente = rows.find((r) => r.ref_id === res.body.admission.id);
+    const copia = rows.find((r) => r.ref_id !== res.body.admission.id);
+    expect(cliente).toBeDefined();
+    expect(cliente.preview).toMatch(/ACCESOS: 3/);
+    expect(cliente.preview).toMatch(/General/);
+    expect(cliente.preview).not.toMatch(/\$/);
+    expect(copia.preview).toMatch(/COPIA HOSTESS/);
+    expect(copia.preview).toMatch(/Accesos\s+3/);
+    expect(copia.preview).toMatch(/\$450\.00/);
+    expect(copia.preview).toMatch(/Cambio\s+\$50\.00/);
+    // El mismo folio en los dos papeles.
+    const folioDe = (txt) => txt.match(/Folio (\w+)/)[1];
+    expect(folioDe(cliente.preview)).toBe(folioDe(copia.preview));
   });
 
   it('un extra VIP queda pegado a su reservación: así se responde "reservó 8, entraron 10"', async () => {
@@ -353,10 +386,11 @@ describe('lo que se vende en la entrada', () => {
       expect(log.rows).toEqual([{ action: 'door.transfer_authorized' }]);
     });
 
-    it('el gerente en la puerta no necesita PIN', async () => {
+    it('el gerente ya no vende en la puerta: cobra la caja de Cover (D118)', async () => {
       const res = await api().post(url('/door/admissions')).set(auth(manager))
         .send({ kind: 'general', quantity: 1, unit_price: 300, payment_method: 'courtesy', notes: 'prensa' });
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(403);
+      expect(res.body.error.message).toMatch(/caja de Cover/);
     });
   });
 

@@ -554,19 +554,21 @@ router.post('/nightclubs/:nightclubId/manual-payments/register',
       const { tx } = await loadPayableTransaction(client, {
         transactionId: b.transaction_id, nightclubId, user: req.user, onBehalfOf: b.on_behalf_of,
       });
-      // El cajero cobra solo lo de su barra, con la caja abierta (D77).
-      await till.assertCanCollect(client, { nightclubId, user: req.user, transactionId: tx.id });
+      // El cajero cobra solo lo de su barra, con la caja abierta (D77); la anfitriona,
+      // con la caja de Cover abierta (D118). El pago queda anotado a esa caja.
+      const caja = await till.assertCanCollect(client, { nightclubId, user: req.user, transactionId: tx.id });
       let created;
       try {
         const { rows } = await client.query(
           `INSERT INTO manual_payments (nightclub_id, transaction_id, option_id, method, declared_by,
                                         on_behalf_of, amount, currency, reference, note, status,
-                                        reviewed_by, reviewed_at, client_request_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'confirmed',$5,now(),$11)
+                                        reviewed_by, reviewed_at, client_request_id, till_shift_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'confirmed',$5,now(),$11,$12)
            RETURNING id, transaction_id, method, amount::text AS amount, currency, status,
                      declared_by, on_behalf_of, reference`,
           [nightclubId, tx.id, b.option_id ?? null, b.method, req.user.id, b.on_behalf_of ?? null,
-            b.amount, b.currency, b.reference ?? null, b.note ?? null, b.client_request_id ?? null]);
+            b.amount, b.currency, b.reference ?? null, b.note ?? null, b.client_request_id ?? null,
+            caja ? caja.id : null]);
         created = rows[0];
       } catch (err) {
         if (err.code === '23505') throw ApiError.conflict('Ese cobro ya tiene un pago registrado');

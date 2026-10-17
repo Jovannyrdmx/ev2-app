@@ -30,6 +30,8 @@ beforeEach(async () => {
   club = await f.createNightclub({ slug: 'ev2-rp' });
   manager = await f.createUser(club.id, { role: 'manager', display_name: 'Gerente' });
   hostess = await f.createUser(club.id, { role: 'hostess' });
+  // Desde D118 en la puerta cobra la anfitriona con la caja de Cover abierta.
+  await f.openDoorTill(club.id, { hostess, authorizer: manager });
   waiter = await f.createUser(club.id, { role: 'waiter', on_shift: true, display_name: 'Luis' });
   guest = await f.createUser(club.id, { role: 'guest', display_name: 'Ana' });
   rpA = await f.createUser(club.id, { role: 'rp', display_name: 'Rafa RP' });

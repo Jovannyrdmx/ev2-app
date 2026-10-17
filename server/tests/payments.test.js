@@ -18,6 +18,8 @@ beforeEach(async () => {
   otherClub = await f.createNightclub({ name: 'Otro', slug: 'otro-pay' });
   manager = await f.createUser(club.id, { role: 'manager' });
   hostess = await f.createUser(club.id, { role: 'hostess' });
+  // Desde D118 la anfitriona cobra con la caja de Cover abierta.
+  await f.openDoorTill(club.id, { hostess, authorizer: manager });
   guest = await f.createUser(club.id, { role: 'guest', display_name: 'Ana' });
   otherGuest = await f.createUser(club.id, { role: 'guest', display_name: 'Sofía' });
   otherManager = await f.createUser(otherClub.id, { role: 'manager' });

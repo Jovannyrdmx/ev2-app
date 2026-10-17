@@ -43,7 +43,8 @@ const STAFF_ROLES = ['waiter', 'bartender', 'hostess', 'cashier', 'manager'];
 async function shiftToCut(runner, { nightclubId, userId }) {
   const { rows } = await runner.query(
     `SELECT s.id, s.user_id, s.section, s.started_at, s.ended_at,
-            s.location_id, s.opening_float::text AS opening_float
+            s.location_id, s.opening_float::text AS opening_float,
+            s.opening_float_usd::text AS opening_float_usd
        FROM staff_shifts s
        LEFT JOIN shift_closings c ON c.shift_id = s.id
       WHERE s.nightclub_id = $1 AND s.user_id = $2
@@ -241,14 +242,17 @@ router.get('/nightclubs/:nightclubId/cash-drops',
     res.json({ drops: rows });
   }));
 
-// ---------------------------------------------------------------- la caja (D77)
+// ---------------------------------------------------------------- la caja (D77, D118)
+
+/** Quienes tienen caja: el cajero en su barra y la anfitriona en Cover (D118). */
+const TILL_ROLES = till.TILL_ROLES;
 
 /**
- * Mi caja: la barra que me asignaron esta noche, si ya está abierta, con qué fondo, y
- * los pedidos de esa barra que siguen sin cobrar.
+ * Mi caja: el lugar que me asignaron esta noche (barra o Cover), si ya está abierta,
+ * con qué fondo, y —en una barra— los pedidos que siguen sin cobrar.
  */
 router.get('/nightclubs/:nightclubId/till',
-  requireRole('cashier'),
+  requireRole(...TILL_ROLES),
   validate({ params: z.object({ nightclubId: uuid }) }),
   asyncHandler(async (req, res) => {
     res.json(await till.state(pool, { nightclubId: req.params.nightclubId, user: req.user }));
@@ -257,28 +261,30 @@ router.get('/nightclubs/:nightclubId/till',
 /**
  * Abrir la caja con su fondo.
  *
- * El cajero teclea el fondo que recibe y el gerente que se lo entrega teclea su
- * código ahí mismo. La barra NO se manda: sale del rol de la noche.
+ * Quien abre teclea el fondo que recibe —en pesos y, si le dan, en dólares— y el
+ * gerente que se lo entrega teclea su código ahí mismo. El lugar NO se manda: sale
+ * del rol de la noche (barra para el cajero, Cover para la anfitriona).
  */
 router.post('/nightclubs/:nightclubId/till/open',
-  requireRole('cashier'),
+  requireRole(...TILL_ROLES),
   validate({
     params: z.object({ nightclubId: uuid }),
     body: z.object({
       opening_float: z.number().min(0).max(1_000_000),
+      // Los dólares del fondo (D118). Opcional: hay cajas que abren solo con pesos.
+      opening_float_usd: z.number().min(0).max(100_000).optional(),
       currency: z.enum(['MXN', 'USD']).default('MXN'),
       manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos'),
     }),
   }),
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
-    // La barra se revisa ANTES de gastar un intento de PIN del gerente: sin barra
-    // asignada no hay nada que autorizar.
-    const asignada = await till.assignedBar(pool, { nightclubId, userId: req.user.id });
-    if (!asignada) {
-      throw ApiError.unprocessable(
-        'No tienes barra asignada para esta noche. El gerente te asigna una en el rol de la noche.');
-    }
+    // El lugar se revisa ANTES de gastar un intento de PIN del gerente: sin lugar
+    // asignado no hay nada que autorizar.
+    const asignada = await till.assignedTill(pool, {
+      nightclubId, userId: req.user.id, role: req.user.role,
+    });
+    if (!asignada) throw ApiError.unprocessable(till.noAssignmentMessage(req.user.role));
     const autoriza = await managerAuth.authorize(pool, {
       nightclubId, pin: req.body.manager_pin, selfId: req.user.id, ip: req.ip,
     });
@@ -290,20 +296,40 @@ router.post('/nightclubs/:nightclubId/till/open',
       abierta = await till.open(client, {
         nightclubId,
         userId: req.user.id,
+        role: req.user.role,
         openingFloat: req.body.opening_float,
+        openingFloatUsd: req.body.opening_float_usd ?? null,
         currency: req.body.currency,
         authorizer: autoriza,
       });
+      // Queda escrito quién abrió, dónde, con cuánto y quién entregó el fondo.
+      await client.query(
+        `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
+         VALUES ($1,$2,'till.open','staff_shift',$3,$4,$5)`,
+        [nightclubId, req.user.id, abierta.shiftId, JSON.stringify({
+          location_id: abierta.location.location_id,
+          location_name: abierta.location.location_name,
+          location_kind: abierta.location.location_kind,
+          opening_float: abierta.openingFloat,
+          opening_float_usd: abierta.openingFloatUsd,
+          authorized_by: autoriza.id,
+          attached_to_shift: abierta.attachedToShift,
+        }), req.ip || null]);
+      // Si es la caja de Cover, las demás anfitrionas también se enteran: desde ese
+      // momento ellas escanean y no cobran (D118).
+      const puerta = abierta.location.location_kind === 'door';
       await events.publish({
         nightclubId, type: 'till_opened', client,
-        audience: { roles: ['manager', 'admin'], userIds: [req.user.id] },
+        audience: { roles: puerta ? ['manager', 'admin', 'hostess'] : ['manager', 'admin'], userIds: [req.user.id] },
         payload: {
           shift_id: abierta.shiftId,
           user_id: req.user.id,
           user_name: req.user.display_name || null,
-          location_id: abierta.bar.location_id,
-          location_name: abierta.bar.location_name,
+          location_id: abierta.location.location_id,
+          location_name: abierta.location.location_name,
+          location_kind: abierta.location.location_kind,
           opening_float: abierta.openingFloat,
+          opening_float_usd: abierta.openingFloatUsd,
           authorized_by: autoriza.name,
         },
       });
@@ -550,13 +576,16 @@ router.post('/nightclubs/:nightclubId/cash-drawer/open',
   }),
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
+    // El cajón es de quien tiene la caja abierta: el cajero en su barra, la anfitriona
+    // en Cover (D118). Sin caja abierta no hay cajón que abrir.
     let printer;
     if (req.user.role === 'cashier') {
       const caja = await till.openTill(pool, { nightclubId, userId: req.user.id });
       if (!caja) throw ApiError.conflict('No tienes la caja abierta');
       printer = await cashDrawer.tillPrinter(pool, { nightclubId, locationId: caja.location_id });
     } else {
-      printer = await cashDrawer.doorPrinter(pool, { nightclubId });
+      const caja = await till.assertDoorTill(pool, { nightclubId, user: req.user });
+      printer = await cashDrawer.doorPrinter(pool, { nightclubId, locationId: caja.location_id });
     }
     if (!printer || !printer.drawer_pin) {
       throw ApiError.unprocessable('Esta caja no tiene cajón configurado. El gerente lo da de alta en Impresoras.');
@@ -591,9 +620,10 @@ router.post('/nightclubs/:nightclubId/cash-drawer/open',
   }));
 
 /**
- * Las cajas de la noche, para el gerente (D88).
+ * Las cajas de la noche, para el gerente (D88, D118).
  *
- * Solo lectura: cada caja que abrió en las últimas 18 horas, con su barra, quién la
+ * Solo lectura: cada caja que abrió en las últimas 18 horas —las barras y Cover—,
+ * con su lugar, quién la
  * tiene, el fondo, lo cobrado hasta ahora y lo que debe tener en el cajón — pesos y,
  * aparte, dólares —, y si ya hizo corte, con su diferencia. Es la pregunta que el
  * gerente se hace a media noche y que antes solo podía contestar yendo a cada barra.
@@ -606,7 +636,8 @@ router.get('/nightclubs/:nightclubId/tills',
     const { rows } = await pool.query(
       `SELECT s.id, s.user_id, s.section, s.started_at, s.ended_at, s.location_id,
               s.opening_float::text AS opening_float, s.float_currency AS currency,
-              u.display_name AS user_name, l.name AS location_name,
+              s.opening_float_usd::text AS opening_float_usd,
+              u.display_name AS user_name, l.name AS location_name, l.kind AS location_kind,
               c.id AS closing_id, c.difference::text AS difference,
               c.difference_usd::text AS difference_usd, c.confirmed_at
          FROM staff_shifts s
@@ -615,7 +646,7 @@ router.get('/nightclubs/:nightclubId/tills',
          LEFT JOIN shift_closings c ON c.shift_id = s.id
         WHERE s.nightclub_id = $1 AND s.location_id IS NOT NULL
           AND s.started_at > now() - interval '18 hours'
-        ORDER BY l.name, s.started_at`,
+        ORDER BY l.kind = 'door', l.name, s.started_at`,
       [nightclubId]);
     const tills = [];
     for (const s of rows) {
@@ -625,12 +656,14 @@ router.get('/nightclubs/:nightclubId/tills',
         shift_id: s.id,
         location_id: s.location_id,
         location_name: s.location_name,
+        location_kind: s.location_kind,
         user_id: s.user_id,
         user_name: s.user_name,
         started_at: s.started_at,
         ended_at: s.ended_at,
         currency: s.currency || resumen.totals.currency,
         opening_float: resumen.opening_float,
+        opening_float_usd: resumen.opening_float_usd,
         collected: resumen.totals.total_collected,
         cash_collected: resumen.totals.cash_collected,
         cash_to_hand: resumen.cash_to_hand,
@@ -639,6 +672,8 @@ router.get('/nightclubs/:nightclubId/tills',
         drops_received: resumen.drops_received,
         pending_orders: (resumen.pending_orders || []).length,
         pending_total: resumen.pending_total,
+        // En Cover lo que importa es cuánta gente entró por esa caja.
+        door_people: resumen.totals.door_people,
         closed: Boolean(s.closing_id),
         difference: s.difference,
         difference_usd: s.difference_usd,
@@ -717,10 +752,16 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
       client.release();
     }
 
+    // El corte de la caja de Cover libera esa caja: las anfitrionas se enteran (D118).
+    const dePuerta = shift.location_id ? (await pool.query(
+      'SELECT kind FROM supply_locations WHERE id = $1', [shift.location_id])).rows[0] : null;
     await events.publish({
       nightclubId,
       type: 'shift_closed',
-      audience: { roles: ['manager', 'admin'], userIds: [req.user.id] },
+      audience: {
+        roles: dePuerta && dePuerta.kind === 'door' ? ['manager', 'admin', 'hostess'] : ['manager', 'admin'],
+        userIds: [req.user.id],
+      },
       payload: {
         closing_id: hecho.id,
         user_id: req.user.id,
@@ -730,6 +771,7 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
         difference: hecho.difference,
         difference_usd: hecho.difference_usd,
         opening_float: hecho.opening_float,
+        opening_float_usd: hecho.opening_float_usd,
         pending_orders: hecho.pending_orders,
         pending_total: hecho.pending_total,
         authorized_by: autoriza.name,
@@ -762,7 +804,8 @@ const CLOSING_SELECT = `
          c.counted_cash::text AS counted_cash, c.difference::text AS difference,
          c.difference_reason, c.status, c.confirmed_at,
          c.authorized_at, c.authorized_role, c.ticket_job_id,
-         c.location_id, l.name AS location_name, c.opening_float::text AS opening_float,
+         c.location_id, l.name AS location_name, l.kind AS location_kind,
+         c.opening_float::text AS opening_float, c.opening_float_usd::text AS opening_float_usd,
          c.pending_orders, c.pending_total::text AS pending_total,
          c.usd_collected::text AS usd_collected, c.usd_change_given::text AS usd_change_given,
          c.usd_drops_total::text AS usd_drops_total, c.expected_usd::text AS expected_usd,

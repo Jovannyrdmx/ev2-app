@@ -80,7 +80,8 @@ const roster = (quien = manager) => api().get(url(`/nights/${night.id}/roster`))
 describe('qué se le asigna a cada puesto', () => {
   it('el mesero y la hostess atienden zonas, y pueden cubrir varias', () => {
     expect(assignments.ruleFor('waiter')).toEqual({ target: 'section', multi: true });
-    expect(assignments.ruleFor('hostess')).toEqual({ target: 'section', multi: true });
+    // Y la anfitriona, además, puede ir a Cover: la caja de la puerta (D118).
+    expect(assignments.ruleFor('hostess')).toEqual({ target: 'section', multi: true, door: true });
   });
 
   it('el bartender está en UNA barra', () => {

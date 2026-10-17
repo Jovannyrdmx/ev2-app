@@ -25,7 +25,8 @@
    */
   const ASSIGNABLE = {
     waiter: { target: 'section', multi: true },
-    hostess: { target: 'section', multi: true },
+    // La anfitriona atiende zonas y, además, puede ir a Cover: la caja de la puerta (D118).
+    hostess: { target: 'section', multi: true, door: true },
     bartender: { target: 'location', multi: false },
     // El cajero tiene UNA caja en UNA barra (D77); su asignación decide de qué barra
     // cobra.
@@ -71,11 +72,17 @@
    * decisión: o se puede o no, y decir dos razones a la vez confunde más que
    * ayuda.
    */
-  function check({ person, section = null, locationId = null, roster = [] }) {
+  function check({ person, section = null, locationId = null, locationKind = null, roster = [] }) {
     if (!person) return { code: 'no_person' };
     const rule = ruleFor(person.role);
     if (!rule) return { code: 'role_not_assignable', role: person.role };
     if (person.active === false) return { code: 'inactive', name: person.display_name };
+
+    // Cover (D118): solo la anfitriona va ahí, y a ella no se le pone en una barra.
+    if (locationId && locationKind === 'door') {
+      if (!rule.door) return { code: 'door_needs_hostess' };
+      return alreadyThere({ person, rule, section, locationId, roster });
+    }
 
     // El destino EQUIVOCADO se avisa antes que el destino que falta: si alguien
     // arrastró un mesero a una barra, "a un mesero se le asigna una zona" le dice
@@ -88,6 +95,11 @@
       if (!locationId) return { code: 'need_bar' };
     }
 
+    return alreadyThere({ person, rule, section, locationId, roster });
+  }
+
+  /** ¿Ya está ahí, o ya está en otro lugar que solo admite uno? */
+  function alreadyThere({ person, rule, section, locationId, roster }) {
     const ya = (roster || []).find((p) => p.user_id === person.id || p.user_id === person.user_id);
     if (ya) {
       const mismo = (ya.targets || []).some((t) => (section && t.section === section)
@@ -113,7 +125,8 @@
    */
   function byTarget({ roster = [], sections = [], bars = [] }) {
     const zonas = new Map(sections.map((s) => [s, []]));
-    const barras = new Map(bars.map((b) => [b.location_id, { name: b.name, people: [] }]));
+    const barras = new Map(bars.map((b) => [b.location_id,
+      { name: b.name, kind: b.kind || 'bar', people: [] }]));
 
     for (const person of roster) {
       for (const target of person.targets || []) {
@@ -128,7 +141,8 @@
           });
         } else if (target.location_id) {
           if (!barras.has(target.location_id)) {
-            barras.set(target.location_id, { name: target.location_name, people: [] });
+            barras.set(target.location_id,
+              { name: target.location_name, kind: target.location_kind || 'bar', people: [] });
           }
           barras.get(target.location_id).people.push({
             user_id: person.user_id,
@@ -147,7 +161,9 @@
         .sort((a, b) => a.section.localeCompare(b.section)),
       bars: [...barras.entries()]
         .map(([locationId, info]) => ({ location_id: locationId, ...info }))
-        .sort((a, b) => String(a.name).localeCompare(String(b.name))),
+        // Las barras primero y Cover al final, como están en el club.
+        .sort((a, b) => Number(a.kind === 'door') - Number(b.kind === 'door')
+          || String(a.name).localeCompare(String(b.name))),
     };
   }
 
@@ -175,6 +191,18 @@
       // las once de la noche.
       not_arrived: roster.filter((p) => !p.on_shift).map((p) => p.display_name),
     };
+  }
+
+  /**
+   * ¿Este puesto puede ir a este destino? Una zona: mesero y anfitriona. Una barra:
+   * bartender y cajero. Cover (D118): solo la anfitriona.
+   */
+  function fitsTarget(role, destino = {}) {
+    const rule = ruleFor(role);
+    if (!rule) return false;
+    if (destino.section) return rule.target === 'section';
+    if (destino.kind === 'door') return rule.door === true;
+    return rule.target === 'location';
   }
 
   /** El cuerpo de `POST /nights/:id/roster`. */
@@ -236,6 +264,7 @@
     candidates,
     candidatesByRole,
     check,
+    fitsTarget,
     byTarget,
     progress,
     assignBody,

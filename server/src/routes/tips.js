@@ -154,9 +154,21 @@ router.post('/nightclubs/:nightclubId/staff/:userId/shifts/end',
     const { rows } = await pool.query(
       `UPDATE staff_shifts SET ended_at = now()
         WHERE user_id = $1 AND nightclub_id = $2 AND ended_at IS NULL
-       RETURNING id, section, started_at, ended_at`, [req.params.userId, req.params.nightclubId]);
+       RETURNING id, section, started_at, ended_at, location_id`, [req.params.userId, req.params.nightclubId]);
     if (rows.length === 0) throw ApiError.notFound('No hay turno abierto para esa persona');
-    res.json({ shift: rows[0] });
+    // Queda escrito quién cerró el turno ajeno (D118). Si era una caja, su corte sigue
+    // pendiente: se hace después con el mismo PIN del gerente (`shifts/me/closing`).
+    await pool.query(
+      `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
+       VALUES ($1,$2,'shift.force_end','staff_shift',$3,$4,$5)`,
+      [req.params.nightclubId, req.user.id, rows[0].id,
+        JSON.stringify({ user_id: req.params.userId, till: Boolean(rows[0].location_id) }),
+        req.ip || null]);
+    const r = rows[0];
+    res.json({
+      shift: { id: r.id, section: r.section, started_at: r.started_at, ended_at: r.ended_at },
+      till_needs_cut: Boolean(r.location_id),
+    });
   }));
 
 router.get('/nightclubs/:nightclubId/staff/shifts',
