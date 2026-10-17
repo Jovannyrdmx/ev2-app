@@ -326,6 +326,7 @@
   // conductores y las tarifas, que eran dos secciones para una misma cosa.
   const TAB_PANELS = {
     summary: ['tab-summary'],
+    tmon: ['tab-tmon'],
     cash: ['tab-cash'],
     lost: ['tab-lost'],
     reports: ['tab-reports'],
@@ -955,6 +956,91 @@
         loadWaiters();
       } catch (err) { toast(err.message, 'error'); }
     };
+  }
+
+  // ---------------------------------------------------------------- monitor de mesas (D113)
+
+  const tmon = { tables: [], detail: null, history: [], error: null };
+  const TMON_IDLE_KEY = 'ev2.tmon.idle';
+
+  async function loadMonitor() {
+    try {
+      const data = await api.get(`/nightclubs/${clubId()}/tables/monitor`);
+      tmon.tables = data.tables || [];
+      tmon.error = null;
+      if (tmon.detail) {
+        const h = await api.get(`/nightclubs/${clubId()}/tables/${tmon.detail}/history`);
+        tmon.history = h.sessions || [];
+      }
+    } catch (err) { tmon.error = err.message; }
+    renderMonitor();
+  }
+
+  const TMON_TONE = { occupied: 'pill-on', available: 'pill-ok', reserved: 'pill-wait', blocked: 'pill-bad', cleaning: 'pill-bad' };
+
+  function renderMonitor() {
+    if (!$('tmon-grid')) return;
+    const idleMin = Number($('tmon-idle').value) || 0;
+    const soloVip = $('tmon-vip').checked;
+    const list = tmon.tables.filter((x) => !soloVip || x.is_vip);
+    $('tmon-error').hidden = !tmon.error;
+    $('tmon-error').textContent = tmon.error || '';
+    $('tmon-empty').hidden = list.length > 0;
+    const ocupadas = tmon.tables.filter((x) => x.status === 'occupied');
+    $('tmon-stats').innerHTML = [
+      t('tmon.statOcc', { n: ocupadas.length, total: tmon.tables.length }),
+      t('tmon.statVip', { n: ocupadas.filter((x) => x.is_vip).length, total: tmon.tables.filter((x) => x.is_vip).length }),
+    ].map((x) => `<span class="pill pill-off">${escape(x)}</span>`).join('');
+    $('tmon-grid').innerHTML = list.map((x) => {
+      const sinConsumo = idleMin > 0 && x.status === 'occupied' && Number(x.total) === 0
+        && (x.minutes_seated || 0) >= idleMin;
+      return `
+      <button class="card rounded-xl p-3 text-left space-y-1.5" data-tmon="${escape(x.id)}"
+              style="${sinConsumo ? 'border:1px solid #f59e0b' : ''}">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><p class="font-semibold truncate">${x.is_vip ? '★ ' : ''}${escape(x.code)}</p>
+            <p class="text-xs text-white/50 truncate">${escape(x.section || '')}</p></div>
+          <span class="pill ${TMON_TONE[x.status] || 'pill-off'} shrink-0">${escape(t(`tmon.st.${x.status}`))}</span>
+        </div>
+        ${x.status === 'occupied' ? `
+          <div class="flex justify-between text-xs"><span class="text-white/50">${escape(t('tmon.guests', { n: x.guests }))}</span>
+            <span>${escape(t('tmon.since', { n: x.minutes_seated }))}</span></div>
+          <div class="flex justify-between text-sm"><span class="text-white/60">${escape(t('tmon.consumed'))}</span>
+            <span class="font-semibold">${escape(money(x.total, x.currency || state.currency))}</span></div>
+          ${sinConsumo ? `<p class="text-[11px] text-amber-300">${escape(t('tmon.noOrders'))}</p>` : ''}` : ''}
+      </button>`;
+    }).join('');
+    document.querySelectorAll('[data-tmon]').forEach((b) => {
+      b.onclick = async () => { tmon.detail = b.dataset.tmon; await loadMonitor(); };
+    });
+
+    const det = tmon.detail && tmon.tables.find((x) => x.id === tmon.detail);
+    $('tmon-detail').hidden = !det;
+    if (!det) return;
+    $('tmon-detail').innerHTML = `
+      <div class="flex justify-between items-baseline">
+        <p class="font-display text-lg">${escape(t('tmon.history', { code: det.code }))}</p>
+        <button data-tmon-close class="text-xs underline text-white/60">${escape(t('tmon.close'))}</button>
+      </div>
+      ${tmon.history.length ? tmon.history.map((h) => `
+        <div class="rounded-xl p-3 space-y-1" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)">
+          <div class="flex justify-between text-xs text-white/60">
+            <span>${escape(EV2Format.dateTime(h.started_at))} → ${escape(h.ended_at ? EV2Format.dateTime(h.ended_at) : t('tmon.now'))}</span>
+            <span>${escape(t('tmon.guests', { n: h.guests }))}</span></div>
+          ${(h.lines || []).map((l) => `<div class="flex justify-between text-sm"><span>${escape(l.quantity)} × ${escape(l.name)}</span><span>${escape(money(l.amount, h.currency || state.currency))}</span></div>`).join('')
+            || `<p class="text-xs text-white/40">${escape(t('tmon.noConsumption'))}</p>`}
+          <div class="flex justify-between text-sm font-semibold"><span>${escape(t('tmon.total'))}</span><span>${escape(money(h.total, h.currency || state.currency))}</span></div>
+        </div>`).join('') : `<p class="text-sm text-white/50">${escape(t('tmon.noHistory'))}</p>`}`;
+    $('tmon-detail').querySelector('[data-tmon-close]').onclick = () => { tmon.detail = null; tmon.history = []; renderMonitor(); };
+  }
+
+  if ($('tmon-idle')) {
+    try { $('tmon-idle').value = localStorage.getItem(TMON_IDLE_KEY) || ''; } catch { /* sin almacenamiento */ }
+    $('tmon-idle').onchange = () => {
+      try { localStorage.setItem(TMON_IDLE_KEY, $('tmon-idle').value); } catch { /* sin almacenamiento */ }
+      renderMonitor();
+    };
+    $('tmon-vip').onchange = renderMonitor;
   }
 
   const TONE_PILL = { ok: 'pill-ok', bad: 'pill-bad', wait: 'pill-wait', on: 'pill-on' };
@@ -4694,6 +4780,7 @@
     staffcons: () => loadStaffCons(),
     promos: () => loadPromos(),
     tableprice: () => loadTablePrices(),
+    tmon: () => loadMonitor(),
   };
 
   function goTab(tab) {
@@ -5945,6 +6032,15 @@
       await loadReports();
       renderReports();
       toast(t('mod.arrived'), 'error');
+    });
+
+    rt.on('event', (message) => {
+      const tipo = message && (message.event_type || message.type);
+      if (tipo === 'vip_table_occupied' || tipo === 'vip_table_released') {
+        const p = message.payload || {};
+        toast(t(tipo === 'vip_table_occupied' ? 'tmon.vipIn' : 'tmon.vipOut', { code: p.code || '' }), 'ok');
+      }
+      if (state.tab === 'tmon' && /^(table_updated|vip_table_|order_)/.test(tipo || '')) loadMonitor();
     });
 
     rt.on('event', (message) => {
