@@ -4170,7 +4170,7 @@
       <div class="rounded-lg border border-white/10 p-3 flex flex-wrap items-center justify-between gap-2">
         <div class="min-w-0">
           <p class="font-display truncate">${escape(r.display_name)}${r.active === false ? ` · ${escape(t('rpm.inactive'))}` : ''}</p>
-          <p class="text-xs text-white/50">${escape(t('rpm.code'))}: <b>${escape(r.code || '—')}</b> · ${escape(r.commission_pct || '10')}%</p>
+          <p class="text-xs text-white/50">${r.role ? `${escape(EV2Roles.describe(r.role, lang()).label)} · ` : ''}${escape(t('rpm.code'))}: <b>${escape(r.code || '—')}</b> · ${escape(r.commission_pct || '10')}%</p>
         </div>
         <div class="flex flex-wrap gap-2">
           <button data-rp-pct="${escape(r.user_id)}" class="ev2-button rounded-lg px-3 py-1 text-xs">${escape(t('rpm.editPct'))}</button>
