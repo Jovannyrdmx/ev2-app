@@ -204,7 +204,8 @@ describe('La comisión', () => {
     await consumo();
     const b = await miNoche(rpB);
     expect(b.body.night === null || b.body.night.lines.length === 0).toBe(true);
-    expect((await miNoche(waiter)).status).toBe(403);
+    // D120: sin código de RP no hay nada que ver (404); con código, cualquier puesto entra.
+    expect((await miNoche(waiter)).status).toBe(404);
     expect((await api().get(url('/rp/summary')).set(auth(rpA))).status).toBe(403);
     const resumen = await api().get(url('/rp/summary')).set(auth(manager));
     expect(resumen.body.rps).toHaveLength(1);
@@ -258,5 +259,98 @@ describe('Liquidar la noche', () => {
     await cerrarNoche();
     const res = await liquidar();
     expect(res.status).toBe(422);
+  });
+});
+
+describe('Todo el personal como RP sin dejar su puesto (D120)', () => {
+  const enroll = require('../scripts/rp-enroll-all');
+  const quiet = () => {};
+  let admin;
+
+  beforeEach(async () => {
+    admin = await f.createUser(club.id, { role: 'admin', display_name: 'Dueño' });
+  });
+
+  const profiles = async () => (await pool.query(
+    `SELECT u.display_name, u.role, p.code, p.commission_pct::text AS pct
+       FROM rp_profiles p JOIN users u ON u.id = p.user_id ORDER BY u.display_name`)).rows;
+
+  it('da código a empleados y gerentes con el % indicado; no a clientes ni al dueño; no toca los existentes', async () => {
+    const antes = await codeOf(rpA);
+    const r = await enroll.run({ pct: 5, log: quiet });
+    expect(r).toMatchObject({ created: 3, dry: false }); // gerente, anfitriona y mesero
+    const all = await profiles();
+    const byName = Object.fromEntries(all.map((p) => [p.display_name, p]));
+    expect(Object.keys(byName).sort()).toEqual(['Beto RP', 'Gerente', 'Luis', 'Rafa RP', 'hostess Test']);
+    expect(byName.Luis).toMatchObject({ role: 'waiter', pct: '5.00' });
+    expect(byName.Gerente).toMatchObject({ role: 'manager', pct: '5.00' });
+    expect(byName['Rafa RP']).toMatchObject({ role: 'rp', pct: '10.00', code: antes });
+    expect(new Set(all.map((p) => p.code)).size).toBe(all.length);
+    for (const p of all) expect(p.code).toMatch(/^[A-HJKMNP-Z2-9]{6}$/);
+    expect(all.find((p) => p.role === 'guest' || p.role === 'admin')).toBeUndefined();
+    expect(admin).toBeTruthy();
+
+    // Repetirlo no crea ni cambia nada.
+    expect((await enroll.run({ pct: 5, log: quiet })).created).toBe(0);
+    expect(await profiles()).toEqual(all);
+    const log = await pool.query(
+      `SELECT count(*)::int AS n FROM audit_log WHERE action = 'rp.enroll_all_from_console'`);
+    expect(log.rows[0].n).toBe(1);
+  });
+
+  it('en simulación no guarda nada, y sin % no corre', async () => {
+    expect((await enroll.run({ pct: 5, dry: true, log: quiet })).created).toBe(3);
+    expect((await profiles()).length).toBe(2);
+    await expect(enroll.run({ log: quiet })).rejects.toThrow(/--pct/);
+    await expect(enroll.run({ pct: 101, log: quiet })).rejects.toThrow(/--pct/);
+  });
+
+  it('la lista en CSV trae nombre, puesto, código y %', async () => {
+    const out = [];
+    await enroll.run({ pct: 5, csv: true, log: (l) => out.push(l) });
+    expect(out[0]).toBe('nombre,puesto,codigo,comision_pct,activo,nuevo');
+    expect(out).toHaveLength(6);
+    expect(out.find((l) => l.startsWith('Luis,waiter,'))).toMatch(/^Luis,waiter,[A-Z2-9]{6},5\.00,si,si$/);
+  });
+
+  it('el mesero con código sigue siendo mesero, la puerta le liga la mesa y cobra su %', async () => {
+    await enroll.run({ pct: 5, log: quiet });
+    const code = await codeOf(waiter);
+    const res = await attach(code);
+    expect(res.body).toMatchObject({ ok: true, rp: { display_name: 'Luis', code } });
+    await consumo();
+
+    const mia = await miNoche(waiter);
+    expect(mia.status).toBe(200);
+    expect(mia.body.profile).toMatchObject({ code, commission_pct: '5.00' });
+    expect(mia.body.night.totals).toEqual([{ currency: 'MXN', base: '120.00', commission: '6.00' }]);
+    expect((await api().get(url('/rp/me/nights')).set(auth(waiter))).status).toBe(200);
+
+    // Su puesto no cambió: sigue levantando pedidos.
+    expect((await pool.query('SELECT role FROM users WHERE id = $1', [waiter.id])).rows[0].role).toBe('waiter');
+    await consumo();
+
+    // El gerente lo ve en la lista con su puesto y le puede cambiar el %.
+    const lista = await api().get(url('/rps')).set(auth(manager));
+    expect(lista.body.rps.find((r) => r.user_id === waiter.id)).toMatchObject({ role: 'waiter', code });
+    const patch = await api().patch(url(`/rps/${waiter.id}`)).set(auth(manager)).send({ commission_pct: 7 });
+    expect(patch.status).toBe(200);
+
+    // Y se le liquida como a cualquier RP (5% copiado al ligar: 240 → 12).
+    await cerrarNoche();
+    const liq = await api().post(url('/rp/settle')).set(auth(manager))
+      .send({ rp_user_id: waiter.id, event_id: night.id });
+    expect(liq.status).toBe(201);
+    expect(liq.body.settlements[0]).toMatchObject({ currency: 'MXN', base: '240.00', amount: '12.00' });
+  });
+
+  it('un cliente o un empleado sin código no es RP', async () => {
+    expect((await miNoche(guest)).status).toBe(404);
+    expect((await api().get(url('/rp/me/nights')).set(auth(waiter))).status).toBe(404);
+    expect((await api().patch(url(`/rps/${waiter.id}`)).set(auth(manager)).send({ active: false })).status).toBe(404);
+    await cerrarNoche();
+    const settle = await api().post(url('/rp/settle')).set(auth(manager))
+      .send({ rp_user_id: waiter.id, event_id: night.id });
+    expect(settle.status).toBe(404);
   });
 });

@@ -46,37 +46,43 @@ const eventQuery = z.object({ event_id: uuid.optional() });
 
 // ---------------------------------------------------------------- el RP: lo suyo
 
-router.get('/nightclubs/:nightclubId/rp/me', ...guard, requireRole('rp'),
+router.get('/nightclubs/:nightclubId/rp/me', ...guard,
   validate({ params, query: eventQuery }),
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await rp.ensureProfile(client, { nightclubId, userId: req.user.id });
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw err;
-    } finally {
-      client.release();
+    // El puesto RP nace con su codigo; cualquier otro empleado lo tiene solo si el
+    // gerente se lo dio (D120). Sin perfil no hay nada que ver.
+    if (req.user.role === rp.ROLE) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await rp.ensureProfile(client, { nightclubId, userId: req.user.id });
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
     }
-    const { rows } = await pool.query(
-      `SELECT p.code, p.commission_pct::text AS commission_pct, p.active, u.display_name
-         FROM rp_profiles p JOIN users u ON u.id = p.user_id WHERE p.user_id = $1`, [req.user.id]);
+    const profile = await rp.profileOf(pool, { userId: req.user.id });
+    if (!profile) throw ApiError.notFound('No tienes código de RP');
     const eventId = req.query.event_id
       || await rp.currentEventId(pool, { nightclubId })
       || await rp.latestEventFor(pool, { nightclubId, rpUserId: req.user.id });
     const night = eventId
       ? await rp.nightReport(pool, { nightclubId, eventId, rpUserId: req.user.id })
       : null;
-    res.json({ profile: rows[0], night });
+    res.json({ profile, night });
   }));
 
-router.get('/nightclubs/:nightclubId/rp/me/nights', ...guard, requireRole('rp'),
+router.get('/nightclubs/:nightclubId/rp/me/nights', ...guard,
   validate({ params }),
   asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
+    if (!(await rp.profileOf(pool, { userId: req.user.id }))) {
+      throw ApiError.notFound('No tienes código de RP');
+    }
     const { rows } = await pool.query(
       `SELECT DISTINCT e.id, e.name, e.event_date, e.doors_open_at
          FROM rp_attributions a JOIN events_calendar e ON e.id = a.event_id
@@ -158,10 +164,10 @@ router.get('/nightclubs/:nightclubId/rps', ...guard, requireRole(...MANAGE_ROLES
   validate({ params }),
   asyncHandler(async (req, res) => {
     const { rows } = await pool.query(
-      `SELECT u.id AS user_id, u.display_name, u.status, p.code, p.commission_pct::text AS commission_pct,
-              p.active
+      `SELECT u.id AS user_id, u.display_name, u.role, u.status, p.code,
+              p.commission_pct::text AS commission_pct, p.active
          FROM users u LEFT JOIN rp_profiles p ON p.user_id = u.id
-        WHERE u.nightclub_id = $1 AND u.role = 'rp'
+        WHERE u.nightclub_id = $1 AND (u.role = 'rp' OR p.user_id IS NOT NULL)
         ORDER BY u.display_name`, [req.params.nightclubId]);
     res.json({ rps: rows });
   }));
@@ -182,9 +188,13 @@ router.patch('/nightclubs/:nightclubId/rps/:userId', ...guard, requireRole(...MA
     try {
       await client.query('BEGIN');
       const u = await client.query(
-        `SELECT id FROM users WHERE id = $1 AND nightclub_id = $2 AND role = 'rp' FOR UPDATE`,
+        `SELECT u.id, u.role, (p.user_id IS NOT NULL) AS has_profile
+           FROM users u LEFT JOIN rp_profiles p ON p.user_id = u.id
+          WHERE u.id = $1 AND u.nightclub_id = $2 FOR UPDATE OF u`,
         [userId, nightclubId]);
-      if (u.rowCount === 0) throw ApiError.notFound('RP no encontrado');
+      if (u.rowCount === 0 || (u.rows[0].role !== rp.ROLE && !u.rows[0].has_profile)) {
+        throw ApiError.notFound('RP no encontrado');
+      }
       await rp.ensureProfile(client, { nightclubId, userId });
       if (b.regenerate_code) {
         for (let i = 0; i < 20; i += 1) {

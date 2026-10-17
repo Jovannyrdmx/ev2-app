@@ -18,6 +18,11 @@ const { ApiError } = require('../middleware/errors');
 const eventPricing = require('./event-pricing');
 
 const ROLE = 'rp';
+// Desde D120 cualquier empleado o gerente puede tener codigo de RP sin dejar su puesto:
+// lo que lo hace RP es tener un perfil en `rp_profiles`, no el rol. El rol 'rp' sigue
+// existiendo para quien solo trae gente (nace con su codigo al darlo de alta).
+// Clientes y la cuenta del dueno (admin) no son personal: nunca cobran comision.
+const NOT_STAFF = ['guest', 'admin'];
 const DEFAULT_PCT = 10;
 // Sin 0/O, 1/I/L: el codigo se dicta en voz alta y se teclea con prisa.
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -32,19 +37,22 @@ function randomCode(len = 6) {
   return out;
 }
 
-/** El perfil de RP de un usuario, creandolo con un codigo libre si no tiene. */
-async function ensureProfile(client, { nightclubId, userId }) {
+/**
+ * El perfil de RP de un usuario, creandolo con un codigo libre si no tiene.
+ * Devuelve true si lo creo, false si ya existia.
+ */
+async function ensureProfile(client, { nightclubId, userId, commissionPct = DEFAULT_PCT }) {
   const have = await client.query('SELECT user_id FROM rp_profiles WHERE user_id = $1', [userId]);
-  if (have.rowCount > 0) return;
+  if (have.rowCount > 0) return false;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const ins = await client.query(
       `INSERT INTO rp_profiles (user_id, nightclub_id, code, commission_pct)
        VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING user_id`,
-      [userId, nightclubId, randomCode(), DEFAULT_PCT]);
-    if (ins.rowCount > 0) return;
+      [userId, nightclubId, randomCode(), commissionPct]);
+    if (ins.rowCount > 0) return true;
     // O el codigo choco, o otro proceso creo el perfil.
     const now = await client.query('SELECT 1 FROM rp_profiles WHERE user_id = $1', [userId]);
-    if (now.rowCount > 0) return;
+    if (now.rowCount > 0) return false;
   }
   throw new Error('rp: no se pudo generar un codigo libre');
 }
@@ -58,8 +66,8 @@ async function findByCode(runner, { nightclubId, code }) {
        FROM rp_profiles p JOIN users u ON u.id = p.user_id
       LEFT JOIN employee_profiles ep ON ep.user_id = u.id
       WHERE p.nightclub_id = $1 AND p.code = $2 AND p.active AND u.status = 'active'
-        AND COALESCE(ep.active, true) AND u.role = $3`,
-    [nightclubId, c, ROLE]);
+        AND COALESCE(ep.active, true) AND NOT (u.role = ANY($3::text[]))`,
+    [nightclubId, c, NOT_STAFF]);
   return rows[0] || null;
 }
 
@@ -308,8 +316,9 @@ async function settle(client, { nightclubId, rpUserId, eventId, settledBy, note 
     throw ApiError.conflict('La noche todavía no termina: la comisión se liquida al cerrarla.');
   }
   const rp = await client.query(
-    `SELECT u.id FROM users u WHERE u.id = $1 AND u.nightclub_id = $2 AND u.role = $3 FOR UPDATE`,
-    [rpUserId, nightclubId, ROLE]);
+    `SELECT u.id FROM users u JOIN rp_profiles p ON p.user_id = u.id
+      WHERE u.id = $1 AND u.nightclub_id = $2 FOR UPDATE OF u`,
+    [rpUserId, nightclubId]);
   if (rp.rowCount === 0) throw ApiError.notFound('RP no encontrado');
 
   const ls = await lines(client, { nightclubId, eventId, rpUserId });
@@ -344,8 +353,17 @@ async function settle(client, { nightclubId, rpUserId, eventId, settledBy, note 
   return done;
 }
 
+/** El perfil de RP de un usuario (cualquier puesto), o null si no tiene codigo. */
+async function profileOf(runner, { userId }) {
+  const { rows } = await runner.query(
+    `SELECT p.code, p.commission_pct::text AS commission_pct, p.active, u.display_name
+       FROM rp_profiles p JOIN users u ON u.id = p.user_id WHERE p.user_id = $1`, [userId]);
+  return rows[0] || null;
+}
+
 module.exports = {
-  ROLE, DEFAULT_PCT, normalize, randomCode, ensureProfile, findByCode, currentEventId,
+  ROLE, NOT_STAFF, DEFAULT_PCT, profileOf, normalize, randomCode, ensureProfile, findByCode,
+  currentEventId,
   attachToReservation, attachToAdmission, reassignReservation,
   lines, nightReport, latestEventFor, summary, settle, totalsByCurrency,
 };
