@@ -109,7 +109,16 @@ agentRouter.post('/pair',
  * lados a propósito: si no lo fuera, esto pasaría las pruebas aquí y contestaría 404
  * en el club.
  */
-const AGENT_DIR = path.resolve(__dirname, '../../../agent');
+//
+// Corrección (D119): eso era cierto en el repositorio (`server/src/routes` → raíz), pero
+// en la imagen el código vive en `/app/src/routes`, y tres niveles arriba es `/`, no
+// `/app`. Por eso el VPS contestaba `agent_files_missing` y ninguna PC se podía instalar
+// desde el navegador. Se busca en los dos lugares y se usa el primero que tenga el agente.
+const AGENT_DIR = [
+  path.resolve(__dirname, '../../../agent'), // repositorio: <raíz>/agent
+  path.resolve(__dirname, '../../agent'), // imagen: /app/agent
+].find((dir) => fs.existsSync(path.join(dir, 'print-agent.js')))
+  || path.resolve(__dirname, '../../agent');
 
 /**
  * Lo que se sirve, y nada más.
@@ -502,6 +511,20 @@ const printerBody = z.object({
  * `purposeRequired`: una impresora siempre tiene proposito; una PC puede no tenerlo
  * ("todo lo de ese lugar").
  */
+/**
+ * El lugar Cover del club (D119). "Puerta" dejó de ser un destino aparte: la impresora
+ * de la puerta es la de la caja de Cover, la que saca los dos tickets del cover (el del
+ * cliente y el de la caja). Lo que todavía llegue como `door` se registra ahí.
+ */
+async function coverOf(nightclubId) {
+  const { rows } = await pool.query(
+    `SELECT id FROM supply_locations
+      WHERE nightclub_id = $1 AND kind = 'door' AND active
+      ORDER BY sort_order, code LIMIT 1`, [nightclubId]);
+  if (!rows[0]) throw ApiError.badRequest('El club no tiene el lugar Cover dado de alta');
+  return rows[0].id;
+}
+
 async function checkArea(nightclubId, locationId, purpose, { purposeRequired = false } = {}) {
   if (!locationId) return;
   const { rows } = await pool.query(
@@ -574,6 +597,10 @@ router.post('/nightclubs/:nightclubId/printers',
   asyncHandler(async (req, res) => {
     checkPrinter(req.body);
     const b = req.body;
+    if (b.purpose === 'door') {
+      b.location_id = await coverOf(req.params.nightclubId);
+      b.purpose = 'till';
+    }
     await checkArea(req.params.nightclubId, b.location_id, b.purpose, { purposeRequired: true });
     await checkAgent(req.params.nightclubId, b.agent_id);
     try {
@@ -760,15 +787,14 @@ router.post('/nightclubs/:nightclubId/print-agents/invite',
     let locationId = req.body.location_id || null;
     let purpose = req.body.purpose || null;
     if (station) {
-      // La puerta no está en ninguna barra; todo lo demás sí.
+      // La puerta es Cover (D119): su estación es la caja de Cover, con sus dos tickets.
       if (station.purpose === 'door') {
-        locationId = null;
-        purpose = null;
-      } else {
-        if (!locationId) throw ApiError.badRequest('Escoge la barra o Cover de esta estación');
-        purpose = station.purpose;
-        await checkArea(req.params.nightclubId, locationId, purpose, { purposeRequired: true });
+        locationId = await coverOf(req.params.nightclubId);
+        station.purpose = 'till';
       }
+      if (!locationId) throw ApiError.badRequest('Escoge la barra o Cover de esta estación');
+      purpose = station.purpose;
+      await checkArea(req.params.nightclubId, locationId, purpose, { purposeRequired: true });
     } else {
       await checkArea(req.params.nightclubId, locationId, purpose);
     }
