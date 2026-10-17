@@ -1163,7 +1163,7 @@
       for (const lugar of printPlaces()) {
         const opt = document.createElement('option');
         opt.value = lugar.id;
-        opt.textContent = lugar.kind === 'door' ? t('stn.door') : lugar.name;
+        opt.textContent = lugar.name;
         sitio.appendChild(opt);
       }
       sitio.value = term.location_id || '';
@@ -2649,9 +2649,9 @@
     }
   }
 
-  // La impresora de la puerta no va en ninguna barra (D96).
-  $('prn-purpose').addEventListener('change', () => {
-    $('prn-location-box').hidden = $('prn-purpose').value === 'door';
+  // Cover solo imprime recibos de caja (D119: ya no hay "puerta" aparte).
+  $('prn-location').addEventListener('change', () => {
+    if (isDoor($('prn-location').value)) $('prn-purpose').value = 'till';
   });
 
   $('prn-connection').onchange = () => {
@@ -2664,9 +2664,8 @@
     const nota = $('prn-add-error');
     nota.hidden = true;
     const red = $('prn-connection').value === 'network';
-    const esPuerta = $('prn-purpose').value === 'door';
     const cuerpo = {
-      location_id: esPuerta ? null : $('prn-location').value,
+      location_id: $('prn-location').value,
       name: $('prn-name').value.trim(),
       purpose: $('prn-purpose').value,
       drawer_pin: $('prn-drawer').value ? Number($('prn-drawer').value) : null,
@@ -2680,7 +2679,7 @@
       ...(!red && $('prn-agent-id').value ? { agent_id: $('prn-agent-id').value } : {}),
       test: true,
     };
-    if (!esPuerta && !cuerpo.location_id) { avisar(nota, t('prn.errBar')); return; }
+    if (!cuerpo.location_id) { avisar(nota, t('prn.errBar')); return; }
     if (!cuerpo.name) { avisar(nota, t('prn.errName')); return; }
     if (red && !cuerpo.host) { avisar(nota, t('prn.errHost')); return; }
     if (!red && !cuerpo.windows_name) { avisar(nota, t('prn.errWinName')); return; }
@@ -2733,16 +2732,16 @@
 
   // ---------------------------------------------------------------- la estación (D99)
 
-  /** "Puerta" no es una barra: es la entrada, donde la anfitriona cobra el cover. */
-  const STATION_DOOR = '__door';
+  // Cover es la puerta (D119): su estación es la caja de Cover, la que imprime el ticket
+  // del cliente y el de la caja. Ya no hay una opción "Puerta" aparte.
   let stationTouched = false;
+  let stationDrawerTouched = false;
 
   function renderStationForm() {
     const sel = $('stn-place');
     if (!sel) return;
     const lugares = printPlaces();
-    const quiero = lugares.length + 1;
-    if (sel.options.length !== quiero) {
+    if (sel.options.length !== lugares.length) {
       const antes = sel.value;
       sel.innerHTML = '';
       for (const b of lugares) {
@@ -2751,25 +2750,25 @@
         opt.textContent = b.name;
         sel.appendChild(opt);
       }
-      const puerta = document.createElement('option');
-      puerta.value = STATION_DOOR;
-      puerta.textContent = t('stn.door');
-      sel.appendChild(puerta);
-      // Si todavía no ha escogido, la primera barra: las barras llegan después de abrir la
-      // pestaña, y quedarse en "Puerta" por haber pintado antes sería una mala sorpresa.
-      sel.value = (stationTouched && antes) || (lugares[0] ? lugares[0].id : STATION_DOOR);
+      sel.value = (stationTouched && antes) || (lugares[0] ? lugares[0].id : '');
     }
     syncStationPurpose();
   }
 
-  /** En la puerta no hay "para qué": es la caja del cover. En Cover solo hay recibos. */
+  /**
+   * Menos decisiones: en Cover solo hay caja; en una barra, "Caja" es lo de siempre. Una
+   * caja lleva cajón, así que la casilla ya viene marcada (se puede quitar).
+   */
   function syncStationPurpose() {
     const lugar = $('stn-place').value;
-    $('stn-purpose-box').hidden = lugar === STATION_DOOR;
-    if (isDoor(lugar)) $('stn-purpose').value = 'till';
-    $('stn-purpose').disabled = isDoor(lugar);
-    if (lugar === STATION_DOOR) $('stn-drawer').checked = true;
+    const cover = isDoor(lugar);
+    $('stn-purpose-box').hidden = cover;
+    if (cover) $('stn-purpose').value = 'till';
+    $('stn-purpose').disabled = cover;
+    if (!stationDrawerTouched) $('stn-drawer').checked = $('stn-purpose').value === 'till';
   }
+  $('stn-drawer').addEventListener('change', () => { stationDrawerTouched = true; });
+  $('stn-purpose').addEventListener('change', syncStationPurpose);
   $('stn-place').onchange = () => { stationTouched = true; syncStationPurpose(); };
 
   $('btn-stn-create').onclick = async () => {
@@ -2779,14 +2778,13 @@
     if (!nombre) { avisar(error, t('stn.needName')); $('stn-name').focus(); return; }
     const lugar = $('stn-place').value;
     if (!lugar) { avisar(error, t('prn.noBars')); return; }
-    const puerta = lugar === STATION_DOOR;
     const listo = ocupado($('btn-stn-create'), 'prn.saving');
     try {
       const cuerpo = {
-        location_id: puerta ? null : lugar,
+        location_id: lugar,
         station: {
           name: nombre,
-          purpose: puerta ? 'door' : $('stn-purpose').value,
+          purpose: isDoor(lugar) ? 'till' : $('stn-purpose').value,
           has_drawer: $('stn-drawer').checked,
         },
       };

@@ -312,6 +312,29 @@ describe('lo que se vende en la entrada', () => {
     expect(copias).toHaveLength(1);
   });
 
+  it('si el club solo tiene la impresora de "puerta" de antes, ahí salen los dos tickets (D119)', async () => {
+    const { rows: [vieja] } = await pool.query(
+      `INSERT INTO printers (nightclub_id, location_id, name, purpose, connection, host, port,
+                             paper_width, columns, codepage, has_cutter)
+       VALUES ($1,NULL,'Puerta vieja','door','network','192.168.1.61',9100,80,48,'CP850',true)
+       RETURNING id::text AS id`, [club.id]);
+    const res = await api().post(url('/door/admissions')).set(auth(hostess))
+      .send({ kind: 'general', quantity: 2, unit_price: 150, payment_method: 'cash' });
+    expect(res.status).toBe(201);
+    const { rows } = await pool.query(
+      `SELECT printer_id::text AS printer_id FROM print_jobs WHERE kind = 'receipt'`);
+    expect(rows.map((r) => r.printer_id)).toEqual([vieja.id, vieja.id]);
+  });
+
+  it('dar de alta una impresora de "puerta" la deja en la caja de Cover (D119)', async () => {
+    const cover = await f.coverOf(club.id);
+    const res = await api().post(url('/printers')).set(auth(manager)).send({
+      name: 'Puerta', purpose: 'door', connection: 'network', host: '192.168.1.62',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.printer).toMatchObject({ purpose: 'till', location_id: cover });
+  });
+
   it('el ticket del cliente dice cuántos accesos y no lleva dinero; la copia de la hostess sí (D115)', async () => {
     const cover = { id: await f.coverOf(club.id) };
     await api().post(url('/printers')).set(auth(manager)).send({

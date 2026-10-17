@@ -676,7 +676,7 @@ async function printReceipt(client, {
   if (!data) return null;
 
   const printer = tillLocation
-    ? await printing.resolvePrinter(client, { nightclubId, purpose: 'till', locationId: tillLocation })
+    ? await tillPrinterOf(client, { nightclubId, locationId: tillLocation })
     : await printing.resolvePrinter(client, {
       nightclubId, purpose: 'service', section: data.table_section,
     });
@@ -738,11 +738,26 @@ function renderAdmission(t, data, { club, settings }) {
   t.blank(2).cut();
 }
 
+/**
+ * La impresora de una caja. En Cover (D119) es la de la caja de Cover; si el club todavía
+ * tiene registrada una impresora de "puerta" de antes, esa la sustituye para que los dos
+ * tickets del cover no se queden sin salir.
+ */
+async function tillPrinterOf(runner, { nightclubId, locationId }) {
+  const deCaja = await printing.resolvePrinter(runner, { nightclubId, purpose: 'till', locationId });
+  if (deCaja) return deCaja;
+  const { rows } = await runner.query('SELECT kind FROM supply_locations WHERE id = $1', [locationId]);
+  if (rows[0] && rows[0].kind === 'door') {
+    return printing.resolvePrinter(runner, { nightclubId, purpose: 'door' });
+  }
+  return null;
+}
+
 /** Encola el ticket del cliente en la impresora de la puerta. Nunca tumba el cobro. */
 async function printAdmission(client, { nightclubId, admissionId, locationId, userId = null }) {
   const data = await admissionData(client, { nightclubId, admissionId });
   if (!data) return null;
-  const printer = await printing.resolvePrinter(client, { nightclubId, purpose: 'till', locationId });
+  const printer = await tillPrinterOf(client, { nightclubId, locationId });
   if (!printer) return null;
   const settings = await printing.settingsOf(client, nightclubId);
   const club = await clubOf(client, nightclubId);
