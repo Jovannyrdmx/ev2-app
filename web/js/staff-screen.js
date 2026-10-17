@@ -4,7 +4,7 @@
  * Conecta el DOM con `EV2` (API y socket), `EV2Staff` (charolas, ocupación, propinas)
  * y `EV2Roles`. Las decisiones viven en `staff-floor.js` y están probadas ahí.
  */
-/* global EV2Drawer, EV2Push, EV2TerminalCharge, EV2ShiftCut, EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan,
+/* global EV2DoorTill, EV2Drawer, EV2Push, EV2TerminalCharge, EV2ShiftCut, EV2, EV2Format, EV2Staff, EV2Roles, EV2PasswordGate, EV2Door, EV2DoorScan,
           EV2Client, EV2DrinkArt, EV2OrderTaking, EV2Deposit */
 (function () {
   'use strict';
@@ -43,6 +43,8 @@
     // devuelve la MISMA entrada en vez de vender otra.
     sell: { coverId: null, requestId: null },
     rate: null, // el tipo de cambio vigente USD→MXN, para el cambio en la puerta (D96)
+    // La caja de Cover de esta anfitriona (D118): lo que contesta GET /till.
+    doorTill: null,
     drinks: [],
     // Lo que el mesero está levantando ahora mismo. `order` se llena cuando el pedido
     // ya existe en el servidor y solo falta cobrarlo: mientras esté ahí, cerrar la hoja
@@ -221,6 +223,8 @@
         : Promise.resolve(),
       isDoorRole() ? loadDoorSummary() : Promise.resolve(),
       isDoorRole() ? loadDepositReviews() : Promise.resolve(),
+      // La caja de Cover (D118): solo la anfitriona tiene una.
+      isHostess() ? loadDoorTill({ render: false }) : Promise.resolve(),
       canConfirmExit() ? loadDepartures() : Promise.resolve(),
       // Los covers del club. Sin catálogo la puerta sigue vendiendo con el importe
       // tecleado (y el servidor lo marca como tecleado); con catálogo, el precio deja
@@ -244,8 +248,6 @@
     // eso son diez segundos perdidos con alguien esperando.
     const camara = $('btn-scan-toggle');
     if (camara) camara.hidden = !camaraDisponible();
-    // El cajón de la puerta lo abre la anfitriona, que es quien lo tiene (D96).
-    $('btn-door-drawer').hidden = !(api.session.user && api.session.user.role === 'hostess');
     renderAll();
     cargarPointPendientes().catch(() => {});
   }
@@ -294,6 +296,10 @@
   // Quien ve la cola de pedidos: lo mismo que acepta el servidor en GET /orders.
   const ORDER_ROLES = ['waiter', 'bartender', 'manager', 'admin'];
   const isDoorRole = () => DOOR_ROLES.includes(api.session.user && api.session.user.role);
+  const myRole = () => api.session.user && api.session.user.role;
+  const isHostess = () => myRole() === 'hostess';
+  // Cobra en la puerta solo la anfitriona con la caja de Cover abierta (D118).
+  const canChargeDoor = () => EV2DoorTill.canCharge(state.doorTill, myRole());
   // Desde D77 el mesero no cobra: levanta el pedido, la barra lo prepara y él lleva
   // el dinero a la caja de esa barra. La puerta (hostess) y la gerencia siguen cobrando.
   const isWaiter = () => (api.session.user && api.session.user.role) === 'waiter';
@@ -775,6 +781,9 @@
   async function vender(kind) {
     const error = $('sell-error');
     error.hidden = true;
+    // Sin la caja de Cover abierta no se vende (D118): se dice por qué, sin ir al servidor.
+    const bloqueoCaja = EV2DoorTill.chargeBlocker(state.doorTill, myRole());
+    if (bloqueoCaja) { error.textContent = doorTillText(bloqueoCaja); error.hidden = false; return; }
     const reservationId = scan.last ? scan.last.reservationId : null;
     const problema = EV2DoorScan.sellBlocker(kind, {
       unitPrice: $('sell-price').value,
@@ -887,6 +896,8 @@
     if (!v || !v.balance) return;
     const error = $('scan-balance-error');
     error.hidden = true;
+    const bloqueoCaja = EV2DoorTill.chargeBlocker(state.doorTill, myRole());
+    if (bloqueoCaja) { error.textContent = doorTillText(bloqueoCaja); error.hidden = false; return; }
     const body = { method, client_request_id: state.balanceRequestId || (state.balanceRequestId = EV2.uuid()) };
     if (method === 'cash') {
       const recibido = $('scan-balance-cash').value.trim();
@@ -958,6 +969,113 @@
       $('depr-card').hidden = q.count() === 0;
     } catch { /* la cola no es lo único de la puerta: no tapa la pantalla con un error */ }
   }
+
+  // ------------------------------------------------- la caja de Cover (D118)
+
+  async function loadDoorTill({ render = true } = {}) {
+    if (!isHostess()) { state.doorTill = null; return; }
+    try {
+      state.doorTill = await api.get(`/nightclubs/${clubId()}/till`);
+    } catch (err) { showError(err); }
+    if (render) renderAll();
+  }
+
+  /** El texto de un motivo de la caja de Cover, con el nombre de quien la tiene. */
+  function doorTillText(key) {
+    const a = state.doorTill && state.doorTill.assignment;
+    return t(key, { name: (a && a.held_by) || '—' });
+  }
+
+  function renderDoorTill() {
+    const rol = myRole();
+    const fase = EV2DoorTill.phase(state.doorTill, rol);
+    const puede = fase === 'open';
+    const caja = $('door-till');
+    // La tarjeta es de la anfitriona; la gerencia ve en su panel las cajas de la noche.
+    caja.hidden = !isHostess();
+    if (!caja.hidden) {
+      const s = state.doorTill || {};
+      const estado = $('door-till-state');
+      estado.className = `pill text-[11px] ${puede ? 'pill-ok' : (fase === 'closed' ? 'pill-wait' : 'pill-off')}`;
+      estado.textContent = t(puede ? 'dtill.stateOpen' : 'dtill.stateClosed');
+      let info = '';
+      if (puede) {
+        const tl = s.till;
+        info = t('dtill.openInfo', {
+          amount: money(tl.opening_float, tl.currency || 'MXN'),
+          usd: Number(tl.opening_float_usd) > 0 ? ` + US$${Number(tl.opening_float_usd).toFixed(2)}` : '',
+          by: tl.float_authorized_by || '—',
+        });
+      } else if (fase === 'closed') {
+        const a = s.assignment;
+        info = t('dtill.closedInfo', { night: a.event_name || '', when: EV2Format.dateTime(a.doors_open_at) });
+      } else {
+        info = doorTillText(EV2DoorTill.chargeBlocker(s, rol));
+      }
+      $('door-till-info').textContent = info;
+      $('door-till-form').hidden = fase !== 'closed';
+      $('door-till-actions').hidden = !puede;
+      $('btn-door-till-recheck').hidden = puede || fase === 'closed';
+    }
+
+    // La venta y el resto de la mesa se cobran solo con la caja abierta.
+    const bloqueo = puede ? null : EV2DoorTill.chargeBlocker(state.doorTill, rol);
+    const aviso = $('sell-locked');
+    aviso.hidden = !bloqueo;
+    aviso.textContent = bloqueo ? doorTillText(bloqueo) : '';
+    if (!puede) {
+      $('btn-sell-general').disabled = true;
+      $('btn-sell-extra').disabled = true;
+    } else {
+      $('btn-sell-general').disabled = false;
+      $('btn-sell-extra').disabled = !EV2DoorScan.canSellExtra(scan.last);
+    }
+    $('btn-balance-cash').disabled = !puede;
+    $('btn-balance-card').disabled = !puede;
+    // El cajón es de quien tiene la caja abierta (D96, D118).
+    $('btn-door-drawer').hidden = !puede;
+  }
+
+  async function abrirCajaCover() {
+    const error = $('door-till-error');
+    error.hidden = true;
+    const amount = $('door-till-float').value.trim();
+    const amountUsd = $('door-till-float-usd').value.trim();
+    const pin = $('door-till-pin').value.trim();
+    const bloqueo = EV2DoorTill.openBlocker({
+      state: state.doorTill, role: myRole(), amount, amountUsd, pin,
+    });
+    if (bloqueo) { error.textContent = doorTillText(bloqueo); error.hidden = false; return; }
+    const usdTexto = Number(amountUsd) > 0 ? ` + US$${Number(amountUsd).toFixed(2)}` : '';
+    if (!(await ask(t('dtill.confirmOpen', { amount: money(amount, 'MXN'), usd: usdTexto })))) {
+      $('door-till-pin').value = '';
+      return;
+    }
+    const boton = $('btn-door-till-open');
+    boton.disabled = true;
+    try {
+      state.doorTill = await api.post(`/nightclubs/${clubId()}/till/open`,
+        EV2DoorTill.openPayload({ amount, amountUsd, pin }));
+      $('door-till-float').value = '';
+      $('door-till-float-usd').value = '';
+      toast(t('dtill.opened'), 'ok');
+      await loadAll();
+    } catch (err) {
+      error.textContent = EV2Format.errorMessage(err);
+      error.hidden = false;
+      // Otra anfitriona la abrió primero: se vuelve a preguntar quién la tiene.
+      if (err.status === 409) await loadDoorTill();
+    } finally {
+      // El código del gerente no se queda escrito, salga bien o mal.
+      $('door-till-pin').value = '';
+      boton.disabled = false;
+    }
+  }
+
+  $('btn-door-till-open').onclick = abrirCajaCover;
+  $('btn-door-till-cut').onclick = () => corte().open();
+  $('btn-door-till-refresh').onclick = () => loadDoorTill();
+  $('btn-door-till-recheck').onclick = () => loadDoorTill();
 
   // ------------------------------------------------- cover con la terminal (D100)
 
@@ -1141,6 +1259,7 @@
       renderCoversRapidos();
       renderVenta();
       renderDoorSummary();
+      renderDoorTill();
     }
     // La cámara se apaga al salir de la puerta: dejarla prendida en otra pestaña
     // gasta batería toda la noche y enciende una luz que nadie está mirando.
@@ -2186,6 +2305,11 @@
       if (terminalSheet) terminalSheet.onEvent(message);
       const cajon = EV2Drawer.failedEvent(message);
       if (cajon) { toast(t(cajon.key, cajon.vars), 'error', 9000); return; }
+      // Alguien abrió o cortó una caja: la de Cover pudo cambiar de manos (D118).
+      if (EV2DoorTill.affectsTill(message)) {
+        if (isHostess()) await loadDoorTill();
+        return;
+      }
       // Alguien pidió (o canceló) su salida sin taxi: la lista de la puerta se refresca.
       if (/^departure_/.test(String(message && (message.event_type || message.type) || ''))) {
         if (canConfirmExit()) await loadDepartures();

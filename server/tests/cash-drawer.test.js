@@ -34,6 +34,8 @@ beforeEach(async () => {
   manager = await f.createUser(club.id, { role: 'manager', display_name: 'Gerente' });
   cajero = await f.createUser(club.id, { role: 'cashier', display_name: 'Caja Ana' });
   hostess = await f.createUser(club.id, { role: 'hostess', display_name: 'Sol' });
+  // Desde D118 en la puerta cobra la anfitriona con la caja de Cover abierta.
+  await f.openDoorTill(club.id, { hostess, authorizer: manager });
   waiter = await f.createUser(club.id, { role: 'waiter', on_shift: true, display_name: 'Luis' });
   table = await f.createTable(club.id, { code: 'T-3', section: 'ZONA ROJA', capacity: 4 });
   beer = await f.createDrink(club.id, { name: 'Cerveza', price: 60, stock: 40 });
@@ -300,7 +302,8 @@ describe('El cambio en la puerta', () => {
 
   it('el corte de la anfitriona cuenta los dólares aparte y descuenta el cambio de dólares', async () => {
     const tipo = await fijarTipo(17.35);
-    expect((await api().post(url('/staff/shifts/start')).set(auth(hostess)).send({})).status).toBe(201);
+    // Su turno ya está abierto: es el de la caja de Cover (D118).
+    expect((await api().post(url('/staff/shifts/start')).set(auth(hostess)).send({})).status).toBe(200);
     await vender({ cash_received: 300 }); // $300 en pesos
     await vender({ usd_received: 20, exchange_rate_id: tipo }); // $300 con dólares, $47 de cambio
     const res = await api().get(url('/shifts/me/cut')).set(auth(hostess));

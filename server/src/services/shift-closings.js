@@ -16,7 +16,8 @@
  *      menos lo devuelto. No es efectivo: es dinero que ya está en la cuenta del
  *      club, y por eso se enseña pero no se le pide entregarlo.
  *   3. `door_admissions` que esa persona vendió. El cover de la puerta casi siempre
- *      es efectivo y lo cobra la misma persona que recibe.
+ *      es efectivo y lo cobra la misma persona que recibe. Desde D118 lo cobra la
+ *      anfitriona con la caja de Cover abierta, y su corte es el de esa caja.
  *
  * Nada de esto lo teclea nadie: son las filas que ya existen, contadas por quien las
  * cobró y por el método con el que se cobraron. Lo ÚNICO que teclea una persona en
@@ -57,7 +58,7 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
   const hasta = to || new Date();
   const params = [nightclubId, userId, from, hasta];
 
-  const [manuales, terminal, puerta, propinas, dolares, puertaUsd] = await Promise.all([
+  const [manuales, terminal, puerta, propinas, dolares, puertaUsd, coverUsd] = await Promise.all([
     // 1. Pagos que esa persona registró: efectivo en la mesa y vouchers de terminal.
     runner.query(
       `SELECT p.method, p.currency,
@@ -88,6 +89,7 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
               COALESCE(sum(d.quantity), 0)::int AS people
          FROM door_admissions d
         WHERE d.nightclub_id = $1 AND d.sold_by = $2 AND d.payment_method NOT IN ('courtesy', 'point')
+          AND NOT (d.payment_method = 'cash' AND d.currency = 'USD')
           AND d.created_at >= $3 AND d.created_at <= $4
         GROUP BY d.payment_method, d.currency`, params),
     // La propina de la noche. NO es del club: va aparte y no se entrega.
@@ -117,6 +119,17 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
          FROM door_admissions d
         WHERE d.nightclub_id = $1 AND d.sold_by = $2 AND d.usd_received IS NOT NULL
           AND d.created_at >= $3 AND d.created_at <= $4`, params),
+    // Un cover con precio en dólares cobrado en efectivo (D118): son dólares que entran
+    // al cajón como dólares. Antes se sumaban a los pesos y el corte esperaba pesos
+    // que nunca entraron.
+    runner.query(
+      `SELECT count(*)::int AS count,
+              COALESCE(sum(d.total), 0)::numeric(12,2)::text AS usd,
+              COALESCE(sum(d.quantity), 0)::int AS people
+         FROM door_admissions d
+        WHERE d.nightclub_id = $1 AND d.sold_by = $2
+          AND d.payment_method = 'cash' AND d.currency = 'USD'
+          AND d.created_at >= $3 AND d.created_at <= $4`, params),
   ]);
 
   const porMetodo = new Map();
@@ -137,17 +150,23 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
   for (const r of puerta.rows) suma(DOOR_METHOD[r.method] || r.method, r.currency, r.amount, r.count);
   const pu = puertaUsd.rows[0];
   if (pu.count > 0) suma('cash_usd', 'MXN', pu.amount, pu.count);
+  const cu = coverUsd.rows[0];
+  if (cu.count > 0) suma('cash_usd', 'USD', cu.usd, cu.count);
 
   const lineas = [...porMetodo.values()]
     .map((l) => ({ ...l, amount: money(l.amount) }))
     .sort((a, b) => a.method.localeCompare(b.method));
 
-  const currency = lineas[0] ? lineas[0].currency
+  // Lo que entró como dólares sin convertir (covers con precio en dólares, D118) se
+  // enseña en su renglón, pero se cuenta en `usd.received` y no en la moneda del club.
+  const enDolares = (l) => l.method === 'cash_usd' && l.currency === 'USD';
+  const lineasClub = lineas.filter((l) => !enDolares(l));
+  const currency = lineasClub[0] ? lineasClub[0].currency
     : (propinas.rows[0] ? propinas.rows[0].currency : 'MXN');
-  const efectivo = lineas
+  const efectivo = lineasClub
     .filter((l) => CASH_METHODS.includes(l.method))
     .reduce((n, l) => round2(n + Number(l.amount)), 0);
-  const total = lineas.reduce((n, l) => round2(n + Number(l.amount)), 0);
+  const total = lineasClub.reduce((n, l) => round2(n + Number(l.amount)), 0);
 
   return {
     from,
@@ -157,13 +176,13 @@ async function collected(runner, { nightclubId, userId, from, to = null }) {
     // Cuántos cobros hizo y a cuánta gente dejó entrar: lo que la persona reconoce
     // de su propia noche antes de discutir un número.
     payments_count: lineas.reduce((n, l) => n + l.count, 0),
-    door_people: puerta.rows.reduce((n, r) => n + Number(r.people || 0), 0),
+    door_people: puerta.rows.reduce((n, r) => n + Number(r.people || 0), 0) + Number(cu.people || 0),
     cash_collected: money(efectivo),
     total_collected: money(total),
     usd: {
-      received: money(Number(dolares.rows[0].usd) + Number(pu.usd)),
+      received: money(Number(dolares.rows[0].usd) + Number(pu.usd) + Number(cu.usd)),
       change_given_mxn: money(Number(dolares.rows[0].change_mxn) + Number(pu.change_mxn)),
-      count: dolares.rows[0].count + pu.count,
+      count: dolares.rows[0].count + pu.count + cu.count,
     },
     tips: {
       amount: money(propinas.rows.reduce((n, r) => round2(n + Number(r.amount)), 0)),
@@ -236,7 +255,11 @@ async function shiftSummary(runner, { nightclubId, shift }) {
 
   // La caja (D77): el fondo con el que abrió es dinero del club que también se
   // devuelve al cerrar, y lo que su barra tiene sin cobrar es lo que el corte pregunta.
+  // Desde D118 el fondo puede traer dólares, que se devuelven como dólares.
   const fondo = round2(shift.opening_float || 0);
+  const fondoUsd = round2(shift.opening_float_usd || 0);
+  // Hay dólares que contar si entraron dólares o si la caja abrió con dólares.
+  const conDolares = Number(totals.usd.received) > 0 || fondoUsd > 0;
   const pendientes = shift.location_id && !rows[0]
     ? await till.pendingOrders(runner, { nightclubId, locationId: shift.location_id })
     : [];
@@ -251,6 +274,8 @@ async function shiftSummary(runner, { nightclubId, shift }) {
     },
     totals,
     opening_float: money(fondo),
+    opening_float_usd: money(fondoUsd),
+    has_usd: conDolares,
     drops,
     drops_received: entregado,
     drops_pending: pendingDrops(drops).length,
@@ -260,7 +285,7 @@ async function shiftSummary(runner, { nightclubId, shift }) {
       - Number(totals.usd.change_given_mxn) - Number(entregado))),
     // Los dólares van aparte (D86): se cuentan como dólares, no se convierten.
     usd_drops_received: entregadoUsd,
-    usd_to_hand: money(round2(Number(totals.usd.received) - Number(entregadoUsd))),
+    usd_to_hand: money(round2(fondoUsd + Number(totals.usd.received) - Number(entregadoUsd))),
     pending_orders: pendientes,
     // Lo que FALTA por cobrar (D79): un pedido con una parte pagada solo debe el resto.
     pending_total: money(pendientes.reduce((n, o) => round2(n + Number(o.remaining)), 0)),
@@ -315,7 +340,7 @@ function forEmployee(resumen, role) {
         received: null,
         change_given_mxn: null,
         count: resumen.totals.usd.count,
-        any: Number(resumen.totals.usd.received) > 0,
+        any: resumen.has_usd === true || Number(resumen.totals.usd.received) > 0,
       },
     },
     cash_to_hand: null,
@@ -331,9 +356,9 @@ async function declare(client, { nightclubId, shift, declaredCash, declaredUsd =
   const ya = await client.query('SELECT 1 FROM shift_closings WHERE shift_id = $1', [shift.id]);
   if (ya.rowCount > 0) throw ApiError.conflict('El corte de ese turno ya está hecho');
   const resumen = await shiftSummary(client, { nightclubId, shift });
-  const huboDolares = Number(resumen.totals.usd.received) > 0;
+  const huboDolares = resumen.has_usd === true;
   if (huboDolares && (declaredUsd === null || declaredUsd === undefined)) {
-    throw ApiError.unprocessable('Este turno recibió dólares: cuéntalos también.');
+    throw ApiError.unprocessable('Este turno tiene dólares en el cajón: cuéntalos también.');
   }
   try {
     const { rows } = await client.query(
@@ -471,12 +496,15 @@ async function close(client, {
 
   // Los dólares (D86): solo se cuentan si hubo dólares en el turno. Si los hubo, no se
   // cierra sin contarlos: "no los conté" no es lo mismo que "conté cero".
-  const huboDolares = Number(resumen.totals.usd.received) > 0;
+  const huboDolares = resumen.has_usd === true;
   const esperadoUsd = Number(resumen.usd_to_hand);
   if (huboDolares && (countedUsd === null || countedUsd === undefined)) {
+    // A ciegas (D105) no se dice cuánto se espera.
     throw ApiError.unprocessable(
-      `Este turno recibió dólares: cuenta los dólares del cajón (se esperan US$${money(esperadoUsd)}).`,
-      { expected_usd: money(esperadoUsd) });
+      isBlind(role)
+        ? 'Este turno tiene dólares en el cajón: cuéntalos también.'
+        : `Este turno tiene dólares en el cajón: cuéntalos (se esperan US$${money(esperadoUsd)}).`,
+      isBlind(role) ? {} : { expected_usd: money(esperadoUsd) });
   }
   const contadoUsd = huboDolares ? round2(Number(countedUsd)) : null;
   const diferenciaUsd = huboDolares ? round2(contadoUsd - esperadoUsd) : null;
@@ -508,10 +536,10 @@ async function close(client, {
                                  authorized_by, authorized_at, authorized_role,
                                  location_id, opening_float, pending_orders, pending_total,
                                  usd_collected, usd_change_given, usd_drops_total,
-                                 expected_usd, counted_usd, difference_usd)
+                                 expected_usd, counted_usd, difference_usd, opening_float_usd)
      VALUES ($1,$2,$3,$4::text,$5,COALESCE($6, now()),$7::text,$8::jsonb,$9,$10,$11,$12,$13,
              $14,$15,$16::text,'confirmed',$17, now(), $17, now(), $18::text,
-             $19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28)
+             $19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29)
      RETURNING id`,
     [nightclubId, shift.id, shift.user_id, role, shift.started_at, shift.ended_at,
       resumen.totals.currency, JSON.stringify(resumen.totals), resumen.totals.cash_collected,
@@ -534,7 +562,8 @@ async function close(client, {
       resumen.totals.usd.received, resumen.totals.usd.change_given_mxn, resumen.usd_drops_received,
       huboDolares ? money(esperadoUsd) : null,
       huboDolares ? money(contadoUsd) : null,
-      huboDolares ? money(diferenciaUsd) : null]);
+      huboDolares ? money(diferenciaUsd) : null,
+      resumen.opening_float_usd]);
 
   // El corte es el último paso del turno: al cerrarlo, el turno queda cerrado.
   await client.query(
@@ -546,6 +575,7 @@ async function close(client, {
     counted_cash: money(contado),
     difference: money(diferencia),
     opening_float: resumen.opening_float,
+    opening_float_usd: resumen.opening_float_usd,
     pending_orders: porCobrar.length,
     pending_total: resumen.pending_total,
     expected_usd: huboDolares ? money(esperadoUsd) : null,

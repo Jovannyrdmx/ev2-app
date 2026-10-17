@@ -37,6 +37,11 @@ beforeEach(async () => {
 
 const url = (p) => `/api/nightclubs/${club.id}${p}`;
 const abrirTurno = (user) => api().post(url('/staff/shifts/start')).set(auth(user)).send({});
+// Desde D118 la anfitriona cobra con la caja de Cover abierta: su turno con la caja.
+const abrirCaja = async (user) => {
+  await abrirTurno(user);
+  return f.openDoorTill(club.id, { hostess: user, authorizer: manager });
+};
 // Los números del corte, como los ve el gerente: la anfitriona cuenta a ciegas (D105).
 const miCorte = async (user) => {
   const res = await api().get(url('/shifts/me/cut')).set(auth(user));
@@ -101,7 +106,7 @@ describe('Lo que traigo encima', () => {
   });
 
   it('cuenta lo cobrado por método, y el efectivo es lo único que se entrega', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 450);
     await cobrar(luis, 300);
     await cobrar(luis, 1200, 'card_terminal');
@@ -117,25 +122,28 @@ describe('Lo que traigo encima', () => {
   });
 
   it('lo que cobró OTRA persona no aparece en mi corte', async () => {
-    // Es la razón de ser de todo esto: el faltante tiene que ser de alguien.
-    await abrirTurno(luis);
+    // Es la razón de ser de todo esto: el faltante tiene que ser de alguien. Desde D118
+    // la otra anfitriona, sin la caja de Cover, ni siquiera puede cobrar.
+    await abrirCaja(luis);
     await abrirTurno(sol);
     await cobrar(luis, 500);
-    await cobrar(sol, 900);
+    const deSol = await cobrar(sol, 900);
+    expect(deSol.status).toBe(409);
 
     expect((await miCorte(luis)).body.totals.cash_collected).toBe('500.00');
-    expect((await miCorte(sol)).body.totals.cash_collected).toBe('900.00');
+    expect((await miCorte(sol)).body.totals.cash_collected).toBe('0.00');
   });
 
-  it('lo cobrado ANTES de abrir el turno no cuenta en este turno', async () => {
-    await cobrar(luis, 700);
-    await abrirTurno(luis);
+  it('sin la caja abierta no se cobra: nada queda fuera de un corte', async () => {
+    const antes = await cobrar(luis, 700);
+    expect(antes.status).toBe(409);
+    await abrirCaja(luis);
     await cobrar(luis, 200);
     expect((await miCorte(luis)).body.totals.cash_collected).toBe('200.00');
   });
 
   it('la propina va aparte: no es del club y no se entrega', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 400);
     await api().post(url('/tips')).set(auth(guest))
       .send({ client_request_id: randomUUID(), to_user_id: luis.id, amount: 150 });
@@ -156,7 +164,7 @@ describe('El retiro parcial de efectivo', () => {
   beforeEach(async () => { pin = await codigoDe(manager); });
 
   it('pide monto, motivo y código, y con los tres sale', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 5000);
     const res = await retirar(luis, 3000, 'Traía mucho efectivo encima', pin);
 
@@ -167,7 +175,7 @@ describe('El retiro parcial de efectivo', () => {
   });
 
   it('queda recibido y contado en el acto: quien autoriza está ahí', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 5000);
     const res = await retirar(luis, 3000, 'A la caja fuerte', pin);
     const { rows } = await pool.query(
@@ -183,14 +191,14 @@ describe('El retiro parcial de efectivo', () => {
   });
 
   it('descuenta de lo que falta entregar', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 5000);
     await retirar(luis, 3000, 'A la caja fuerte', pin);
     expect((await miCorte(luis)).body.cash_to_hand).toBe('2000.00');
   });
 
   it('sin motivo no hay retiro', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 5000);
     const res = await api().post(url('/shifts/me/cash-drops')).set(auth(luis))
       .send({ amount: 1000, manager_pin: pin });
@@ -198,13 +206,13 @@ describe('El retiro parcial de efectivo', () => {
   });
 
   it('un motivo de dos letras tampoco es un motivo', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 5000);
     expect((await retirar(luis, 1000, 'ok', pin)).status).toBe(400);
   });
 
   it('sin código no hay retiro, y un código equivocado no dice por qué', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 5000);
     const sinCodigo = await api().post(url('/shifts/me/cash-drops')).set(auth(luis))
       .send({ amount: 1000, reason: 'Traía mucho' });
@@ -219,7 +227,7 @@ describe('El retiro parcial de efectivo', () => {
 
   it('el PIN de alguien del piso no autoriza nada', async () => {
     const pinMesero = await codigoDe(sol);
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 5000);
     const res = await retirar(luis, 1000, 'Traía mucho', pinMesero);
     expect(res.status).toBe(403);
@@ -230,7 +238,7 @@ describe('El retiro parcial de efectivo', () => {
     // Hoy ninguna ruta llega a este caso —un gerente no abre turno, así que no tiene
     // corte propio— pero la garantía no puede depender de eso: mañana alguien agrega
     // otra forma de cerrar un turno y este renglón sigue siendo el que manda.
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 1000);
     const turno = await pool.query(
       'SELECT id FROM staff_shifts WHERE user_id = $1', [luis.id]);
@@ -244,7 +252,7 @@ describe('El retiro parcial de efectivo', () => {
   });
 
   it('autorizado a medias no existe: o están los tres datos o no hay autorización', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 1000);
     const turno = await pool.query(
       'SELECT id FROM staff_shifts WHERE user_id = $1', [luis.id]);
@@ -257,7 +265,7 @@ describe('El retiro parcial de efectivo', () => {
   });
 
   it('no se retira más de lo que se trae', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 1000);
     const res = await retirar(luis, 4000, 'Me equivoqué de tecla', pin);
     expect(res.status).toBe(422);
@@ -267,7 +275,7 @@ describe('El retiro parcial de efectivo', () => {
   });
 
   it('el gerente ve los retiros con su motivo y quién los autorizó', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 5000);
     await retirar(luis, 3000, 'A la caja fuerte', pin);
     const lista = await api().get(url('/cash-drops')).set(auth(manager));
@@ -277,7 +285,7 @@ describe('El retiro parcial de efectivo', () => {
   });
 
   it('un retiro escrito no se edita ni se borra', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 5000);
     const res = await retirar(luis, 3000, 'A la caja fuerte', pin);
     const id = res.body.withdrawal.id;
@@ -294,7 +302,7 @@ describe('El corte, en un solo acto', () => {
   beforeEach(async () => { pin = await codigoDe(manager); });
 
   it('se declara, se cuenta y se cierra de una vez', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 2000);
     const res = await cortar(luis, 2000, 2000, pin);
 
@@ -310,7 +318,7 @@ describe('El corte, en un solo acto', () => {
 
   it('la diferencia se mide contra lo que TOCABA, no contra lo declarado', async () => {
     // Es el agujero obvio: declarar de menos y entregar de menos cuadraría perfecto.
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 2000);
     const res = await cortar(luis, 1800, 1800, pin,
       { difference_reason: 'Se me perdieron doscientos pesos' });
@@ -318,7 +326,7 @@ describe('El corte, en un solo acto', () => {
   });
 
   it('una diferencia sin motivo no se acepta', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 2000);
     const res = await cortar(luis, 2000, 1900, pin);
     expect(res.status).toBe(422);
@@ -328,13 +336,13 @@ describe('El corte, en un solo acto', () => {
   });
 
   it('un motivo de tres letras no es un motivo', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 2000);
     expect((await cortar(luis, 2000, 1900, pin, { difference_reason: 'ups' })).status).toBe(422);
   });
 
   it('sin código no se cierra nada', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 2000);
     const res = await api().post(url('/shifts/me/closing')).set(auth(luis))
       .send({ declared_cash: 2000, counted_cash: 2000 });
@@ -343,7 +351,7 @@ describe('El corte, en un solo acto', () => {
   });
 
   it('con un código equivocado no se escribe ni un renglón', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 2000);
     expect((await cortar(luis, 2000, 2000, '111999')).status).toBe(403);
     const { rows } = await pool.query('SELECT count(*)::int AS n FROM shift_closings');
@@ -351,7 +359,7 @@ describe('El corte, en un solo acto', () => {
   });
 
   it('el corte descuenta los retiros de la noche', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 5000);
     await retirar(luis, 3000, 'A la caja fuerte', pin);
     const res = await cortar(luis, 2000, 2000, pin);
@@ -362,14 +370,14 @@ describe('El corte, en un solo acto', () => {
   });
 
   it('no se corta dos veces el mismo turno', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 1000);
     await cortar(luis, 1000, 1000, pin);
     expect((await cortar(luis, 1000, 1000, pin)).status).toBe(409);
   });
 
   it('un corte cerrado no se reescribe', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 1000);
     const res = await cortar(luis, 1000, 1000, pin);
     await expect(pool.query(
@@ -384,7 +392,7 @@ describe('El corte, en un solo acto', () => {
   });
 
   it('quien cobró NO puede cerrar su turno sin corte', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 800);
     const res = await api().post(url('/staff/shifts/end')).set(auth(luis)).send({});
     expect(res.status).toBe(422);
@@ -412,7 +420,7 @@ describe('El ticket del corte', () => {
   };
 
   it('sale al cerrar, con el desglose por método de pago', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 3000);
     await cobrar(luis, 4500, 'card_terminal');
     const res = await cortar(luis, 3000, 3000, pin);
@@ -430,7 +438,7 @@ describe('El ticket del corte', () => {
   });
 
   it('desglosa cada retiro parcial con su motivo y quién lo autorizó', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 9000);
     await retirar(luis, 5000, 'A la caja fuerte del gerente', pin);
     await retirar(luis, 2000, 'Se pagó al proveedor del hielo', pin);
@@ -446,7 +454,7 @@ describe('El ticket del corte', () => {
   });
 
   it('la propina aparece aparte y dice que no se entrega', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 1000);
     await api().post(url('/tips')).set(auth(guest))
       .send({ client_request_id: randomUUID(), to_user_id: luis.id, amount: 250 });
@@ -458,7 +466,7 @@ describe('El ticket del corte', () => {
   });
 
   it('cuando falta dinero, el papel lo dice con su motivo', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 2000);
     const res = await cortar(luis, 2000, 1850, pin,
       { difference_reason: 'Faltó un billete de 150, no apareció al recontar' });
@@ -470,14 +478,14 @@ describe('El ticket del corte', () => {
   });
 
   it('cuando cuadra, lo dice también: el silencio no es una respuesta', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 2000);
     const res = await cortar(luis, 2000, 2000, pin);
     expect(await ticketDe(res.body.closing.id)).toContain('CUADRA');
   });
 
   it('trae las dos firmas: la de quien entrega y la de quien autoriza', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 500);
     const res = await cortar(luis, 500, 500, pin);
     const papel = await ticketDe(res.body.closing.id);
@@ -486,12 +494,12 @@ describe('El ticket del corte', () => {
   });
 
   it('se reimprime igual: el papel no se vuelve a calcular', async () => {
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 1000);
     const res = await cortar(luis, 1000, 1000, pin);
 
     // Esa persona sigue cobrando después de su corte, en otro turno.
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 4000);
 
     const otra = await api().post(url(`/shift-closings/${res.body.closing.id}/ticket`))
@@ -506,7 +514,7 @@ describe('El ticket del corte', () => {
 
   it('sin impresora el corte se cierra igual, y lo dice', async () => {
     await pool.query('UPDATE printers SET active = false WHERE nightclub_id = $1', [club.id]);
-    await abrirTurno(luis);
+    await abrirCaja(luis);
     await cobrar(luis, 1000);
     const res = await cortar(luis, 1000, 1000, pin);
     // El dinero ya se contó: que no salga el papel no puede deshacer eso.

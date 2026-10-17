@@ -212,6 +212,8 @@ beforeEach(async () => {
   // cover). Desde D77 el mesero ya no cobra, y la caja de cada barra —que solo cobra
   // pedidos de SU barra— tiene sus propias pruebas en `cashier.test.js`.
   cobrador = await f.createUser(club.id, { role: 'hostess' });
+  // Desde D118 en la puerta cobra la anfitriona con la caja de Cover abierta.
+  await f.openDoorTill(club.id, { hostess: cobrador, authorizer: manager });
   guest = await f.createUser(club.id, { role: 'guest' });
 });
 

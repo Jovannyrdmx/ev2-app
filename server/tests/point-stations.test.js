@@ -127,13 +127,12 @@ beforeEach(async () => {
   process.env.MERCADOPAGO_WEBHOOK_SECRET = 'secreto-de-prueba';
 
   club = await f.createNightclub({ slug: 'ev2-point' });
-  const door = await pool.query(
-    `INSERT INTO supply_locations (nightclub_id, code, name, kind, sort_order)
-     VALUES ($1,'cover','Cover','door',3) RETURNING id`, [club.id]);
-  doorId = door.rows[0].id;
+  doorId = await f.coverOf(club.id);
   manager = await f.createUser(club.id, { role: 'manager' });
   cajero = await f.createUser(club.id, { role: 'cashier' });
   hostess = await f.createUser(club.id, { role: 'hostess' });
+  // Desde D118 en la puerta cobra la anfitriona con la caja de Cover abierta.
+  await f.openDoorTill(club.id, { hostess, authorizer: manager });
   guest = await f.createUser(club.id, { role: 'guest' });
 });
 

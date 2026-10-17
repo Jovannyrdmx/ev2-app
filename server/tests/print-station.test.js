@@ -77,12 +77,23 @@ describe('Pedir el código de una estación', () => {
     expect(res.status).toBe(400);
   });
 
-  it('la puerta no lleva barra', async () => {
+  it('"puerta" ya no es un destino aparte: queda como la caja de Cover (D119)', async () => {
+    const cover = await f.coverOf(club.id);
     const res = await pedirCodigo({ name: 'Puerta', purpose: 'door', has_drawer: true },
       { location_id: null });
     expect(res.status).toBe(201);
-    expect(res.body.invite.location_id).toBeNull();
-    expect(res.body.invite.station.purpose).toBe('door');
+    expect(res.body.invite.location_id).toBe(cover);
+    expect(res.body.invite.station.purpose).toBe('till');
+  });
+
+  it('Cover se escoge como cualquier lugar, y solo lleva caja', async () => {
+    const cover = await f.coverOf(club.id);
+    const ok = await pedirCodigo({ name: 'Caja Cover', purpose: 'till', has_drawer: true },
+      { location_id: cover });
+    expect(ok.status).toBe(201);
+    const comandas = await pedirCodigo({ name: 'Cover', purpose: 'orders', has_drawer: false },
+      { location_id: cover });
+    expect(comandas.status).toBe(400);
   });
 
   it('un mesero no puede', async () => {
@@ -128,13 +139,15 @@ describe('El registro automático', () => {
     expect(p.rows[0].drawer_pin).toBeNull();
   });
 
-  it('en la puerta queda como impresora de puerta, sin barra', async () => {
+  it('la estación de Cover queda como la impresora de la caja de Cover, con su cajón', async () => {
+    const cover = await f.coverOf(club.id);
     const agent = await canjear(await pedirCodigo(
-      { name: 'Puerta', purpose: 'door', has_drawer: true }, { location_id: null }));
+      { name: 'Caja Cover', purpose: 'till', has_drawer: true }, { location_id: cover }));
     await barrer(agent, [termica]);
     const { rows } = await pool.query(
-      'SELECT purpose, location_id, drawer_pin FROM printers WHERE nightclub_id = $1', [club.id]);
-    expect(rows[0]).toMatchObject({ purpose: 'door', location_id: null, drawer_pin: 2 });
+      'SELECT purpose, location_id::text AS location_id, drawer_pin FROM printers WHERE nightclub_id = $1',
+      [club.id]);
+    expect(rows[0]).toMatchObject({ purpose: 'till', location_id: cover, drawer_pin: 2 });
   });
 
   it('con pin 5 lo respeta', async () => {

@@ -52,6 +52,8 @@ beforeEach(async () => {
   otro = await f.createUser(club.id, { role: 'guest', display_name: 'Otro' });
   hostess = await f.createUser(club.id, { role: 'hostess', display_name: 'Recepción' });
   manager = await f.createUser(club.id, { role: 'manager', display_name: 'Gerente' });
+  // Desde D118 en la puerta cobra la anfitriona con la caja de Cover abierta.
+  await f.openDoorTill(club.id, { hostess, authorizer: manager });
   waiter = await f.createUser(club.id, { role: 'waiter', display_name: 'Mesero' });
   mesa = await f.createTable(club.id, { code: 'V-7', section: 'VIP ELEVADO', capacity: 8 });
   const ev = await pool.query(
@@ -335,9 +337,7 @@ describe('La puerta', () => {
     let original;
     beforeEach(async () => {
       process.env.MERCADOPAGO_ENV = 'test';
-      const cover = await pool.query(
-        `INSERT INTO supply_locations (nightclub_id, code, name, kind, sort_order)
-         VALUES ($1,'cover','Cover','door',3) RETURNING id`, [club.id]);
+      const cover = { rows: [{ id: await f.coverOf(club.id) }] };
       await pool.query(
         `INSERT INTO payment_terminals (nightclub_id, external_id, label, operating_mode,
                                         operating_mode_at, location_id, registered_by)
