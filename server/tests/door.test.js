@@ -33,6 +33,8 @@ beforeEach(async () => {
   waiter = await f.createUser(club.id, { role: 'waiter' });
   await loadPriceList({ slug: 'ev2' });
   mesa = await f.createTable(club.id, { code: '39', section: 'ZONA ROJA', capacity: 8, type: 'booth' });
+  // Desde D118 en la puerta cobra la anfitriona con la caja de Cover abierta.
+  await f.openDoorTill(club.id, { hostess, authorizer: manager });
 });
 
 const url = (p) => `/api/nightclubs/${club.id}${p}`;
@@ -286,9 +288,7 @@ describe('lo que se vende en la entrada', () => {
   });
 
   it('el cover imprime en la impresora de Cover (D96); una cortesía solo saca el ticket del cliente (D115)', async () => {
-    const { rows: [cover] } = await pool.query(
-      `INSERT INTO supply_locations (nightclub_id, code, name, kind, sort_order)
-       VALUES ($1,'cover','Cover','door',3) RETURNING id`, [club.id]);
+    const cover = { id: await f.coverOf(club.id) };
     const prn = await api().post(url('/printers')).set(auth(manager)).send({
       location_id: cover.id, name: 'Cover · caja', purpose: 'till',
       connection: 'network', host: '192.168.1.60',
@@ -313,9 +313,7 @@ describe('lo que se vende en la entrada', () => {
   });
 
   it('el ticket del cliente dice cuántos accesos y no lleva dinero; la copia de la hostess sí (D115)', async () => {
-    const { rows: [cover] } = await pool.query(
-      `INSERT INTO supply_locations (nightclub_id, code, name, kind, sort_order)
-       VALUES ($1,'cover','Cover','door',3) RETURNING id`, [club.id]);
+    const cover = { id: await f.coverOf(club.id) };
     await api().post(url('/printers')).set(auth(manager)).send({
       location_id: cover.id, name: 'Cover · caja', purpose: 'till',
       connection: 'network', host: '192.168.1.60',
@@ -388,10 +386,11 @@ describe('lo que se vende en la entrada', () => {
       expect(log.rows).toEqual([{ action: 'door.transfer_authorized' }]);
     });
 
-    it('el gerente en la puerta no necesita PIN', async () => {
+    it('el gerente ya no vende en la puerta: cobra la caja de Cover (D118)', async () => {
       const res = await api().post(url('/door/admissions')).set(auth(manager))
         .send({ kind: 'general', quantity: 1, unit_price: 300, payment_method: 'courtesy', notes: 'prensa' });
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(403);
+      expect(res.body.error.message).toMatch(/caja de Cover/);
     });
   });
 

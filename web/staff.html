@@ -169,6 +169,41 @@
         búsqueda ignora acentos.
       -->
       <div id="tab-door" class="space-y-3" hidden>
+        <!--
+          La caja de Cover (D118). La anfitriona que el gerente puso en Cover la abre con
+          su fondo y el código del gerente; mientras la tenga abierta es la única que
+          cobra en la puerta. Las demás escanean pases.
+        -->
+        <div id="door-till" class="card rounded-xl p-4 space-y-3" hidden>
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="dtill.title">Caja de Cover</p>
+            <span id="door-till-state" class="pill pill-off text-[11px]">—</span>
+          </div>
+          <p id="door-till-info" class="text-sm text-white/70"></p>
+          <div id="door-till-form" class="space-y-2" hidden>
+            <div class="grid grid-cols-2 gap-2">
+              <input id="door-till-float" type="number" min="0" step="50" inputmode="decimal" class="field text-center"
+                     placeholder="Fondo en pesos" data-i18n-placeholder="dtill.floatMxn"
+                     aria-label="Fondo en pesos" data-i18n-aria-label="dtill.floatMxn">
+              <input id="door-till-float-usd" type="number" min="0" step="1" inputmode="decimal" class="field text-center"
+                     placeholder="Fondo en dólares" data-i18n-placeholder="dtill.floatUsd"
+                     aria-label="Fondo en dólares" data-i18n-aria-label="dtill.floatUsd">
+            </div>
+            <!-- Enmascarado: lo teclea el gerente enfrente de la anfitriona, y se borra al usarse. -->
+            <input id="door-till-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"
+                   class="field text-center tracking-[0.5em]"
+                   placeholder="Código del gerente" data-i18n-placeholder="dtill.pin"
+                   aria-label="Código del gerente" data-i18n-aria-label="dtill.pin">
+            <button id="btn-door-till-open" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="dtill.open">Abrir caja de Cover</button>
+          </div>
+          <div id="door-till-actions" class="grid grid-cols-2 gap-2" hidden>
+            <button id="btn-door-till-cut" type="button" class="card py-2 rounded-xl text-sm" data-i18n="till.cut">Corte de caja</button>
+            <button id="btn-door-till-refresh" type="button" class="card py-2 rounded-xl text-sm" data-i18n="till.recheck">Volver a revisar</button>
+          </div>
+          <button id="btn-door-till-recheck" type="button" class="block mx-auto text-sm text-white/50 underline" data-i18n="till.recheck" hidden>Volver a revisar</button>
+          <p id="door-till-error" class="text-sm text-red-300" hidden></p>
+        </div>
+
         <div class="grid grid-cols-4 gap-2">
           <div class="stat-card"><div class="stat-number" id="d-expected">—</div><div class="stat-label" data-i18n="door.expected">Por llegar</div></div>
           <div class="stat-card"><div class="stat-number" id="d-seated">—</div><div class="stat-label" data-i18n="door.seated">Ya adentro</div></div>
@@ -331,6 +366,8 @@
           va a llenar un formulario.
         -->
         <div class="card rounded-xl p-4 space-y-3">
+          <!-- Sin la caja de Cover abierta no se cobra (D118): aquí se dice por qué. -->
+          <p id="sell-locked" class="text-sm text-amber-200" hidden></p>
           <div class="flex items-center justify-between gap-2">
             <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="sell.title">Vender entrada</p>
             <button id="btn-door-drawer" type="button" class="text-xs px-3 rounded-lg card" data-i18n="drawer.openNoSale">Abrir cajón</button>
@@ -518,6 +555,7 @@
 <script src="js/order-taking.js"></script>
 <script src="js/terminal-charge.js"></script>
 <script src="js/shift-cut.js"></script>
+<script src="js/door-till.js"></script>
 <script src="js/push.js"></script>
 <script src="js/cash-drawer.js"></script>
 <script src="js/staff-screen.js"></script>

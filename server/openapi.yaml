@@ -3813,6 +3813,11 @@ paths:
       tags: [Puerta]
       summary: Vender un acceso general o un extra VIP (hostess)
       description: |
+        **Quién vende (D118):** solo la anfitriona con la caja de Cover abierta (también
+        una cortesía). Gerencia y otros puestos: 403; anfitriona sin la caja: 409
+        (`details.reason = door_till_closed`). La entrada queda anotada a esa caja (`till_shift_id`) y sus
+        tickets salen en la impresora de esa caja.
+
         **Quién autoriza qué (D109):** la tarjeta tecleada a mano (`card`) ya no se acepta
         (422): en la puerta la tarjeta se cobra con la terminal (`point`). Si quien vende
         es la anfitriona, `courtesy` pide `notes` (el motivo) y `transfer` pide
@@ -3989,6 +3994,8 @@ paths:
       summary: Cobrar en la puerta el resto de una reservación (anfitriona)
       description: |
         Lo que falta de la mesa (total menos lo pagado), antes de dejarla entrar (D113).
+        Solo la anfitriona con la caja de Cover abierta (D118): otros puestos 403, sin la
+        caja 409. El pago queda anotado a esa caja (`till_shift_id`).
         `cash`: queda pagado al momento a nombre de quien lo recibió, con el cambio y el
         cajón de la puerta. `point`: despierta la terminal de Cover y el renglón se paga
         cuando Mercado Pago aprueba. Lo pagado suma al crédito de consumo de esa noche.
@@ -4025,6 +4032,7 @@ paths:
       tags: [Puerta]
       summary: Cobrar un cover en la terminal de la puerta (hostess)
       description: |
+        Solo la anfitriona con la caja de Cover abierta (D118); usa la terminal de esa caja.
         Primero la tarjeta, después la entrada (D100). Crea un renglón PENDIENTE del libro
         y despierta la terminal asignada a la puerta; **no** crea la entrada. Cuando
         Mercado Pago aprueba, la entrada se asienta con `POST /door/admissions`
@@ -10620,10 +10628,12 @@ paths:
     get:
       operationId: getMyTill
       tags: [Cortes de turno]
-      summary: Mi caja (cajero)
+      summary: Mi caja (cajero o anfitriona en Cover)
       description: |
-        Requiere rol `cashier` (D77). La barra que le asignaron esta noche, si ya abrió
-        la caja y con qué fondo, y los pedidos de esa barra que siguen sin cobrar.
+        Requiere rol `cashier` o `hostess` (D77, D118). El lugar que le asignaron esta
+        noche —una barra para el cajero, Cover para la anfitriona—, si ya abrió la caja y
+        con qué fondo (pesos y dólares), y en una barra los pedidos que siguen sin cobrar.
+        Sin caja propia, `assignment.held_by` dice quién tiene abierta la caja de ese lugar.
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/NightclubId' }]
       responses:
@@ -10641,9 +10651,10 @@ paths:
       tags: [Cortes de turno]
       summary: Las cajas de la noche (gerente)
       description: |
-        Requiere rol `manager` (D88). Cada caja abierta en las últimas 18 horas: barra,
-        cajero, cuánto lleva cobrado, cuánto debe tener en caja (en pesos y en dólares
-        aparte), pedidos de esa barra sin cobrar y, si ya cortó, la diferencia del corte.
+        Requiere rol `manager` (D88, D118). Cada caja abierta en las últimas 18 horas —las
+        barras y Cover—: lugar, quién la tiene, fondo (pesos y dólares), cuánto lleva
+        cobrado, cuánto debe tener en caja (en pesos y en dólares aparte), pedidos de esa
+        barra sin cobrar, personas que entraron por Cover y, si ya cortó, la diferencia.
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/NightclubId' }]
       responses:
@@ -10663,12 +10674,15 @@ paths:
                         shift_id: { type: string, format: uuid }
                         location_id: { type: string, format: uuid }
                         location_name: { type: string }
+                        location_kind: { type: string, enum: [bar, door] }
                         user_id: { type: string, format: uuid }
                         user_name: { type: string }
                         started_at: { type: string, format: date-time }
                         ended_at: { type: [string, 'null'], format: date-time }
                         currency: { $ref: '#/components/schemas/Currency' }
                         opening_float: { $ref: '#/components/schemas/Money' }
+                        opening_float_usd: { $ref: '#/components/schemas/Money' }
+                        door_people: { type: integer }
                         collected: { $ref: '#/components/schemas/Money' }
                         cash_collected: { $ref: '#/components/schemas/Money' }
                         cash_to_hand: { $ref: '#/components/schemas/Money' }
@@ -10759,10 +10773,13 @@ paths:
       tags: [Cortes de turno]
       summary: Abrir la caja con su fondo
       description: |
-        Requiere rol `cashier` (D77). La barra **no se manda**: sale del rol de la noche
-        (`shift_assignments`) para la noche en curso. El cajero teclea el fondo que
-        recibe y el gerente que se lo entrega teclea su PIN ahí mismo. Una caja por
-        barra; el fondo no se edita después.
+        Requiere rol `cashier` o `hostess` (D77, D118). El lugar **no se manda**: sale del
+        rol de la noche (`shift_assignments`) para la noche en curso — una barra para el
+        cajero, Cover para la anfitriona. Quien abre teclea el fondo que recibe (pesos y,
+        opcional, dólares) y el gerente que se lo entrega teclea su PIN ahí mismo. Una caja
+        por lugar: en Cover solo una anfitriona cobra. Si la anfitriona ya tenía su turno
+        abierto (huella o botón), la caja se le pone a ese turno. El fondo no se edita
+        después. Queda en `audit_log` (`till.open`).
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/NightclubId' }]
       requestBody:
@@ -10774,6 +10791,7 @@ paths:
               required: [opening_float, manager_pin]
               properties:
                 opening_float: { type: number, minimum: 0, maximum: 1000000 }
+                opening_float_usd: { type: number, minimum: 0, maximum: 100000 }
                 currency: { $ref: '#/components/schemas/Currency' }
                 manager_pin: { type: string, pattern: '^\d{6}$' }
       responses:
@@ -10789,12 +10807,12 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '409':
-          description: Su caja ya está abierta, o esa barra ya tiene otra caja abierta
+          description: Su caja ya está abierta, o ese lugar ya tiene otra caja abierta
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '422':
-          description: No tiene barra asignada para la noche en curso
+          description: No tiene barra (o Cover) asignada para la noche en curso
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -11367,7 +11385,8 @@ paths:
       tags: [Cortes de turno]
       summary: Abrir el cajón sin venta (con PIN del gerente)
       description: |
-        Para el cajero (su caja) o la anfitriona (la puerta), D96. Lo autoriza un
+        Para el cajero (su caja) o la anfitriona con la caja de Cover abierta (D96, D118).
+        Sin caja abierta, 409. Lo autoriza un
         gerente con su PIN de seis dígitos, nunca quien lo pide. Cada apertura queda en
         `audit_log` con el motivo.
       security: [{ bearerAuth: [] }]
@@ -12947,7 +12966,7 @@ components:
 
     TillState:
       type: object
-      description: La caja de quien pregunta (D77).
+      description: La caja de quien pregunta (D77, D118).
       properties:
         till:
           type: [object, 'null']
@@ -12955,17 +12974,23 @@ components:
             shift_id: { type: string, format: uuid }
             location_id: { type: string, format: uuid }
             location_name: { type: string }
+            location_kind: { type: string, enum: [bar, door] }
             started_at: { type: string, format: date-time }
             opening_float: { type: string }
+            opening_float_usd: { type: [string, 'null'] }
             currency: { $ref: '#/components/schemas/Currency' }
             float_authorized_by: { type: [string, 'null'] }
             float_authorized_at: { type: string, format: date-time }
         assignment:
           type: [object, 'null']
-          description: La barra que el gerente le asignó para la noche en curso, mientras no abra.
+          description: El lugar (barra o Cover) que el gerente le asignó para la noche en curso, mientras no abra.
           properties:
             location_id: { type: string, format: uuid }
             location_name: { type: string }
+            location_kind: { type: string, enum: [bar, door] }
+            held_by:
+              type: [string, 'null']
+              description: Quién tiene abierta la caja de ese lugar, si es otra persona.
             event_id: { type: string, format: uuid }
             event_name: { type: string }
             doors_open_at: { type: string, format: date-time }
