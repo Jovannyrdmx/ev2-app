@@ -166,6 +166,8 @@ services:
       TESSERACT_BIN: ${TESSERACT_BIN:-}
       TESSERACT_LANGS: ${TESSERACT_LANGS:-}
       RECEIPT_MAX_BYTES: ${RECEIPT_MAX_BYTES:-}
+      # Tope del comprobante de anticipo (D113); vacío = 10 MB en reservation-money.js.
+      DEPOSIT_PROOF_MAX_BYTES: ${DEPOSIT_PROOF_MAX_BYTES:-}
       # SEED_PASSWORD NO se pasa: el seed de desarrollo crea cuentas con contraseña
       # conocida y aquí no debe poder correr ni por accidente.
       # Las llaves de las pasarelas. Vacias = la pasarela se reporta "no configurada" y
