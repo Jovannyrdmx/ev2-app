@@ -10698,6 +10698,60 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/nightclubs/{nightclubId}/tills/report/print:
+    post:
+      operationId: printNightCut
+      tags: [Cortes de turno]
+      summary: Imprimir el corte general de la noche (gerente o admin)
+      description: |
+        Requiere rol `manager` o `admin` (D121). Encola en la impresora escogida un papel con
+        todas las cajas de la noche (barras y Cover): fondo, cobrado, efectivo, dólares,
+        retiros, personas que entraron, lo que debe tener (si sigue abierta) o la diferencia
+        de su corte, y al pie los totales del club por forma de pago. Si hay cajas abiertas
+        el papel sale marcado PRELIMINAR. Solo lee: no cierra ni cambia nada.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [printer_id]
+              properties:
+                printer_id: { type: string, format: uuid }
+      responses:
+        '202':
+          description: El corte general quedó en la cola de impresión
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job, totals]
+                properties:
+                  job:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      status: { type: string }
+                      printer_id: { type: string, format: uuid }
+                  totals:
+                    type: object
+                    properties:
+                      tills: { type: integer }
+                      open_tills: { type: integer }
+                      total_collected: { $ref: '#/components/schemas/Money' }
+                      tips: { $ref: '#/components/schemas/Money' }
+                      drops_received: { $ref: '#/components/schemas/Money' }
+                      usd_received: { $ref: '#/components/schemas/Money' }
+                      door_people: { type: integer }
+                      difference: { $ref: '#/components/schemas/Money' }
+                      difference_usd: { $ref: '#/components/schemas/Money' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/nightclubs/{nightclubId}/waiters/balances:
     get:
       operationId: waitersBalances
@@ -16110,7 +16164,7 @@ components:
         nightclub_id: { type: string, format: uuid }
         printer_id: { type: string, format: uuid }
         printer_name: { type: [string, 'null'] }
-        kind: { type: string, enum: [order, bill, receipt, shift_cut, test, cash_drop, drawer] }
+        kind: { type: string, enum: [order, bill, receipt, shift_cut, test, cash_drop, drawer, night_cut] }
         ref_id: { type: [string, 'null'], format: uuid }
         copies: { type: integer }
         status: { type: string, enum: [pending, taken, printed, failed] }

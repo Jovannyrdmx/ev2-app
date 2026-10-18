@@ -510,6 +510,14 @@
           <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="mgr.tills">Cajas de la noche</p>
           <p id="c-tills-empty" class="text-sm text-white/40" data-i18n="mgr.tillsNone" hidden>Ninguna caja abierta todavía.</p>
           <div id="c-tills" class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3"></div>
+          <!-- El corte general de la noche (D121): todas las cajas en un papel. -->
+          <div class="flex flex-wrap items-center gap-2 pt-1">
+            <label for="c-nightcut-printer" class="text-xs text-white/50" data-i18n="mgr.nightCutPrinter">Imprimir en</label>
+            <select id="c-nightcut-printer" class="rounded-lg px-2 py-2 text-xs bg-black/40 border border-white/10 min-w-0 max-w-full"></select>
+            <button id="c-nightcut-print" type="button" class="ev2-button rounded-lg px-3 py-2 text-xs" data-i18n="mgr.nightCutPrint">Imprimir corte general</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="mgr.nightCutWhy">Todas las cajas de la noche con su fondo, lo cobrado, retiros y diferencia, y los totales por forma de pago. Con cajas abiertas sale como PRELIMINAR.</p>
+          <p id="c-nightcut-error" class="text-sm text-red-300" hidden></p>
         </div>
         <!--
           Los cortes de turno (D51). Aquí el gerente cuenta el dinero que le entrega
@@ -1370,6 +1378,14 @@
             <span data-i18n="prn.orderTickets">Imprimir comanda en la barra con cada pedido</span>
           </label>
           <p class="text-[11px] text-white/40" data-i18n="prn.orderTicketsWhy">Lo cambian el gerente y el administrador, y queda registrado quién fue. El recibo de cobro sale siempre.</p>
+          <!-- Encabezado y pie de todos los tickets (D121): una línea por renglón. -->
+          <form id="prn-texts" class="space-y-2 pt-2">
+            <label for="prn-header" class="block text-xs text-white/50" data-i18n="prn.headerText">Encabezado del ticket (nombre, dirección, teléfono…; una línea por renglón)</label>
+            <textarea id="prn-header" rows="3" maxlength="120" class="w-full rounded-lg px-3 py-2 text-sm bg-black/40 border border-white/10"></textarea>
+            <label for="prn-footer" class="block text-xs text-white/50" data-i18n="prn.footerText">Pie del ticket (por ejemplo, un agradecimiento)</label>
+            <textarea id="prn-footer" rows="2" maxlength="160" class="w-full rounded-lg px-3 py-2 text-sm bg-black/40 border border-white/10"></textarea>
+            <button id="prn-texts-save" type="submit" class="ev2-button rounded-lg px-3 py-2 text-xs" data-i18n="prn.textsSave">Guardar encabezado y pie</button>
+          </form>
           <p id="prn-settings-error" class="text-sm text-red-300" hidden></p>
         </div>
       </div>

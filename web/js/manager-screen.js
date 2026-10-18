@@ -997,6 +997,39 @@
       $(box).innerHTML = list.map(tillCard).join('');
       $(empty).hidden = list.length > 0;
     }
+    loadNightCutPrinters();
+  }
+
+  // ---------------------------------------------------------------- corte general (D121)
+
+  /** Las impresoras activas, para escoger dónde sale el corte general. */
+  async function loadNightCutPrinters() {
+    const sel = $('c-nightcut-printer');
+    if (!sel || $('tab-cash').hidden) return;
+    try {
+      const { printers } = await api.get(`/nightclubs/${clubId()}/printers`);
+      const activas = (printers || []).filter((p) => p.active);
+      const antes = sel.value;
+      sel.innerHTML = activas.map((p) => `<option value="${escape(p.id)}">${escape(p.name)}</option>`).join('');
+      if (activas.some((p) => p.id === antes)) sel.value = antes;
+      $('c-nightcut-print').disabled = activas.length === 0;
+    } catch { /* la lista queda como estaba */ }
+  }
+
+  if ($('c-nightcut-print')) {
+    $('c-nightcut-print').onclick = async () => {
+      const nota = $('c-nightcut-error');
+      nota.hidden = true;
+      const printerId = $('c-nightcut-printer').value;
+      if (!printerId) { avisar(nota, t('mgr.nightCutNoPrinter')); return; }
+      const listo = ocupado($('c-nightcut-print'), 'prn.sending');
+      try {
+        const r = await api.post(`/nightclubs/${clubId()}/tills/report/print`, { printer_id: printerId });
+        toast(t(r.totals && r.totals.open_tills > 0 ? 'mgr.nightCutSentPrelim' : 'mgr.nightCutSent'), 'ok');
+      } catch (err) {
+        avisar(nota, EV2Format.errorMessage(err));
+      } finally { listo(); }
+    };
   }
 
   function renderTonight() {
@@ -2592,11 +2625,15 @@
     const s = printing.settings;
     const check = $('prn-order-tickets');
     check.checked = Boolean(s && s.print_order_tickets);
+    // El encabezado y el pie (D121): no se pisa lo que el gerente está escribiendo.
+    if ($('prn-header') && document.activeElement !== $('prn-header')) $('prn-header').value = (s && s.header_text) || '';
+    if ($('prn-footer') && document.activeElement !== $('prn-footer')) $('prn-footer').value = (s && s.footer_text) || '';
     // Lo cambian gerente y admin (D58). Para cualquier otro rol que llegue a esta
     // pantalla se deshabilita en vez de esconderse: hay que poder VER si está
     // prendido cuando la barra reclama, aunque no se pueda tocar.
     const rol = (api.session && api.session.user && api.session.user.role) || null;
     check.disabled = !['manager', 'admin'].includes(rol);
+    for (const id of ['prn-header', 'prn-footer', 'prn-texts-save']) if ($(id)) $(id).disabled = check.disabled;
   }
 
   async function testPrinter(printer, button, nota) {
@@ -2869,7 +2906,7 @@
           const b = document.createElement('button');
           b.className = 'ev2-button rounded-lg px-3 py-2 text-xs';
           b.textContent = c.port ? `${c.name} (${c.port})` : c.name;
-          b.onclick = () => stationFinish(a, c.name, b);
+          b.onclick = () => stationFinish(a, c, b);
           opciones.appendChild(b);
         }
         card.appendChild(opciones);
@@ -2909,11 +2946,13 @@
     } catch (err) { showError(err); } finally { listo(); }
   }
 
-  async function stationFinish(agent, windowsName, boton) {
+  async function stationFinish(agent, candidata, boton) {
     const listo = ocupado(boton, 'prn.saving');
     try {
+      // Una de red se escoge por su dirección; una USB por su nombre en Windows (D121).
       await api.post(`/nightclubs/${clubId()}/print-agents/${agent.id}/station/finish`,
-        { windows_name: windowsName });
+        candidata.network ? { host: candidata.host, port: candidata.tcp_port }
+          : { windows_name: candidata.name });
       toast(t('prn.registered'), 'ok');
       await loadPrinting();
     } catch (err) { listo(); showError(err); }
@@ -2993,6 +3032,25 @@
     }
     printing.invite = null;
     renderPairing();
+  }
+
+  if ($('prn-texts')) {
+    $('prn-texts').onsubmit = async (e) => {
+      e.preventDefault();
+      const nota = $('prn-settings-error');
+      nota.hidden = true;
+      const limpio = (v) => { const x = String(v || '').trim(); return x === '' ? null : x; };
+      const listo = ocupado($('prn-texts-save'), 'prn.saving');
+      try {
+        const { settings } = await api.patch(`/nightclubs/${clubId()}/print-settings`, {
+          header_text: limpio($('prn-header').value), footer_text: limpio($('prn-footer').value),
+        });
+        printing.settings = settings;
+        toast(t('prn.textsSaved'), 'ok');
+      } catch (err) {
+        avisar(nota, EV2Format.errorMessage(err));
+      } finally { listo(); }
+    };
   }
 
   $('prn-order-tickets').onchange = async () => {

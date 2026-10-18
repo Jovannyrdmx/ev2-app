@@ -854,7 +854,13 @@ router.post('/nightclubs/:nightclubId/print-agents/:agentId/station/finish',
   requireRole(...MANAGE),
   validate({
     params: z.object({ nightclubId: uuid, agentId: uuid }),
-    body: z.object({ windows_name: z.string().trim().min(1).max(240) }),
+    // Una USB por su nombre en Windows; una de red por su dirección (D121).
+    body: z.object({
+      windows_name: z.string().trim().min(1).max(240).optional(),
+      host: z.string().trim().min(1).max(120).optional(),
+      port: z.coerce.number().int().min(1).max(65535).optional(),
+    }).refine((b) => Boolean(b.windows_name) !== Boolean(b.host),
+      { message: 'Indica la impresora USB (windows_name) o la de red (host), una de las dos' }),
   }),
   asyncHandler(async (req, res) => {
     const client = await pool.connect();
@@ -863,7 +869,9 @@ router.post('/nightclubs/:nightclubId/print-agents/:agentId/station/finish',
       await client.query('BEGIN');
       station = await printing.finishStation(client, {
         nightclubId: req.params.nightclubId, agentId: req.params.agentId,
-        windowsName: req.body.windows_name, createdBy: req.user.id,
+        windowsName: req.body.windows_name || null,
+        host: req.body.host || null, port: req.body.port || 9100,
+        createdBy: req.user.id,
       });
       await client.query('COMMIT');
     } catch (err) {

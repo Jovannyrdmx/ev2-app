@@ -585,9 +585,120 @@ async function close(client, {
   };
 }
 
+// ---------------------------------------------------------------- las cajas de la noche
+
+/**
+ * Las cajas de la noche (D88, D118), para el gerente: cada caja que abrió en las
+ * últimas 18 horas —barras y Cover— con su fondo, lo cobrado, lo que debe tener y,
+ * si ya cerró, su diferencia. Es lo que lee "Cajas de la noche" y lo que imprime el
+ * corte general (D121). Solo lectura.
+ */
+async function nightTills(runner, { nightclubId }) {
+  const { rows } = await runner.query(
+    `SELECT s.id, s.user_id, s.section, s.started_at, s.ended_at, s.location_id,
+            s.opening_float::text AS opening_float, s.float_currency AS currency,
+            s.opening_float_usd::text AS opening_float_usd,
+            u.display_name AS user_name, l.name AS location_name, l.kind AS location_kind,
+            c.id AS closing_id, c.difference::text AS difference,
+            c.difference_usd::text AS difference_usd, c.confirmed_at
+       FROM staff_shifts s
+       JOIN users u ON u.id = s.user_id
+       JOIN supply_locations l ON l.id = s.location_id
+       LEFT JOIN shift_closings c ON c.shift_id = s.id
+      WHERE s.nightclub_id = $1 AND s.location_id IS NOT NULL
+        AND s.started_at > now() - interval '18 hours'
+      ORDER BY l.kind = 'door', l.name, s.started_at`,
+    [nightclubId]);
+  const tills = [];
+  for (const s of rows) {
+    // Una caja tras otra: son pocas por noche y así no se acapara el pool.
+    const resumen = await shiftSummary(runner, { nightclubId, shift: s });
+    tills.push({
+      shift_id: s.id,
+      location_id: s.location_id,
+      location_name: s.location_name,
+      location_kind: s.location_kind,
+      user_id: s.user_id,
+      user_name: s.user_name,
+      started_at: s.started_at,
+      ended_at: s.ended_at,
+      currency: s.currency || resumen.totals.currency,
+      opening_float: resumen.opening_float,
+      opening_float_usd: resumen.opening_float_usd,
+      collected: resumen.totals.total_collected,
+      cash_collected: resumen.totals.cash_collected,
+      cash_to_hand: resumen.cash_to_hand,
+      usd_received: resumen.totals.usd.received,
+      usd_to_hand: resumen.usd_to_hand,
+      drops_received: resumen.drops_received,
+      usd_drops_received: resumen.usd_drops_received,
+      pending_orders: (resumen.pending_orders || []).length,
+      pending_total: resumen.pending_total,
+      // En Cover lo que importa es cuánta gente entró por esa caja.
+      door_people: resumen.totals.door_people,
+      by_method: resumen.totals.by_method,
+      tips: resumen.totals.tips,
+      closed: Boolean(s.closing_id),
+      difference: s.difference,
+      difference_usd: s.difference_usd,
+      closed_at: s.confirmed_at,
+    });
+  }
+  return tills;
+}
+
+/**
+ * Los totales de la noche, sumando todas las cajas: lo que va al pie del corte
+ * general. Los dólares sin convertir se suman aparte, como en el corte de cada caja.
+ */
+function nightTotals(tills) {
+  const porMetodo = new Map();
+  let cobrado = 0; let propinas = 0; let retiros = 0; let retirosUsd = 0;
+  let dolares = 0; let personas = 0; let diferencia = 0; let diferenciaUsd = 0;
+  let abiertas = 0; let fondos = 0; let fondosUsd = 0;
+  for (const t of tills) {
+    cobrado = round2(cobrado + Number(t.collected || 0));
+    propinas = round2(propinas + Number((t.tips && t.tips.amount) || 0));
+    retiros = round2(retiros + Number(t.drops_received || 0));
+    retirosUsd = round2(retirosUsd + Number(t.usd_drops_received || 0));
+    dolares = round2(dolares + Number(t.usd_received || 0));
+    fondos = round2(fondos + Number(t.opening_float || 0));
+    fondosUsd = round2(fondosUsd + Number(t.opening_float_usd || 0));
+    personas += Number(t.door_people || 0);
+    if (t.closed) {
+      diferencia = round2(diferencia + Number(t.difference || 0));
+      diferenciaUsd = round2(diferenciaUsd + Number(t.difference_usd || 0));
+    } else abiertas += 1;
+    for (const l of t.by_method || []) {
+      const clave = `${l.method}|${l.currency || ''}`;
+      const previo = porMetodo.get(clave) || { method: l.method, currency: l.currency, amount: 0, count: 0 };
+      previo.amount = round2(previo.amount + Number(l.amount));
+      previo.count += Number(l.count || 0);
+      porMetodo.set(clave, previo);
+    }
+  }
+  return {
+    tills: tills.length,
+    open_tills: abiertas,
+    by_method: [...porMetodo.values()].map((l) => ({ ...l, amount: money(l.amount) }))
+      .sort((a, b) => a.method.localeCompare(b.method)),
+    total_collected: money(cobrado),
+    tips: money(propinas),
+    opening_floats: money(fondos),
+    opening_floats_usd: money(fondosUsd),
+    drops_received: money(retiros),
+    usd_drops_received: money(retirosUsd),
+    usd_received: money(dolares),
+    door_people: personas,
+    difference: money(diferencia),
+    difference_usd: money(diferenciaUsd),
+  };
+}
+
 module.exports = {
   CASH_METHODS, COLLECTING_ROLES, BLIND_ROLES,
   collected, dropsOf, receivedTotal, pendingDrops, shiftSummary,
   withdraw, close, money, round2,
   isBlind, declarationOf, forEmployee, declare,
+  nightTills, nightTotals,
 };

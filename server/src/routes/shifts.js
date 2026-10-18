@@ -27,6 +27,7 @@ const managerAuth = require('../services/manager-auth');
 const manualVoucher = require('../services/manual-voucher');
 const cashDrawer = require('../services/cash-drawer');
 const tickets = require('../services/tickets');
+const printing = require('../services/printing');
 const events = require('../services/events');
 const till = require('../services/till');
 const payments = require('../services/payments');
@@ -632,55 +633,39 @@ router.get('/nightclubs/:nightclubId/tills',
   requireRole('manager'),
   validate({ params: z.object({ nightclubId: uuid }) }),
   asyncHandler(async (req, res) => {
+    const tills = await cuts.nightTills(pool, { nightclubId: req.params.nightclubId });
+    // `by_method`, `tips` y `usd_drops_received` son para el corte general (D121): la
+    // pantalla sigue recibiendo exactamente lo mismo que antes.
+    const SOLO_PAPEL = ['by_method', 'tips', 'usd_drops_received'];
+    const salida = tills.map((x) => Object.fromEntries(
+      Object.entries(x).filter(([k]) => !SOLO_PAPEL.includes(k))));
+    res.json({ tills: salida });
+  }));
+
+/**
+ * El corte general de la noche, en papel (D121).
+ *
+ * Todas las cajas —barras y Cover— con su fondo, lo cobrado, retiros y diferencia, y
+ * los totales del club al pie. Lo pide el gerente (o el admin) y sale en la impresora
+ * que él escoja: el corte general no es de ninguna caja. Con cajas abiertas sale
+ * marcado PRELIMINAR. No cambia nada: solo lee y encola el papel.
+ */
+router.post('/nightclubs/:nightclubId/tills/report/print',
+  requireRole('manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({ printer_id: uuid }),
+  }),
+  asyncHandler(async (req, res) => {
     const { nightclubId } = req.params;
-    const { rows } = await pool.query(
-      `SELECT s.id, s.user_id, s.section, s.started_at, s.ended_at, s.location_id,
-              s.opening_float::text AS opening_float, s.float_currency AS currency,
-              s.opening_float_usd::text AS opening_float_usd,
-              u.display_name AS user_name, l.name AS location_name, l.kind AS location_kind,
-              c.id AS closing_id, c.difference::text AS difference,
-              c.difference_usd::text AS difference_usd, c.confirmed_at
-         FROM staff_shifts s
-         JOIN users u ON u.id = s.user_id
-         JOIN supply_locations l ON l.id = s.location_id
-         LEFT JOIN shift_closings c ON c.shift_id = s.id
-        WHERE s.nightclub_id = $1 AND s.location_id IS NOT NULL
-          AND s.started_at > now() - interval '18 hours'
-        ORDER BY l.kind = 'door', l.name, s.started_at`,
-      [nightclubId]);
-    const tills = [];
-    for (const s of rows) {
-      // Una caja tras otra: son pocas por noche y así no se acapara el pool.
-      const resumen = await cuts.shiftSummary(pool, { nightclubId, shift: s });
-      tills.push({
-        shift_id: s.id,
-        location_id: s.location_id,
-        location_name: s.location_name,
-        location_kind: s.location_kind,
-        user_id: s.user_id,
-        user_name: s.user_name,
-        started_at: s.started_at,
-        ended_at: s.ended_at,
-        currency: s.currency || resumen.totals.currency,
-        opening_float: resumen.opening_float,
-        opening_float_usd: resumen.opening_float_usd,
-        collected: resumen.totals.total_collected,
-        cash_collected: resumen.totals.cash_collected,
-        cash_to_hand: resumen.cash_to_hand,
-        usd_received: resumen.totals.usd.received,
-        usd_to_hand: resumen.usd_to_hand,
-        drops_received: resumen.drops_received,
-        pending_orders: (resumen.pending_orders || []).length,
-        pending_total: resumen.pending_total,
-        // En Cover lo que importa es cuánta gente entró por esa caja.
-        door_people: resumen.totals.door_people,
-        closed: Boolean(s.closing_id),
-        difference: s.difference,
-        difference_usd: s.difference_usd,
-        closed_at: s.confirmed_at,
-      });
-    }
-    res.json({ tills });
+    const printer = await printing.getPrinter(pool, { nightclubId, printerId: req.body.printer_id });
+    if (!printer || !printer.active) throw ApiError.notFound('Esa impresora no existe o está apagada');
+    const tills = await cuts.nightTills(pool, { nightclubId });
+    const totals = cuts.nightTotals(tills);
+    const job = await tickets.printNightCut(pool, {
+      nightclubId, printer, tills, totals, userId: req.user.id,
+    });
+    res.status(202).json({ job: { id: job.id, status: job.status, printer_id: printer.id }, totals });
   }));
 
 // ---------------------------------------------------------------- el corte
