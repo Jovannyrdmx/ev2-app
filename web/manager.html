@@ -115,6 +115,7 @@
     <nav id="mgr-nav" class="flex px-2 border-b border-white/10 overflow-x-auto lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden lg:w-60 lg:shrink-0 lg:border-b-0 lg:border-r lg:px-3 lg:py-4 lg:sticky lg:top-[57px] lg:self-start lg:h-[calc(100vh-57px)]" aria-label="Secciones">
       <p class="mgr-group" data-i18n="mgr.groupNight">Esta noche</p>
       <button data-tab="summary" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap active"><i class="fa-solid fa-chart-line mgr-icon"></i><span data-i18n="manager.tabSummary">Turno</span><span id="inbox-count" class="tab-count" hidden>0</span></button>
+      <button data-tab="tmon" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-table-cells mgr-icon"></i><span data-i18n="tmon.tab">Monitor de mesas</span></button>
       <button data-tab="cash" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-cash-register mgr-icon"></i><span data-i18n="mgr.tabCash">Caja y cortes</span></button>
       <button data-tab="lost" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-inbox mgr-icon"></i><span data-i18n="mgr.tabLost">Objetos perdidos</span></button>
       <button data-tab="reports" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-shield-halved mgr-icon"></i><span data-i18n="mgr.tabModeration">Moderación</span></button>
@@ -470,6 +471,22 @@
         Precio y personas por mesa VIP (D103): una mesa con dato propio manda sobre su zona;
         vacío, usa el de la zona. Solo se mandan las mesas que cambiaron.
       -->
+      <div id="tab-tmon" class="space-y-3" hidden>
+        <div class="card rounded-xl p-4 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tmon.title">Mesas en vivo</p>
+          <div id="tmon-stats" class="flex flex-wrap gap-2 text-xs"></div>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="text-xs text-white/60 flex items-center gap-2"><input id="tmon-vip" type="checkbox"><span data-i18n="tmon.vipOnly">Solo VIP</span></label>
+            <label class="text-xs text-white/60"><span data-i18n="tmon.idle">Marcar sin consumo después de</span>
+              <select id="tmon-idle" class="field"><option value="">—</option><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label>
+          </div>
+          <p id="tmon-error" class="text-xs text-red-300" hidden></p>
+          <p id="tmon-empty" class="text-sm text-white/50" hidden data-i18n="tmon.empty">No hay mesas para mostrar.</p>
+        </div>
+        <div id="tmon-grid" class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3"></div>
+        <div id="tmon-detail" class="card rounded-xl p-4 space-y-3" hidden></div>
+      </div>
+
       <div id="tab-tableprice" class="space-y-4" hidden>
         <div class="card rounded-xl p-4 space-y-2">
           <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tpr.title">Precio y personas por mesa</p>

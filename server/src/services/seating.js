@@ -13,6 +13,23 @@
  */
 'use strict';
 
+const events = require('./events');
+
+const VIP_TYPES = ['vip', 'premium', 'booth'];
+
+/** Avisa al gerente cuando una mesa VIP se ocupa o se desocupa (D113). */
+async function announceVip(client, tableId, action) {
+  const { rows } = await client.query(
+    'SELECT nightclub_id, code, section, type FROM tables WHERE id = $1', [tableId]);
+  const t = rows[0];
+  if (!t || !VIP_TYPES.includes(t.type)) return;
+  await events.publish({
+    nightclubId: t.nightclub_id, type: `vip_table_${action}`, client,
+    audience: { roles: ['manager', 'admin'] },
+    payload: { table_id: tableId, code: t.code, section: t.section, action },
+  });
+}
+
 /**
  * Sienta a una persona en una mesa, dentro de la transacción de quien llama.
  *
@@ -29,7 +46,7 @@ async function seatUser(client, { tableId, userId }) {
   );
   for (const row of dejadas.rows) {
     if (row.table_id === tableId) continue;
-    await client.query(
+    const libre = await client.query(
       `UPDATE tables t SET status = 'available'
         WHERE t.id = $1 AND t.status = 'occupied'
           AND NOT EXISTS (
@@ -37,15 +54,17 @@ async function seatUser(client, { tableId, userId }) {
           )`,
       [row.table_id],
     );
+    if (libre.rowCount > 0) await announceVip(client, row.table_id, 'released');
   }
   await client.query(
     'INSERT INTO table_occupants (table_id, user_id) VALUES ($1,$2)',
     [tableId, userId],
   );
-  await client.query(
+  const ocupada = await client.query(
     `UPDATE tables SET status = 'occupied' WHERE id = $1 AND status IN ('available','reserved')`,
     [tableId],
   );
+  if (ocupada.rowCount > 0) await announceVip(client, tableId, 'occupied');
 }
 
 /**
@@ -60,7 +79,7 @@ async function releaseUser(client, { userId }) {
     [userId],
   );
   for (const row of rows) {
-    await client.query(
+    const libre = await client.query(
       `UPDATE tables t SET status = 'available'
         WHERE t.id = $1 AND t.status = 'occupied'
           AND NOT EXISTS (
@@ -68,6 +87,7 @@ async function releaseUser(client, { userId }) {
           )`,
       [row.table_id],
     );
+    if (libre.rowCount > 0) await announceVip(client, row.table_id, 'released');
   }
   return rows.map((r) => r.table_id);
 }
@@ -78,10 +98,11 @@ async function clearTable(client, { tableId }) {
     `UPDATE table_occupants SET left_at = now() WHERE table_id = $1 AND left_at IS NULL`,
     [tableId],
   );
-  await client.query(
+  const libre = await client.query(
     `UPDATE tables SET status = 'available' WHERE id = $1 AND status IN ('occupied','reserved')`,
     [tableId],
   );
+  if (libre.rowCount > 0) await announceVip(client, tableId, 'released');
 }
 
-module.exports = { seatUser, releaseUser, clearTable };
+module.exports = { seatUser, releaseUser, clearTable, announceVip };

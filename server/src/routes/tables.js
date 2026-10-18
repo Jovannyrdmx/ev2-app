@@ -10,6 +10,7 @@ const events = require('../services/events');
 const seating = require('../services/seating');
 const tickets = require('../services/tickets');
 const floorLayout = require('../services/floor-layout');
+const tableMonitor = require('../services/table-monitor');
 
 const router = express.Router({ mergeParams: true });
 
@@ -219,6 +220,34 @@ router.get('/nightclubs/:nightclubId/tables/stats',
     });
   }));
 
+// El monitor del gerente (D113): todas las mesas, quién hay, desde cuándo y qué llevan.
+router.get('/nightclubs/:nightclubId/tables/monitor',
+  requireRole('manager', 'admin'),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    res.json({
+      tables: await tableMonitor.monitor(pool, { nightclubId: req.params.nightclubId }),
+      generated_at: new Date().toISOString(),
+    });
+  }));
+
+// La historia de una mesa: cada ocupación, con su entrada, su salida y lo que consumió.
+router.get('/nightclubs/:nightclubId/tables/:tableId/history',
+  requireRole('manager', 'admin'),
+  validate({
+    params: z.object({ nightclubId: uuid, tableId: uuid }),
+    query: z.object({ hours: z.coerce.number().int().min(1).max(24 * 31).default(18) }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, tableId } = req.params;
+    const found = await pool.query('SELECT id FROM tables WHERE id = $1 AND nightclub_id = $2', [tableId, nightclubId]);
+    if (found.rowCount === 0) throw ApiError.notFound('Esa mesa no existe');
+    res.json({
+      hours: req.query.hours,
+      sessions: await tableMonitor.history(pool, { nightclubId, tableId, hours: req.query.hours }),
+    });
+  }));
+
 /**
  * Sentar a alguien en una mesa.
  *
@@ -316,7 +345,9 @@ router.post('/nightclubs/:nightclubId/tables/:tableId/release',
         [tableId],
       );
       if (remaining.rows[0].n === 0) {
-        await client.query(`UPDATE tables SET status = 'available' WHERE id = $1 AND status = 'occupied'`, [tableId]);
+        const libre = await client.query(
+          `UPDATE tables SET status = 'available' WHERE id = $1 AND status = 'occupied'`, [tableId]);
+        if (libre.rowCount > 0) await seating.announceVip(client, tableId, 'released');
       }
       await events.publish({
         nightclubId, type: 'table_updated', client,

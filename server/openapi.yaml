@@ -10965,6 +10965,24 @@ paths:
       responses:
         '201': {description: Pedidos cobrados con un solo cambio}
         '422': {description: Efectivo insuficiente o nada por cobrar}
+  /api/nightclubs/{nightclubId}/tables/monitor:
+    get:
+      operationId: tablesMonitor
+      summary: Todas las mesas con estado, personas, tiempo y consumo (gerente/admin)
+      parameters:
+        - {name: nightclubId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: 'Mesas VIP primero, con lo consumido desde que se ocuparon'}
+  /api/nightclubs/{nightclubId}/tables/{tableId}/history:
+    get:
+      operationId: tableHistory
+      summary: Ocupaciones de una mesa con lo consumido en cada una (gerente/admin)
+      parameters:
+        - {name: nightclubId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: tableId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: hours, in: query, schema: {type: integer, minimum: 1, maximum: 744, default: 18}}
+      responses:
+        '200': {description: 'Ocupaciones, de la más reciente a la más antigua'}
   /api/nightclubs/{nightclubId}/till/open:
     post:
       operationId: openTill
