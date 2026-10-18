@@ -12215,6 +12215,44 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/nightclubs/{nightclubId}/print-agents/cleanup:
+    post:
+      operationId: cleanupPrintDevices
+      tags: [Impresión]
+      summary: Limpiar equipos — dejar en la lista solo lo que funciona (D125)
+      description: |
+        Requiere rol `manager` o `admin`. En una sola transacción, y queda en `audit_log`
+        como `printing.cleanup`:
+
+        - Apaga las PCs repetidas (mismo nombre de máquina, sin impresora activa, con
+          otra activa de ese nombre).
+        - Cancela los papeles pendientes de impresoras apagadas.
+        - **Borra** las impresoras y PCs apagadas que no tienen historia.
+        - Las apagadas con historia (papeles impresos, código de alta usado) no se
+          pueden borrar (D31, D56): quedan archivadas y se cuentan en `archived`.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Qué se hizo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cleanup:
+                    type: object
+                    properties:
+                      duplicates_disabled: { type: integer }
+                      jobs_cancelled: { type: integer }
+                      printers_deleted: { type: integer }
+                      agents_deleted: { type: integer }
+                      archived:
+                        type: object
+                        properties:
+                          agents: { type: integer }
+                          printers: { type: integer }
+        '403': { description: Solo gerente o admin }
   /api/nightclubs/{nightclubId}/print-agents/scan:
     post:
       operationId: scanForPrinters

@@ -73,6 +73,8 @@
   // decide que una PC se murió con un trabajo en la mano.
   const printing = {
     printers: [], agents: [], jobs: [], settings: null, staleMinutes: 2, health: [], zones: [],
+    // Lo apagado se archiva y no se enseña (D125), salvo que el gerente lo pida.
+    showArchived: false,
     // La búsqueda de impresoras (D55). `scanUntil` es hasta cuándo se sigue
     // preguntando por el resultado: el que busca es el agente, en el club, y tarda.
     scanUntil: 0,
@@ -2253,7 +2255,7 @@
   });
 
   function renderPrintersList() {
-    const lista = printing.printers || [];
+    const lista = (printing.printers || []).filter((p) => p.active || printing.showArchived);
     $('prn-empty').hidden = lista.length > 0;
     const caja = $('prn-list');
     caja.innerHTML = '';
@@ -2565,8 +2567,9 @@
   }
 
   function renderPrintAgents() {
-    const lista = printing.agents || [];
+    const lista = (printing.agents || []).filter((a) => a.active || printing.showArchived);
     $('prn-agents-empty').hidden = lista.length > 0;
+    renderArchivedToggle();
     const caja = $('prn-agents');
     caja.innerHTML = '';
     for (const a of lista) {
@@ -2844,6 +2847,37 @@
    * teclee. Copiar un token de 48 caracteres desde aquí hasta la barra —por WhatsApp,
    * por un papel— era donde se rompía la instalación.
    */
+  /** Cuántas PCs e impresoras apagadas hay, y el botón para verlas (D125). */
+  function renderArchivedToggle() {
+    const boton = $('btn-prn-archived');
+    if (!boton) return;
+    const n = (printing.agents || []).filter((a) => !a.active).length
+      + (printing.printers || []).filter((p) => !p.active).length;
+    boton.hidden = n === 0;
+    boton.textContent = t(printing.showArchived ? 'prn.archivedHide' : 'prn.archivedShow', { n });
+  }
+  $('btn-prn-archived').onclick = () => {
+    printing.showArchived = !printing.showArchived;
+    renderPrintersList();
+    renderPrintAgents();
+  };
+
+  // "Limpiar equipos" (D125): deja en la lista solo lo que funciona.
+  $('btn-prn-cleanup').onclick = async () => {
+    if (!(await ask(t('prn.cleanupConfirm')))) return;
+    const listo = ocupado($('btn-prn-cleanup'), 'prn.saving');
+    try {
+      const { cleanup: r } = await api.post(`/nightclubs/${clubId()}/print-agents/cleanup`, {});
+      listo();
+      toast(t('prn.cleanupDone', {
+        deleted: r.agents_deleted + r.printers_deleted,
+        cancelled: r.jobs_cancelled,
+        archived: r.archived.agents + r.archived.printers,
+      }), 'ok');
+      await loadPrinting();
+    } catch (err) { listo(); showError(err); }
+  };
+
   $('btn-agent-add').onclick = async () => {
     const listo = ocupado($('btn-agent-add'), 'prn.saving');
     try {
@@ -2946,7 +2980,7 @@
     const caja = $('stn-list');
     if (!caja) return;
     caja.innerHTML = '';
-    const lista = (printing.agents || []).filter((a) => a.station);
+    const lista = (printing.agents || []).filter((a) => a.station && a.active);
     for (const a of lista) {
       const st = a.station;
       const card = document.createElement('div');

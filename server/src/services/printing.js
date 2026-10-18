@@ -524,6 +524,20 @@ async function createInvite(runner, {
 }
 
 /**
+ * La PC del club que ya tiene este nombre de máquina, si hay (D125): la activa primero
+ * y, entre iguales, la que se vio más recientemente.
+ */
+async function reusableAgent(runner, nightclubId, hostname) {
+  const { rows } = await runner.query(
+    `SELECT id::text AS id FROM print_agents
+      WHERE nightclub_id = $1 AND lower(hostname) = lower($2::text)
+      ORDER BY active DESC, last_seen_at DESC NULLS LAST, created_at DESC
+      LIMIT 1 FOR UPDATE`,
+    [nightclubId, hostname]);
+  return rows[0] || null;
+}
+
+/**
  * Canjea un código y crea la PC.
  *
  * Devuelve el token de esa PC **una sola vez**, igual que antes: lo que cambió es
@@ -556,6 +570,41 @@ async function redeemInvite(client, { code, hostname, version = null, ip = null 
 
   const nombre = String(hostname || '').trim().slice(0, 60) || `PC ${invite.id.slice(0, 4)}`;
   const token = newToken();
+
+  // Reinstalar una PC la REEMPLAZA (D125). Antes cada código creaba otra PC con el
+  // mismo nombre de Windows —"COVER (2)", "(3)", "(4)"…— y la vieja se quedaba con su
+  // impresora, bloqueando a la nueva. Ahora, si el club ya tiene una PC con ese nombre
+  // de máquina, se reusa ese mismo registro: token nuevo, barra y estación nuevas, y
+  // las demás PCs con ese nombre quedan apagadas. El token viejo deja de servir, que
+  // es lo correcto: es la misma máquina y ya trae el nuevo.
+  const reusable = hostname ? await reusableAgent(client, invite.nightclub_id, nombre) : null;
+  if (reusable) {
+    const { rows: hecho } = await client.query(
+      `UPDATE print_agents
+          SET token_hash = $2, token_hint = $3, hostname = $4::text, agent_version = $5::text,
+              active = true, paired_at = now(),
+              paired_by = (SELECT created_by FROM print_agent_invites WHERE id = $6),
+              scan_requested_at = now(), scan_at = NULL, scan_result = NULL, scan_error = NULL,
+              location_id = $7::uuid, purpose = $8::text, station = $9::jsonb, updated_at = now()
+        WHERE id = $1
+        RETURNING id::text AS id, name,
+                  location_id::text AS location_id, purpose, station,
+                  (SELECT l.name FROM supply_locations l WHERE l.id = print_agents.location_id)
+                    AS location_name`,
+      [reusable.id, hashToken(token), token.slice(-6), nombre, version, invite.id,
+        invite.location_id, invite.purpose,
+        invite.station ? JSON.stringify(invite.station) : null]);
+    await client.query(
+      `UPDATE print_agents SET active = false, updated_at = now()
+        WHERE nightclub_id = $1 AND id <> $2 AND active AND lower(hostname) = lower($3::text)`,
+      [invite.nightclub_id, reusable.id, nombre]);
+    await client.query(
+      `UPDATE print_agent_invites
+          SET used_at = now(), used_agent_id = $2, used_ip = $3::text
+        WHERE id = $1`,
+      [invite.id, reusable.id, ip]);
+    return { agent: hecho[0], token, nightclubId: invite.nightclub_id, replaced: true };
+  }
 
   // El nombre viene de la PC, así que dos PCs con el mismo nombre de Windows chocarían
   // contra el índice único. Se desempata en vez de fallar: quien está parado en la
@@ -640,7 +689,7 @@ async function createAgent(runner, { nightclubId, name, createdBy }) {
 
 async function listAgents(runner, { nightclubId }) {
   const { rows } = await runner.query(
-    `SELECT id::text AS id, name, token_hint, last_seen_at, agent_version, active, created_at,
+    `SELECT id::text AS id, name, hostname, token_hint, last_seen_at, agent_version, active, created_at,
             scan_requested_at, scan_at, scan_result, scan_error,
             location_id::text AS location_id, purpose, station,
             -- El nombre de la barra viaja resuelto: la pantalla enseña "Barra de
@@ -932,6 +981,23 @@ const STATION_PURPOSES = ['orders', 'service', 'till', 'door'];
 const VIRTUAL_PORT = /^(PORTPROMPT|FILE|NUL|XPSPORT|SHRFAX|WSD|TS\d|MICROSOFT|NE\d)/i;
 const VIRTUAL_NAME = /(pdf|xps|onenote|fax|anydesk|teamviewer|rustdesk|snagit|send to|virtual|print to file)/i;
 const USB_PORT = /^(USB|ESDPRT|TMUSB|BIXOLON|EPUSB|STAR|ESC)/i;
+// Cómo se llaman las térmicas de tickets en Windows (D125). Sirve para escoger sola
+// cuando una PC ve, por ejemplo, la térmica de la caja y una de tinta de la oficina.
+const THERMAL_NAME = /(xprinter|\bxp-|\btm-|\btm\s|epson tm|\bpos[-\s]?\d|\bpos\b|thermal|t[ée]rmica|receipt|ticket|bixolon|\bsrp-|star tsp|\btsp\d|sewoo|3nstar|ec-?line|\b80\s?mm|\b58\s?mm)/i;
+
+/**
+ * Cuál de varias impresoras es la de esta estación, cuando se puede saber sin
+ * preguntar (D125). Primero la que el club ya usaba para esa caja (reinstalar no debe
+ * volver a preguntar); si no, la única que tiene nombre de térmica. Si no se puede
+ * saber, `null` y se le pregunta al gerente, como antes.
+ */
+function pickStationPrinter(candidatos, preferidos = []) {
+  const quiero = new Set(preferidos.filter(Boolean).map((n) => String(n).toLowerCase()));
+  const yaUsada = candidatos.filter((c) => quiero.has(String(c.name).toLowerCase()));
+  if (yaUsada.length === 1) return yaUsada[0];
+  const termicas = candidatos.filter((c) => THERMAL_NAME.test(c.name));
+  return termicas.length === 1 ? termicas[0] : null;
+}
 
 /**
  * Las impresoras de esta PC que pueden ser la térmica de la estación.
@@ -1008,9 +1074,21 @@ async function registerStationPrinter(runner, {
   const needsLocation = st.purpose !== 'door';
   const { rows: clubRows } = await runner.query('SELECT name FROM nightclubs WHERE id = $1',
     [agent.nightclub_id]);
+  const nuevoNombre = String(st.name || windowsName || (network && network.name) || 'Caja').slice(0, 60);
+  // La estación nueva toma el lugar de la vieja (D125) en vez de bloquearse con
+  // "apágala y vuelve a buscar": se apagan las que chocarían y, cuando la nueva ya
+  // existe, sus papeles pendientes pasan a ella.
   await runner.query('SAVEPOINT station_printer');
   let printer;
+  let reemplazadas = [];
   try {
+    // Dentro del SAVEPOINT: si el alta de la nueva falla, la vieja vuelve a quedar como
+    // estaba en vez de dejar la caja sin impresora.
+    reemplazadas = await displacedPrinters(runner, {
+      nightclubId: agent.nightclub_id,
+      locationId: needsLocation ? agent.location_id : null,
+      purpose: st.purpose, name: nuevoNombre, agentId: network ? null : agent.id,
+    });
     // Una de red la imprime cualquier PC del club (no se ata al agente); una USB solo
     // la PC donde está conectada.
     const { rows } = await runner.query(
@@ -1021,7 +1099,7 @@ async function registerStationPrinter(runner, {
                80,$9,'CP850',true,$10::uuid,$11)
        RETURNING id::text AS id`,
       [agent.nightclub_id, needsLocation ? agent.location_id : null,
-        String(st.name || windowsName || (network && network.name) || 'Caja').slice(0, 60),
+        nuevoNombre,
         st.purpose, network ? 'network' : 'windows', network ? null : windowsName,
         network ? network.host : null, network ? network.tcp_port : 9100,
         columnsFor(80), network ? null : agent.id, st.drawer_pin || null]);
@@ -1041,6 +1119,7 @@ async function registerStationPrinter(runner, {
     }
     throw err;
   }
+  await moveJobs(runner, { nightclubId: agent.nightclub_id, fromIds: reemplazadas, to: printer });
   await enqueueTest(runner, {
     nightclubId: agent.nightclub_id,
     printer,
@@ -1059,7 +1138,122 @@ async function registerStationPrinter(runner, {
       createdBy: createdBy || null,
     });
   }
-  return { status: 'done', message: null, printer_id: printer.id, candidates: null };
+  return {
+    status: 'done', message: null, printer_id: printer.id, candidates: null,
+    replaced: reemplazadas.length,
+  };
+}
+
+/**
+ * Las impresoras que la estación nueva desplaza (D125), ya apagadas.
+ *
+ * Son las activas del mismo lugar y uso, la activa con el mismo nombre, y las USB que
+ * esta PC tenía antes (la estación es UNA impresora por PC: reinstalarla cambia cuál).
+ * Una apagada con el mismo nombre se renombra, porque el nombre es único en el club
+ * aunque esté apagada, y eso era lo que hacía fallar el "COVER" de la segunda vez.
+ */
+async function displacedPrinters(runner, { nightclubId, locationId, purpose, name, agentId }) {
+  const { rows } = await runner.query(
+    `UPDATE printers SET active = false, updated_at = now()
+      WHERE nightclub_id = $1 AND active
+        AND ( ($2::uuid IS NOT NULL AND location_id = $2::uuid AND purpose = $3::text)
+           OR lower(name) = lower($4::text)
+           OR ($5::uuid IS NOT NULL AND agent_id = $5::uuid AND connection = 'windows') )
+      RETURNING id::text AS id`,
+    [nightclubId, locationId, purpose, name, agentId]);
+  await runner.query(
+    `UPDATE printers
+        SET name = left(name, 40) || ' (baja ' || to_char(now(), 'YYMMDD-HH24MISS') || ')',
+            updated_at = now()
+      WHERE nightclub_id = $1 AND NOT active AND lower(name) = lower($2::text)`,
+    [nightclubId, name]);
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Pasa los papeles que esperaban en impresoras apagadas a la que las reemplaza.
+ *
+ * Un trabajo no cambia de impresora (el gatillo de print_jobs lo prohíbe, D31): se
+ * marca fallido con el motivo y se encola una copia, igual que el desvío por falla. El
+ * pulso del cajón y la hoja de prueba no se pasan: eran de la caja vieja.
+ */
+async function moveJobs(runner, { nightclubId, fromIds, to }) {
+  if (!fromIds.length) return 0;
+  const { rows } = await runner.query(
+    `UPDATE print_jobs
+        SET status = 'failed', last_error = $3, taken_at = NULL
+      WHERE nightclub_id = $1 AND printer_id = ANY($2::uuid[]) AND status IN ('pending', 'taken')
+      RETURNING id, kind, ref_id::text AS ref_id, copies, payload, preview, printer_id::text AS printer_id`,
+    [nightclubId, fromIds, to ? `Impresora reemplazada por ${to.name}` : 'Impresora dada de baja']);
+  if (!to) return 0;
+  let n = 0;
+  for (const job of rows) {
+    if (job.kind === 'drawer' || job.kind === 'test') continue;
+    await enqueue(runner, {
+      nightclubId, printer: to, kind: job.kind, refId: job.ref_id, copies: job.copies,
+      payload: job.payload, preview: job.preview, reroutedFrom: job.printer_id,
+    });
+    n += 1;
+  }
+  return n;
+}
+
+/**
+ * "Limpiar equipos" (D125): deja en la lista solo lo que funciona.
+ *
+ * - Cancela los papeles que esperaban en impresoras apagadas (nunca iban a salir).
+ * - Apaga las PCs repetidas: misma máquina, sin impresora activa, cuando hay otra
+ *   activa con su nombre (lo que dejaba cada reinstalación).
+ * - BORRA lo apagado que no tiene historia. Lo que sí la tiene —papeles impresos o
+ *   el código con que se dio de alta— no se puede borrar (D31, D56): queda archivado,
+ *   fuera de la vista, y no estorba porque ya no choca con nada.
+ */
+async function cleanupDevices(runner, { nightclubId }) {
+  const { rows: rep } = await runner.query(
+    `UPDATE print_agents a SET active = false, updated_at = now()
+      WHERE a.nightclub_id = $1 AND a.active AND a.hostname IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM printers p WHERE p.agent_id = a.id AND p.active)
+        AND EXISTS (SELECT 1 FROM print_agents b
+                     WHERE b.nightclub_id = a.nightclub_id AND b.id <> a.id AND b.active
+                       AND lower(b.hostname) = lower(a.hostname)
+                       AND (EXISTS (SELECT 1 FROM printers q WHERE q.agent_id = b.id AND q.active)
+                            OR b.last_seen_at > a.last_seen_at OR a.last_seen_at IS NULL))
+      RETURNING a.id`,
+    [nightclubId]);
+  const { rows: cancel } = await runner.query(
+    `UPDATE print_jobs j
+        SET status = 'failed', last_error = 'Cancelado: la impresora está dada de baja', taken_at = NULL
+       FROM printers p
+      WHERE p.id = j.printer_id AND j.nightclub_id = $1 AND NOT p.active
+        AND j.status IN ('pending', 'taken')
+      RETURNING j.id`,
+    [nightclubId]);
+  const { rows: imps } = await runner.query(
+    `DELETE FROM printers p
+      WHERE p.nightclub_id = $1 AND NOT p.active
+        AND NOT EXISTS (SELECT 1 FROM print_jobs j WHERE j.printer_id = p.id OR j.rerouted_from = p.id)
+        AND NOT EXISTS (SELECT 1 FROM printers f WHERE f.fallback_id = p.id AND f.active)
+      RETURNING p.id`,
+    [nightclubId]);
+  const { rows: pcs } = await runner.query(
+    `DELETE FROM print_agents a
+      WHERE a.nightclub_id = $1 AND NOT a.active
+        AND NOT EXISTS (SELECT 1 FROM print_agent_invites i WHERE i.used_agent_id = a.id)
+        AND NOT EXISTS (SELECT 1 FROM print_jobs j WHERE j.taken_by = a.id)
+        AND NOT EXISTS (SELECT 1 FROM printers p WHERE p.agent_id = a.id)
+      RETURNING a.id`,
+    [nightclubId]);
+  const { rows: quedan } = await runner.query(
+    `SELECT (SELECT count(*)::int FROM print_agents WHERE nightclub_id = $1 AND NOT active) AS agents,
+            (SELECT count(*)::int FROM printers WHERE nightclub_id = $1 AND NOT active) AS printers`,
+    [nightclubId]);
+  return {
+    duplicates_disabled: rep.length,
+    jobs_cancelled: cancel.length,
+    printers_deleted: imps.length,
+    agents_deleted: pcs.length,
+    archived: quedan[0],
+  };
 }
 
 /**
@@ -1093,14 +1287,25 @@ async function applyStation(runner, { agentId }) {
         + 'su cable USB o de red y su driver instalado, y pulsa Buscar de nuevo.',
     });
   }
-  if (candidatos.length > 1) {
+  let elegida = candidatos.length === 1 ? candidatos[0] : null;
+  if (!elegida) {
+    // La que el club ya usaba en esta PC o para esta caja, o la única térmica (D125).
+    const { rows: antes } = await runner.query(
+      `SELECT windows_name FROM printers
+        WHERE nightclub_id = $1 AND windows_name IS NOT NULL
+          AND (agent_id = $2::uuid OR (location_id = $3::uuid AND purpose = $4::text))
+        ORDER BY active DESC, updated_at DESC LIMIT 5`,
+      [agent.nightclub_id, agent.id, agent.location_id, (agent.station || {}).purpose || null]);
+    elegida = pickStationPrinter(candidatos, antes.map((r) => r.windows_name));
+  }
+  if (!elegida) {
     return setStation(runner, agent.id, {
       status: 'choose', candidates: candidatos.slice(0, 8),
       message: 'Esta PC ve varias impresoras. Escoge cuál es la de tickets.',
     });
   }
   const hecho = await registerStationPrinter(runner, {
-    agent, windowsName: candidatos[0].name, createdBy: agent.paired_by,
+    agent, windowsName: elegida.name, createdBy: agent.paired_by,
   });
   return setStation(runner, agent.id, hecho);
 }
@@ -1149,4 +1354,5 @@ module.exports = {
   newInviteCode, prettyCode, normalizeCode, hashCode,
   createInvite, redeemInvite, countFailedPairing, openInvites,
   STATION_PURPOSES, stationCandidates, stationNetworkCandidates, applyStation, finishStation,
+  pickStationPrinter, cleanupDevices,
 };

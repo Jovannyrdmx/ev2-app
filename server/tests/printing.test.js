@@ -662,13 +662,15 @@ describe('Dar de alta una PC sin copiar un token (D56)', () => {
     expect((await emparejar(invite.code)).status).toBe(403);
   });
 
-  it('dos PCs con el mismo nombre de Windows no se pisan', async () => {
+  it('el mismo nombre de Windows es la misma PC: se reemplaza, no se duplica (D125)', async () => {
     const a = await emparejar((await nuevoCodigo()).code, 'DESKTOP-PC');
     const b = await emparejar((await nuevoCodigo()).code, 'DESKTOP-PC');
     expect(a.status).toBe(201);
     expect(b.status).toBe(201);
-    // Quien está parado en la barra no puede resolver un choque de nombres.
-    expect(b.body.agent.name).not.toBe(a.body.agent.name);
+    // Antes nacía "DESKTOP-PC (2)" y la vieja se quedaba con la impresora. Ahora es la
+    // misma PC con token nuevo; dos máquinas distintas deben tener nombres distintos.
+    expect(b.body.agent.id).toBe(a.body.agent.id);
+    expect(b.body.agent.name).toBe('DESKTOP-PC');
   });
 
   it('queda constancia de cómo entró esa PC, y no se puede reescribir', async () => {

@@ -1356,8 +1356,12 @@
         <div class="card rounded-xl p-4 space-y-3">
           <div class="flex items-center justify-between gap-2">
             <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.agents">PCs que imprimen</p>
-            <button id="btn-agent-add" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.agentAdd">Nueva PC</button>
+            <div class="flex items-center gap-2">
+              <button id="btn-prn-cleanup" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.cleanup">Limpiar equipos</button>
+              <button id="btn-agent-add" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.agentAdd">Nueva PC</button>
+            </div>
           </div>
+          <button id="btn-prn-archived" class="text-[11px] text-white/50 underline" hidden></button>
           <p class="text-[11px] text-white/40" data-i18n="prn.agentsWhy">El servidor no alcanza las impresoras del club: un programa en una PC de barra las alcanza por él. Con dos, si apagan una la otra sigue sacando todo el papel.</p>
           <!-- La barra y el papel de la PC se escogen ANTES del código (D80). -->
           <div class="flex gap-2">

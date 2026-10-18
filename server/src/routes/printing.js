@@ -840,6 +840,33 @@ router.post('/nightclubs/:nightclubId/print-agents/scan',
   }));
 
 /**
+ * "Limpiar equipos" (D125): un botón para que la lista enseñe solo lo que funciona.
+ * Ver `printing.cleanupDevices` para qué se borra y qué solo se archiva.
+ */
+router.post('/nightclubs/:nightclubId/print-agents/cleanup',
+  requireRole(...MANAGE),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const client = await pool.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      result = await printing.cleanupDevices(client, { nightclubId: req.params.nightclubId });
+      await client.query(
+        `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
+         VALUES ($1, $2, 'printing.cleanup', 'print_agents', NULL, $3::jsonb, $4)`,
+        [req.params.nightclubId, req.user.id, JSON.stringify(result), req.ip || null]);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    res.json({ cleanup: result });
+  }));
+
+/**
  * Prender/apagar una PC, y decirle a qué barra atiende (D61).
  *
  * Los dos campos son opcionales y se pueden mandar juntos o por separado. `area` con

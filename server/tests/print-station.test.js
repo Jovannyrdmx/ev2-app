@@ -201,16 +201,21 @@ describe('El registro automático', () => {
     expect(res.status).toBe(403);
   });
 
-  it('si ya hay una impresora para ese uso en ese lugar, no la pisa y lo dice', async () => {
+  it('si ya hay una impresora para ese uso en ese lugar, la nueva toma su lugar (D125)', async () => {
     await api().post(url('/printers')).set(auth(manager)).send({
       location_id: club.bar_id, name: 'Vieja', purpose: 'till', connection: 'network', host: '192.168.1.9',
     });
     const agent = await canjear(await pedirCodigo(estacionCaja));
     await barrer(agent, [termica]);
     const st = await estacionDe(agent);
-    expect(st.status).toBe('blocked');
-    expect(st.message).toMatch(/Ya hay una impresora/);
-    expect((await pool.query('SELECT 1 FROM printers WHERE nightclub_id = $1', [club.id])).rowCount).toBe(1);
+    expect(st.status).toBe('done');
+    expect(st.replaced).toBe(1);
+    const { rows } = await pool.query(
+      'SELECT name, active FROM printers WHERE nightclub_id = $1 ORDER BY name', [club.id]);
+    expect(rows).toEqual([
+      { name: 'Caja barra baja', active: true },
+      { name: 'Vieja', active: false },
+    ]);
   });
 
   it('una PC sin estación no registra nada sola', async () => {
