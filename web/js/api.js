@@ -116,7 +116,9 @@
    */
   function shouldRetry(method, status) {
     if (method !== 'GET' && method !== 'HEAD') return false;
-    return status === null || status === 502 || status === 503 || status === 504 || status === 429;
+    // 429 NO se reintenta: el servidor dijo "ya fueron muchas" y la ventana dura un
+    // minuto, así que reintentar a los 600 ms solo suma peticiones al mismo atasco.
+    return status === null || status === 502 || status === 503 || status === 504;
   }
 
   function createClient(options) {
