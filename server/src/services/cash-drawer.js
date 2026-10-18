@@ -57,6 +57,17 @@ async function doorPrinter(runner, { nightclubId, locationId = null }) {
 }
 
 /**
+ * La impresora con cajón de una caja abierta (D122): la de su barra, o la de Cover si
+ * la caja es la de la puerta. `caja` es el turno con `location_id` y `location_kind`.
+ */
+function printerForTill(runner, { nightclubId, caja }) {
+  if (!caja || !caja.location_id) return Promise.resolve(null);
+  return caja.location_kind === 'door'
+    ? doorPrinter(runner, { nightclubId, locationId: caja.location_id })
+    : tillPrinter(runner, { nightclubId, locationId: caja.location_id });
+}
+
+/**
  * Qué le dice la pantalla a quien cobra:
  *   `queued`      — el pulso va en camino;
  *   `no_drawer`   — esa caja no tiene cajón configurado (o no tiene impresora);
@@ -87,4 +98,6 @@ async function open(client, { nightclubId, printer, reason, refId = null, create
   return status(job, printer);
 }
 
-module.exports = { CASH_METHODS, opensDrawer, tillPrinter, doorPrinter, open, status };
+module.exports = {
+  CASH_METHODS, opensDrawer, tillPrinter, doorPrinter, printerForTill, open, status,
+};

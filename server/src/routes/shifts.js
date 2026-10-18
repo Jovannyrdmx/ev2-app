@@ -156,7 +156,7 @@ router.post('/nightclubs/:nightclubId/shifts/me/cash-drops',
     });
 
     const client = await pool.connect();
-    let hecho;
+    let hecho; let drawer = null;
     try {
       await client.query('BEGIN');
       hecho = await cuts.withdraw(client, {
@@ -168,6 +168,15 @@ router.post('/nightclubs/:nightclubId/shifts/me/cash-drops',
         authorizer: autoriza,
         role: req.user.role,
       });
+      // De una caja (D122): el cajón se abre solo para sacar el dinero.
+      if (shift.location_id) {
+        const caja = await till.openTill(client, { nightclubId, userId: req.user.id });
+        const printer = await cashDrawer.printerForTill(client, { nightclubId, caja });
+        drawer = await cashDrawer.open(client, {
+          nightclubId, printer, refId: hecho.id, createdBy: req.user.id,
+          reason: `retiro de efectivo ${hecho.amount} ${hecho.currency}`,
+        });
+      }
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -202,6 +211,7 @@ router.post('/nightclubs/:nightclubId/shifts/me/cash-drops',
     });
     res.status(201).json({
       withdrawal: hecho,
+      drawer,
       ticket: ticket ? { job_id: ticket.id, status: ticket.status } : null,
     });
   }));
@@ -316,6 +326,16 @@ router.post('/nightclubs/:nightclubId/till/open',
           authorized_by: autoriza.id,
           attached_to_shift: abierta.attachedToShift,
         }), req.ip || null]);
+      // El fondo entra al cajón (D122): se abre solo, si hay fondo que meter.
+      if (Number(abierta.openingFloat) > 0 || Number(abierta.openingFloatUsd) > 0) {
+        const printer = await cashDrawer.printerForTill(client, {
+          nightclubId, caja: abierta.location,
+        });
+        abierta.drawer = await cashDrawer.open(client, {
+          nightclubId, printer, refId: abierta.shiftId, createdBy: req.user.id,
+          reason: 'apertura de caja: fondo',
+        });
+      }
       // Si es la caja de Cover, las demás anfitrionas también se enteran: desde ese
       // momento ellas escanean y no cobran (D118).
       const puerta = abierta.location.location_kind === 'door';
@@ -341,7 +361,10 @@ router.post('/nightclubs/:nightclubId/till/open',
     } finally {
       client.release();
     }
-    res.status(201).json(await till.state(pool, { nightclubId, user: req.user }));
+    res.status(201).json({
+      ...(await till.state(pool, { nightclubId, user: req.user })),
+      drawer: abierta.drawer || null,
+    });
   }));
 
 /**
@@ -623,9 +646,7 @@ router.post('/nightclubs/:nightclubId/cash-drawer/open',
 // ---------------------------------------------------------------- entrada de efectivo (D122)
 
 /** La impresora con cajón de una caja abierta: la de la barra o la de Cover. */
-const drawerPrinterOf = (runner, { nightclubId, caja }) => (caja.location_kind === 'door'
-  ? cashDrawer.doorPrinter(runner, { nightclubId, locationId: caja.location_id })
-  : cashDrawer.tillPrinter(runner, { nightclubId, locationId: caja.location_id }));
+const drawerPrinterOf = (runner, { nightclubId, caja }) => cashDrawer.printerForTill(runner, { nightclubId, caja });
 
 /**
  * Meter efectivo a la caja abierta (D122): reponer fondo o traer cambio a media noche.
@@ -935,7 +956,7 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
     });
 
     const client = await pool.connect();
-    let hecho;
+    let hecho; let drawerCorte = null;
     try {
       await client.query('BEGIN');
       hecho = await cuts.close(client, {
@@ -950,6 +971,18 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
         acknowledgePending: req.body.acknowledge_pending,
         countedUsd: req.body.counted_usd ?? null,
       });
+      // El corte de una caja (D122): se abre el cajón para entregar todo el efectivo.
+      if (shift.location_id) {
+        const { rows: lugar } = await client.query(
+          'SELECT kind FROM supply_locations WHERE id = $1', [shift.location_id]);
+        const printer = await cashDrawer.printerForTill(client, {
+          nightclubId, caja: { location_id: shift.location_id, location_kind: lugar[0] && lugar[0].kind },
+        });
+        drawerCorte = await cashDrawer.open(client, {
+          nightclubId, printer, refId: hecho.id, createdBy: req.user.id,
+          reason: 'corte de caja: entrega del efectivo',
+        });
+      }
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -998,6 +1031,7 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
     const { rows } = await pool.query(`${CLOSING_SELECT} WHERE c.id = $1`, [hecho.id]);
     res.status(201).json({
       closing: rows[0],
+      drawer: drawerCorte,
       ticket: ticket ? { job_id: ticket.id, status: ticket.status } : null,
     });
   }));

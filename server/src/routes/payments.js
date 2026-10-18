@@ -12,6 +12,7 @@ const { ApiError, asyncHandler } = require('../middleware/errors');
 const { validate, z, uuid, currency, pagination } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const till = require('../services/till');
+const cashDrawer = require('../services/cash-drawer');
 const payments = require('../services/payments');
 const manualVoucher = require('../services/manual-voucher');
 const events = require('../services/events');
@@ -580,8 +581,18 @@ router.post('/nightclubs/:nightclubId/manual-payments/register',
       const settled = await payments.settle(client, {
         payment: created, reviewerId: req.user.id, nightclubId,
       });
+      // Efectivo en una caja (D96, D122): el cajón se abre solo para guardar el dinero,
+      // en la misma transacción que asienta el cobro.
+      let drawer = null;
+      if (caja && cashDrawer.opensDrawer(b.method)) {
+        const printer = await cashDrawer.printerForTill(client, { nightclubId, caja });
+        drawer = await cashDrawer.open(client, {
+          nightclubId, printer, refId: tx.id, createdBy: req.user.id,
+          reason: `cobro en efectivo ${created.amount} ${created.currency || ''}`.trim(),
+        });
+      }
       await client.query('COMMIT');
-      outcome = { payment: created, ...settled };
+      outcome = { payment: created, ...settled, drawer };
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       throw err;
@@ -597,6 +608,7 @@ router.post('/nightclubs/:nightclubId/manual-payments/register',
       // El papel del cobro (D79): null si no hay a dónde mandarlo, para que la pantalla
       // lo diga en vez de dejar al cajero buscando un recibo que no va a salir.
       receipt: outcome.receipt ? { job_id: outcome.receipt.id, status: outcome.receipt.status } : null,
+      drawer: outcome.drawer,
     });
   }));
 

@@ -239,3 +239,56 @@ describe('Copia de recibo para el cajero (D122)', () => {
     expect(lista.body.receipts).toHaveLength(0);
   });
 });
+
+describe('El cajón se abre cuando entra o sale efectivo (D122)', () => {
+  const pulsos = async () => (await jobs('drawer')).map((j) => j.preview);
+
+  it('al retirar efectivo de la caja', async () => {
+    const res = await api().post(url('/shifts/me/cash-drops')).set(auth(cajero))
+      .send({ amount: 300, reason: 'Para el banco', manager_pin: pinGerente });
+    expect(res.status).toBe(201);
+    expect(res.body.drawer.status).toBe('queued');
+    expect(await pulsos()).toEqual([expect.stringContaining('retiro de efectivo 300.00 MXN')]);
+  });
+
+  it('al cerrar el corte, para entregar el efectivo', async () => {
+    const res = await declareAndClose(club.id, cajero, {
+      declared_cash: 1000, counted_cash: 1000, manager_pin: pinGerente,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.drawer.status).toBe('queued');
+    expect(await pulsos()).toEqual([expect.stringContaining('corte de caja')]);
+  });
+
+  it('al registrar un cobro en efectivo; con tarjeta no', async () => {
+    const pedir = () => api().post(url('/orders')).set(auth(waiter)).send({
+      client_request_id: randomUUID(), table_id: table.id, items: [{ drink_id: beer.id, quantity: 1 }],
+    });
+    const efectivo = (await pedir()).body.order;
+    const res = await api().post(url('/manual-payments/register')).set(auth(cajero))
+      .send({ transaction_id: efectivo.transaction_id, method: 'cash', amount: 60, currency: 'MXN' });
+    expect(res.status).toBe(201);
+    expect(res.body.drawer.status).toBe('queued');
+    expect(await pulsos()).toHaveLength(1);
+
+    // Con la terminal no hay nada que guardar en el cajón.
+    const { voucherAuth } = require('./helpers/voucher');
+    const tarjeta = (await pedir()).body.order;
+    const conTarjeta = await api().post(url('/manual-payments/register')).set(auth(cajero)).send({
+      transaction_id: tarjeta.transaction_id, method: 'card_terminal', amount: 60, currency: 'MXN',
+      reference: 'VCH-1', ...(await voucherAuth(club.id)),
+    });
+    expect(conTarjeta.status).toBe(201);
+    expect(conTarjeta.body.drawer).toBeNull();
+    expect(await pulsos()).toHaveLength(1);
+  });
+
+  it('una caja sin cajón configurado no encola pulsos y no falla', async () => {
+    await api().patch(url(`/printers/${impresora.id}`)).set(auth(manager)).send({ drawer_pin: null });
+    const res = await api().post(url('/shifts/me/cash-drops')).set(auth(cajero))
+      .send({ amount: 100, reason: 'Para el banco', manager_pin: pinGerente });
+    expect(res.status).toBe(201);
+    expect(res.body.drawer.status).toBe('no_drawer');
+    expect(await pulsos()).toHaveLength(0);
+  });
+});

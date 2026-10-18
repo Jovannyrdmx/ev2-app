@@ -143,6 +143,20 @@ describe('Abrir la caja', () => {
     expect((await miCaja()).body.till).toBeNull();
   });
 
+  it('con fondo, el cajón se abre solo para meterlo (D122)', async () => {
+    await api().post(url('/printers')).set(auth(manager)).send({
+      location_id: club.bar_id, name: 'Caja PB', purpose: 'till', connection: 'network',
+      host: '192.168.1.80', drawer_pin: 2,
+    });
+    await asignar(cajero, club.bar_id);
+    const res = await abrirCaja({ opening_float: 800 });
+    expect(res.status).toBe(201);
+    expect(res.body.drawer.status).toBe('queued');
+    const { rows } = await pool.query(
+      `SELECT preview FROM print_jobs WHERE nightclub_id = $1 AND kind = 'drawer'`, [club.id]);
+    expect(rows.map((r) => r.preview)).toEqual([expect.stringContaining('apertura de caja')]);
+  });
+
   it('el PIN de alguien que no es gerente no autoriza el fondo', async () => {
     await asignar(cajero, club.bar_id);
     const pinMesero = await codigoDe(waiter);
