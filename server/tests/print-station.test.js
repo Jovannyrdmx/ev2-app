@@ -77,12 +77,23 @@ describe('Pedir el código de una estación', () => {
     expect(res.status).toBe(400);
   });
 
-  it('la puerta no lleva barra', async () => {
+  it('"puerta" ya no es un destino aparte: queda como la caja de Cover (D119)', async () => {
+    const cover = await f.coverOf(club.id);
     const res = await pedirCodigo({ name: 'Puerta', purpose: 'door', has_drawer: true },
       { location_id: null });
     expect(res.status).toBe(201);
-    expect(res.body.invite.location_id).toBeNull();
-    expect(res.body.invite.station.purpose).toBe('door');
+    expect(res.body.invite.location_id).toBe(cover);
+    expect(res.body.invite.station.purpose).toBe('till');
+  });
+
+  it('Cover se escoge como cualquier lugar, y solo lleva caja', async () => {
+    const cover = await f.coverOf(club.id);
+    const ok = await pedirCodigo({ name: 'Caja Cover', purpose: 'till', has_drawer: true },
+      { location_id: cover });
+    expect(ok.status).toBe(201);
+    const comandas = await pedirCodigo({ name: 'Cover', purpose: 'orders', has_drawer: false },
+      { location_id: cover });
+    expect(comandas.status).toBe(400);
   });
 
   it('un mesero no puede', async () => {
@@ -128,13 +139,15 @@ describe('El registro automático', () => {
     expect(p.rows[0].drawer_pin).toBeNull();
   });
 
-  it('en la puerta queda como impresora de puerta, sin barra', async () => {
+  it('la estación de Cover queda como la impresora de la caja de Cover, con su cajón', async () => {
+    const cover = await f.coverOf(club.id);
     const agent = await canjear(await pedirCodigo(
-      { name: 'Puerta', purpose: 'door', has_drawer: true }, { location_id: null }));
+      { name: 'Caja Cover', purpose: 'till', has_drawer: true }, { location_id: cover }));
     await barrer(agent, [termica]);
     const { rows } = await pool.query(
-      'SELECT purpose, location_id, drawer_pin FROM printers WHERE nightclub_id = $1', [club.id]);
-    expect(rows[0]).toMatchObject({ purpose: 'door', location_id: null, drawer_pin: 2 });
+      'SELECT purpose, location_id::text AS location_id, drawer_pin FROM printers WHERE nightclub_id = $1',
+      [club.id]);
+    expect(rows[0]).toMatchObject({ purpose: 'till', location_id: cover, drawer_pin: 2 });
   });
 
   it('con pin 5 lo respeta', async () => {
@@ -144,9 +157,9 @@ describe('El registro automático', () => {
     expect(rows[0].drawer_pin).toBe(5);
   });
 
-  it('sin ninguna impresora USB avisa qué revisar y se completa en el siguiente barrido', async () => {
+  it('sin ninguna impresora USB ni de red avisa qué revisar y se completa en el siguiente barrido', async () => {
     const agent = await canjear(await pedirCodigo(estacionCaja));
-    await barrer(agent, virtuales);
+    await barrer(agent, virtuales.filter((v) => v.kind !== 'network'));
     const st = await estacionDe(agent);
     expect(st.status).toBe('none');
     expect(st.message).toMatch(/USB/);
@@ -231,5 +244,70 @@ describe('El registro automático', () => {
     expect(cambia.body.printer.drawer_pin).toBe(5);
     const prueba = await api().post(url(`/printers/${id}/test-drawer`)).set(auth(manager));
     expect(prueba.status).toBe(202);
+  });
+});
+
+describe('Estación con impresora de red (D121)', () => {
+  const red = { kind: 'network', host: '192.168.1.60', port: 9100, model: 'XP-C260M' };
+  const otraRed = { kind: 'network', host: '192.168.1.61', port: 9100, model: null };
+
+  it('sin USB pregunta entre las de red; nunca registra una sola por su cuenta', async () => {
+    const agent = await canjear(await pedirCodigo(estacionCaja));
+    await barrer(agent, [...virtuales.filter((v) => v.kind !== 'network'), red]);
+    const st = await estacionDe(agent);
+    expect(st.status).toBe('choose');
+    expect(st.message).toMatch(/de red/);
+    expect(st.candidates).toEqual([expect.objectContaining({
+      name: 'XP-C260M', host: '192.168.1.60', tcp_port: 9100, network: true,
+    })]);
+    expect((await pool.query('SELECT 1 FROM printers WHERE nightclub_id = $1', [club.id])).rowCount).toBe(0);
+  });
+
+  it('el gerente escoge la de red: queda por red, sin atarse a la PC, con cajón, prueba y pulso', async () => {
+    const agent = await canjear(await pedirCodigo(estacionCaja));
+    await barrer(agent, [red, otraRed]);
+    const ok = await api().post(url(`/print-agents/${agent.id}/station/finish`))
+      .set(auth(manager)).send({ host: '192.168.1.60', port: 9100 });
+    expect(ok.status).toBe(200);
+    expect(ok.body.station.status).toBe('done');
+    const { rows } = await pool.query(
+      `SELECT connection, host, port, windows_name, agent_id, drawer_pin, purpose, location_id::text AS location_id
+         FROM printers WHERE nightclub_id = $1`, [club.id]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      connection: 'network', host: '192.168.1.60', port: 9100, windows_name: null,
+      agent_id: null, drawer_pin: 2, purpose: 'till', location_id: club.bar_id,
+    });
+    const { rows: trabajos } = await pool.query(
+      'SELECT kind FROM print_jobs WHERE nightclub_id = $1 ORDER BY kind', [club.id]);
+    expect(trabajos.map((j) => j.kind)).toEqual(['drawer', 'test']);
+  });
+
+  it('no deja escoger una de red que la PC no vio, ni una que el club ya tiene', async () => {
+    await api().post(url('/printers')).set(auth(manager)).send({
+      location_id: club.bar_id, name: 'Meseros', purpose: 'service', connection: 'network', host: '192.168.1.61',
+    });
+    const agent = await canjear(await pedirCodigo(estacionCaja));
+    await barrer(agent, [red, otraRed]);
+    const st = await estacionDe(agent);
+    // La que ya está dada de alta no se ofrece.
+    expect(st.candidates.map((c) => c.host)).toEqual(['192.168.1.60']);
+    const yaEsta = await api().post(url(`/print-agents/${agent.id}/station/finish`))
+      .set(auth(manager)).send({ host: '192.168.1.61' });
+    expect(yaEsta.status).toBe(400);
+    const nunca = await api().post(url(`/print-agents/${agent.id}/station/finish`))
+      .set(auth(manager)).send({ host: '10.0.0.5' });
+    expect(nunca.status).toBe(400);
+    const ambas = await api().post(url(`/print-agents/${agent.id}/station/finish`))
+      .set(auth(manager)).send({ host: '192.168.1.60', windows_name: 'XP-80C' });
+    expect(ambas.status).toBe(400);
+  });
+
+  it('con una USB presente sigue ganando la USB, como antes', async () => {
+    const agent = await canjear(await pedirCodigo(estacionCaja));
+    await barrer(agent, [termica, red]);
+    expect((await estacionDe(agent)).status).toBe('done');
+    const { rows } = await pool.query('SELECT connection FROM printers WHERE nightclub_id = $1', [club.id]);
+    expect(rows[0].connection).toBe('windows');
   });
 });

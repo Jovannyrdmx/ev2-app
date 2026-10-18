@@ -231,6 +231,49 @@ async function openTill(nightclubId, {
   return rows[0];
 }
 
+/**
+ * El lugar Cover (la puerta) del club. La migración 050 se lo da a los clubes que ya
+ * existían; uno creado en una prueba lo recibe aquí, la primera vez que se pide.
+ */
+async function coverOf(nightclubId) {
+  await pool.query(
+    `INSERT INTO supply_locations (nightclub_id, code, name, kind, floor, sort_order)
+     VALUES ($1,'cover','Cover','door',NULL,3)
+     ON CONFLICT (nightclub_id, code) DO NOTHING`, [nightclubId]);
+  const { rows } = await pool.query(
+    `SELECT id FROM supply_locations WHERE nightclub_id = $1 AND code = 'cover'`, [nightclubId]);
+  return rows[0].id;
+}
+
+/**
+ * Abre la caja de Cover de una anfitriona directamente en la base (D118). Si ya tiene
+ * un turno abierto (por la huella o el botón), la caja se le pone a ese turno, igual
+ * que hace el servidor. La apertura por la API tiene su propia suite.
+ */
+async function openDoorTill(nightclubId, {
+  hostess, authorizer, openingFloat = 0, openingFloatUsd = null,
+}) {
+  const locationId = await coverOf(nightclubId);
+  const abierto = await pool.query(
+    'SELECT id FROM staff_shifts WHERE user_id = $1 AND ended_at IS NULL', [hostess.id]);
+  const valores = [locationId, Number(openingFloat).toFixed(2),
+    authorizer.id, authorizer.role,
+    openingFloatUsd === null ? null : Number(openingFloatUsd).toFixed(2)];
+  const { rows } = abierto.rows[0]
+    ? await pool.query(
+      `UPDATE staff_shifts SET location_id = $1, opening_float = $2, float_currency = 'MXN',
+              float_authorized_by = $3, float_authorized_at = now(), float_authorized_role = $4,
+              opening_float_usd = $5
+        WHERE id = $6 RETURNING *`, [...valores, abierto.rows[0].id])
+    : await pool.query(
+      `INSERT INTO staff_shifts (nightclub_id, user_id, location_id, opening_float, float_currency,
+                                 float_authorized_by, float_authorized_at, float_authorized_role,
+                                 opening_float_usd)
+       VALUES ($6,$7,$1,$2,'MXN',$3, now(), $4, $5) RETURNING *`,
+      [...valores, nightclubId, hostess.id]);
+  return rows[0];
+}
+
 /** A Date `hours` from now, as an ISO string the API accepts. */
 function hoursFromNow(hours) {
   return new Date(Date.now() + hours * 3_600_000).toISOString();
@@ -239,5 +282,5 @@ function hoursFromNow(hours) {
 module.exports = {
   PASSWORD, createNightclub, createUser, createTable, createDrink,
   createReservationRules, hoursFromNow,
-  createSupply, setRecipe, supplyStock, barOf, stockUp, openTill,
+  createSupply, setRecipe, supplyStock, barOf, stockUp, openTill, coverOf, openDoorTill,
 };

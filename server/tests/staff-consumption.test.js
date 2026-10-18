@@ -98,10 +98,18 @@ describe('el empleado pide para sí', () => {
     expect(despues).toBeLessThan(antes);
   });
 
-  it('el cliente, el gerente y el admin no piden por aquí', async () => {
+  it('el cliente y el admin no piden por aquí', async () => {
     expect((await pedir(guest)).status).toBe(403);
-    expect((await pedir(manager)).status).toBe(403);
     expect((await pedir(admin)).status).toBe(403);
+  });
+
+  it('el gerente sí pide su consumo y entra al reporte semanal (D116)', async () => {
+    const res = await pedir(manager);
+    expect(res.status).toBe(201);
+    const mio = await api().get(url('/staff-consumption/me')).set(auth(manager));
+    expect(mio.status).toBe(200);
+    const rep = await semana(manager);
+    expect(JSON.stringify(rep.body)).toMatch(/Gerente/);
   });
 
   it('es idempotente: el doble toque no descuenta dos veces', async () => {

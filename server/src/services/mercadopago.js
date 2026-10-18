@@ -223,8 +223,12 @@ async function createPointOrder({
   if (currency !== 'MXN' || !Number.isFinite(Number(amount)) || Number(amount) <= 0) {
     throw ApiError.unprocessable('Esta integración Point cobra únicamente importes positivos en MXN.');
   }
-  if ((settings.mode === 'test') !== isSandboxTerminal(terminalExternalId)) {
-    throw ApiError.unprocessable('En modo prueba usa únicamente la terminal virtual; en producción usa una terminal física.');
+  // La terminal virtual solo existe para credenciales de prueba: en producción no cobra
+  // nada. Al revés SÍ se permite: una Point física con la sesión del vendedor de prueba,
+  // vinculada a una caja de la cuenta de prueba, sirve para ensayar el flujo completo en
+  // el aparato real antes de pasar a producción (decisión de Jovanny, 2026-10-12).
+  if (settings.mode !== 'test' && isSandboxTerminal(terminalExternalId)) {
+    throw ApiError.unprocessable('La terminal virtual solo sirve con credenciales de prueba; en producción usa una terminal física.');
   }
   const body = {
     type: 'point',

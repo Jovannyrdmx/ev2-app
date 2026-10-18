@@ -48,8 +48,10 @@
   const isCash = (method) => String(method) === 'cash';
 
   /** Si este turno recibió dólares (D86): entonces el corte cuenta dólares aparte. */
-  const hasUsd = (cut) => Boolean(cut && cut.totals && cut.totals.usd
-    && (cut.totals.usd.any === true || Number(cut.totals.usd.received) > 0));
+  // Hay dólares que contar si entraron dólares o si la caja abrió con dólares (D118).
+  const hasUsd = (cut) => Boolean(cut && (cut.has_usd === true || Number(cut.opening_float_usd) > 0
+    || (cut.totals && cut.totals.usd
+      && (cut.totals.usd.any === true || Number(cut.totals.usd.received) > 0))));
 
   /** El conteo a ciegas que falta guardar (D105). */
   function countBlocker(amount, cut, { usd = '' } = {}) {

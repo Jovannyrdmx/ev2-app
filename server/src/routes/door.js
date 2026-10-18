@@ -8,7 +8,11 @@
 //     resuelven hablando; un 404 rojo solo detiene la fila;
 //   * lo que se vende se registra en el mismo instante y en el mismo libro que
 //     todo lo demás (`transactions`), porque al cierre nadie va a recordar
-//     cuántos covers se cobraron.
+//     cuántos covers se cobraron;
+//   * desde D118 la puerta es una caja (Cover): cobra SOLO la anfitriona que tiene
+//     esa caja abierta, y cada cobro queda anotado a esa caja (`till_shift_id`).
+//     Escanear pases, revisar identificaciones y buscar reservaciones sigue abierto
+//     a toda la puerta y a la gerencia.
 'use strict';
 
 const express = require('express');
@@ -29,6 +33,7 @@ const rpService = require('../services/rp');
 const mercadopago = require('../services/mercadopago');
 const terminalCharges = require('../services/terminal-charges');
 const reservationMoney = require('../services/reservation-money');
+const till = require('../services/till');
 
 const router = express.Router({ mergeParams: true });
 
@@ -919,11 +924,16 @@ router.post('/nightclubs/:nightclubId/door/reservations/:reservationId/balance',
     }
     if (b.method === 'point') mercadopago.assertUsable({ forCharge: true });
 
+    // Sin la caja de Cover abierta no se cobra en la puerta (D118). Se pregunta antes
+    // de abrir la transacción para contestar rápido a quien no puede cobrar.
+    await till.assertDoorTill(pool, { nightclubId, user: req.user });
+
     const client = await pool.connect();
     let outcome = null;
     let apartado = null;
     try {
       await client.query('BEGIN');
+      const caja = await till.assertDoorTill(client, { nightclubId, user: req.user });
       const saldo = await reservationMoney.balanceOf(client, { nightclubId, reservationId, lock: true });
       if (!saldo) throw ApiError.notFound('Reservación no encontrada');
       const st = saldo.reservation.status;
@@ -939,15 +949,9 @@ router.post('/nightclubs/:nightclubId/door/reservations/:reservationId/balance',
         if (saldo.currency !== 'MXN') {
           throw ApiError.unprocessable('La terminal cobra solo en pesos: una mesa en dólares se cobra en efectivo.');
         }
-        const cover = await client.query(
-          `SELECT id FROM supply_locations
-            WHERE nightclub_id = $1 AND kind = 'door' AND active
-            ORDER BY sort_order, code LIMIT 1`, [nightclubId]);
-        if (!cover.rows[0]) {
-          throw ApiError.unprocessable('El club no tiene el lugar Cover (puerta) dado de alta.');
-        }
+        // La terminal de la caja de Cover.
         const terminalId = await terminalCharges.resolveTerminal(client, {
-          nightclubId, locationId: cover.rows[0].id, strict: true,
+          nightclubId, locationId: caja.location_id, strict: true,
         });
         const tx = await reservationMoney.openBalanceTransaction(client, {
           nightclubId, balance: saldo, userId: req.user.id });
@@ -972,14 +976,14 @@ router.post('/nightclubs/:nightclubId/door/reservations/:reservationId/balance',
             `INSERT INTO manual_payments (nightclub_id, transaction_id, method, declared_by,
                                           on_behalf_of, amount, currency, note, status,
                                           reviewed_by, reviewed_at, client_request_id,
-                                          cash_received, change_given)
+                                          cash_received, change_given, till_shift_id)
              VALUES ($1,$2,'cash',$3,$4,$5,$6,'resto de la reservación en la puerta','confirmed',
-                     $3,now(),$7,$8,$9)
+                     $3,now(),$7,$8,$9,$10)
              RETURNING id, transaction_id, method, amount::text AS amount, currency, status,
                        declared_by, on_behalf_of, reference,
                        cash_received::text AS cash_received, change_given::text AS change_given`,
             [nightclubId, tx.id, req.user.id, saldo.reservation.user_id, saldo.due, saldo.currency,
-              b.client_request_id ?? null, recibido.toFixed(2), cambio.toFixed(2)]);
+              b.client_request_id ?? null, recibido.toFixed(2), cambio.toFixed(2), caja.id]);
           creado = rows[0];
         } catch (err) {
           if (err.code === '23505') throw ApiError.conflict('Ese resto ya tiene un pago registrado');
@@ -988,8 +992,8 @@ router.post('/nightclubs/:nightclubId/door/reservations/:reservationId/balance',
         const settled = await payments.settle(client, {
           payment: creado, reviewerId: req.user.id, nightclubId,
         });
-        // Efectivo en la puerta: el cajón se abre solo (D96).
-        const printer = await cashDrawer.doorPrinter(client, { nightclubId });
+        // Efectivo en la puerta: el cajón de la caja de Cover se abre solo (D96, D118).
+        const printer = await cashDrawer.doorPrinter(client, { nightclubId, locationId: caja.location_id });
         const drawer = await cashDrawer.open(client, {
           nightclubId, printer, refId: tx.id, createdBy: req.user.id,
           reason: `resto de mesa ${saldo.due} ${saldo.currency}`,
@@ -1061,10 +1065,14 @@ router.post('/nightclubs/:nightclubId/door/point-charges',
     const { nightclubId } = req.params;
     const b = req.body;
 
+    // Solo la caja de Cover despierta la terminal de la puerta (D118).
+    await till.assertDoorTill(pool, { nightclubId, user: req.user });
+
     const client = await pool.connect();
     let apartado;
     try {
       await client.query('BEGIN');
+      const caja = await till.assertDoorTill(client, { nightclubId, user: req.user });
       const precio = await resolvePrice(client, { nightclubId, body: b });
       const total = Math.round(precio.unitPrice * b.quantity * 100) / 100;
       if (precio.currency !== 'MXN') {
@@ -1073,15 +1081,8 @@ router.post('/nightclubs/:nightclubId/door/point-charges',
       if (!(total > 0)) {
         throw ApiError.unprocessable('Un cover sin costo no pasa por la terminal.');
       }
-      const cover = await client.query(
-        `SELECT id FROM supply_locations
-          WHERE nightclub_id = $1 AND kind = 'door' AND active
-          ORDER BY sort_order, code LIMIT 1`, [nightclubId]);
-      if (!cover.rows[0]) {
-        throw ApiError.unprocessable('El club no tiene el lugar Cover (puerta) dado de alta.');
-      }
       const terminalId = await terminalCharges.resolveTerminal(client, {
-        nightclubId, locationId: cover.rows[0].id, strict: true,
+        nightclubId, locationId: caja.location_id, strict: true,
       });
       if (b.reservation_id) {
         const r = await client.query(
@@ -1096,7 +1097,7 @@ router.post('/nightclubs/:nightclubId/door/point-charges',
          VALUES ($1,'cover','in',$2,'MXN','pending','mercadopago','door_admission',$3)
          RETURNING id`,
         [nightclubId, total, JSON.stringify({
-          door_point: true, sold_by: req.user.id,
+          door_point: true, sold_by: req.user.id, till_shift_id: caja.id,
           request: {
             kind: b.kind, quantity: b.quantity, cover_price_id: b.cover_price_id || null,
             reservation_id: b.reservation_id || null, event_id: b.event_id || null,
@@ -1185,6 +1186,11 @@ router.post('/nightclubs/:nightclubId/door/admissions',
       }
     }
 
+    // Vende la entrada solo la anfitriona con la caja de Cover abierta (D118), también
+    // una cortesía: lo que entra por la puerta se cuenta en UNA caja. Se pregunta antes
+    // de gastar un intento del PIN del gerente.
+    await till.assertDoorTill(pool, { nightclubId, user: req.user });
+
     // La tarjeta en la puerta se cobra con la terminal (D100, D109): tecleada a mano
     // era una venta en efectivo que dejaba de esperarse en el cajón.
     if (b.payment_method === 'card') {
@@ -1214,6 +1220,8 @@ router.post('/nightclubs/:nightclubId/door/admissions',
     try {
       await client.query('BEGIN');
 
+      // Otra vez dentro de la transacción: la caja pudo cerrarse mientras tanto.
+      const caja = await till.assertDoorTill(client, { nightclubId, user: req.user });
       const precio = await resolvePrice(client, { nightclubId, body: b });
       const total = Math.round(precio.unitPrice * b.quantity * 100) / 100;
 
@@ -1282,6 +1290,7 @@ router.post('/nightclubs/:nightclubId/door/admissions',
               usd_received: pago && pago.usd ? pago.usd.received : null,
               exchange_rate: pago && pago.usd ? pago.usd.rate : null,
               change_given: pago ? pago.change : null,
+              till_shift_id: caja.id,
             })],
         );
         transactionId = tx.rows[0].id;
@@ -1294,9 +1303,9 @@ router.post('/nightclubs/:nightclubId/door/admissions',
                                       client_request_id, price_source, cover_price_id,
                                       cash_received, usd_received, exchange_rate, exchange_rate_id,
                                       usd_amount, usd_change, change_given, terminal_charge_id,
-                                      authorized_by, payment_reference)
+                                      authorized_by, payment_reference, till_shift_id)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::text,$15,
-                 $16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+                 $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
          RETURNING id, kind, quantity, unit_price::text, total::text, currency,
                    payment_method, reservation_id, price_source, created_at,
                    cash_received::text, usd_received::text, exchange_rate::text,
@@ -1314,7 +1323,8 @@ router.post('/nightclubs/:nightclubId/door/admissions',
           pago ? pago.change : null,
           cobroPoint ? cobroPoint.id : null,
           autoriza ? autoriza.id : null,
-          b.payment_reference || null],
+          b.payment_reference || null,
+          caja.id],
       );
       if (autoriza) {
         await client.query(
@@ -1341,10 +1351,10 @@ router.post('/nightclubs/:nightclubId/door/admissions',
         }
       }
 
-      // Efectivo en la puerta: el cajón de la puerta se abre solo (D96).
+      // Efectivo en la puerta: el cajón de la caja de Cover se abre solo (D96, D118).
       let drawer = null;
       if (b.payment_method === 'cash' && total > 0) {
-        const printer = await cashDrawer.doorPrinter(client, { nightclubId });
+        const printer = await cashDrawer.doorPrinter(client, { nightclubId, locationId: caja.location_id });
         drawer = await cashDrawer.open(client, {
           nightclubId, printer, refId: transactionId, createdBy: req.user.id,
           reason: `cover en efectivo ${total.toFixed(2)} ${precio.currency}`,
@@ -1370,28 +1380,43 @@ router.post('/nightclubs/:nightclubId/door/admissions',
         });
       }
 
-      // El recibo del cover sale en la impresora de Cover (D96), si el club la tiene.
-      // Nunca tumba el cobro: `printReceipt` encola con salvaguarda.
+      // Dos tickets en la impresora de Cover (D96, D115), si el club la tiene:
+      //   1. el del CLIENTE, sin dinero, con cuántos accesos compró;
+      //   2. la copia de la HOSTESS, con lo que se cobró, solo si hubo cobro.
+      // Una cortesía no tiene cobro: sale únicamente el del cliente. Ninguno de los
+      // dos tumba la venta: los dos encolan con salvaguarda.
+      // Los tickets salen en la impresora de la caja de Cover que cobró (D118).
+      await tickets.printAdmission(client, {
+        nightclubId, admissionId: rows[0].id, locationId: caja.location_id, userId: req.user.id,
+      });
       if (transactionId) {
-        const cover = await client.query(
-          `SELECT id FROM supply_locations
-            WHERE nightclub_id = $1 AND kind = 'door' AND active
-            ORDER BY sort_order, code LIMIT 1`, [nightclubId]);
-        if (cover.rows[0]) {
-          await tickets.printReceipt(client, {
-            nightclubId,
-            transactionId,
+        await tickets.printReceipt(client, {
+          nightclubId,
+          transactionId,
+          method: DOOR_RECEIPT_METHOD[b.payment_method] || b.payment_method,
+          collectedBy: req.user.id,
+          locationId: caja.location_id,
+          copyLabel: 'COPIA HOSTESS',
+          accesses: b.quantity,
+          // Lo que entregó el cliente y el cambio, para que la copia cuadre el cajón.
+          parts: pago ? [{
             method: DOOR_RECEIPT_METHOD[b.payment_method] || b.payment_method,
-            collectedBy: req.user.id,
-            locationId: cover.rows[0].id,
-          });
-        }
+            amount: total.toFixed(2),
+            cash_received: Number(pago.cashReceived) > 0 ? pago.cashReceived : null,
+            usd_received: pago.usd ? pago.usd.received : null,
+            exchange_rate: pago.usd ? pago.usd.rate : null,
+            change_given: pago.change,
+          }] : null,
+        });
       }
 
       await events.publish({
         nightclubId, type: 'door_admission', client,
         audience: { roles: ['hostess', 'manager'] },
-        payload: { kind: b.kind, quantity: b.quantity, total: String(total) },
+        payload: {
+          kind: b.kind, quantity: b.quantity, total: String(total),
+          payment_method: b.payment_method, till_shift_id: caja.id,
+        },
       });
       await client.query('COMMIT');
       return res.status(201).json({

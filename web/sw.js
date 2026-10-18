@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v73';
+const VERSION = 'ev2-v74';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -61,6 +61,7 @@ const SHELL = [
   // El corte del turno (D51): quien cobra lo abre al final de la noche, con el club
   // lleno y la senal peor que nunca. Sin el guardado, no puede ni ver cuanto entrega.
   'js/shift-cut.js',
+  'js/door-till.js',
   // La caja de cada barra (D77): el cajero abre, cobra y corta desde aquí toda la noche.
   'caja.html', 'js/cashier.js', 'js/cashier-screen.js', 'js/substitutions.js',
   // El cajón y el cambio en efectivo (D96): la caja y la puerta los usan en cada cobro.

@@ -151,6 +151,12 @@ impresora*, con la barra, el propósito, la IP y el ancho del papel. Para otra V
 > dentro del club. Y la consulta del modelo (`GS I`) es eso, una pregunta: **no
 > imprime nada**.
 
+**Impresoras de red en una estación (D121).** Si la PC de la caja no tiene impresora USB,
+la estación ofrece las impresoras de **red** que contestaron en su barrido y que el club
+todavía no tiene dadas de alta; el gerente escoge la de esa caja y sale la hoja de prueba y
+el pulso del cajón. Nunca se registra una sola sin preguntar: el barrido de una PC ve todas
+las impresoras de la red, también la de la caja de al lado.
+
 ### 2. Encender el respaldo
 
 Edita cada impresora y ponle como respaldo (`fallback_id`) la otra de su misma barra.
@@ -205,14 +211,22 @@ noche no salió una sola comanda, ahí está la respuesta.
 El recibo de cobro sale siempre: es el respaldo de que ese dinero entró, y es lo que
 hace que el corte del turno cuadre sin discutir.
 
+## Encabezado y pie (D121)
+
+**Impresoras → Ajustes → Encabezado del ticket.** Una línea por renglón: la primera (el
+nombre) sale en grande; las demás —dirección, teléfono, RFC, lo que el club quiera— centradas
+debajo. Sin capturar sale solo el nombre del club: el sistema no inventa datos fiscales. El
+**pie** (por ejemplo, un agradecimiento) sale al final de todos los papeles.
+
 ## Los cuatro papeles
 
 | Papel | Sale cuando | Va a | Lleva |
 |---|---|---|---|
 | **Comanda** | Se **paga** un pedido — pagar es lo que lo manda a la barra | `orders` de esa barra | Mesa en grande, cantidades en columna, **sin precios** |
 | **Cuenta** | El mesero pica "Cuenta" | `service` de esa barra | Todo lo de la mesa, lo pagado y lo que falta |
-| **Recibo** | Entra el dinero, por cualquiera de los tres caminos | `service` de esa barra | Método de pago, folio del voucher, "PAGADO" |
+| **Recibo de pago** | Entra el dinero, por cualquiera de los tres caminos | `till` de la caja que cobró (si no, `service` de esa barra) | Caja, quién cobró, mesa y mesero; los artículos (cantidad, descripción, importe), subtotal, propina de la terminal, TOTAL, formas de pago con recibido y cambio, "PAGADO" |
 | **Retiro de efectivo** (D81) | El cajero retira efectivo con el PIN del gerente | `till` de su caja (si no tiene, `service` de su barra) | Monto, motivo, quién autorizó y las dos firmas |
+| **Corte general** (D121) | El gerente pica *Imprimir corte general* en Caja y cortes | La impresora que él escoja | Cada caja (barras y Cover): fondo, cobrado, efectivo, dólares, retiros, personas, lo que debe tener o la diferencia; totales por forma de pago. Con cajas abiertas: **PRELIMINAR** |
 | **Corte de turno** | El empleado cierra su turno, con un gerente autorizando | `till` de su caja (si no tiene, `service` de su barra) | Cobros por método, propinas aparte, retiros con su motivo, esperado/declarado/contado y las dos firmas |
 
 ### La comanda lleva precios, y dice si ya se pagó

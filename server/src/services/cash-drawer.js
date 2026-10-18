@@ -29,9 +29,31 @@ function tillPrinter(runner, { nightclubId, locationId }) {
   return printing.resolvePrinter(runner, { nightclubId, purpose: 'till', locationId });
 }
 
-/** La impresora de la puerta (la de la anfitriona). Hay una por club. */
-function doorPrinter(runner, { nightclubId }) {
-  return printing.resolvePrinter(runner, { nightclubId, purpose: 'door' });
+/**
+ * La impresora con cajón de la puerta (la de la anfitriona).
+ *
+ * Hay dos formas de tenerla dada de alta y las dos se respetan: la impresora de
+ * recibos de Cover (`purpose = 'till'` en el lugar Cover, D96 zonas) —que es donde ya
+ * salen los tickets del cover— y la impresora de puerta (`purpose = 'door'`, una por
+ * club). Se usa la que tenga cajón; si ninguna lo tiene, la primera que exista, para
+ * que la pantalla diga "esta caja no tiene cajón" y no "no hay impresora".
+ */
+async function doorPrinter(runner, { nightclubId, locationId = null }) {
+  let coverId = locationId;
+  if (!coverId) {
+    const { rows } = await runner.query(
+      `SELECT id FROM supply_locations
+        WHERE nightclub_id = $1 AND kind = 'door' AND active
+        ORDER BY sort_order, code LIMIT 1`, [nightclubId]);
+    coverId = rows[0] ? rows[0].id : null;
+  }
+  const deCover = coverId
+    ? await printing.resolvePrinter(runner, { nightclubId, purpose: 'till', locationId: coverId })
+    : null;
+  if (deCover && deCover.drawer_pin) return deCover;
+  const dePuerta = await printing.resolvePrinter(runner, { nightclubId, purpose: 'door' });
+  if (dePuerta && dePuerta.drawer_pin) return dePuerta;
+  return deCover || dePuerta;
 }
 
 /**

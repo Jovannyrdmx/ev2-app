@@ -215,6 +215,8 @@
     $('screen-manager').hidden = false;
     $('me-name').textContent = (api.session.user && api.session.user.display_name) || '';
     $('btn-venue-editor').hidden = role !== 'admin';
+    // Mi consumo (D116): el gerente pide para sí; el admin es el dueño, no lleva descuento.
+    if ($('btn-my-consumption')) $('btn-my-consumption').hidden = role !== 'manager';
     await loadAll();
     connectRealtime();
     // Notificaciones al teléfono (D90): ofrecerlas, o volver a registrar este teléfono.
@@ -1047,8 +1049,15 @@
 
   function tillCard(c) {
     const st = EV2Manager.tillState(c);
-    const usd = Number(c.usd_received) > 0
+    // Dólares: si entraron o si la caja abrió con dólares (D118).
+    const usd = Number(c.usd_received) > 0 || Number(c.opening_float_usd) > 0
       ? `<div class="flex justify-between text-xs"><span class="text-white/50">${escape(t('mgr.tillUsd'))}</span><span>US$${escape(Number(c.usd_to_hand).toFixed(2))}</span></div>` : '';
+    const fondoUsd = Number(c.opening_float_usd) > 0 ? ` + US$${Number(c.opening_float_usd).toFixed(2)}` : '';
+    const fondo = Number(c.opening_float) > 0 || fondoUsd
+      ? `<div class="flex justify-between text-xs"><span class="text-white/50">${escape(t('mgr.tillFloat'))}</span><span>${escape(money(c.opening_float, c.currency))}${escape(fondoUsd)}</span></div>` : '';
+    // La caja de Cover (D118): cuánta gente entró por ella.
+    const puerta = c.location_kind === 'door'
+      ? `<div class="flex justify-between text-xs"><span class="text-white/50">${escape(t('mgr.tillDoorPeople'))}</span><span>${escape(t('mgr.tillDoorPeopleN', { n: c.door_people || 0 }))}</span></div>` : '';
     const dif = c.closed && Number(c.difference || 0) !== 0
       ? `<p class="text-xs text-red-300">${escape(t('mgr.tillDiff', { amount: money(Math.abs(Number(c.difference)), c.currency) }))}</p>` : '';
     return `
@@ -1060,6 +1069,7 @@
           </div>
           <span class="pill ${TONE_PILL[st.tone] || 'pill-off'} shrink-0">${escape(t(st.key, { n: c.pending_orders }))}</span>
         </div>
+        ${fondo}${puerta}
         <div class="flex justify-between text-xs"><span class="text-white/50">${escape(t('mgr.tillCollected'))}</span><span>${escape(money(c.collected, c.currency))}</span></div>
         <div class="flex justify-between text-sm"><span class="text-white/60">${escape(t('mgr.tillToHand'))}</span><span class="font-semibold">${escape(money(c.cash_to_hand, c.currency))}</span></div>
         ${usd}${dif}
@@ -1073,6 +1083,39 @@
       $(box).innerHTML = list.map(tillCard).join('');
       $(empty).hidden = list.length > 0;
     }
+    loadNightCutPrinters();
+  }
+
+  // ---------------------------------------------------------------- corte general (D121)
+
+  /** Las impresoras activas, para escoger dónde sale el corte general. */
+  async function loadNightCutPrinters() {
+    const sel = $('c-nightcut-printer');
+    if (!sel || $('tab-cash').hidden) return;
+    try {
+      const { printers } = await api.get(`/nightclubs/${clubId()}/printers`);
+      const activas = (printers || []).filter((p) => p.active);
+      const antes = sel.value;
+      sel.innerHTML = activas.map((p) => `<option value="${escape(p.id)}">${escape(p.name)}</option>`).join('');
+      if (activas.some((p) => p.id === antes)) sel.value = antes;
+      $('c-nightcut-print').disabled = activas.length === 0;
+    } catch { /* la lista queda como estaba */ }
+  }
+
+  if ($('c-nightcut-print')) {
+    $('c-nightcut-print').onclick = async () => {
+      const nota = $('c-nightcut-error');
+      nota.hidden = true;
+      const printerId = $('c-nightcut-printer').value;
+      if (!printerId) { avisar(nota, t('mgr.nightCutNoPrinter')); return; }
+      const listo = ocupado($('c-nightcut-print'), 'prn.sending');
+      try {
+        const r = await api.post(`/nightclubs/${clubId()}/tills/report/print`, { printer_id: printerId });
+        toast(t(r.totals && r.totals.open_tills > 0 ? 'mgr.nightCutSentPrelim' : 'mgr.nightCutSent'), 'ok');
+      } catch (err) {
+        avisar(nota, EV2Format.errorMessage(err));
+      } finally { listo(); }
+    };
   }
 
   function renderTonight() {
@@ -1241,7 +1284,7 @@
       for (const lugar of printPlaces()) {
         const opt = document.createElement('option');
         opt.value = lugar.id;
-        opt.textContent = lugar.kind === 'door' ? t('stn.door') : lugar.name;
+        opt.textContent = lugar.name;
         sitio.appendChild(opt);
       }
       sitio.value = term.location_id || '';
@@ -1911,7 +1954,9 @@
         const fondo = document.createElement('p');
         fondo.className = 'text-[11px] text-white/50';
         fondo.textContent = t('cuts.till', {
-          bar: c.location_name || '—', amount: money(c.opening_float, c.currency),
+          bar: c.location_name || '—',
+          amount: money(c.opening_float, c.currency)
+            + (Number(c.opening_float_usd) > 0 ? ` + US$${Number(c.opening_float_usd).toFixed(2)}` : ''),
         });
         card.appendChild(fondo);
       }
@@ -2666,11 +2711,15 @@
     const s = printing.settings;
     const check = $('prn-order-tickets');
     check.checked = Boolean(s && s.print_order_tickets);
+    // El encabezado y el pie (D121): no se pisa lo que el gerente está escribiendo.
+    if ($('prn-header') && document.activeElement !== $('prn-header')) $('prn-header').value = (s && s.header_text) || '';
+    if ($('prn-footer') && document.activeElement !== $('prn-footer')) $('prn-footer').value = (s && s.footer_text) || '';
     // Lo cambian gerente y admin (D58). Para cualquier otro rol que llegue a esta
     // pantalla se deshabilita en vez de esconderse: hay que poder VER si está
     // prendido cuando la barra reclama, aunque no se pueda tocar.
     const rol = (api.session && api.session.user && api.session.user.role) || null;
     check.disabled = !['manager', 'admin'].includes(rol);
+    for (const id of ['prn-header', 'prn-footer', 'prn-texts-save']) if ($(id)) $(id).disabled = check.disabled;
   }
 
   async function testPrinter(printer, button, nota) {
@@ -2725,9 +2774,9 @@
     }
   }
 
-  // La impresora de la puerta no va en ninguna barra (D96).
-  $('prn-purpose').addEventListener('change', () => {
-    $('prn-location-box').hidden = $('prn-purpose').value === 'door';
+  // Cover solo imprime recibos de caja (D119: ya no hay "puerta" aparte).
+  $('prn-location').addEventListener('change', () => {
+    if (isDoor($('prn-location').value)) $('prn-purpose').value = 'till';
   });
 
   $('prn-connection').onchange = () => {
@@ -2740,9 +2789,8 @@
     const nota = $('prn-add-error');
     nota.hidden = true;
     const red = $('prn-connection').value === 'network';
-    const esPuerta = $('prn-purpose').value === 'door';
     const cuerpo = {
-      location_id: esPuerta ? null : $('prn-location').value,
+      location_id: $('prn-location').value,
       name: $('prn-name').value.trim(),
       purpose: $('prn-purpose').value,
       drawer_pin: $('prn-drawer').value ? Number($('prn-drawer').value) : null,
@@ -2756,7 +2804,7 @@
       ...(!red && $('prn-agent-id').value ? { agent_id: $('prn-agent-id').value } : {}),
       test: true,
     };
-    if (!esPuerta && !cuerpo.location_id) { avisar(nota, t('prn.errBar')); return; }
+    if (!cuerpo.location_id) { avisar(nota, t('prn.errBar')); return; }
     if (!cuerpo.name) { avisar(nota, t('prn.errName')); return; }
     if (red && !cuerpo.host) { avisar(nota, t('prn.errHost')); return; }
     if (!red && !cuerpo.windows_name) { avisar(nota, t('prn.errWinName')); return; }
@@ -2809,16 +2857,16 @@
 
   // ---------------------------------------------------------------- la estación (D99)
 
-  /** "Puerta" no es una barra: es la entrada, donde la anfitriona cobra el cover. */
-  const STATION_DOOR = '__door';
+  // Cover es la puerta (D119): su estación es la caja de Cover, la que imprime el ticket
+  // del cliente y el de la caja. Ya no hay una opción "Puerta" aparte.
   let stationTouched = false;
+  let stationDrawerTouched = false;
 
   function renderStationForm() {
     const sel = $('stn-place');
     if (!sel) return;
     const lugares = printPlaces();
-    const quiero = lugares.length + 1;
-    if (sel.options.length !== quiero) {
+    if (sel.options.length !== lugares.length) {
       const antes = sel.value;
       sel.innerHTML = '';
       for (const b of lugares) {
@@ -2827,25 +2875,25 @@
         opt.textContent = b.name;
         sel.appendChild(opt);
       }
-      const puerta = document.createElement('option');
-      puerta.value = STATION_DOOR;
-      puerta.textContent = t('stn.door');
-      sel.appendChild(puerta);
-      // Si todavía no ha escogido, la primera barra: las barras llegan después de abrir la
-      // pestaña, y quedarse en "Puerta" por haber pintado antes sería una mala sorpresa.
-      sel.value = (stationTouched && antes) || (lugares[0] ? lugares[0].id : STATION_DOOR);
+      sel.value = (stationTouched && antes) || (lugares[0] ? lugares[0].id : '');
     }
     syncStationPurpose();
   }
 
-  /** En la puerta no hay "para qué": es la caja del cover. En Cover solo hay recibos. */
+  /**
+   * Menos decisiones: en Cover solo hay caja; en una barra, "Caja" es lo de siempre. Una
+   * caja lleva cajón, así que la casilla ya viene marcada (se puede quitar).
+   */
   function syncStationPurpose() {
     const lugar = $('stn-place').value;
-    $('stn-purpose-box').hidden = lugar === STATION_DOOR;
-    if (isDoor(lugar)) $('stn-purpose').value = 'till';
-    $('stn-purpose').disabled = isDoor(lugar);
-    if (lugar === STATION_DOOR) $('stn-drawer').checked = true;
+    const cover = isDoor(lugar);
+    $('stn-purpose-box').hidden = cover;
+    if (cover) $('stn-purpose').value = 'till';
+    $('stn-purpose').disabled = cover;
+    if (!stationDrawerTouched) $('stn-drawer').checked = $('stn-purpose').value === 'till';
   }
+  $('stn-drawer').addEventListener('change', () => { stationDrawerTouched = true; });
+  $('stn-purpose').addEventListener('change', syncStationPurpose);
   $('stn-place').onchange = () => { stationTouched = true; syncStationPurpose(); };
 
   $('btn-stn-create').onclick = async () => {
@@ -2855,14 +2903,13 @@
     if (!nombre) { avisar(error, t('stn.needName')); $('stn-name').focus(); return; }
     const lugar = $('stn-place').value;
     if (!lugar) { avisar(error, t('prn.noBars')); return; }
-    const puerta = lugar === STATION_DOOR;
     const listo = ocupado($('btn-stn-create'), 'prn.saving');
     try {
       const cuerpo = {
-        location_id: puerta ? null : lugar,
+        location_id: lugar,
         station: {
           name: nombre,
-          purpose: puerta ? 'door' : $('stn-purpose').value,
+          purpose: isDoor(lugar) ? 'till' : $('stn-purpose').value,
           has_drawer: $('stn-drawer').checked,
         },
       };
@@ -2945,7 +2992,7 @@
           const b = document.createElement('button');
           b.className = 'ev2-button rounded-lg px-3 py-2 text-xs';
           b.textContent = c.port ? `${c.name} (${c.port})` : c.name;
-          b.onclick = () => stationFinish(a, c.name, b);
+          b.onclick = () => stationFinish(a, c, b);
           opciones.appendChild(b);
         }
         card.appendChild(opciones);
@@ -2985,11 +3032,13 @@
     } catch (err) { showError(err); } finally { listo(); }
   }
 
-  async function stationFinish(agent, windowsName, boton) {
+  async function stationFinish(agent, candidata, boton) {
     const listo = ocupado(boton, 'prn.saving');
     try {
+      // Una de red se escoge por su dirección; una USB por su nombre en Windows (D121).
       await api.post(`/nightclubs/${clubId()}/print-agents/${agent.id}/station/finish`,
-        { windows_name: windowsName });
+        candidata.network ? { host: candidata.host, port: candidata.tcp_port }
+          : { windows_name: candidata.name });
       toast(t('prn.registered'), 'ok');
       await loadPrinting();
     } catch (err) { listo(); showError(err); }
@@ -3069,6 +3118,25 @@
     }
     printing.invite = null;
     renderPairing();
+  }
+
+  if ($('prn-texts')) {
+    $('prn-texts').onsubmit = async (e) => {
+      e.preventDefault();
+      const nota = $('prn-settings-error');
+      nota.hidden = true;
+      const limpio = (v) => { const x = String(v || '').trim(); return x === '' ? null : x; };
+      const listo = ocupado($('prn-texts-save'), 'prn.saving');
+      try {
+        const { settings } = await api.patch(`/nightclubs/${clubId()}/print-settings`, {
+          header_text: limpio($('prn-header').value), footer_text: limpio($('prn-footer').value),
+        });
+        printing.settings = settings;
+        toast(t('prn.textsSaved'), 'ok');
+      } catch (err) {
+        avisar(nota, EV2Format.errorMessage(err));
+      } finally { listo(); }
+    };
   }
 
   $('prn-order-tickets').onchange = async () => {
@@ -3909,11 +3977,13 @@
         r.roster.flatMap((p) => (p.targets || []).map((x) => x.section).filter(Boolean)),
       ),
     )];
-    const barrasConocidas = r.gaps.bars.concat(
-      r.roster.flatMap((p) => (p.targets || [])
+    // Las barras y Cover (D118): Cover sale de los huecos de caja cuando no hay
+    // anfitriona asignada, para que se vea vacío en vez de no aparecer.
+    const barrasConocidas = r.gaps.bars.map((b) => ({ ...b, kind: 'bar' }))
+      .concat((r.gaps.tills || []).filter((x) => x.kind === 'door'))
+      .concat(r.roster.flatMap((p) => (p.targets || [])
         .filter((x) => x.location_id)
-        .map((x) => ({ location_id: x.location_id, name: x.location_name }))),
-    );
+        .map((x) => ({ location_id: x.location_id, name: x.location_name, kind: x.location_kind || 'bar' }))));
     const porDestino = EV2Roster.byTarget({
       roster: r.roster, sections: zonasConocidas, bars: dedupeBars(barrasConocidas),
     });
@@ -3952,7 +4022,7 @@
         `<button class="chip tap px-3 shrink-0" data-add-section="${escape(z.section)}">+</button>`)),
       ...porDestino.bars.map((b) => bloque(b.name, b.people,
         `<button class="chip tap px-3 shrink-0" data-add-bar="${escape(b.location_id)}"
-                 data-bar-name="${escape(b.name)}">+</button>`)),
+                 data-bar-name="${escape(b.name)}" data-bar-kind="${escape(b.kind || 'bar')}">+</button>`)),
     ].join('');
 
     for (const boton of $('roster-body').querySelectorAll('[data-add-section]')) {
@@ -3961,6 +4031,7 @@
     for (const boton of $('roster-body').querySelectorAll('[data-add-bar]')) {
       boton.onclick = () => openPick({
         locationId: boton.dataset.addBar, name: boton.dataset.barName,
+        kind: boton.dataset.barKind || 'bar',
       });
     }
     for (const boton of $('roster-body').querySelectorAll('[data-unassign]')) {
@@ -3992,15 +4063,16 @@
 
     // Solo los candidatos del puesto que ESE destino necesita: ofrecer un mesero
     // para una barra es ofrecer un error.
-    const quiere = destino.section ? 'section' : 'location';
+    // Cover (D118) es para la anfitriona; una barra, para bartender y cajero.
     const gente = EV2Roster.candidates(state.staff)
-      .filter((p) => EV2Roster.ruleFor(p.role).target === quiere);
+      .filter((p) => EV2Roster.fitsTarget(p.role, destino));
 
     $('pick-list').innerHTML = gente.map((p) => {
       const problema = EV2Roster.check({
         person: p,
         section: destino.section || null,
         locationId: destino.locationId || null,
+        locationKind: destino.kind || null,
         roster: r.roster,
       });
       const bloqueado = problema !== null;

@@ -947,6 +947,45 @@ function stationCandidates(found) {
   return (usb.length ? usb : reales).map((f) => ({ name: f.name, port: f.host || null }));
 }
 
+/**
+ * Las impresoras de RED que contestaron en el barrido de esta PC y que el club todavía
+ * no tiene dadas de alta (D121). Las del club van por red, y una estación sin
+ * impresora USB tiene que poder quedarse con la suya.
+ *
+ * Nunca se registra una sola de estas sin preguntar: el barrido de una PC ve TODAS
+ * las impresoras de la red, también la de la caja de al lado que todavía no se da de
+ * alta, y adivinar mandaría los recibos de una caja a la otra.
+ */
+function stationNetworkCandidates(found, registeredHosts = []) {
+  const ya = new Set(registeredHosts.map((h) => String(h).toLowerCase()));
+  const vistos = new Set();
+  const out = [];
+  for (const f of (Array.isArray(found) ? found : [])) {
+    if (f.kind !== 'network' || !f.host) continue;
+    const port = Number(f.port) || 9100;
+    const clave = `${String(f.host).toLowerCase()}:${port}`;
+    if (ya.has(String(f.host).toLowerCase()) || vistos.has(clave)) continue;
+    vistos.add(clave);
+    out.push({
+      name: f.model ? String(f.model).slice(0, 60) : 'Impresora de red',
+      port: `${f.host}:${port}`,
+      host: String(f.host),
+      tcp_port: port,
+      network: true,
+    });
+  }
+  return out;
+}
+
+/** Las direcciones de las impresoras de red que el club ya tiene activas. */
+async function registeredNetworkHosts(runner, nightclubId) {
+  const { rows } = await runner.query(
+    `SELECT host FROM printers
+      WHERE nightclub_id = $1 AND active AND connection = 'network' AND host IS NOT NULL`,
+    [nightclubId]);
+  return rows.map((r) => r.host);
+}
+
 const columnsFor = (paperWidth) => (Number(paperWidth) === 58 ? 32 : 48);
 
 async function setStation(runner, agentId, patch) {
@@ -962,7 +1001,9 @@ async function setStation(runner, agentId, patch) {
  * Registra la impresora USB de esta estación, con todo lo que el gerente pidió, y
  * saca la hoja de prueba y el pulso del cajón. Devuelve el estado que se guarda.
  */
-async function registerStationPrinter(runner, { agent, windowsName, createdBy }) {
+async function registerStationPrinter(runner, {
+  agent, windowsName = null, network = null, createdBy,
+}) {
   const st = agent.station || {};
   const needsLocation = st.purpose !== 'door';
   const { rows: clubRows } = await runner.query('SELECT name FROM nightclubs WHERE id = $1',
@@ -970,15 +1011,20 @@ async function registerStationPrinter(runner, { agent, windowsName, createdBy })
   await runner.query('SAVEPOINT station_printer');
   let printer;
   try {
+    // Una de red la imprime cualquier PC del club (no se ata al agente); una USB solo
+    // la PC donde está conectada.
     const { rows } = await runner.query(
       `INSERT INTO printers
-         (nightclub_id, location_id, name, purpose, connection, windows_name, paper_width,
-          columns, codepage, has_cutter, agent_id, drawer_pin)
-       VALUES ($1,$2::uuid,$3::text,$4::text,'windows',$5::text,80,$6,'CP850',true,$7::uuid,$8)
+         (nightclub_id, location_id, name, purpose, connection, windows_name, host, port,
+          paper_width, columns, codepage, has_cutter, agent_id, drawer_pin)
+       VALUES ($1,$2::uuid,$3::text,$4::text,$5::text,$6::text,$7::text,$8,
+               80,$9,'CP850',true,$10::uuid,$11)
        RETURNING id::text AS id`,
       [agent.nightclub_id, needsLocation ? agent.location_id : null,
-        String(st.name || windowsName).slice(0, 60), st.purpose, windowsName,
-        columnsFor(80), agent.id, st.drawer_pin || null]);
+        String(st.name || windowsName || (network && network.name) || 'Caja').slice(0, 60),
+        st.purpose, network ? 'network' : 'windows', network ? null : windowsName,
+        network ? network.host : null, network ? network.tcp_port : 9100,
+        columnsFor(80), network ? null : agent.id, st.drawer_pin || null]);
     await runner.query('RELEASE SAVEPOINT station_printer');
     printer = await getPrinter(runner, { nightclubId: agent.nightclub_id, printerId: rows[0].id });
   } catch (err) {
@@ -1031,10 +1077,20 @@ async function applyStation(runner, { agentId }) {
 
   const candidatos = stationCandidates(agent.scan_result);
   if (candidatos.length === 0) {
+    // Sin USB, las de red que contestaron (D121): el gerente escoge la de esta caja.
+    const red = stationNetworkCandidates(agent.scan_result,
+      await registeredNetworkHosts(runner, agent.nightclub_id));
+    if (red.length) {
+      return setStation(runner, agent.id, {
+        status: 'choose', candidates: red.slice(0, 8),
+        message: 'Esta PC no tiene impresora USB, pero estas impresoras de red contestaron. '
+          + 'Escoge la de esta caja: sale una hoja de prueba para confirmarlo.',
+      });
+    }
     return setStation(runner, agent.id, {
       status: 'none', candidates: null,
-      message: 'Esta PC no ve ninguna impresora USB. Revisa que esté encendida, con el cable '
-        + 'USB y con su driver instalado, y pulsa Buscar de nuevo.',
+      message: 'Esta PC no ve ninguna impresora USB ni de red. Revisa que esté encendida, con '
+        + 'su cable USB o de red y su driver instalado, y pulsa Buscar de nuevo.',
     });
   }
   if (candidatos.length > 1) {
@@ -1050,7 +1106,9 @@ async function applyStation(runner, { agentId }) {
 }
 
 /** El gerente escoge entre varias: registra esa y listo. */
-async function finishStation(runner, { nightclubId, agentId, windowsName, createdBy }) {
+async function finishStation(runner, {
+  nightclubId, agentId, windowsName = null, host = null, port = 9100, createdBy,
+}) {
   const { rows } = await runner.query(
     `SELECT id::text AS id, nightclub_id::text AS nightclub_id, location_id::text AS location_id,
             purpose, station, scan_result
@@ -1059,10 +1117,22 @@ async function finishStation(runner, { nightclubId, agentId, windowsName, create
   if (!agent) throw ApiError.notFound('Esa PC no existe');
   if (!agent.station) throw ApiError.badRequest('Esa PC no tiene una estación pendiente');
   if (agent.station.status === 'done') throw ApiError.conflict('Esa estación ya quedó registrada');
-  const ok = (Array.isArray(agent.scan_result) ? agent.scan_result : [])
-    .some((f) => f.kind === 'windows' && f.name === windowsName);
-  if (!ok) throw ApiError.badRequest('Esa impresora no la vio la PC en su último barrido');
-  const hecho = await registerStationPrinter(runner, { agent, windowsName, createdBy });
+  let network = null;
+  if (host) {
+    // Solo una de red que esta PC vio en su último barrido y que el club no tiene ya.
+    const red = stationNetworkCandidates(agent.scan_result,
+      await registeredNetworkHosts(runner, nightclubId));
+    network = red.find((c) => c.host.toLowerCase() === String(host).toLowerCase()
+      && c.tcp_port === (Number(port) || 9100)) || null;
+    if (!network) {
+      throw ApiError.badRequest('Esa impresora de red no la vio la PC en su último barrido, o ya está dada de alta');
+    }
+  } else {
+    const ok = (Array.isArray(agent.scan_result) ? agent.scan_result : [])
+      .some((f) => f.kind === 'windows' && f.name === windowsName);
+    if (!ok) throw ApiError.badRequest('Esa impresora no la vio la PC en su último barrido');
+  }
+  const hecho = await registerStationPrinter(runner, { agent, windowsName, network, createdBy });
   return setStation(runner, agent.id, hecho);
 }
 
@@ -1078,5 +1148,5 @@ module.exports = {
   CODE_ALPHABET, CODE_LENGTH, INVITE_TTL_MINUTES, INVITE_MAX_ATTEMPTS,
   newInviteCode, prettyCode, normalizeCode, hashCode,
   createInvite, redeemInvite, countFailedPairing, openInvites,
-  STATION_PURPOSES, stationCandidates, applyStation, finishStation,
+  STATION_PURPOSES, stationCandidates, stationNetworkCandidates, applyStation, finishStation,
 };
