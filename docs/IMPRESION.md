@@ -226,6 +226,9 @@ debajo. Sin capturar sale solo el nombre del club: el sistema no inventa datos f
 | **Cuenta** | El mesero pica "Cuenta" | `service` de esa barra | Todo lo de la mesa, lo pagado y lo que falta |
 | **Recibo de pago** | Entra el dinero, por cualquiera de los tres caminos | `till` de la caja que cobró (si no, `service` de esa barra) | Caja, quién cobró, mesa y mesero; los artículos (cantidad, descripción, importe), subtotal, propina de la terminal, TOTAL, formas de pago con recibido y cambio, "PAGADO" |
 | **Retiro de efectivo** (D81) | El cajero retira efectivo con el PIN del gerente | `till` de su caja (si no tiene, `service` de su barra) | Monto, motivo, quién autorizó y las dos firmas |
+| **Entrada de efectivo** (D122) | El cajero mete efectivo con el PIN del gerente (también abre el cajón) | `till` de su caja | Monto, motivo, quién autorizó y las dos firmas |
+| **Corte X** (D122) | El gerente lo pide (su PIN en la caja, o desde su panel) | `till` de esa caja | Cobrado por forma de pago, propinas, fondo, entradas, retiros y lo que debe tener; la caja sigue abierta |
+| **Copia de recibo** (D122) | El cajero reimprime un recibo de su turno | La impresora del original | El mismo recibo con `** COPIA - REIMPRESION **`, quién y a qué hora |
 | **Corte general** (D121) | El gerente pica *Imprimir corte general* en Caja y cortes | La impresora que él escoja | Cada caja (barras y Cover): fondo, cobrado, efectivo, dólares, retiros, personas, lo que debe tener o la diferencia; totales por forma de pago. Con cajas abiertas: **PRELIMINAR** |
 | **Corte de turno** | El empleado cierra su turno, con un gerente autorizando | `till` de su caja (si no tiene, `service` de su barra) | Cobros por método, propinas aparte, retiros con su motivo, esperado/declarado/contado y las dos firmas |
 

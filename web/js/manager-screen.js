@@ -987,6 +987,7 @@
         <div class="flex justify-between text-xs"><span class="text-white/50">${escape(t('mgr.tillCollected'))}</span><span>${escape(money(c.collected, c.currency))}</span></div>
         <div class="flex justify-between text-sm"><span class="text-white/60">${escape(t('mgr.tillToHand'))}</span><span class="font-semibold">${escape(money(c.cash_to_hand, c.currency))}</span></div>
         ${usd}${dif}
+        ${c.closed ? '' : `<button type="button" class="card rounded-lg px-3 py-1.5 text-xs" data-xreport="${escape(c.shift_id)}" data-name="${escape(c.location_name)}">${escape(t('mgr.tillXReport'))}</button>`}
       </div>`;
   }
 
@@ -996,6 +997,16 @@
       if (!$(box)) continue;
       $(box).innerHTML = list.map(tillCard).join('');
       $(empty).hidden = list.length > 0;
+      // El corte X de una caja abierta (D122): sale en la impresora de esa caja.
+      for (const b of $(box).querySelectorAll('[data-xreport]')) {
+        b.onclick = async () => {
+          const listo = ocupado(b, 'prn.sending');
+          try {
+            await api.post(`/nightclubs/${clubId()}/tills/${b.dataset.xreport}/x-report`, {});
+            toast(t('mgr.tillXSent', { name: b.dataset.name }), 'ok');
+          } catch (err) { showError(err); } finally { listo(); }
+        };
+      }
     }
     loadNightCutPrinters();
   }

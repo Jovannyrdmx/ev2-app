@@ -620,6 +620,227 @@ router.post('/nightclubs/:nightclubId/cash-drawer/open',
     res.status(201).json({ drawer, authorized_by: autoriza.name || null });
   }));
 
+// ---------------------------------------------------------------- entrada de efectivo (D122)
+
+/** La impresora con cajón de una caja abierta: la de la barra o la de Cover. */
+const drawerPrinterOf = (runner, { nightclubId, caja }) => (caja.location_kind === 'door'
+  ? cashDrawer.doorPrinter(runner, { nightclubId, locationId: caja.location_id })
+  : cashDrawer.tillPrinter(runner, { nightclubId, locationId: caja.location_id }));
+
+/**
+ * Meter efectivo a la caja abierta (D122): reponer fondo o traer cambio a media noche.
+ *
+ * Como el retiro: cuánto, por qué y el PIN de un gerente que no sea quien recibe. El
+ * cajón se abre solo para meter el dinero, sale el ticket con las dos firmas, y lo
+ * que entró suma a lo que la caja debe entregar en su corte.
+ */
+router.post('/nightclubs/:nightclubId/shifts/me/cash-ins',
+  requireRole(...TILL_ROLES),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      amount: z.number().positive().max(1_000_000),
+      currency: z.enum(['MXN', 'USD']).default('MXN'),
+      reason: z.string().trim().min(3).max(200),
+      manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos'),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const caja = await till.openTill(pool, { nightclubId, userId: req.user.id });
+    if (!caja) throw ApiError.conflict('No tienes la caja abierta');
+
+    const autoriza = await managerAuth.authorize(pool, {
+      nightclubId, pin: req.body.manager_pin, selfId: req.user.id, ip: req.ip,
+    });
+    const printer = await drawerPrinterOf(pool, { nightclubId, caja });
+
+    const client = await pool.connect();
+    let hecho; let drawer;
+    try {
+      await client.query('BEGIN');
+      hecho = await cuts.addCash(client, {
+        nightclubId, shift: caja, amount: req.body.amount, currency: req.body.currency,
+        reason: req.body.reason, authorizer: autoriza,
+      });
+      drawer = await cashDrawer.open(client, {
+        nightclubId, printer, refId: hecho.id, createdBy: req.user.id,
+        reason: `entrada de efectivo ${hecho.amount} ${hecho.currency}`,
+      });
+      await client.query(
+        `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
+         VALUES ($1,$2,'till.cash_in','shift_cash_in',$3,$4,$5)`,
+        [nightclubId, req.user.id, hecho.id,
+          JSON.stringify({ amount: hecho.amount, currency: hecho.currency, reason: hecho.reason,
+            authorized_by: autoriza.id, shift_id: caja.id }),
+          req.ip || null]);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    // El papel, fuera de la transacción: la entrada ya está hecha.
+    let ticket = null;
+    try {
+      ticket = await tickets.printCashIn(pool, { nightclubId, cashInId: hecho.id, userId: req.user.id });
+    } catch (err) {
+      req.log?.warn?.({ err }, 'no se pudo imprimir la entrada de efectivo');
+    }
+    await events.publish({
+      nightclubId,
+      type: 'cash_added',
+      audience: { roles: ['manager', 'admin'], userIds: [req.user.id] },
+      payload: {
+        cash_in_id: hecho.id, user_id: req.user.id, user_name: req.user.display_name || null,
+        amount: hecho.amount, currency: hecho.currency, reason: hecho.reason,
+        authorized_by: autoriza.name,
+      },
+    });
+    res.status(201).json({
+      cash_in: hecho,
+      drawer,
+      ticket: ticket ? { job_id: ticket.id, status: ticket.status } : null,
+    });
+  }));
+
+// ---------------------------------------------------------------- corte X (D122)
+
+/** Imprime el corte X de un turno de caja y deja la huella en `audit_log`. */
+async function xReport(req, { caja, userName, role, authorizer }) {
+  const { nightclubId } = req.params;
+  const summary = await cuts.shiftSummary(pool, { nightclubId, shift: caja });
+  if (summary.closing) throw ApiError.conflict('Esa caja ya tiene su corte hecho');
+  const job = await tickets.printXReport(pool, {
+    nightclubId, summary, locationId: caja.location_id, locationName: caja.location_name,
+    userName, role, authorizedBy: authorizer.name || null, userId: req.user.id,
+  });
+  if (!job) {
+    throw ApiError.unprocessable('Esa caja no tiene impresora para el corte X. Dala de alta en Impresoras.');
+  }
+  await pool.query(
+    `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
+     VALUES ($1,$2,'till.x_report','staff_shift',$3,$4,$5)`,
+    [nightclubId, req.user.id, caja.id,
+      JSON.stringify({ authorized_by: authorizer.id, job_id: job.id }), req.ip || null]);
+  return job;
+}
+
+/**
+ * Corte X desde la pantalla de la caja, con el PIN del gerente (D122).
+ *
+ * El papel trae lo que la caja debe tener ahora, así que el cajero no lo puede sacar
+ * solo: sería ver el esperado antes de contar (D105). La respuesta no trae números.
+ */
+router.post('/nightclubs/:nightclubId/till/x-report',
+  requireRole(...TILL_ROLES),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({ manager_pin: z.string().regex(/^\d{6}$/, 'son seis dígitos') }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const caja = await till.openTill(pool, { nightclubId, userId: req.user.id });
+    if (!caja) throw ApiError.conflict('No tienes la caja abierta');
+    const autoriza = await managerAuth.authorize(pool, {
+      nightclubId, pin: req.body.manager_pin, selfId: req.user.id, ip: req.ip,
+    });
+    const job = await xReport(req, {
+      caja, userName: req.user.display_name, role: req.user.role, authorizer: autoriza,
+    });
+    res.status(202).json({ job: { id: job.id, status: job.status }, authorized_by: autoriza.name || null });
+  }));
+
+/** Corte X de cualquier caja abierta, desde el panel del gerente (D122). */
+router.post('/nightclubs/:nightclubId/tills/:shiftId/x-report',
+  requireRole('manager', 'admin'),
+  validate({ params: z.object({ nightclubId: uuid, shiftId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, shiftId } = req.params;
+    const { rows } = await pool.query(
+      `SELECT s.id, s.user_id, s.section, s.started_at, s.ended_at, s.location_id,
+              s.opening_float::text AS opening_float, s.opening_float_usd::text AS opening_float_usd,
+              l.name AS location_name, l.kind AS location_kind,
+              u.display_name AS user_name, u.role
+         FROM staff_shifts s
+         JOIN supply_locations l ON l.id = s.location_id
+         JOIN users u ON u.id = s.user_id
+        WHERE s.id = $1 AND s.nightclub_id = $2 AND s.location_id IS NOT NULL`,
+      [shiftId, nightclubId]);
+    const caja = rows[0];
+    if (!caja) throw ApiError.notFound('Esa caja no existe');
+    const job = await xReport(req, {
+      caja, userName: caja.user_name, role: caja.role,
+      authorizer: { id: req.user.id, name: req.user.display_name || null },
+    });
+    res.status(202).json({ job: { id: job.id, status: job.status } });
+  }));
+
+// ---------------------------------------------------------------- copia de un recibo (D122)
+
+/** Los recibos que esta caja imprimió en el turno abierto, para reimprimir una copia. */
+async function receiptsOfTill(runner, { nightclubId, caja, jobId = null }) {
+  // Solo recibos de un cobro (ref = un renglón del libro): el ticket de acceso del
+  // cover no se reimprime, porque una copia sería otra entrada.
+  const { rows } = await runner.query(
+    `SELECT j.id::text AS id, j.created_at, j.status, j.ref_id::text AS transaction_id,
+            j.printer_id::text AS printer_id, j.preview, j.payload,
+            tx.amount::text AS amount, tx.currency, tx.type
+       FROM print_jobs j
+       JOIN transactions tx ON tx.id = j.ref_id AND tx.nightclub_id = j.nightclub_id
+      WHERE j.nightclub_id = $1 AND j.kind = 'receipt' AND j.created_by = $2
+        AND j.created_at >= $3 AND ($4::uuid IS NULL OR j.id = $4::uuid)
+      ORDER BY j.created_at DESC
+      LIMIT 30`,
+    [nightclubId, caja.user_id, caja.started_at, jobId]);
+  return rows;
+}
+
+router.get('/nightclubs/:nightclubId/till/receipts',
+  requireRole(...TILL_ROLES),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const caja = await till.openTill(pool, { nightclubId, userId: req.user.id });
+    if (!caja) return res.json({ receipts: [] });
+    const rows = await receiptsOfTill(pool, { nightclubId, caja });
+    // Las copias ya impresas (empiezan con el aviso de copia) no se listan.
+    const receipts = rows.filter((r) => !String(r.preview || '').includes('** COPIA'))
+      .map((r) => ({
+        id: r.id, created_at: r.created_at, status: r.status, transaction_id: r.transaction_id,
+        folio: tickets.folio(r.transaction_id), amount: r.amount, currency: r.currency, type: r.type,
+      }));
+    return res.json({ receipts });
+  }));
+
+/**
+ * Una copia del recibo, para el cajero (D122): solo de su caja abierta y de este
+ * turno, marcada como COPIA con su nombre y la hora, y anotada en `audit_log`.
+ */
+router.post('/nightclubs/:nightclubId/till/receipts/:jobId/reprint',
+  requireRole(...TILL_ROLES),
+  validate({ params: z.object({ nightclubId: uuid, jobId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId, jobId } = req.params;
+    const caja = await till.openTill(pool, { nightclubId, userId: req.user.id });
+    if (!caja) throw ApiError.conflict('No tienes la caja abierta');
+    const [job] = await receiptsOfTill(pool, { nightclubId, caja, jobId });
+    if (!job) throw ApiError.notFound('Ese recibo no es de tu caja en este turno');
+    if (String(job.preview || '').includes('** COPIA')) {
+      throw ApiError.badRequest('Eso ya es una copia: reimprime el recibo original');
+    }
+    const copia = await tickets.reprintReceiptCopy(pool, { nightclubId, job, userId: req.user.id });
+    if (!copia) throw ApiError.unprocessable('La impresora de ese recibo ya no está activa');
+    await pool.query(
+      `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
+       VALUES ($1,$2,'receipt.reprint','print_job',$3,$4,$5)`,
+      [nightclubId, req.user.id, job.id,
+        JSON.stringify({ copy_job_id: copia.id, transaction_id: job.transaction_id }), req.ip || null]);
+    res.status(202).json({ job: { id: copia.id, status: copia.status } });
+  }));
+
 /**
  * Las cajas de la noche, para el gerente (D88, D118).
  *

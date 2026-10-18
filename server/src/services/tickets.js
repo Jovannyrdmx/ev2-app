@@ -898,7 +898,8 @@ async function cutData(runner, { nightclubId, closingId }) {
             c.pending_orders, c.pending_total::text AS pending_total,
             c.usd_collected::text AS usd_collected, c.usd_change_given::text AS usd_change_given,
             c.usd_drops_total::text AS usd_drops_total, c.expected_usd::text AS expected_usd,
-            c.counted_usd::text AS counted_usd, c.difference_usd::text AS difference_usd
+            c.counted_usd::text AS counted_usd, c.difference_usd::text AS difference_usd,
+            c.cash_ins_total::text AS cash_ins_total, c.usd_cash_ins_total::text AS usd_cash_ins_total
        FROM shift_closings c
        JOIN users u ON u.id = c.user_id
        LEFT JOIN users a ON a.id = c.authorized_by
@@ -918,7 +919,14 @@ async function cutData(runner, { nightclubId, closingId }) {
       ORDER BY d.created_at`,
     [corte.shift_id]);
 
-  return { ...corte, withdrawals: retiros };
+  // Las entradas de efectivo (D122), para el detalle del papel.
+  const { rows: entradas } = await runner.query(
+    `SELECT i.amount::text AS amount, i.currency, i.reason, i.created_at,
+            a.display_name AS authorized_by
+       FROM shift_cash_ins i LEFT JOIN users a ON a.id = i.authorized_by
+      WHERE i.shift_id = $1 ORDER BY i.created_at`, [corte.shift_id]);
+
+  return { ...corte, withdrawals: retiros, cash_ins: entradas };
 }
 
 const ROLE_LABEL = {
@@ -978,6 +986,17 @@ function renderCut(t, data, { club, settings }) {
     t.boldOff();
   }
 
+  // ---- las entradas de efectivo (D122), con su motivo y quién las autorizó
+  if ((data.cash_ins || []).length) {
+    t.blank().rule();
+    t.bold().line('ENTRADAS DE EFECTIVO').boldOff();
+    for (const r of data.cash_ins) {
+      t.row(localTime(r.created_at, club.timezone).slice(-5), money(r.amount, r.currency || data.currency));
+      for (const l of escpos.wrap(r.reason || 'sin motivo', t.width - 2)) t.raw(`  ${l}`);
+      if (r.authorized_by) t.raw(`  Autorizó: ${r.authorized_by}`);
+    }
+  }
+
   // ---- el efectivo: lo que tocaba, lo que dijo y lo que se contó
   t.blank().rule();
   t.bold().line('EFECTIVO').boldOff();
@@ -987,6 +1006,7 @@ function renderCut(t, data, { club, settings }) {
     t.row('Fondo de caja', money(data.opening_float, data.currency));
   }
   t.row('Efectivo cobrado', money(data.cash_collected, data.currency));
+  if (Number(data.cash_ins_total) > 0) t.row('Entradas de efectivo', money(data.cash_ins_total, data.currency));
   // El cambio en pesos que se dio por cobros en dólares salió de este cajón (D86).
   if (Number(data.usd_change_given) > 0) {
     t.row('Cambio por dólares', `-${money(data.usd_change_given, data.currency)}`);
@@ -1016,6 +1036,7 @@ function renderCut(t, data, { club, settings }) {
     // El fondo en dólares (D118) también se devuelve, como dólares.
     if (Number(data.opening_float_usd) > 0) t.row('Fondo en dólares', money(data.opening_float_usd, 'USD'));
     t.row('Dólares recibidos', money(data.usd_collected, 'USD'));
+    if (Number(data.usd_cash_ins_total) > 0) t.row('Entradas en dólares', money(data.usd_cash_ins_total, 'USD'));
     if (Number(data.usd_drops_total) > 0) t.row('Menos retiros', `-${money(data.usd_drops_total, 'USD')}`);
     t.bold();
     t.row('Debía entregar', money(data.expected_usd, 'USD'));
@@ -1228,6 +1249,8 @@ function renderNightCut(t, data, { club, settings }) {
     t.row('  Cobrado', money(x.collected, currency));
     t.row('  Efectivo', money(x.cash_collected, currency));
     if (Number(x.usd_received) > 0) t.row('  Dólares recibidos', money(x.usd_received, 'USD'));
+    if (Number(x.cash_ins_total) > 0) t.row('  Entradas', money(x.cash_ins_total, currency));
+    if (Number(x.usd_cash_ins_total) > 0) t.row('  Entradas en dólares', money(x.usd_cash_ins_total, 'USD'));
     if (Number(x.drops_received) > 0) t.row('  Retiros', `-${money(x.drops_received, currency)}`);
     if (Number(x.door_people) > 0) t.row('  Personas que entraron', String(x.door_people));
     if (x.pending_orders > 0) {
@@ -1261,6 +1284,8 @@ function renderNightCut(t, data, { club, settings }) {
   if (Number(totals.opening_floats) > 0) t.row('Fondos de caja', money(totals.opening_floats, currency));
   if (Number(totals.opening_floats_usd) > 0) t.row('Fondos en dólares', money(totals.opening_floats_usd, 'USD'));
   if (Number(totals.usd_received) > 0) t.row('Dólares recibidos', money(totals.usd_received, 'USD'));
+  if (Number(totals.cash_ins_total) > 0) t.row('Entradas de efectivo', money(totals.cash_ins_total, currency));
+  if (Number(totals.usd_cash_ins_total) > 0) t.row('Entradas en dólares', money(totals.usd_cash_ins_total, 'USD'));
   if (Number(totals.drops_received) > 0) t.row('Retiros', `-${money(totals.drops_received, currency)}`);
   if (Number(totals.usd_drops_received) > 0) t.row('Retiros en dólares', `-${money(totals.usd_drops_received, 'USD')}`);
   if (totals.door_people > 0) t.row('Personas que entraron', String(totals.door_people));
@@ -1294,6 +1319,186 @@ async function printNightCut(runner, { nightclubId, printer, tills, totals, user
   });
 }
 
+// ---------------------------------------------------------------- entrada de efectivo (D122)
+
+async function cashInData(runner, { nightclubId, cashInId }) {
+  const { rows } = await runner.query(
+    `SELECT i.id::text AS id, i.amount::text AS amount, i.currency, i.reason, i.created_at,
+            i.authorized_role, u.display_name AS user_name, u.role,
+            a.display_name AS authorized_by_name,
+            s.section, s.location_id::text AS location_id, l.name AS location_name
+       FROM shift_cash_ins i
+       JOIN users u ON u.id = i.user_id
+       JOIN staff_shifts s ON s.id = i.shift_id
+       LEFT JOIN users a ON a.id = i.authorized_by
+       LEFT JOIN supply_locations l ON l.id = s.location_id
+      WHERE i.id = $1 AND i.nightclub_id = $2`,
+    [cashInId, nightclubId]);
+  return rows[0] || null;
+}
+
+function renderCashIn(t, data, { club, settings }) {
+  header(t, club, settings);
+  title(t, 'ENTRADA DE EFECTIVO');
+  t.rule();
+  t.row(`Folio ${folio(data.id)}`, localTime(data.created_at, club.timezone));
+  if (data.location_name) t.row('Caja', data.location_name);
+  t.row('Recibió', `${data.user_name} · ${ROLE_LABEL[data.role] || data.role}`);
+  t.line(`Motivo: ${data.reason || '—'}`);
+  if (data.authorized_by_name) {
+    t.line(`Autorizó: ${data.authorized_by_name} (${ROLE_LABEL[data.authorized_role] || data.authorized_role || ''})`);
+  }
+  t.rule();
+  t.bold().tall();
+  t.raw(escpos.twoColumns('ENTRA', money(data.amount, data.currency), t.width));
+  t.normal().boldOff();
+  t.blank(2).line('_______________________').line(data.user_name || '');
+  t.blank(2).line('_______________________').line(data.authorized_by_name || '');
+  footer(t, settings);
+  t.blank(2).cut();
+}
+
+/** El ticket de la entrada, después de asentarla: va a la impresora de esa caja. */
+async function printCashIn(runner, { nightclubId, cashInId, userId = null }) {
+  const data = await cashInData(runner, { nightclubId, cashInId });
+  if (!data) return null;
+  const printer = await cashPaperPrinter(runner, {
+    nightclubId, locationId: data.location_id, section: data.section,
+  });
+  if (!printer) return null;
+  const club = await clubOf(runner, nightclubId);
+  const settings = await printing.settingsOf(runner, nightclubId);
+  return printing.enqueue(runner, {
+    nightclubId,
+    printer,
+    kind: 'cash_in',
+    refId: cashInId,
+    createdBy: userId,
+    ...build(printer, (t) => renderCashIn(t, data, { club, settings })),
+  });
+}
+
+// ---------------------------------------------------------------- corte X (D122)
+
+/**
+ * El corte X: cómo va una caja SIN cerrarla. Lo pide un gerente (en su sesión, o con
+ * su PIN en la pantalla de la caja) y sale en la impresora de esa caja. Lleva lo que
+ * la caja debe tener en este momento; por eso nunca lo saca el cajero solo (D105).
+ */
+function renderXReport(t, data, { club, settings }) {
+  const r = data.summary;
+  const cur = r.totals.currency || 'MXN';
+  header(t, club, settings);
+  title(t, 'CORTE X');
+  t.center().line('Parcial - la caja sigue abierta').left();
+  t.rule();
+  t.row('Impreso', localTime(data.at || new Date(), club.timezone));
+  if (data.location_name) t.row('Caja', data.location_name);
+  t.row('Cajero', `${data.user_name}${data.role ? ` · ${ROLE_LABEL[data.role] || data.role}` : ''}`);
+  t.row('Abrió', localTime(r.shift.started_at, club.timezone));
+  if (data.authorized_by) t.row('Pidió', data.authorized_by);
+
+  t.blank().rule();
+  t.bold().line('COBRADO').boldOff();
+  for (const l of r.totals.by_method || []) {
+    t.row(`${METHOD_LABEL[l.method] || l.method}${l.count ? ` (${l.count})` : ''}`, money(l.amount, l.currency || cur));
+  }
+  if (!(r.totals.by_method || []).length) t.line('Sin cobros todavía.');
+  t.bold().row('Total cobrado', money(r.totals.total_collected, cur)).boldOff();
+  if (Number(r.totals.door_people) > 0) t.row('Personas que entraron', String(r.totals.door_people));
+  if (Number(r.totals.tips.amount) > 0) {
+    t.row(`Propinas (${r.totals.tips.count || 0}) - no se entregan`, money(r.totals.tips.amount, cur));
+  }
+
+  t.blank().rule();
+  t.bold().line('EFECTIVO EN CAJA').boldOff();
+  if (Number(r.opening_float) > 0) t.row('Fondo de caja', money(r.opening_float, cur));
+  t.row('Efectivo cobrado', money(r.totals.cash_collected, cur));
+  if (Number(r.cash_ins_total) > 0) t.row('Entradas de efectivo', money(r.cash_ins_total, cur));
+  if (Number(r.totals.usd.change_given_mxn) > 0) t.row('Cambio por dólares', `-${money(r.totals.usd.change_given_mxn, cur)}`);
+  if (Number(r.drops_received) > 0) t.row('Menos retiros', `-${money(r.drops_received, cur)}`);
+  t.rule();
+  t.bold().tall();
+  t.raw(escpos.twoColumns('DEBE TENER', money(r.cash_to_hand, cur), t.width));
+  t.normal().boldOff();
+
+  if (r.has_usd) {
+    t.blank().rule();
+    t.bold().line('DÓLARES').boldOff();
+    if (Number(r.opening_float_usd) > 0) t.row('Fondo en dólares', money(r.opening_float_usd, 'USD'));
+    t.row('Dólares recibidos', money(r.totals.usd.received, 'USD'));
+    if (Number(r.usd_cash_ins_total) > 0) t.row('Entradas en dólares', money(r.usd_cash_ins_total, 'USD'));
+    if (Number(r.usd_drops_received) > 0) t.row('Menos retiros', `-${money(r.usd_drops_received, 'USD')}`);
+    t.bold().row('Debe tener', money(r.usd_to_hand, 'USD')).boldOff();
+  }
+
+  if ((r.pending_orders || []).length) {
+    t.blank().rule();
+    t.row(`Sin cobrar (${r.pending_orders.length})`, money(r.pending_total, cur));
+  }
+  t.blank().center().line('No es un corte de cierre.').left();
+  footer(t, settings);
+  t.blank(2).cut();
+}
+
+async function printXReport(runner, {
+  nightclubId, summary, locationId, locationName, userName, role, authorizedBy, userId = null,
+}) {
+  const printer = await cashPaperPrinter(runner, {
+    nightclubId, locationId, section: summary.shift.section,
+  });
+  if (!printer) return null;
+  const club = await clubOf(runner, nightclubId);
+  const settings = await printing.settingsOf(runner, nightclubId);
+  return printing.enqueue(runner, {
+    nightclubId,
+    printer,
+    kind: 'x_report',
+    refId: summary.shift.id,
+    createdBy: userId,
+    ...build(printer, (t) => renderXReport(t, {
+      summary, location_name: locationName, user_name: userName, role,
+      authorized_by: authorizedBy, at: new Date(),
+    }, { club, settings })),
+  });
+}
+
+// ---------------------------------------------------------------- copia de un recibo (D122)
+
+/**
+ * La copia de un recibo que pide el cajero: el MISMO papel, byte por byte, con un
+ * aviso arriba de que es copia, quién la pidió y a qué hora. Igual que la comanda
+ * reimpresa (D62): una copia que se ve idéntica al original es cómo un recibo se usa
+ * dos veces.
+ */
+function copyBanner(printer, { requestedBy, at, timezone }) {
+  const t = escpos.ticket({
+    columns: printer.columns, codepage: printer.codepage, hasCutter: printer.has_cutter,
+  });
+  t.center().bold().tall('** COPIA - REIMPRESION **').normal().boldOff();
+  t.line(`Reimprimió: ${requestedBy || '—'}  ${localTime(at || new Date(), timezone)}`);
+  t.left().rule();
+  return t.build();
+}
+
+async function reprintReceiptCopy(runner, { nightclubId, job, userId }) {
+  const printer = await printing.getPrinter(runner, { nightclubId, printerId: job.printer_id });
+  if (!printer || !printer.active) return null;
+  const club = await clubOf(runner, nightclubId);
+  const quien = await nameOf(runner, userId);
+  const banner = copyBanner(printer, { requestedBy: quien, timezone: club.timezone });
+  return printing.enqueue(runner, {
+    nightclubId,
+    printer,
+    kind: 'receipt',
+    // La copia apunta al mismo cobro que el original.
+    refId: job.transaction_id || job.ref_id,
+    createdBy: userId,
+    payload: Buffer.concat([banner.bytes, job.payload]),
+    preview: `${banner.text}\n${job.preview}`,
+  });
+}
+
 // ---------------------------------------------------------------- armar
 
 /**
@@ -1324,5 +1529,7 @@ module.exports = {
   cutData, renderCut, printShiftCut, ROLE_LABEL,
   dropData, renderDrop, printCashDrop,
   renderNightCut, printNightCut, differenceLabel, header, footer, textLines,
+  cashInData, renderCashIn, printCashIn, renderXReport, printXReport,
+  copyBanner, reprintReceiptCopy,
   build,
 };

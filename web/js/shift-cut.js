@@ -92,6 +92,21 @@
   }
 
   /**
+   * Por qué no se puede meter ese efectivo a la caja (D122). Solo una caja abierta, con
+   * monto, motivo y el código del gerente.
+   */
+  function cashInBlocker(amount, cut, { reason = '', pin = '' } = {}) {
+    const n = Number(amount);
+    if (!Number.isFinite(n) || n <= 0) return 'cut.errAmount';
+    if (!cut || !cut.shift) return 'cut.errNoShift';
+    if (!isTill(cut)) return 'cut.errNotTill';
+    if (cut.shift.ended_at || cut.closing) return 'cut.errShiftClosed';
+    if (String(reason).trim().length < 3) return 'cut.errReason';
+    if (!/^\d{6}$/.test(String(pin))) return 'cut.errPin';
+    return null;
+  }
+
+  /**
    * Por qué no se puede cerrar el corte todavía.
    *
    * `counted` es lo que el gerente contó, y la diferencia se mide contra lo que la
@@ -166,6 +181,12 @@
       count: l.count,
       cash: isCash(l.method),
     })));
+    // El efectivo que se metió a la caja (D122) también se devuelve.
+    if (Number(cut.cash_ins_total) > 0) {
+      out2.push({
+        key: 'cash_in', label: t('cut.cashIns'), value: cut.cash_ins_total, count: 0, cash: true,
+      });
+    }
     // El cambio en pesos que se dio por cobros en dólares salió del cajón (D86).
     if (hasUsd(cut) && cut.totals.usd.change_given_mxn !== null
         && Number(cut.totals.usd.change_given_mxn) > 0) {
@@ -268,6 +289,14 @@
           <button id="cut-drop" class="card rounded-xl py-3 text-sm">—</button>
           <button id="cut-declare" class="ev2-button rounded-xl py-3 font-display text-sm">—</button>
         </div>
+        <!-- Solo en una caja (D122): meter efectivo, corte X con el PIN del gerente y
+             copia de un recibo de este turno. -->
+        <div id="cut-till-actions" class="grid grid-cols-3 gap-2" hidden>
+          <button id="cut-cashin" class="card rounded-xl py-3 text-xs">—</button>
+          <button id="cut-xreport" class="card rounded-xl py-3 text-xs">—</button>
+          <button id="cut-receipts" class="card rounded-xl py-3 text-xs">—</button>
+        </div>
+        <div id="cut-receipt-list" class="space-y-1" hidden></div>
       </div>`;
     doc.body.appendChild(caja);
 
@@ -294,6 +323,9 @@
       $('cut-reason').placeholder = t('cut.reason');
       $('cut-pin').placeholder = t('cut.pin');
       $('cut-pin-hint').textContent = t('cut.pinHint');
+      $('cut-cashin').textContent = t('cut.cashIn');
+      $('cut-xreport').textContent = t('cut.xReport');
+      $('cut-receipts').textContent = t('cut.receiptCopy');
 
       const box = $('cut-lines');
       box.innerHTML = '';
@@ -354,6 +386,10 @@
       }
 
       const puede = Boolean(cut && cut.shift && !cut.closing);
+      const esCaja = puede && isTill(cut) && !cut.shift.ended_at;
+      $('cut-till-actions').hidden = !esCaja;
+      if (!esCaja) $('cut-receipt-list').hidden = true;
+      for (const id of ['cut-cashin', 'cut-xreport', 'cut-receipts']) $(id).disabled = !esCaja;
       $('cut-drop').disabled = !puede || Boolean(cut.shift.ended_at);
       $('cut-declare').disabled = !puede;
       // Los campos según el paso del corte a ciegas.
@@ -493,6 +529,103 @@
       }
     }
 
+    const errorDe = (err) => (deps.errorMessage ? deps.errorMessage(err) : String(err.message || err));
+
+    /** Meter efectivo a la caja (D122): los mismos campos que el retiro. */
+    async function meterEfectivo() {
+      if (estado.busy) return;
+      $('cut-error').hidden = true;
+      const monto = Number($('cut-amount').value);
+      const motivo = $('cut-reason').value;
+      const pin = $('cut-pin').value;
+      const moneda = $('cut-currency').hidden ? 'MXN' : ($('cut-currency').value || 'MXN');
+      const bloqueo = cashInBlocker(monto, estado.cut, { reason: motivo, pin });
+      if (bloqueo) { avisar(t(bloqueo)); return; }
+      const texto = moneda === 'USD' ? usdText(monto) : dinero(monto);
+      if (!(await ask(t('cut.confirmCashIn', { amount: texto })))) { $('cut-pin').value = ''; return; }
+      estado.busy = true;
+      $('cut-cashin').disabled = true;
+      try {
+        const hecho = await api.post(`/nightclubs/${clubId()}/shifts/me/cash-ins`, {
+          amount: monto, currency: moneda, reason: motivo.trim(), manager_pin: pin,
+        });
+        if (deps.toast) {
+          const sinPapel = hecho.ticket === null;
+          deps.toast(t(sinPapel ? 'cut.cashInNoTicket' : 'cut.cashInSent', {
+            name: (hecho.cash_in && hecho.cash_in.authorized_by) || '',
+          }), sinPapel ? 'warn' : 'ok');
+        }
+        $('cut-amount').value = '';
+        $('cut-reason').value = '';
+        await refrescar();
+      } catch (err) {
+        avisar(errorDe(err));
+      } finally {
+        $('cut-pin').value = '';
+        estado.busy = false;
+        $('cut-cashin').disabled = false;
+      }
+    }
+
+    /** Corte X (D122): lo autoriza el gerente con su código; aquí no se ve ningún número. */
+    async function corteX() {
+      if (estado.busy) return;
+      $('cut-error').hidden = true;
+      const pin = $('cut-pin').value;
+      if (!/^\d{6}$/.test(String(pin))) { avisar(t('cut.errPin')); return; }
+      estado.busy = true;
+      $('cut-xreport').disabled = true;
+      try {
+        await api.post(`/nightclubs/${clubId()}/till/x-report`, { manager_pin: pin });
+        if (deps.toast) deps.toast(t('cut.xReportSent'), 'ok');
+      } catch (err) {
+        avisar(errorDe(err));
+      } finally {
+        $('cut-pin').value = '';
+        estado.busy = false;
+        $('cut-xreport').disabled = false;
+      }
+    }
+
+    /** Los recibos de este turno, para sacar una copia marcada como COPIA (D122). */
+    async function recibos() {
+      $('cut-error').hidden = true;
+      const lista = $('cut-receipt-list');
+      if (!lista.hidden) { lista.hidden = true; return; }
+      try {
+        const { receipts } = await api.get(`/nightclubs/${clubId()}/till/receipts`);
+        lista.innerHTML = '';
+        if (!receipts.length) {
+          const p = doc.createElement('p');
+          p.className = 'text-xs text-white/40';
+          p.textContent = t('cut.receiptNone');
+          lista.appendChild(p);
+        }
+        for (const r of receipts) {
+          const b = doc.createElement('button');
+          b.className = 'card rounded-lg px-3 py-2 text-xs w-full flex justify-between gap-2';
+          const hora = new Date(r.created_at);
+          b.innerHTML = '<span></span><span></span>';
+          b.firstChild.textContent = `${t('cut.receiptFolio', { folio: r.folio })} · ${
+            String(hora.getHours()).padStart(2, '0')}:${String(hora.getMinutes()).padStart(2, '0')}`;
+          b.lastChild.textContent = r.currency === 'USD' ? usdText(r.amount) : dinero(r.amount);
+          b.onclick = async () => {
+            if (!(await ask(t('cut.receiptConfirm', { folio: r.folio })))) return;
+            b.disabled = true;
+            try {
+              await api.post(`/nightclubs/${clubId()}/till/receipts/${r.id}/reprint`, {});
+              if (deps.toast) deps.toast(t('cut.receiptSent'), 'ok');
+            } catch (err) { avisar(errorDe(err)); } finally { b.disabled = false; }
+          };
+          lista.appendChild(b);
+        }
+        lista.hidden = false;
+      } catch (err) { avisar(errorDe(err)); }
+    }
+
+    $('cut-cashin').onclick = meterEfectivo;
+    $('cut-xreport').onclick = corteX;
+    $('cut-receipts').onclick = recibos;
     $('cut-drop').onclick = () => accion('drop');
     $('cut-declare').onclick = () => accion('declare');
     $('cut-close').onclick = () => { caja.hidden = true; };
@@ -518,6 +651,6 @@
 
   return {
     METHOD_KEY, methodKey, isCash, money, lines, statusKey, hasUsd, usdDifference,
-    dropBlocker, closeBlocker, countBlocker, blindStep, difference, pendingCount, isTill, createSheet,
+    dropBlocker, closeBlocker, countBlocker, cashInBlocker, blindStep, difference, pendingCount, isTill, createSheet,
   };
 }));

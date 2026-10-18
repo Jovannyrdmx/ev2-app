@@ -10698,6 +10698,150 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/nightclubs/{nightclubId}/shifts/me/cash-ins:
+    post:
+      operationId: addCashToTill
+      tags: [Cortes de turno]
+      summary: Meter efectivo a la caja abierta (cajero o anfitriona, con PIN de gerente)
+      description: |
+        D122. Reponer fondo o traer cambio a media noche. Requiere caja abierta y el PIN de un
+        gerente o admin que no sea quien recibe. Abre el cajón, imprime el ticket ENTRADA DE
+        EFECTIVO con las dos firmas, queda en `audit_log` (`till.cash_in`) y suma a lo que la
+        caja debe entregar en su corte (pesos o dólares, según la moneda).
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, reason, manager_pin]
+              properties:
+                amount: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+                currency: { type: string, enum: [MXN, USD], default: MXN }
+                reason: { type: string, minLength: 3, maxLength: 200 }
+                manager_pin: { type: string, pattern: '^\\d{6}$' }
+      responses:
+        '201':
+          description: La entrada quedó asentada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cash_in:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      amount: { $ref: '#/components/schemas/Money' }
+                      currency: { type: string }
+                      reason: { type: string }
+                      authorized_by: { type: [string, 'null'] }
+                  drawer: { type: object }
+                  ticket: { type: [object, 'null'] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/till/x-report:
+    post:
+      operationId: printMyTillXReport
+      tags: [Cortes de turno]
+      summary: Corte X de mi caja, con el PIN del gerente
+      description: |
+        D122. Imprime en la impresora de la caja cómo va sin cerrarla: cobrado por forma de pago,
+        propinas, fondo, entradas, retiros y lo que debe tener (pesos y dólares). La respuesta no
+        trae números: el cajero cuenta a ciegas (D105). Queda en `audit_log` (`till.x_report`).
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manager_pin]
+              properties:
+                manager_pin: { type: string, pattern: '^\\d{6}$' }
+      responses:
+        '202': { description: El corte X quedó en la cola de impresión }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/tills/{shiftId}/x-report:
+    post:
+      operationId: printTillXReport
+      tags: [Cortes de turno]
+      summary: Corte X de cualquier caja abierta (gerente o admin)
+      description: D122. Lo mismo que el corte X de la caja, pedido desde el panel del gerente.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: shiftId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '202': { description: El corte X quedó en la cola de impresión }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/nightclubs/{nightclubId}/till/receipts:
+    get:
+      operationId: listMyTillReceipts
+      tags: [Cortes de turno]
+      summary: Recibos que imprimió mi caja en este turno
+      description: D122. Solo recibos de un cobro (nunca el ticket de acceso del cover) y sin las copias.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Los recibos, el más reciente primero
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  receipts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        created_at: { type: string, format: date-time }
+                        status: { type: string }
+                        transaction_id: { type: string, format: uuid }
+                        folio: { type: string }
+                        amount: { $ref: '#/components/schemas/Money' }
+                        currency: { type: string }
+                        type: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/nightclubs/{nightclubId}/till/receipts/{jobId}/reprint:
+    post:
+      operationId: reprintMyTillReceipt
+      tags: [Cortes de turno]
+      summary: Copia de un recibo de mi caja
+      description: |
+        D122. El mismo papel con el aviso "** COPIA - REIMPRESION **", quién lo pidió y la hora.
+        Solo recibos de la caja abierta de quien lo pide y de este turno; una copia no se vuelve
+        a copiar. Queda en `audit_log` (`receipt.reprint`).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '202': { description: La copia quedó en la cola de impresión }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   /api/nightclubs/{nightclubId}/tills/report/print:
     post:
       operationId: printNightCut
@@ -16164,7 +16308,7 @@ components:
         nightclub_id: { type: string, format: uuid }
         printer_id: { type: string, format: uuid }
         printer_name: { type: [string, 'null'] }
-        kind: { type: string, enum: [order, bill, receipt, shift_cut, test, cash_drop, drawer, night_cut] }
+        kind: { type: string, enum: [order, bill, receipt, shift_cut, test, cash_drop, drawer, night_cut, cash_in, x_report] }
         ref_id: { type: [string, 'null'], format: uuid }
         copies: { type: integer }
         status: { type: string, enum: [pending, taken, printed, failed] }
