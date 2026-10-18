@@ -20,7 +20,7 @@
 
   /** Quién puede pedir para sí. El servidor manda igual: esto solo evita la pantalla. */
   const STAFF_ROLES = ['waiter', 'bartender', 'cashier', 'dancer', 'dj', 'light_tech',
-    'valet', 'hostess', 'rp'];
+    'valet', 'hostess', 'rp', 'manager'];
 
   const t = (key, vars) => (vars ? EV2Format.tf(key, vars) : EV2Format.t(key));
   const money = (a, c) => EV2Format.money(a, c || 'MXN');

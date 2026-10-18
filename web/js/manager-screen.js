@@ -215,6 +215,8 @@
     $('screen-manager').hidden = false;
     $('me-name').textContent = (api.session.user && api.session.user.display_name) || '';
     $('btn-venue-editor').hidden = role !== 'admin';
+    // Mi consumo (D116): el gerente pide para sí; el admin es el dueño, no lleva descuento.
+    if ($('btn-my-consumption')) $('btn-my-consumption').hidden = role !== 'manager';
     await loadAll();
     connectRealtime();
     // Notificaciones al teléfono (D90): ofrecerlas, o volver a registrar este teléfono.
