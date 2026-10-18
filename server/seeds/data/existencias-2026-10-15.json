@@ -1,0 +1,4916 @@
+{
+  "$comment": "Existencias reales al 15/10/2026 tomadas de los reportes de inventario de SoftRestaurant11 (EXISTENCIAS ALM/B1/BVIP). Cantidades en la unidad base del insumo (ml o pza). Reglas aprobadas por el dueño: 1 oz = 30 ml; botellas por su tamaño real de presentación; packs por las piezas que trae el pack; botellas sin tamaño en el archivo = 750 ml. Ninguna cantidad se estimó: cada renglón lleva las líneas del reporte de las que sale. Se aplica como CONTEO FÍSICO por lugar (queda en el kardex con motivo).",
+  "counted_on": "2026-10-15",
+  "reason": "Inventario SR11 15/10/2026",
+  "oz_to_ml": 30,
+  "new_supplies": [
+    {
+      "name": "BE LIGHT TORONJA",
+      "unit": "ml",
+      "package_size": 1000.0,
+      "package_label": "botella 1 L",
+      "size_confirmed": true
+    },
+    {
+      "name": "BOMBAY SAPPHIRE GINEBRA",
+      "unit": "ml",
+      "package_size": 700.0,
+      "package_label": "botella 700 ml",
+      "size_confirmed": true
+    },
+    {
+      "name": "CEREZA",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "CHAMOY",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "COCA COLA 355 ML",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "ESCARCHADO MORA AZUL",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "GOMITA",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "LIMON KL",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "NARANJA",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "PIMIENTA",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "PIÑA",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "POPOTE FANTASY GREEN 21 CM C/150 PZS",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "SAL",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "SALSA BOTANERA",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "SALSA INGLESA",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "SALSA MAGGUIE",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "SALSA TABASCO",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "SKY",
+      "unit": "ml",
+      "package_size": 750.0,
+      "package_label": "botella 750 ml",
+      "size_confirmed": false
+    },
+    {
+      "name": "TAJIN",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "TEQUILA HORNITOS BLACK BARREL",
+      "unit": "ml",
+      "package_size": 750.0,
+      "package_label": "botella 750 ml",
+      "size_confirmed": false
+    },
+    {
+      "name": "TEQUILA HORNITOS REPOSADO",
+      "unit": "ml",
+      "package_size": 750.0,
+      "package_label": "botella 750 ml",
+      "size_confirmed": false
+    },
+    {
+      "name": "TEQUILA LA SANTA",
+      "unit": "ml",
+      "package_size": 750.0,
+      "package_label": "botella 750 ml",
+      "size_confirmed": false
+    },
+    {
+      "name": "ULTRA",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "VASO DART 2 OZ 125PZS 200PC TIRA",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "VASO REYMA 10 OZ TRANSP 1/50 PZS",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "VASO REYMA TRANSP 32EU 1/25 PZS",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "VELA GRANDE 40 SEG. (DISEÑO 1) - PAQ 50 (PZA)",
+      "unit": "pza",
+      "package_size": 1.0,
+      "package_label": "pieza",
+      "size_confirmed": true
+    },
+    {
+      "name": "VINO",
+      "unit": "ml",
+      "package_size": 750.0,
+      "package_label": "botella 750 ml",
+      "size_confirmed": true
+    },
+    {
+      "name": "VINO ESPUMOSO BORRASCA PROSECCO ROSE",
+      "unit": "ml",
+      "package_size": 750.0,
+      "package_label": "botella 750 ml",
+      "size_confirmed": true
+    },
+    {
+      "name": "VINO MARTINI ROSSO",
+      "unit": "ml",
+      "package_size": 750.0,
+      "package_label": "botella 750 ml",
+      "size_confirmed": false
+    },
+    {
+      "name": "VODKA ZAVERICH",
+      "unit": "ml",
+      "package_size": 1000.0,
+      "package_label": "botella 1 L",
+      "size_confirmed": true
+    }
+  ],
+  "locations": [
+    {
+      "code": "almacen",
+      "source": "EXISTENCIAS ALM.pdf (SR11 almacén 1, ALMACÉN GENERAL)",
+      "items": [
+        {
+          "supply": "TECATE LIGHT",
+          "pos_id": "001051",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4007",
+              "articulo": "CARTON - TECATE LIGHT - ( 20 PZA)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 20 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "TECATE ROJA",
+          "pos_id": "001059",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4008",
+              "articulo": "CARTON - TECATE ROJA - ( 20 PZA )",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 20 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "ULTRA",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4006",
+              "articulo": "CARTON - ULTRA - ( 24 PZA )",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 24 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "AGUA",
+          "pos_id": "001054",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3036",
+              "articulo": "AGUA- (500 ML) - 45 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 45 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "AGUA MINERAL 2 L",
+          "pos_id": "001008",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3011",
+              "articulo": "AGUA MINERAL - (2L) - 8 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 8 pzas × 2000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "AGUA MINERAL 355 ML",
+          "pos_id": "003024",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3025",
+              "articulo": "AGUA MINERAL- (355 ML) - 24 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 24 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "BE LIGHT TORONJA",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6048",
+              "articulo": "BE LIGHT TORONJA - (1L - 33 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CALAHUA",
+          "pos_id": "001034",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6027",
+              "articulo": "CALAHUA - (1L - 33 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CARNATION",
+          "pos_id": "001040",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1007",
+              "articulo": "CARNATION - (1L) - 4 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 4 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CEREZA",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1003",
+              "articulo": "CEREZA",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "CHAMOY",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1024",
+              "articulo": "CHAMOY",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "CLAMATO",
+          "pos_id": "001050",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6030",
+              "articulo": "CLAMATO - (2.54 L) - 8 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 8 pzas × 2540 ml"
+            }
+          ]
+        },
+        {
+          "supply": "COCA COLA 355 ML",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3013",
+              "articulo": "COCA COLA - (355 ML) - 24 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 24 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "COCA COLA",
+          "pos_id": "006024",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6029",
+              "articulo": "COCA COLA (3L) - 6 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 6 pzas × 3000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CONCENTRADO MANGO",
+          "pos_id": "001011",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1012",
+              "articulo": "CONCENTRADO MANGO - (1L)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CONCENTRADO TAMARINDO",
+          "pos_id": "001061",
+          "unit": "ml",
+          "quantity": 4000.0,
+          "source_lines": [
+            {
+              "clave": "1013",
+              "articulo": "CONCENTRADO TAMARINDO - (1L)",
+              "existencia": 4.0,
+              "unidad": "presentación",
+              "calculo": "4.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CREMA BATIDA",
+          "pos_id": "001035",
+          "unit": "pza",
+          "quantity": 1.0,
+          "source_lines": [
+            {
+              "clave": "1008",
+              "articulo": "CREMA BATIDA - (425 GR) - 3 PACK",
+              "existencia": 0.3334,
+              "unidad": "presentación",
+              "calculo": "0.3334 × 3 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "ESCARCHADO MORA AZUL",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1005",
+              "articulo": "ESCARCHADO MORA AZUL",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "GOMITA",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6040",
+              "articulo": "GOMITA",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO ARANDANO",
+          "pos_id": "001030",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3016",
+              "articulo": "JUGO ARANDANO - (1L) - 12 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO MANGO",
+          "pos_id": "001039",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3003",
+              "articulo": "JUGO MANGO - (1 L) - 12 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO NARANJA",
+          "pos_id": "001041",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3004",
+              "articulo": "JUGO NARANJA - (1 L) - 12 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO PIÑA",
+          "pos_id": "001009",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3005",
+              "articulo": "JUGO PIÑA - (1L) - 12 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO TORONJA",
+          "pos_id": "004021",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4021",
+              "articulo": "JUGO TORONJA - (1L) - 12 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LIMON KL",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1016",
+              "articulo": "LIMON KL",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "MONSTER",
+          "pos_id": "001021",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3010",
+              "articulo": "MONSTER - (473 ML) - 24 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 24 pzas × 473 ml"
+            }
+          ]
+        },
+        {
+          "supply": "NARANJA",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1028",
+              "articulo": "NARANJA",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "NARANJADA",
+          "pos_id": "001017",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3018",
+              "articulo": "NARANJADA - (2L) - 8 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 8 pzas × 2000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "PIMIENTA",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 1.0,
+          "source_lines": [
+            {
+              "clave": "1025",
+              "articulo": "PIMIENTA",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "PIÑA",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1027",
+              "articulo": "PIÑA",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "POPOTE FANTASY GREEN 21 CM C/150 PZS",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 1.0,
+          "source_lines": [
+            {
+              "clave": "6046",
+              "articulo": "POPOTE FANTASY GREEN 21 CM C/150 PZS",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "POWERADE",
+          "pos_id": "001037",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3006",
+              "articulo": "POWERADE - (1L) - 6 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 6 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "SAL",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 6.0,
+          "source_lines": [
+            {
+              "clave": "1017",
+              "articulo": "SAL",
+              "existencia": 6.0,
+              "unidad": "presentación",
+              "calculo": "6.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "SALSA BOTANERA",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6047",
+              "articulo": "SALSA BOTANERA",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "SALSA INGLESA",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 2.0,
+          "source_lines": [
+            {
+              "clave": "6037",
+              "articulo": "SALSA INGLESA",
+              "existencia": 2.0,
+              "unidad": "presentación",
+              "calculo": "2.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "SALSA MAGGUIE",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6038",
+              "articulo": "SALSA MAGGUIE",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "SALSA TABASCO",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6039",
+              "articulo": "SALSA TABASCO",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "SPRITE 3 L",
+          "pos_id": "001004",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3033",
+              "articulo": "SPRITE - (2L) - 8 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 8 pzas × 2000 ml"
+            },
+            {
+              "clave": "3009",
+              "articulo": "SPRITE - (3L) - 6 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 6 pzas × 3000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "SPRITE 355 ML",
+          "pos_id": "001063",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3008",
+              "articulo": "SPRITE - (355 ML) - 24 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 24 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "SQUIRT",
+          "pos_id": "003027",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3030",
+              "articulo": "SQUIRT - (355 ML) - 24 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 24 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "SQUIRT GRANDE",
+          "pos_id": "003026",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3034",
+              "articulo": "SQUIRT - (2L) - 8 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 8 pzas × 2000 ml"
+            },
+            {
+              "clave": "3029",
+              "articulo": "SQUIRT - (3L) - 6 PACK",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 6 pzas × 3000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TAJIN",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1023",
+              "articulo": "TAJIN",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "VASO DART 2 OZ 125PZS 200PC TIRA",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6045",
+              "articulo": "VASO DART 2 OZ 125PZS 200PC TIRA",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "VASO REYMA 10 OZ TRANSP 1/50 PZS",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1033",
+              "articulo": "VASO REYMA 10 OZ TRANSP 1/50 PZS",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "VASO REYMA TRANSP 32EU 1/25 PZS",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1026",
+              "articulo": "VASO REYMA TRANSP 32EU 1/25 PZS",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "VELA GRANDE 40 SEG. (DISEÑO 1) - PAQ 50 (PZA)",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6044",
+              "articulo": "VELA GRANDE 40 SEG. (DISEÑO 1) - PAQ 50 (PZA)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "BOMBAY SAPPHIRE GINEBRA",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2108",
+              "articulo": "BOMBAY SAPPHIRE GINEBRA (700 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "GINEBRA OSO NEGRO",
+          "pos_id": "002076",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2071",
+              "articulo": "GINEBRA OSO NEGRO - (1L)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR BAILEYS",
+          "pos_id": "001044",
+          "unit": "ml",
+          "quantity": 1000.0,
+          "source_lines": [
+            {
+              "clave": "2040",
+              "articulo": "LICOR BAILEYS - (1L)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR BRANDY TORRES 10",
+          "pos_id": "002072",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2067",
+              "articulo": "LICOR BRANDY TORRES 10 - (700 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU CURACAO AZUL",
+          "pos_id": "001007",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2013",
+              "articulo": "LICOR CARIBU CURACAO AZUL - (1L)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU DURAZNO",
+          "pos_id": "001027",
+          "unit": "ml",
+          "quantity": 1000.0,
+          "source_lines": [
+            {
+              "clave": "2014",
+              "articulo": "LICOR CARIBU DURAZNO - (1L)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU MELON",
+          "pos_id": "001053",
+          "unit": "ml",
+          "quantity": 5000.0,
+          "source_lines": [
+            {
+              "clave": "2015",
+              "articulo": "LICOR CARIBU MELON",
+              "existencia": 5.0,
+              "unidad": "presentación",
+              "calculo": "5.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU MENTA VERDE",
+          "pos_id": "002082",
+          "unit": "ml",
+          "quantity": 1000.0,
+          "source_lines": [
+            {
+              "clave": "2077",
+              "articulo": "LICOR CARIBU MENTA VERDE - (1L)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU TRIPLE SEC",
+          "pos_id": "001002",
+          "unit": "ml",
+          "quantity": 1000.0,
+          "source_lines": [
+            {
+              "clave": "2032",
+              "articulo": "LICOR CARIBU TRIPLE SEC - (1L)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR GRANADINA",
+          "pos_id": "001013",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2050",
+              "articulo": "LICOR GRANADINA - (1L)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR HPNOTIQ",
+          "pos_id": "001080",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2016",
+              "articulo": "LICOR HPNOTIQ",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR JAGERMEISTER",
+          "pos_id": "001046",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2038",
+              "articulo": "LICOR JAGERMEISTER - (700 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR JARABE NATURAL",
+          "pos_id": "001005",
+          "unit": "ml",
+          "quantity": 1000.0,
+          "source_lines": [
+            {
+              "clave": "2051",
+              "articulo": "LICOR JARABE NATURAL - (1L)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR KALHUA",
+          "pos_id": "001048",
+          "unit": "ml",
+          "quantity": 1000.0,
+          "source_lines": [
+            {
+              "clave": "2047",
+              "articulo": "LICOR KALHUA - (1L)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "MEZCAL 400 CONEJOS (JOVEN)",
+          "pos_id": "002112",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2120",
+              "articulo": "MEZCAL 400 CONEJOS JOVEN",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON ANTILLANO BLANCO",
+          "pos_id": "002071",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2066",
+              "articulo": "RON ANTILLANO BLANCO - (1L)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACANORA",
+          "pos_id": "002086",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2081",
+              "articulo": "RON BACANORA - (1L)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACARDI BLANCO",
+          "pos_id": "001052",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2035",
+              "articulo": "RON BACARDI BLANCO - (750 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACARDI LIMON",
+          "pos_id": "001043",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2010",
+              "articulo": "RON BACARDI LIMON - (750 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACARDI MANGO",
+          "pos_id": "001012",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2011",
+              "articulo": "RON BACARDI MANGO - (750 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACARDI RASPBERRY",
+          "pos_id": "001006",
+          "unit": "ml",
+          "quantity": 1500.0,
+          "source_lines": [
+            {
+              "clave": "2012",
+              "articulo": "RON BACARDI RASPBERRY - (750 ML)",
+              "existencia": 2.0,
+              "unidad": "presentación",
+              "calculo": "2.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON CAPITAN MORGAN",
+          "pos_id": "001020",
+          "unit": "ml",
+          "quantity": 1400.0,
+          "source_lines": [
+            {
+              "clave": "2039",
+              "articulo": "RON CAPITAN MORGAN - (700 ML)",
+              "existencia": 2.0,
+              "unidad": "presentación",
+              "calculo": "2.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON MALIBU",
+          "pos_id": "001032",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2033",
+              "articulo": "RON MALIBU - (750 ML)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "SKY",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4004",
+              "articulo": "SKY",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 1800",
+          "pos_id": "002052",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2106",
+              "articulo": "TEQUILA 1800",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 30-30 AÑEJO",
+          "pos_id": "002110",
+          "unit": "ml",
+          "quantity": 2250.0,
+          "source_lines": [
+            {
+              "clave": "2118",
+              "articulo": "TEQUILA 30-30 AÑEJO",
+              "existencia": 3.0,
+              "unidad": "presentación",
+              "calculo": "3.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 30-30 BLANCO",
+          "pos_id": "002109",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2116",
+              "articulo": "TEQUILA 30-30 BLANCO",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 990 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 30-30 CRISTALINO",
+          "pos_id": "002107",
+          "unit": "ml",
+          "quantity": 2250.0,
+          "source_lines": [
+            {
+              "clave": "2115",
+              "articulo": "TEQUILA 30-30 CRISTALINO",
+              "existencia": 3.0,
+              "unidad": "presentación",
+              "calculo": "3.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 30-30 REPOSADO",
+          "pos_id": "002108",
+          "unit": "ml",
+          "quantity": 3000.0,
+          "source_lines": [
+            {
+              "clave": "2117",
+              "articulo": "TEQUILA 30-30 REPOSADO",
+              "existencia": 4.0,
+              "unidad": "presentación",
+              "calculo": "4.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA BARULLO SANDIA",
+          "pos_id": "002113",
+          "unit": "ml",
+          "quantity": 9000.0,
+          "source_lines": [
+            {
+              "clave": "2121",
+              "articulo": "TEQUILA BARULLO SANDIA",
+              "existencia": 12.0,
+              "unidad": "presentación",
+              "calculo": "12.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA (CABRITOS, HERENCIA ORO - 33 OZ)",
+          "pos_id": "001079",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2026",
+              "articulo": "TEQUILA CABRITO - (750 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            },
+            {
+              "clave": "2109",
+              "articulo": "TEQUILA RANCHO MI HERENCIA ORO - (1L)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA CLASE AZUL",
+          "pos_id": "001068",
+          "unit": "ml",
+          "quantity": 3750.0,
+          "source_lines": [
+            {
+              "clave": "2031",
+              "articulo": "TEQUILA CLASE AZUL",
+              "existencia": 5.0,
+              "unidad": "presentación",
+              "calculo": "5.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA DON JULIO 1942",
+          "pos_id": "001067",
+          "unit": "ml",
+          "quantity": 1500.0,
+          "source_lines": [
+            {
+              "clave": "2030",
+              "articulo": "TEQUILA DON JULIO 1942",
+              "existencia": 2.0,
+              "unidad": "presentación",
+              "calculo": "2.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA DON JULIO 70",
+          "pos_id": "001033",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2027",
+              "articulo": "TEQUILA DON JULIO 70 - (700 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 690 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA DON JULIO BLANCO",
+          "pos_id": "001065",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2043",
+              "articulo": "TEQUILA DON JULIO BLANCO - (700 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA DON JULIO REPOSADO",
+          "pos_id": "001066",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2044",
+              "articulo": "TEQUILA DON JULIO REPOSADO",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA GRAN MALO",
+          "pos_id": "001069",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2028",
+              "articulo": "TEQUILA GRAN MALO",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA HERRADURA ULTRA",
+          "pos_id": "001071",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2036",
+              "articulo": "TEQUILA HERRADURA ULTRA",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA HORNITOS BLACK BARREL",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2110",
+              "articulo": "TEQUILA HORNITOS BLACK BARREL",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA HORNITOS REPOSADO",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 1500.0,
+          "source_lines": [
+            {
+              "clave": "2060",
+              "articulo": "TEQUILA HORNITOS REPOSADO",
+              "existencia": 2.0,
+              "unidad": "presentación",
+              "calculo": "2.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA MAESTRO DOBEL",
+          "pos_id": "001070",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2025",
+              "articulo": "TEQUILA MAESTRO DOBEL - (700 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA MANGO AZUL",
+          "pos_id": "001010",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2024",
+              "articulo": "TEQUILA MANGO AZUL - (700 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2075",
+              "articulo": "VINO - (750 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO ESPUMOSO BORRASCA PROSECCO ROSE",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2113",
+              "articulo": "VINO ESPUMOSO BORRASCA PROSECCO ROSE (750 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO ESPUMOSO CHAMPAGNE DE LA CASA",
+          "pos_id": "001001",
+          "unit": "ml",
+          "quantity": 1500.0,
+          "source_lines": [
+            {
+              "clave": "2041",
+              "articulo": "VINO ESPUMOSO CHAMPAGNE DE LA CASA",
+              "existencia": 2.0,
+              "unidad": "presentación",
+              "calculo": "2.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO ESPUMOSO DOM PERIGNON",
+          "pos_id": "001082",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2042",
+              "articulo": "VINO ESPUMOSO DOM PERIGNON",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO ESPUMOSO MOET",
+          "pos_id": "001081",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2048",
+              "articulo": "VINO ESPUMOSO MOET",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO MARTINI ROSSO",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2111",
+              "articulo": "VINO MARTINI ROSSO",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT",
+          "pos_id": "002070",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2065",
+              "articulo": "VODKA ABSOLUT - (750ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT LIMON",
+          "pos_id": "001056",
+          "unit": "ml",
+          "quantity": 2250.0,
+          "source_lines": [
+            {
+              "clave": "1001",
+              "articulo": "VODKA ABSOLUT LIMON - (750 ML)",
+              "existencia": 3.0,
+              "unidad": "presentación",
+              "calculo": "3.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT MANGO",
+          "pos_id": "004014",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2008",
+              "articulo": "VODKA ABSOLUT MANGO - (750ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT PERA",
+          "pos_id": "001057",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2007",
+              "articulo": "VODKA ABSOLUT PERA - (750ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT RASPBERRY",
+          "pos_id": "001058",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2009",
+              "articulo": "VODKA ABSOLUT RASPBERRY - (750ML)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT SANDIA",
+          "pos_id": "002068",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2063",
+              "articulo": "VODKA ABSOLUT SANDIA - (750ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA GREY GOOSE",
+          "pos_id": "001083",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2017",
+              "articulo": "VODKA GREY GOOSE",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA OSO NEGRO",
+          "pos_id": "004007",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2107",
+              "articulo": "VODKA OSO NEGRO - (1L)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA SMIRNOF TAMARINDO",
+          "pos_id": "001084",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2018",
+              "articulo": "VODKA SMIRNOF TAMARINDO - (750ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA TITOS",
+          "pos_id": "002106",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2114",
+              "articulo": "VODKA TITOS - (750 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKEY RED LABEL",
+          "pos_id": "001018",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2022",
+              "articulo": "WHISKEY RED LABEL - (700 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BLACK LABEL",
+          "pos_id": "001074",
+          "unit": "ml",
+          "quantity": 5250.0,
+          "source_lines": [
+            {
+              "clave": "2020",
+              "articulo": "WHISKY BLACK LABEL - (750 ML)",
+              "existencia": 7.0,
+              "unidad": "presentación",
+              "calculo": "7.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BLUE LABEL",
+          "pos_id": "001022",
+          "unit": "ml",
+          "quantity": 1500.0,
+          "source_lines": [
+            {
+              "clave": "2023",
+              "articulo": "WHISKY BLUE LABEL (750 ML)",
+              "existencia": 2.0,
+              "unidad": "presentación",
+              "calculo": "2.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS 12",
+          "pos_id": "001076",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2019",
+              "articulo": "WHISKY BUCHANNANS 12 - (750 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS 18",
+          "pos_id": "001077",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2021",
+              "articulo": "WHISKY BUCHANNANS 18 - (750ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS 21 *RED SEAL*",
+          "pos_id": "002111",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2119",
+              "articulo": "WHISKY BUCHANNANS 21 *RED SEAL*",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS MASTER",
+          "pos_id": "002061",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2057",
+              "articulo": "WHISKY BUCHANNANS MASTER",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS PIÑA",
+          "pos_id": "002062",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2102",
+              "articulo": "WHISKY BUCHANNANS PIÑA (750 ML)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY DOUBLE BLACK LABEL",
+          "pos_id": "001075",
+          "unit": "ml",
+          "quantity": 2250.0,
+          "source_lines": [
+            {
+              "clave": "2045",
+              "articulo": "WHISKY DOUBLE BLACK LABEL (750 ML)",
+              "existencia": 3.0,
+              "unidad": "presentación",
+              "calculo": "3.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY JACK DANIELS",
+          "pos_id": "001078",
+          "unit": "ml",
+          "quantity": 700.0,
+          "source_lines": [
+            {
+              "clave": "2037",
+              "articulo": "WHISKY JACK DANIELS - (700 ML)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 700 ml"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "barra-baja",
+      "source": "EXISTENCIAS B1.pdf (SR11 almacén 04, BARRA 1)",
+      "items": [
+        {
+          "supply": "TECATE LIGHT",
+          "pos_id": "001051",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4007",
+              "articulo": "TECATE 1/4 BLANCA PZ (SUSPENDIDO) (1.0000 )",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "TECATE ROJA",
+          "pos_id": "001059",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4008",
+              "articulo": "TECATE 1/4 ROJO PZ (SUSPENDIDO) (1.0000 )",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "ULTRA",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4006",
+              "articulo": "CARTON - ULTRA - ( 24 PZA ) (24.0000 MEDIAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 24 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "AGUA",
+          "pos_id": "001054",
+          "unit": "pza",
+          "quantity": 43.0,
+          "source_lines": [
+            {
+              "clave": "1054",
+              "articulo": "AGUA",
+              "existencia": 43.0,
+              "unidad": "PZA",
+              "calculo": "piezas"
+            }
+          ]
+        },
+        {
+          "supply": "AGUA MINERAL 2 L",
+          "pos_id": "001008",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1008",
+              "articulo": "AGUA MINERAL - (2L - 66 OZ)",
+              "existencia": 0.0,
+              "unidad": "OZ",
+              "calculo": "0.0 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "AGUA MINERAL 355 ML",
+          "pos_id": "003024",
+          "unit": "pza",
+          "quantity": 1.042,
+          "source_lines": [
+            {
+              "clave": "3025",
+              "articulo": "AGUA MINERAL .355 (SUSPENDIDO) (1.0000 )",
+              "existencia": 1.0417,
+              "unidad": "presentación",
+              "calculo": "1.0417 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "BE LIGHT TORONJA",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 6000.0,
+          "source_lines": [
+            {
+              "clave": "6048",
+              "articulo": "BE LIGHT TORONJA - (1L - 33 OZ) (33.0000 OZ)",
+              "existencia": 6.0,
+              "unidad": "presentación",
+              "calculo": "6.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CALAHUA",
+          "pos_id": "001034",
+          "unit": "ml",
+          "quantity": 1500.0,
+          "source_lines": [
+            {
+              "clave": "6027",
+              "articulo": "CALAHUA - (1L - 33 OZ) (33.0000 OZ)",
+              "existencia": 1.5,
+              "unidad": "presentación",
+              "calculo": "1.5 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CARNATION",
+          "pos_id": "001040",
+          "unit": "ml",
+          "quantity": 198.0,
+          "source_lines": [
+            {
+              "clave": "1040",
+              "articulo": "CARNATION - (1L - 33 OZ / 340 ML - 11 OZ)",
+              "existencia": 6.6,
+              "unidad": "OZ",
+              "calculo": "6.6 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "CLAMATO",
+          "pos_id": "001050",
+          "unit": "ml",
+          "quantity": 381.0,
+          "source_lines": [
+            {
+              "clave": "6030",
+              "articulo": "CLAMATO 2.54 L (SUSPENDIDO) (1.0000 )",
+              "existencia": 0.15,
+              "unidad": "presentación",
+              "calculo": "0.15 × 2540 ml"
+            }
+          ]
+        },
+        {
+          "supply": "COCA COLA 355 ML",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3013",
+              "articulo": "COCA COLA - (355 ML) - 24 PACK (24.0000 PZA)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 24 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "COCA COLA",
+          "pos_id": "006024",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6029",
+              "articulo": "COCA COLA (3L) - 6 PACK (594.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 6 pzas × 3000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CONCENTRADO MANGO",
+          "pos_id": "001011",
+          "unit": "ml",
+          "quantity": 100.0,
+          "source_lines": [
+            {
+              "clave": "1012",
+              "articulo": "CONCENTRADO MANGO - (1L) (33.0000 OZ)",
+              "existencia": 0.1,
+              "unidad": "presentación",
+              "calculo": "0.1 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CONCENTRADO TAMARINDO",
+          "pos_id": "001061",
+          "unit": "ml",
+          "quantity": 700.0,
+          "source_lines": [
+            {
+              "clave": "1013",
+              "articulo": "CONCENTRADO TAMARINDO - (1L) (33.0000 OZ)",
+              "existencia": 0.7,
+              "unidad": "presentación",
+              "calculo": "0.7 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CREMA BATIDA",
+          "pos_id": "001035",
+          "unit": "pza",
+          "quantity": 5.0,
+          "source_lines": [
+            {
+              "clave": "1008",
+              "articulo": "CREMA BATIDA - (425 GR) - 3 PACK (36.0000 PZA)",
+              "existencia": 0.1389,
+              "unidad": "presentación",
+              "calculo": "0.1389 × 36 pza (factor del archivo)"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO ARANDANO",
+          "pos_id": "001030",
+          "unit": "ml",
+          "quantity": 4500.0,
+          "source_lines": [
+            {
+              "clave": "3016",
+              "articulo": "JUGO ARANDANO - (1L) - 12 PACK (396.0000 OZ)",
+              "existencia": 0.375,
+              "unidad": "presentación",
+              "calculo": "0.375 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO MANGO",
+          "pos_id": "001039",
+          "unit": "ml",
+          "quantity": 8000.4,
+          "source_lines": [
+            {
+              "clave": "3003",
+              "articulo": "JUGO MANGO - (1 L) - 12 PACK (396.0000 OZ)",
+              "existencia": 0.6667,
+              "unidad": "presentación",
+              "calculo": "0.6667 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO NARANJA",
+          "pos_id": "001041",
+          "unit": "ml",
+          "quantity": 3999.6,
+          "source_lines": [
+            {
+              "clave": "3004",
+              "articulo": "JUGO NARANJA - (1 L) - 12 PACK (396.0000 OZ)",
+              "existencia": 0.3333,
+              "unidad": "presentación",
+              "calculo": "0.3333 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO PIÑA",
+          "pos_id": "001009",
+          "unit": "ml",
+          "quantity": 5000.4,
+          "source_lines": [
+            {
+              "clave": "3005",
+              "articulo": "JUGO PIÑA - (1L) - 12 PACK (396.0000 OZ)",
+              "existencia": 0.4167,
+              "unidad": "presentación",
+              "calculo": "0.4167 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO TORONJA",
+          "pos_id": "004021",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4021",
+              "articulo": "JUGO TORONJA - (1L) - 12 PACK (396.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "MONSTER",
+          "pos_id": "001021",
+          "unit": "ml",
+          "quantity": 473.378,
+          "source_lines": [
+            {
+              "clave": "3010",
+              "articulo": "MONSTER - (473 ML) - 24 PACK (384.0000 OZ)",
+              "existencia": 0.0417,
+              "unidad": "presentación",
+              "calculo": "0.0417 × 24 pzas × 473 ml"
+            }
+          ]
+        },
+        {
+          "supply": "NARANJADA",
+          "pos_id": "001017",
+          "unit": "ml",
+          "quantity": 1000.0,
+          "source_lines": [
+            {
+              "clave": "3018",
+              "articulo": "NARANJADA - (2L) - 8 PACK (528.0000 OZ)",
+              "existencia": 0.0625,
+              "unidad": "presentación",
+              "calculo": "0.0625 × 8 pzas × 2000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "POWERADE",
+          "pos_id": "001037",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3006",
+              "articulo": "POWERADE - (1L) - 6 PACK (198.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 6 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "SPRITE 355 ML",
+          "pos_id": "001063",
+          "unit": "pza",
+          "quantity": 36.0,
+          "source_lines": [
+            {
+              "clave": "3008",
+              "articulo": "SPRITE - (355 ML) - 24 PACK (24.0000 PZA)",
+              "existencia": 1.5,
+              "unidad": "presentación",
+              "calculo": "1.5 × 24 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "SPRITE 3 L",
+          "pos_id": "001004",
+          "unit": "ml",
+          "quantity": 10692.0,
+          "source_lines": [
+            {
+              "clave": "1004",
+              "articulo": "SPRITE - (3L - 99 OZ / 2L - 66 OZ)",
+              "existencia": 356.4,
+              "unidad": "OZ",
+              "calculo": "356.4 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "SQUIRT",
+          "pos_id": "003027",
+          "unit": "pza",
+          "quantity": 36.0,
+          "source_lines": [
+            {
+              "clave": "3030",
+              "articulo": "SQUIRT - (355 ML) - 24 PACK (24.0000 PZA)",
+              "existencia": 1.5,
+              "unidad": "presentación",
+              "calculo": "1.5 × 24 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "SQUIRT GRANDE",
+          "pos_id": "003026",
+          "unit": "ml",
+          "quantity": 16830.0,
+          "source_lines": [
+            {
+              "clave": "3026",
+              "articulo": "SQUIRT GRANDE (3L - 99 OZ / 2L - 66 OZ)",
+              "existencia": 561.0,
+              "unidad": "OZ",
+              "calculo": "561.0 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "VELA GRANDE 40 SEG. (DISEÑO 1) - PAQ 50 (PZA)",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6044",
+              "articulo": "VELA GRANDE 40 SEG. (DISEÑO 1) - PAQ 50 (PZA) (50.0000 VELAS",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "GINEBRA OSO NEGRO",
+          "pos_id": "002076",
+          "unit": "ml",
+          "quantity": 2000.0,
+          "source_lines": [
+            {
+              "clave": "2071",
+              "articulo": "GINEBRA OSO NEGRO - (1L) (33.0000 OZ)",
+              "existencia": 2.0,
+              "unidad": "presentación",
+              "calculo": "2.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR BAILEYS",
+          "pos_id": "001044",
+          "unit": "ml",
+          "quantity": 300.0,
+          "source_lines": [
+            {
+              "clave": "2040",
+              "articulo": "LICOR BAILEYS - (1L) (33.0000 OZ)",
+              "existencia": 0.3,
+              "unidad": "presentación",
+              "calculo": "0.3 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR BRANDY TORRES 10",
+          "pos_id": "002072",
+          "unit": "ml",
+          "quantity": 2800.0,
+          "source_lines": [
+            {
+              "clave": "2067",
+              "articulo": "LICOR BRANDY TORRES 10 - (700 ML) (23.0000 OZ)",
+              "existencia": 4.0,
+              "unidad": "presentación",
+              "calculo": "4.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU CURACAO AZUL",
+          "pos_id": "001007",
+          "unit": "ml",
+          "quantity": 2300.0,
+          "source_lines": [
+            {
+              "clave": "2013",
+              "articulo": "LICOR CARIBU CURACAO AZUL - (1L) (33.0000 OZ)",
+              "existencia": 2.3,
+              "unidad": "presentación",
+              "calculo": "2.3 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU DURAZNO",
+          "pos_id": "001027",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2014",
+              "articulo": "LICOR CARIBU DURAZNO - (1L) (33.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU MELON",
+          "pos_id": "001053",
+          "unit": "ml",
+          "quantity": 8100.0,
+          "source_lines": [
+            {
+              "clave": "2015",
+              "articulo": "LICOR CARIBU MELON (33.0000 OZ)",
+              "existencia": 8.1,
+              "unidad": "presentación",
+              "calculo": "8.1 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU MENTA VERDE",
+          "pos_id": "002082",
+          "unit": "ml",
+          "quantity": 3500.0,
+          "source_lines": [
+            {
+              "clave": "2077",
+              "articulo": "LICOR CARIBU MENTA VERDE - (1L) (33.0000 OZ)",
+              "existencia": 3.5,
+              "unidad": "presentación",
+              "calculo": "3.5 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU TRIPLE SEC",
+          "pos_id": "001002",
+          "unit": "ml",
+          "quantity": 1900.0,
+          "source_lines": [
+            {
+              "clave": "2032",
+              "articulo": "LICOR CARIBU TRIPLE SEC - (1L) (33.0000 OZ)",
+              "existencia": 1.9,
+              "unidad": "presentación",
+              "calculo": "1.9 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR GRANADINA",
+          "pos_id": "001013",
+          "unit": "ml",
+          "quantity": 803.0,
+          "source_lines": [
+            {
+              "clave": "2050",
+              "articulo": "LICOR GRANADINA - (1L) (33.0000 OZ)",
+              "existencia": 0.803,
+              "unidad": "presentación",
+              "calculo": "0.803 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR HPNOTIQ",
+          "pos_id": "001080",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2016",
+              "articulo": "LICOR HPNOTIQ (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR JAGERMEISTER",
+          "pos_id": "001046",
+          "unit": "ml",
+          "quantity": 560.0,
+          "source_lines": [
+            {
+              "clave": "2038",
+              "articulo": "LICOR JAGERMEISTER - (700 ML) (23.0000 OZ)",
+              "existencia": 0.8,
+              "unidad": "presentación",
+              "calculo": "0.8 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR JARABE NATURAL",
+          "pos_id": "001005",
+          "unit": "ml",
+          "quantity": 1200.0,
+          "source_lines": [
+            {
+              "clave": "2051",
+              "articulo": "LICOR JARABE NATURAL - (1L) (33.0000 OZ)",
+              "existencia": 1.2,
+              "unidad": "presentación",
+              "calculo": "1.2 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR KALHUA",
+          "pos_id": "001048",
+          "unit": "ml",
+          "quantity": 1400.0,
+          "source_lines": [
+            {
+              "clave": "2047",
+              "articulo": "LICOR KALHUA - (1L) (33.0000 OZ)",
+              "existencia": 1.4,
+              "unidad": "presentación",
+              "calculo": "1.4 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "MEZCAL 400 CONEJOS (JOVEN)",
+          "pos_id": "002112",
+          "unit": "ml",
+          "quantity": 1425.0,
+          "source_lines": [
+            {
+              "clave": "2120",
+              "articulo": "MEZCAL 400 CONEJOS JOVEN (1.0000 BOTELLAS)",
+              "existencia": 1.9,
+              "unidad": "presentación",
+              "calculo": "1.9 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON ANTILLANO BLANCO",
+          "pos_id": "002071",
+          "unit": "ml",
+          "quantity": 400.0,
+          "source_lines": [
+            {
+              "clave": "2066",
+              "articulo": "RON ANTILLANO BLANCO - (1L) (33.0000 OZ)",
+              "existencia": 0.4,
+              "unidad": "presentación",
+              "calculo": "0.4 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACANORA",
+          "pos_id": "002086",
+          "unit": "ml",
+          "quantity": 1900.0,
+          "source_lines": [
+            {
+              "clave": "2081",
+              "articulo": "RON BACANORA - (1L) (33.0000 OZ)",
+              "existencia": 1.9,
+              "unidad": "presentación",
+              "calculo": "1.9 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACARDI BLANCO",
+          "pos_id": "001052",
+          "unit": "ml",
+          "quantity": 1500.0,
+          "source_lines": [
+            {
+              "clave": "2035",
+              "articulo": "RON BACARDI BLANCO - (750 ML) (25.0000 OZ)",
+              "existencia": 2.0,
+              "unidad": "presentación",
+              "calculo": "2.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACARDI LIMON",
+          "pos_id": "001043",
+          "unit": "ml",
+          "quantity": 5250.0,
+          "source_lines": [
+            {
+              "clave": "2010",
+              "articulo": "RON BACARDI LIMON - (750 ML) (25.0000 OZ)",
+              "existencia": 7.0,
+              "unidad": "presentación",
+              "calculo": "7.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACARDI MANGO",
+          "pos_id": "001012",
+          "unit": "ml",
+          "quantity": 3675.0,
+          "source_lines": [
+            {
+              "clave": "2011",
+              "articulo": "RON BACARDI MANGO - (750 ML) (25.0000 OZ)",
+              "existencia": 4.9,
+              "unidad": "presentación",
+              "calculo": "4.9 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACARDI RASPBERRY",
+          "pos_id": "001006",
+          "unit": "ml",
+          "quantity": 150.0,
+          "source_lines": [
+            {
+              "clave": "2012",
+              "articulo": "RON BACARDI RASPBERRY - (750 ML) (25.0000 OZ)",
+              "existencia": 0.2,
+              "unidad": "presentación",
+              "calculo": "0.2 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON CAPITAN MORGAN",
+          "pos_id": "001020",
+          "unit": "ml",
+          "quantity": 840.0,
+          "source_lines": [
+            {
+              "clave": "2039",
+              "articulo": "RON CAPITAN MORGAN - (700 ML) (23.0000 OZ)",
+              "existencia": 1.2,
+              "unidad": "presentación",
+              "calculo": "1.2 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON MALIBU",
+          "pos_id": "001032",
+          "unit": "ml",
+          "quantity": 1050.0,
+          "source_lines": [
+            {
+              "clave": "2033",
+              "articulo": "RON MALIBU - (750 ML) (25.0000 OZ)",
+              "existencia": 1.4,
+              "unidad": "presentación",
+              "calculo": "1.4 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "SKY",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4004",
+              "articulo": "SKY (1.0000 PZA)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA (CABRITOS, HERENCIA ORO - 33 OZ)",
+          "pos_id": "001079",
+          "unit": "ml",
+          "quantity": 792.0,
+          "source_lines": [
+            {
+              "clave": "1079",
+              "articulo": "TEQUILA (CABRITOS, HERENCIA ORO - 33 OZ)",
+              "existencia": 26.4,
+              "unidad": "OZ",
+              "calculo": "26.4 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 1800",
+          "pos_id": "002052",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2106",
+              "articulo": "TEQUILA 1800 (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 30-30 AÑEJO",
+          "pos_id": "002110",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2118",
+              "articulo": "TEQUILA 30-30 AÑEJO (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 30-30 BLANCO",
+          "pos_id": "002109",
+          "unit": "ml",
+          "quantity": 1683.0,
+          "source_lines": [
+            {
+              "clave": "2116",
+              "articulo": "TEQUILA 30-30 BLANCO (33.0000 OZ)",
+              "existencia": 1.7,
+              "unidad": "presentación",
+              "calculo": "1.7 × 990 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 30-30 CRISTALINO",
+          "pos_id": "002107",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2115",
+              "articulo": "TEQUILA 30-30 CRISTALINO (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 30-30 REPOSADO",
+          "pos_id": "002108",
+          "unit": "ml",
+          "quantity": 525.0,
+          "source_lines": [
+            {
+              "clave": "2117",
+              "articulo": "TEQUILA 30-30 REPOSADO (1.0000 BOTELLAS)",
+              "existencia": 0.7,
+              "unidad": "presentación",
+              "calculo": "0.7 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA BARULLO SANDIA",
+          "pos_id": "002113",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2121",
+              "articulo": "TEQUILA BARULLO SANDIA (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA CLASE AZUL",
+          "pos_id": "001068",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2031",
+              "articulo": "TEQUILA CLASE AZUL (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA DON JULIO 1942",
+          "pos_id": "001067",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2030",
+              "articulo": "TEQUILA DON JULIO 1942 (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA DON JULIO 70",
+          "pos_id": "001033",
+          "unit": "ml",
+          "quantity": 2691.0,
+          "source_lines": [
+            {
+              "clave": "2027",
+              "articulo": "TEQUILA DON JULIO 70 - (700 ML) (23.0000 OZ)",
+              "existencia": 3.9,
+              "unidad": "presentación",
+              "calculo": "3.9 × 690 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA DON JULIO BLANCO",
+          "pos_id": "001065",
+          "unit": "ml",
+          "quantity": 12.75,
+          "source_lines": [
+            {
+              "clave": "2092",
+              "articulo": "TEQUILA DON JULIO BLANCO - (700 ML) (1.0000 )",
+              "existencia": 0.017,
+              "unidad": "presentación",
+              "calculo": "0.017 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA DON JULIO REPOSADO",
+          "pos_id": "001066",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2044",
+              "articulo": "TEQUILA DON JULIO REPOSADO (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA GRAN MALO",
+          "pos_id": "001069",
+          "unit": "ml",
+          "quantity": 17.625,
+          "source_lines": [
+            {
+              "clave": "2094",
+              "articulo": "TEQUILA GRAN MALO (1.0000 )",
+              "existencia": 0.0235,
+              "unidad": "presentación",
+              "calculo": "0.0235 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA HERRADURA ULTRA",
+          "pos_id": "001071",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2036",
+              "articulo": "TEQUILA HERRADURA ULTRA (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA HORNITOS REPOSADO",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 1140.0,
+          "source_lines": [
+            {
+              "clave": "2060",
+              "articulo": "TEQUILA HORNITOS REPOSADO (1.0000 BOTELLAS)",
+              "existencia": 1.52,
+              "unidad": "presentación",
+              "calculo": "1.52 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA HORNITOS BLACK BARREL",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2110",
+              "articulo": "TEQUILA HORNITOS BLACK BARREL (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA LA SANTA",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 150.0,
+          "source_lines": [
+            {
+              "clave": "2093",
+              "articulo": "TEQUILA LA SANTA",
+              "existencia": 0.2,
+              "unidad": "BOTELLAS",
+              "calculo": "0.2 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA MAESTRO DOBEL",
+          "pos_id": "001070",
+          "unit": "ml",
+          "quantity": 1680.0,
+          "source_lines": [
+            {
+              "clave": "2025",
+              "articulo": "TEQUILA MAESTRO DOBEL - (700 ML) (23.0000 OZ)",
+              "existencia": 2.4,
+              "unidad": "presentación",
+              "calculo": "2.4 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA MANGO AZUL",
+          "pos_id": "001010",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2024",
+              "articulo": "TEQUILA MANGO AZUL - (700 ML) (23.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2075",
+              "articulo": "VINO - (750 ML) (25.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO ESPUMOSO BORRASCA PROSECCO ROSE",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2113",
+              "articulo": "VINO ESPUMOSO BORRASCA PROSECCO ROSE (750 ML) (1.0000 BOTELL",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO ESPUMOSO CHAMPAGNE DE LA CASA",
+          "pos_id": "001001",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2041",
+              "articulo": "VINO ESPUMOSO CHAMPAGNE DE LA CASA (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO ESPUMOSO DOM PERIGNON",
+          "pos_id": "001082",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2042",
+              "articulo": "VINO ESPUMOSO DOM PERIGNON (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO ESPUMOSO MOET",
+          "pos_id": "001081",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2048",
+              "articulo": "VINO ESPUMOSO MOET (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO MARTINI ROSSO",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 1425.0,
+          "source_lines": [
+            {
+              "clave": "2111",
+              "articulo": "VINO MARTINI ROSSO (1.0000 BOTELLAS)",
+              "existencia": 1.9,
+              "unidad": "presentación",
+              "calculo": "1.9 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT",
+          "pos_id": "002070",
+          "unit": "ml",
+          "quantity": 2025.0,
+          "source_lines": [
+            {
+              "clave": "2065",
+              "articulo": "VODKA ABSOLUT - (750ML) (1.0000 BOTELLAS)",
+              "existencia": 2.7,
+              "unidad": "presentación",
+              "calculo": "2.7 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT LIMON",
+          "pos_id": "001056",
+          "unit": "ml",
+          "quantity": 1125.0,
+          "source_lines": [
+            {
+              "clave": "1001",
+              "articulo": "VODKA ABSOLUT LIMON - (750 ML) (1.0000 BOTELLAS)",
+              "existencia": 1.5,
+              "unidad": "presentación",
+              "calculo": "1.5 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT MANGO",
+          "pos_id": "004014",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2008",
+              "articulo": "VODKA ABSOLUT MANGO - (750ML) (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT PERA",
+          "pos_id": "001057",
+          "unit": "ml",
+          "quantity": 1425.0,
+          "source_lines": [
+            {
+              "clave": "2007",
+              "articulo": "VODKA ABSOLUT PERA - (750ML) (1.0000 BOTELLAS)",
+              "existencia": 1.9,
+              "unidad": "presentación",
+              "calculo": "1.9 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT RASPBERRY",
+          "pos_id": "001058",
+          "unit": "ml",
+          "quantity": 450.0,
+          "source_lines": [
+            {
+              "clave": "2009",
+              "articulo": "VODKA ABSOLUT RASPBERRY - (750ML) (25.0000 OZ)",
+              "existencia": 0.6,
+              "unidad": "presentación",
+              "calculo": "0.6 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT SANDIA",
+          "pos_id": "002068",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2063",
+              "articulo": "VODKA ABSOLUT SANDIA - (750ML) (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "BOMBAY SAPPHIRE GINEBRA",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 700.0,
+          "source_lines": [
+            {
+              "clave": "2108",
+              "articulo": "BOMBAY SAPPHIRE GINEBRA (700 ML) (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA GREY GOOSE",
+          "pos_id": "001083",
+          "unit": "ml",
+          "quantity": 31.95,
+          "source_lines": [
+            {
+              "clave": "2087",
+              "articulo": "VODKA GREY GOOSE (1.0000 )",
+              "existencia": 0.0426,
+              "unidad": "presentación",
+              "calculo": "0.0426 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA OSO NEGRO",
+          "pos_id": "004007",
+          "unit": "ml",
+          "quantity": 1400.0,
+          "source_lines": [
+            {
+              "clave": "2107",
+              "articulo": "VODKA OSO NEGRO - (1L) (33.0000 OZ)",
+              "existencia": 1.4,
+              "unidad": "presentación",
+              "calculo": "1.4 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA SMIRNOF TAMARINDO",
+          "pos_id": "001084",
+          "unit": "ml",
+          "quantity": 30.0,
+          "source_lines": [
+            {
+              "clave": "2018",
+              "articulo": "VODKA SMIRNOF TAMARINDO - (750ML) (25.0000 OZ)",
+              "existencia": 0.04,
+              "unidad": "presentación",
+              "calculo": "0.04 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA TITOS",
+          "pos_id": "002106",
+          "unit": "ml",
+          "quantity": 150.0,
+          "source_lines": [
+            {
+              "clave": "2114",
+              "articulo": "VODKA TITOS - (750 ML) (1.0000 BOTELLAS)",
+              "existencia": 0.2,
+              "unidad": "presentación",
+              "calculo": "0.2 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ZAVERICH",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1024",
+              "articulo": "VODKA ZAVERICH - (1L - 33 OZ)",
+              "existencia": 0.0,
+              "unidad": "OZ",
+              "calculo": "0.0 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKEY RED LABEL",
+          "pos_id": "001018",
+          "unit": "ml",
+          "quantity": 2730.0,
+          "source_lines": [
+            {
+              "clave": "2022",
+              "articulo": "WHISKEY RED LABEL - (700 ML) (23.0000 OZ)",
+              "existencia": 3.9,
+              "unidad": "presentación",
+              "calculo": "3.9 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BLACK LABEL",
+          "pos_id": "001074",
+          "unit": "ml",
+          "quantity": 1695.0,
+          "source_lines": [
+            {
+              "clave": "1074",
+              "articulo": "WHISKY BLACK LABEL - (750 ML - 25 OZ)",
+              "existencia": 56.5,
+              "unidad": "OZ",
+              "calculo": "56.5 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BLUE LABEL",
+          "pos_id": "001022",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2023",
+              "articulo": "WHISKY BLUE LABEL (750 ML) (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS 12",
+          "pos_id": "001076",
+          "unit": "ml",
+          "quantity": 3450.0,
+          "source_lines": [
+            {
+              "clave": "1076",
+              "articulo": "WHISKY BUCHANNANS 12 - (750 ML - 25 OZ)",
+              "existencia": 115.0,
+              "unidad": "OZ",
+              "calculo": "115.0 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS 18",
+          "pos_id": "001077",
+          "unit": "ml",
+          "quantity": 975.0,
+          "source_lines": [
+            {
+              "clave": "1077",
+              "articulo": "WHISKY BUCHANNANS 18 - (750 ML - 25 OZ)",
+              "existencia": 32.5,
+              "unidad": "OZ",
+              "calculo": "32.5 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS 21 *RED SEAL*",
+          "pos_id": "002111",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2119",
+              "articulo": "WHISKY BUCHANNANS 21 *RED SEAL* (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS MASTER",
+          "pos_id": "002061",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2057",
+              "articulo": "WHISKY BUCHANNANS MASTER (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS PIÑA",
+          "pos_id": "002062",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2102",
+              "articulo": "WHISKY BUCHANNANS PIÑA (750 ML) (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY DOUBLE BLACK LABEL",
+          "pos_id": "001075",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2045",
+              "articulo": "WHISKY DOUBLE BLACK LABEL (750 ML) (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY JACK DANIELS",
+          "pos_id": "001078",
+          "unit": "ml",
+          "quantity": 6.0,
+          "source_lines": [
+            {
+              "clave": "1078",
+              "articulo": "WHISKY JACK DANIELS - (700 ML - 25 OZ)",
+              "existencia": 0.2,
+              "unidad": "OZ",
+              "calculo": "0.2 oz × 30"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "barra-alta",
+      "source": "EXISTENCIAS BVIP.pdf (SR11 almacén 05, BARRA VIP)",
+      "items": [
+        {
+          "supply": "TECATE LIGHT",
+          "pos_id": "001051",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4007",
+              "articulo": "TECATE 1/4 BLANCA PZ (SUSPENDIDO) (1.0000 )",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "TECATE ROJA",
+          "pos_id": "001059",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4008",
+              "articulo": "TECATE 1/4 ROJO PZ (SUSPENDIDO) (1.0000 )",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "ULTRA",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4006",
+              "articulo": "CARTON - ULTRA - ( 24 PZA ) (24.0000 MEDIAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 24 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "AGUA",
+          "pos_id": "001054",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1054",
+              "articulo": "AGUA",
+              "existencia": 0.0,
+              "unidad": "PZA",
+              "calculo": "piezas"
+            }
+          ]
+        },
+        {
+          "supply": "AGUA MINERAL 2 L",
+          "pos_id": "001008",
+          "unit": "ml",
+          "quantity": 7128.0,
+          "source_lines": [
+            {
+              "clave": "1008",
+              "articulo": "AGUA MINERAL - (2L - 66 OZ)",
+              "existencia": 237.6,
+              "unidad": "OZ",
+              "calculo": "237.6 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "AGUA MINERAL 355 ML",
+          "pos_id": "003024",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3025",
+              "articulo": "AGUA MINERAL .355 (SUSPENDIDO) (1.0000 )",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "BE LIGHT TORONJA",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6048",
+              "articulo": "BE LIGHT TORONJA - (1L - 33 OZ) (33.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CALAHUA",
+          "pos_id": "001034",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6027",
+              "articulo": "CALAHUA - (1L - 33 OZ) (33.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CARNATION",
+          "pos_id": "001040",
+          "unit": "ml",
+          "quantity": 495.0,
+          "source_lines": [
+            {
+              "clave": "1040",
+              "articulo": "CARNATION - (1L - 33 OZ / 340 ML - 11 OZ)",
+              "existencia": 16.5,
+              "unidad": "OZ",
+              "calculo": "16.5 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "CLAMATO",
+          "pos_id": "001050",
+          "unit": "ml",
+          "quantity": 349.25,
+          "source_lines": [
+            {
+              "clave": "6030",
+              "articulo": "CLAMATO 2.54 L (SUSPENDIDO) (1.0000 )",
+              "existencia": 0.1375,
+              "unidad": "presentación",
+              "calculo": "0.1375 × 2540 ml"
+            }
+          ]
+        },
+        {
+          "supply": "COCA COLA 355 ML",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3013",
+              "articulo": "COCA COLA - (355 ML) - 24 PACK (24.0000 PZA)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 24 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "COCA COLA",
+          "pos_id": "006024",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6029",
+              "articulo": "COCA COLA (3L) - 6 PACK (594.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 6 pzas × 3000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CONCENTRADO MANGO",
+          "pos_id": "001011",
+          "unit": "ml",
+          "quantity": 1800.0,
+          "source_lines": [
+            {
+              "clave": "1012",
+              "articulo": "CONCENTRADO MANGO - (1L) (33.0000 OZ)",
+              "existencia": 1.8,
+              "unidad": "presentación",
+              "calculo": "1.8 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CONCENTRADO TAMARINDO",
+          "pos_id": "001061",
+          "unit": "ml",
+          "quantity": 800.0,
+          "source_lines": [
+            {
+              "clave": "1013",
+              "articulo": "CONCENTRADO TAMARINDO - (1L) (33.0000 OZ)",
+              "existencia": 0.8,
+              "unidad": "presentación",
+              "calculo": "0.8 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "CREMA BATIDA",
+          "pos_id": "001035",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1008",
+              "articulo": "CREMA BATIDA - (425 GR) - 3 PACK (36.0000 PZA)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 36 pza (factor del archivo)"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO ARANDANO",
+          "pos_id": "001030",
+          "unit": "ml",
+          "quantity": 3000.0,
+          "source_lines": [
+            {
+              "clave": "3016",
+              "articulo": "JUGO ARANDANO - (1L) - 12 PACK (396.0000 OZ)",
+              "existencia": 0.25,
+              "unidad": "presentación",
+              "calculo": "0.25 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO MANGO",
+          "pos_id": "001039",
+          "unit": "ml",
+          "quantity": 3999.6,
+          "source_lines": [
+            {
+              "clave": "3003",
+              "articulo": "JUGO MANGO - (1 L) - 12 PACK (396.0000 OZ)",
+              "existencia": 0.3333,
+              "unidad": "presentación",
+              "calculo": "0.3333 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO NARANJA",
+          "pos_id": "001041",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3004",
+              "articulo": "JUGO NARANJA - (1 L) - 12 PACK (396.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO PIÑA",
+          "pos_id": "001009",
+          "unit": "ml",
+          "quantity": 999.6,
+          "source_lines": [
+            {
+              "clave": "3005",
+              "articulo": "JUGO PIÑA - (1L) - 12 PACK (396.0000 OZ)",
+              "existencia": 0.0833,
+              "unidad": "presentación",
+              "calculo": "0.0833 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "JUGO TORONJA",
+          "pos_id": "004021",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4021",
+              "articulo": "JUGO TORONJA - (1L) - 12 PACK (396.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 12 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "MONSTER",
+          "pos_id": "001021",
+          "unit": "ml",
+          "quantity": 14190.0,
+          "source_lines": [
+            {
+              "clave": "3010",
+              "articulo": "MONSTER - (473 ML) - 24 PACK (384.0000 OZ)",
+              "existencia": 1.25,
+              "unidad": "presentación",
+              "calculo": "1.25 × 24 pzas × 473 ml"
+            }
+          ]
+        },
+        {
+          "supply": "NARANJADA",
+          "pos_id": "001017",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3018",
+              "articulo": "NARANJADA - (2L) - 8 PACK (528.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 8 pzas × 2000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "POWERADE",
+          "pos_id": "001037",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3006",
+              "articulo": "POWERADE - (1L) - 6 PACK (198.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 6 pzas × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "SPRITE 355 ML",
+          "pos_id": "001063",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3008",
+              "articulo": "SPRITE - (355 ML) - 24 PACK (24.0000 PZA)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 24 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "SPRITE 3 L",
+          "pos_id": "001004",
+          "unit": "ml",
+          "quantity": 4950.0,
+          "source_lines": [
+            {
+              "clave": "1004",
+              "articulo": "SPRITE - (3L - 99 OZ / 2L - 66 OZ)",
+              "existencia": 165.0,
+              "unidad": "OZ",
+              "calculo": "165.0 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "SQUIRT",
+          "pos_id": "003027",
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "3030",
+              "articulo": "SQUIRT - (355 ML) - 24 PACK (24.0000 PZA)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 24 pzas"
+            }
+          ]
+        },
+        {
+          "supply": "SQUIRT GRANDE",
+          "pos_id": "003026",
+          "unit": "ml",
+          "quantity": 2376.0,
+          "source_lines": [
+            {
+              "clave": "3026",
+              "articulo": "SQUIRT GRANDE (3L - 99 OZ / 2L - 66 OZ)",
+              "existencia": 79.2,
+              "unidad": "OZ",
+              "calculo": "79.2 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "VELA GRANDE 40 SEG. (DISEÑO 1) - PAQ 50 (PZA)",
+          "pos_id": null,
+          "unit": "pza",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "6044",
+              "articulo": "VELA GRANDE 40 SEG. (DISEÑO 1) - PAQ 50 (PZA) (50.0000 VELAS",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1 pza"
+            }
+          ]
+        },
+        {
+          "supply": "GINEBRA OSO NEGRO",
+          "pos_id": "002076",
+          "unit": "ml",
+          "quantity": 3897.0,
+          "source_lines": [
+            {
+              "clave": "2071",
+              "articulo": "GINEBRA OSO NEGRO - (1L) (33.0000 OZ)",
+              "existencia": 3.897,
+              "unidad": "presentación",
+              "calculo": "3.897 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR BAILEYS",
+          "pos_id": "001044",
+          "unit": "ml",
+          "quantity": 400.0,
+          "source_lines": [
+            {
+              "clave": "2040",
+              "articulo": "LICOR BAILEYS - (1L) (33.0000 OZ)",
+              "existencia": 0.4,
+              "unidad": "presentación",
+              "calculo": "0.4 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR BRANDY TORRES 10",
+          "pos_id": "002072",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2067",
+              "articulo": "LICOR BRANDY TORRES 10 - (700 ML) (23.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU CURACAO AZUL",
+          "pos_id": "001007",
+          "unit": "ml",
+          "quantity": 2500.0,
+          "source_lines": [
+            {
+              "clave": "2013",
+              "articulo": "LICOR CARIBU CURACAO AZUL - (1L) (33.0000 OZ)",
+              "existencia": 2.5,
+              "unidad": "presentación",
+              "calculo": "2.5 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU DURAZNO",
+          "pos_id": "001027",
+          "unit": "ml",
+          "quantity": 600.0,
+          "source_lines": [
+            {
+              "clave": "2014",
+              "articulo": "LICOR CARIBU DURAZNO - (1L) (33.0000 OZ)",
+              "existencia": 0.6,
+              "unidad": "presentación",
+              "calculo": "0.6 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU MELON",
+          "pos_id": "001053",
+          "unit": "ml",
+          "quantity": 2000.0,
+          "source_lines": [
+            {
+              "clave": "2015",
+              "articulo": "LICOR CARIBU MELON (33.0000 OZ)",
+              "existencia": 2.0,
+              "unidad": "presentación",
+              "calculo": "2.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU MENTA VERDE",
+          "pos_id": "002082",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2077",
+              "articulo": "LICOR CARIBU MENTA VERDE - (1L) (33.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR CARIBU TRIPLE SEC",
+          "pos_id": "001002",
+          "unit": "ml",
+          "quantity": 1900.0,
+          "source_lines": [
+            {
+              "clave": "2032",
+              "articulo": "LICOR CARIBU TRIPLE SEC - (1L) (33.0000 OZ)",
+              "existencia": 1.9,
+              "unidad": "presentación",
+              "calculo": "1.9 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR GRANADINA",
+          "pos_id": "001013",
+          "unit": "ml",
+          "quantity": 1000.0,
+          "source_lines": [
+            {
+              "clave": "2050",
+              "articulo": "LICOR GRANADINA - (1L) (33.0000 OZ)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR HPNOTIQ",
+          "pos_id": "001080",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2016",
+              "articulo": "LICOR HPNOTIQ (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR JAGERMEISTER",
+          "pos_id": "001046",
+          "unit": "ml",
+          "quantity": 1050.0,
+          "source_lines": [
+            {
+              "clave": "2038",
+              "articulo": "LICOR JAGERMEISTER - (700 ML) (23.0000 OZ)",
+              "existencia": 1.5,
+              "unidad": "presentación",
+              "calculo": "1.5 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR JARABE NATURAL",
+          "pos_id": "001005",
+          "unit": "ml",
+          "quantity": 1300.0,
+          "source_lines": [
+            {
+              "clave": "2051",
+              "articulo": "LICOR JARABE NATURAL - (1L) (33.0000 OZ)",
+              "existencia": 1.3,
+              "unidad": "presentación",
+              "calculo": "1.3 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "LICOR KALHUA",
+          "pos_id": "001048",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2047",
+              "articulo": "LICOR KALHUA - (1L) (33.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "MEZCAL 400 CONEJOS (JOVEN)",
+          "pos_id": "002112",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2120",
+              "articulo": "MEZCAL 400 CONEJOS JOVEN (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON ANTILLANO BLANCO",
+          "pos_id": "002071",
+          "unit": "ml",
+          "quantity": 1900.0,
+          "source_lines": [
+            {
+              "clave": "2066",
+              "articulo": "RON ANTILLANO BLANCO - (1L) (33.0000 OZ)",
+              "existencia": 1.9,
+              "unidad": "presentación",
+              "calculo": "1.9 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACANORA",
+          "pos_id": "002086",
+          "unit": "ml",
+          "quantity": 700.0,
+          "source_lines": [
+            {
+              "clave": "2081",
+              "articulo": "RON BACANORA - (1L) (33.0000 OZ)",
+              "existencia": 0.7,
+              "unidad": "presentación",
+              "calculo": "0.7 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACARDI BLANCO",
+          "pos_id": "001052",
+          "unit": "ml",
+          "quantity": 1725.0,
+          "source_lines": [
+            {
+              "clave": "2035",
+              "articulo": "RON BACARDI BLANCO - (750 ML) (25.0000 OZ)",
+              "existencia": 2.3,
+              "unidad": "presentación",
+              "calculo": "2.3 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACARDI LIMON",
+          "pos_id": "001043",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2010",
+              "articulo": "RON BACARDI LIMON - (750 ML) (25.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACARDI MANGO",
+          "pos_id": "001012",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2011",
+              "articulo": "RON BACARDI MANGO - (750 ML) (25.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON BACARDI RASPBERRY",
+          "pos_id": "001006",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2012",
+              "articulo": "RON BACARDI RASPBERRY - (750 ML) (25.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON CAPITAN MORGAN",
+          "pos_id": "001020",
+          "unit": "ml",
+          "quantity": 630.0,
+          "source_lines": [
+            {
+              "clave": "2039",
+              "articulo": "RON CAPITAN MORGAN - (700 ML) (23.0000 OZ)",
+              "existencia": 0.9,
+              "unidad": "presentación",
+              "calculo": "0.9 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "RON MALIBU",
+          "pos_id": "001032",
+          "unit": "ml",
+          "quantity": 255.0,
+          "source_lines": [
+            {
+              "clave": "2033",
+              "articulo": "RON MALIBU - (750 ML) (25.0000 OZ)",
+              "existencia": 0.34,
+              "unidad": "presentación",
+              "calculo": "0.34 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "SKY",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "4004",
+              "articulo": "SKY (1.0000 PZA)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA (CABRITOS, HERENCIA ORO - 33 OZ)",
+          "pos_id": "001079",
+          "unit": "ml",
+          "quantity": 2076.0,
+          "source_lines": [
+            {
+              "clave": "1079",
+              "articulo": "TEQUILA (CABRITOS, HERENCIA ORO - 33 OZ)",
+              "existencia": 69.2,
+              "unidad": "OZ",
+              "calculo": "69.2 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 1800",
+          "pos_id": "002052",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2106",
+              "articulo": "TEQUILA 1800 (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 30-30 AÑEJO",
+          "pos_id": "002110",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2118",
+              "articulo": "TEQUILA 30-30 AÑEJO (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 30-30 BLANCO",
+          "pos_id": "002109",
+          "unit": "ml",
+          "quantity": 990.0,
+          "source_lines": [
+            {
+              "clave": "2116",
+              "articulo": "TEQUILA 30-30 BLANCO (33.0000 OZ)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 990 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 30-30 CRISTALINO",
+          "pos_id": "002107",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2115",
+              "articulo": "TEQUILA 30-30 CRISTALINO (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA 30-30 REPOSADO",
+          "pos_id": "002108",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2117",
+              "articulo": "TEQUILA 30-30 REPOSADO (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA BARULLO SANDIA",
+          "pos_id": "002113",
+          "unit": "ml",
+          "quantity": 1650.0,
+          "source_lines": [
+            {
+              "clave": "2121",
+              "articulo": "TEQUILA BARULLO SANDIA (1.0000 BOTELLAS)",
+              "existencia": 2.2,
+              "unidad": "presentación",
+              "calculo": "2.2 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA CLASE AZUL",
+          "pos_id": "001068",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2031",
+              "articulo": "TEQUILA CLASE AZUL (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA DON JULIO 1942",
+          "pos_id": "001067",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2030",
+              "articulo": "TEQUILA DON JULIO 1942 (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA DON JULIO 70",
+          "pos_id": "001033",
+          "unit": "ml",
+          "quantity": 1311.0,
+          "source_lines": [
+            {
+              "clave": "2027",
+              "articulo": "TEQUILA DON JULIO 70 - (700 ML) (23.0000 OZ)",
+              "existencia": 1.9,
+              "unidad": "presentación",
+              "calculo": "1.9 × 690 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA DON JULIO BLANCO",
+          "pos_id": "001065",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2092",
+              "articulo": "TEQUILA DON JULIO BLANCO - (700 ML) (1.0000 )",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA DON JULIO REPOSADO",
+          "pos_id": "001066",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2044",
+              "articulo": "TEQUILA DON JULIO REPOSADO (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA GRAN MALO",
+          "pos_id": "001069",
+          "unit": "ml",
+          "quantity": 29.4,
+          "source_lines": [
+            {
+              "clave": "2094",
+              "articulo": "TEQUILA GRAN MALO (1.0000 )",
+              "existencia": 0.0392,
+              "unidad": "presentación",
+              "calculo": "0.0392 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA HERRADURA ULTRA",
+          "pos_id": "001071",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2036",
+              "articulo": "TEQUILA HERRADURA ULTRA (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA HORNITOS REPOSADO",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2060",
+              "articulo": "TEQUILA HORNITOS REPOSADO (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA HORNITOS BLACK BARREL",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2110",
+              "articulo": "TEQUILA HORNITOS BLACK BARREL (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA LA SANTA",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2093",
+              "articulo": "TEQUILA LA SANTA",
+              "existencia": 0.0,
+              "unidad": "BOTELLAS",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA MAESTRO DOBEL",
+          "pos_id": "001070",
+          "unit": "ml",
+          "quantity": 4130.0,
+          "source_lines": [
+            {
+              "clave": "2025",
+              "articulo": "TEQUILA MAESTRO DOBEL - (700 ML) (23.0000 OZ)",
+              "existencia": 5.9,
+              "unidad": "presentación",
+              "calculo": "5.9 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "TEQUILA MANGO AZUL",
+          "pos_id": "001010",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2024",
+              "articulo": "TEQUILA MANGO AZUL - (700 ML) (23.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2075",
+              "articulo": "VINO - (750 ML) (25.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO ESPUMOSO BORRASCA PROSECCO ROSE",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2113",
+              "articulo": "VINO ESPUMOSO BORRASCA PROSECCO ROSE (750 ML) (1.0000 BOTELL",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO ESPUMOSO CHAMPAGNE DE LA CASA",
+          "pos_id": "001001",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2041",
+              "articulo": "VINO ESPUMOSO CHAMPAGNE DE LA CASA (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO ESPUMOSO DOM PERIGNON",
+          "pos_id": "001082",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2042",
+              "articulo": "VINO ESPUMOSO DOM PERIGNON (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO ESPUMOSO MOET",
+          "pos_id": "001081",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2048",
+              "articulo": "VINO ESPUMOSO MOET (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VINO MARTINI ROSSO",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2111",
+              "articulo": "VINO MARTINI ROSSO (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT",
+          "pos_id": "002070",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2065",
+              "articulo": "VODKA ABSOLUT - (750ML) (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT LIMON",
+          "pos_id": "001056",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1001",
+              "articulo": "VODKA ABSOLUT LIMON - (750 ML) (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT MANGO",
+          "pos_id": "004014",
+          "unit": "ml",
+          "quantity": 2250.0,
+          "source_lines": [
+            {
+              "clave": "2008",
+              "articulo": "VODKA ABSOLUT MANGO - (750ML) (1.0000 BOTELLAS)",
+              "existencia": 3.0,
+              "unidad": "presentación",
+              "calculo": "3.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT PERA",
+          "pos_id": "001057",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2007",
+              "articulo": "VODKA ABSOLUT PERA - (750ML) (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT RASPBERRY",
+          "pos_id": "001058",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2009",
+              "articulo": "VODKA ABSOLUT RASPBERRY - (750ML) (25.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ABSOLUT SANDIA",
+          "pos_id": "002068",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2063",
+              "articulo": "VODKA ABSOLUT SANDIA - (750ML) (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "BOMBAY SAPPHIRE GINEBRA",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 700.0,
+          "source_lines": [
+            {
+              "clave": "2108",
+              "articulo": "BOMBAY SAPPHIRE GINEBRA (700 ML) (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA GREY GOOSE",
+          "pos_id": "001083",
+          "unit": "ml",
+          "quantity": 15.975,
+          "source_lines": [
+            {
+              "clave": "2087",
+              "articulo": "VODKA GREY GOOSE (1.0000 )",
+              "existencia": 0.0213,
+              "unidad": "presentación",
+              "calculo": "0.0213 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA OSO NEGRO",
+          "pos_id": "004007",
+          "unit": "ml",
+          "quantity": 2051.5,
+          "source_lines": [
+            {
+              "clave": "2107",
+              "articulo": "VODKA OSO NEGRO - (1L) (33.0000 OZ)",
+              "existencia": 2.0515,
+              "unidad": "presentación",
+              "calculo": "2.0515 × 1000 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA SMIRNOF TAMARINDO",
+          "pos_id": "001084",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2018",
+              "articulo": "VODKA SMIRNOF TAMARINDO - (750ML) (25.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA TITOS",
+          "pos_id": "002106",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2114",
+              "articulo": "VODKA TITOS - (750 ML) (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "VODKA ZAVERICH",
+          "pos_id": null,
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1024",
+              "articulo": "VODKA ZAVERICH - (1L - 33 OZ)",
+              "existencia": 0.0,
+              "unidad": "OZ",
+              "calculo": "0.0 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKEY RED LABEL",
+          "pos_id": "001018",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2022",
+              "articulo": "WHISKEY RED LABEL - (700 ML) (23.0000 OZ)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 700 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BLACK LABEL",
+          "pos_id": "001074",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "1074",
+              "articulo": "WHISKY BLACK LABEL - (750 ML - 25 OZ)",
+              "existencia": 0.0,
+              "unidad": "OZ",
+              "calculo": "0.0 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BLUE LABEL",
+          "pos_id": "001022",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2023",
+              "articulo": "WHISKY BLUE LABEL (750 ML) (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS 12",
+          "pos_id": "001076",
+          "unit": "ml",
+          "quantity": 1050.0,
+          "source_lines": [
+            {
+              "clave": "1076",
+              "articulo": "WHISKY BUCHANNANS 12 - (750 ML - 25 OZ)",
+              "existencia": 35.0,
+              "unidad": "OZ",
+              "calculo": "35.0 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS 18",
+          "pos_id": "001077",
+          "unit": "ml",
+          "quantity": 1500.0,
+          "source_lines": [
+            {
+              "clave": "1077",
+              "articulo": "WHISKY BUCHANNANS 18 - (750 ML - 25 OZ)",
+              "existencia": 50.0,
+              "unidad": "OZ",
+              "calculo": "50.0 oz × 30"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS 21 *RED SEAL*",
+          "pos_id": "002111",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2119",
+              "articulo": "WHISKY BUCHANNANS 21 *RED SEAL* (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS MASTER",
+          "pos_id": "002061",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2057",
+              "articulo": "WHISKY BUCHANNANS MASTER (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY BUCHANNANS PIÑA",
+          "pos_id": "002062",
+          "unit": "ml",
+          "quantity": 750.0,
+          "source_lines": [
+            {
+              "clave": "2102",
+              "articulo": "WHISKY BUCHANNANS PIÑA (750 ML) (1.0000 BOTELLAS)",
+              "existencia": 1.0,
+              "unidad": "presentación",
+              "calculo": "1.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY DOUBLE BLACK LABEL",
+          "pos_id": "001075",
+          "unit": "ml",
+          "quantity": 0.0,
+          "source_lines": [
+            {
+              "clave": "2045",
+              "articulo": "WHISKY DOUBLE BLACK LABEL (750 ML) (1.0000 BOTELLAS)",
+              "existencia": 0.0,
+              "unidad": "presentación",
+              "calculo": "0.0 × 750 ml"
+            }
+          ]
+        },
+        {
+          "supply": "WHISKY JACK DANIELS",
+          "pos_id": "001078",
+          "unit": "ml",
+          "quantity": 375.0,
+          "source_lines": [
+            {
+              "clave": "1078",
+              "articulo": "WHISKY JACK DANIELS - (700 ML - 25 OZ)",
+              "existencia": 12.5,
+              "unidad": "OZ",
+              "calculo": "12.5 oz × 30"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
