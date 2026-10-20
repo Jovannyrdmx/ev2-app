@@ -47,6 +47,7 @@ const paymentRoutes = require('./routes/payments');
 const doorRoutes = require('./routes/door');
 const passRoutes = require('./routes/passes');
 const printingRoutes = require('./routes/printing');
+const tillSetupRoutes = require('./routes/tills');
 const pushRoutes = require('./routes/push');
 const clockRoutes = require('./routes/clock');
 
@@ -264,6 +265,7 @@ function createApp() {
   app.use('/api', posRoutes);
   app.use('/api', paymentRoutes);
   app.use('/api', printingRoutes);
+  app.use('/api', tillSetupRoutes);
   app.use('/api', pushRoutes);
   // El agente de impresión va aparte porque no trae sesión de persona: se
   // identifica con su propio token y solo puede tomar trabajos de su club. Va montado

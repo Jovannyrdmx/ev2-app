@@ -663,15 +663,17 @@ async function nightTills(runner, { nightclubId }) {
             s.opening_float::text AS opening_float, s.float_currency AS currency,
             s.opening_float_usd::text AS opening_float_usd,
             u.display_name AS user_name, l.name AS location_name, l.kind AS location_kind,
+            s.till_id, tt.name AS till_name,
             c.id AS closing_id, c.difference::text AS difference,
             c.difference_usd::text AS difference_usd, c.confirmed_at
        FROM staff_shifts s
        JOIN users u ON u.id = s.user_id
        JOIN supply_locations l ON l.id = s.location_id
+       LEFT JOIN tills tt ON tt.id = s.till_id
        LEFT JOIN shift_closings c ON c.shift_id = s.id
       WHERE s.nightclub_id = $1 AND s.location_id IS NOT NULL
         AND s.started_at > now() - interval '18 hours'
-      ORDER BY l.kind = 'door', l.name, s.started_at`,
+      ORDER BY l.kind = 'door', l.name, tt.sort_order, tt.name, s.started_at`,
     [nightclubId]);
   const tills = [];
   for (const s of rows) {
@@ -680,8 +682,12 @@ async function nightTills(runner, { nightclubId }) {
     tills.push({
       shift_id: s.id,
       location_id: s.location_id,
-      location_name: s.location_name,
+      // El corte general dice la caja (D126); con una caja por barra es el mismo nombre.
+      location_name: s.till_name || s.location_name,
       location_kind: s.location_kind,
+      till_id: s.till_id,
+      till_name: s.till_name || null,
+      bar_name: s.location_name,
       user_id: s.user_id,
       user_name: s.user_name,
       started_at: s.started_at,

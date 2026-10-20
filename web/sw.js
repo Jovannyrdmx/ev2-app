@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v76';
+const VERSION = 'ev2-v77';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -49,7 +49,7 @@ const SHELL = [
   // blanco. El peor era el almacen: se cuenta en una bodega, que es donde peor entra
   // la senal del edificio. `tests/web-pwa.test.js` ahora compara esta lista contra los
   // <script> de cada pagina, para que no vuelva a quedarse atras en silencio.
-  'js/receiving.js', 'js/receipt-review.js', 'js/roster.js', 'js/night-report.js', 'js/purchasing.js',
+  'js/receiving.js', 'js/receipt-review.js', 'js/roster.js', 'js/till-setup.js', 'js/night-report.js', 'js/purchasing.js',
   'js/social-login.js',
   // El teclado del PIN (D46). Es lo PRIMERO que toca el personal al llegar: si este
   // archivo no esta guardado, una mala senal en la puerta deja a todo el turno sin

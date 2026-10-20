@@ -132,6 +132,7 @@
       <button data-tab="tableprice" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-chair mgr-icon"></i><span data-i18n="tpr.tab">Precios de mesas</span></button>
       <button data-tab="exit" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-taxi mgr-icon"></i><span data-i18n="mgr.tabExit">Salida segura</span></button>
       <button data-tab="parking" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-car mgr-icon"></i><span data-i18n="mgr.tabValet">Valet</span></button>
+      <button data-tab="tills" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-cash-register mgr-icon"></i><span data-i18n="tset.tab">Cajas</span></button>
       <button data-tab="printing" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-print mgr-icon"></i><span data-i18n="prn.tab">Impresoras</span></button>
       <button data-tab="clock" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-clock mgr-icon"></i><span data-i18n="clk.tab">Checador</span></button>
       <button data-tab="rps" class="tab mgr-tab flex-none lg:w-full py-3 px-4 text-sm whitespace-nowrap"><i class="fa-solid fa-star mgr-icon"></i><span data-i18n="rpm.tab">RPs</span></button>
@@ -1166,6 +1167,32 @@
         </div>
       </div>
 
+      <!--
+        Cajas (D126): cada barra puede tener varias, con PC o con teléfono. Cada caja
+        lleva su impresora con cajón y su terminal; "Nueva caja" lo hace en un recorrido.
+      -->
+      <div id="tab-tills" class="space-y-4" hidden>
+        <div class="card rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tset.title">Cajas</p>
+            <button id="btn-till-new" class="ev2-button rounded-lg px-3 py-2 text-xs" data-i18n="tset.new">Nueva caja</button>
+          </div>
+          <p class="text-[11px] text-white/40" data-i18n="tset.why">Una barra puede tener varias cajas: todas cobran los pedidos de esa barra y cada una tiene su fondo, su corte, su impresora con cajón y su terminal. Se cobra con la PC de la caja o con un teléfono.</p>
+        </div>
+        <div id="till-wizard" class="card rounded-xl p-4 space-y-3" hidden>
+          <div class="flex items-center justify-between gap-2">
+            <div class="min-w-0">
+              <p id="till-wiz-title" class="font-display truncate">—</p>
+              <p id="till-wiz-step" class="text-[11px] text-white/40">—</p>
+            </div>
+            <button id="till-wiz-close" class="card rounded-lg px-3 py-2 text-xs shrink-0" data-i18n="tset.close">Cerrar</button>
+          </div>
+          <div id="till-wiz-body" class="space-y-3"></div>
+        </div>
+        <p id="till-empty" class="text-sm text-white/40" data-i18n="tset.none" hidden>Todavía no hay cajas.</p>
+        <div id="till-list" class="space-y-3"></div>
+      </div>
+
       <div id="tab-printing" class="space-y-4" hidden>
 
         <!--
@@ -1542,6 +1569,7 @@
 <script src="js/night-report.js"></script>
 <script src="js/purchasing.js"></script>
 <script src="js/roster.js"></script>
+<script src="js/till-setup.js"></script>
 <script src="js/substitutions.js"></script>
 <script src="js/push.js"></script>
 <!-- El lector de huella (D94): la librería oficial de HID y el checador. Solo hablan

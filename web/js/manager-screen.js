@@ -6,7 +6,7 @@
  * tarifas del taxi, y los cajones del estacionamiento — más el resumen del turno.
  */
 /* global EV2Push, EV2, EV2Format, EV2Manager, EV2Warehouse, EV2Roles, EV2PasswordGate, EV2StaffAdmin,
-   EV2Payouts, EV2NightReport, EV2Roster, EV2Clock, EV2Deposit, EV2Purchasing */
+   EV2Payouts, EV2NightReport, EV2Roster, EV2TillSetup, EV2Clock, EV2Deposit, EV2Purchasing */
 (function () {
   'use strict';
   // Preguntas con el cuadro de la app (js/ui.js), no con el confirm() del navegador.
@@ -346,6 +346,7 @@
     exit: ['tab-drivers', 'tab-taxi'],
     parking: ['tab-parking'],
     printing: ['tab-printing'],
+    tills: ['tab-tills'],
     clock: ['tab-clock'],
     rps: ['tab-rps'],
   };
@@ -3964,6 +3965,7 @@
       const data = await api.get(`/nightclubs/${clubId()}/nights/${r.night.id}/roster`);
       r.roster = data.roster || [];
       r.gaps = data.gaps || { sections: [], bars: [], tills: [] };
+      r.tills = data.tills || [];
     } catch (err) {
       showError(err, $('roster-error'));
       return;
@@ -4042,7 +4044,7 @@
     const persona = (p) => `
       <div class="flex items-center justify-between gap-2 text-sm">
         <span class="min-w-0 truncate">
-          ${escape(p.display_name)}
+          ${escape(p.display_name)}${p.till_name ? ` <span class="text-[11px] text-lime-300">· ${escape(p.till_name)}</span>` : ''}
           <span class="${p.on_shift ? 'text-emerald-300' : 'text-white/35'} text-[11px]">
             · ${escape(t(p.on_shift ? 'roster.here' : 'roster.notHere'))}
           </span>
@@ -4159,14 +4161,33 @@
   $('pick-close').onclick = closePick;
   $('pick-backdrop').onclick = closePick;
 
-  async function assignPicked(userId) {
+  async function assignPicked(userId, tillId = null) {
     const destino = state.pick;
     const r = state.roster;
     if (!destino || !r) return;
+    // Una barra con varias cajas (D126): al cajero se le dice en cuál va.
+    const persona = (state.staff || []).find((p) => p.id === userId);
+    const cajas = EV2Roster.tillChoices({
+      role: persona && persona.role, locationId: destino.locationId || null,
+      tills: r.tills || [],
+    });
+    if (!tillId && cajas.length) {
+      const libres = new Set(((r.gaps && r.gaps.tills) || []).map((x) => x.till_id));
+      $('pick-where').textContent = `${destino.name} · ${t('tset.whichTill')}`;
+      $('pick-list').innerHTML = cajas.map((c) => `
+        <button type="button" class="card rounded-xl p-3 w-full text-left" data-pick-till="${escape(c.till_id)}">
+          <p class="text-sm font-semibold truncate"><i class="fa-solid ${c.device === 'phone' ? 'fa-mobile-screen' : 'fa-desktop'} mr-1"></i>${escape(c.till_name)}</p>
+          <p class="text-[11px] ${libres.has(c.till_id) ? 'text-lime-300' : 'text-white/40'}">${escape(t(libres.has(c.till_id) ? 'tset.free' : 'tset.taken'))}</p>
+        </button>`).join('');
+      for (const b of $('pick-list').querySelectorAll('[data-pick-till]')) {
+        b.onclick = () => assignPicked(userId, b.dataset.pickTill);
+      }
+      return;
+    }
     try {
       await api.post(`/nightclubs/${clubId()}/nights/${r.night.id}/roster`,
         EV2Roster.assignBody({
-          userId, section: destino.section || null, locationId: destino.locationId || null,
+          userId, section: destino.section || null, locationId: destino.locationId || null, tillId,
         }));
       closePick();
       await reloadRoster();
@@ -4885,6 +4906,11 @@
     return purchasingView;
   }
 
+  // Cajas (D126): la pestaña vive en js/till-setup.js.
+  const tillSetup = window.EV2TillSetup.mount({
+    api, t, toast, showError, clubId, escape, ask, installLine,
+  });
+
   const TAB_LOADERS = {
     purchasing: () => purchasing().load(),
     summary: () => Promise.all([loadTills(), loadWaiters()]),
@@ -4893,6 +4919,7 @@
     club: () => Promise.all([loadExchangeRate(), loadTerminals(), loadPrinting(), loadPushStatus(),
       loadDepositQueue(), loadPaymentOptions()]),
     printing: () => loadPrinting(),
+    tills: () => tillSetup.load(),
     rps: () => loadRps(),
     staffcons: () => loadStaffCons(),
     promos: () => loadPromos(),

@@ -26,6 +26,7 @@ const { validate, z, uuid } = require('../middleware/validate');
 const { authenticate, requireRole, sameNightclub } = require('../middleware/auth');
 const printing = require('../services/printing');
 const cashDrawer = require('../services/cash-drawer');
+const tillsService = require('../services/tills');
 const events = require('../services/events');
 
 const router = express.Router({ mergeParams: true });
@@ -501,7 +502,28 @@ const printerBody = z.object({
   agent_id: uuid.nullish(),
   // El cajón de dinero conectado a esta impresora (D96): pin 2 o 5; null = sin cajón.
   drawer_pin: z.union([z.literal(2), z.literal(5)]).nullish(),
+  // La caja de una impresora de recibos (D126). Sin ella, la única caja de ese lugar.
+  till_id: uuid.nullish(),
 });
+
+/**
+ * La caja de una impresora de recibos (D126): tiene que ser de este club, estar
+ * prendida, y su lugar manda (la impresora va donde está la caja).
+ */
+async function tillForPrinter(nightclubId, tillId) {
+  if (!tillId) return null;
+  const till = await tillsService.getTill(pool, { nightclubId, tillId });
+  if (!till.active) throw ApiError.badRequest('Esa caja está apagada');
+  return till;
+}
+
+/** Lo que contesta la base cuando un lugar tiene varias cajas y no se dijo cuál. */
+function tillAmbiguous(err) {
+  if (err && err.constraint === 'printers_till_ambiguous') {
+    return ApiError.badRequest('Ese lugar tiene varias cajas: escoge de qué caja es la impresora');
+  }
+  return null;
+}
 
 /**
  * El lugar de una impresora o una PC (D96): una barra, o Cover. Cover solo imprime
@@ -601,6 +623,8 @@ router.post('/nightclubs/:nightclubId/printers',
       b.location_id = await coverOf(req.params.nightclubId);
       b.purpose = 'till';
     }
+    const caja = b.purpose === 'till' ? await tillForPrinter(req.params.nightclubId, b.till_id) : null;
+    if (caja) b.location_id = caja.location_id;
     await checkArea(req.params.nightclubId, b.location_id, b.purpose, { purposeRequired: true });
     await checkAgent(req.params.nightclubId, b.agent_id);
     try {
@@ -608,13 +632,14 @@ router.post('/nightclubs/:nightclubId/printers',
         `INSERT INTO printers
            (nightclub_id, location_id, name, purpose, connection, host, port,
             windows_name, paper_width, columns, codepage, has_cutter, fallback_id, agent_id,
-            drawer_pin)
-         VALUES ($1,$2,$3::text,$4::text,$5::text,$6,$7,$8,$9,$10,$11::text,$12,$13,$14,$15)
+            drawer_pin, till_id)
+         VALUES ($1,$2,$3::text,$4::text,$5::text,$6,$7,$8,$9,$10,$11::text,$12,$13,$14,$15,$16)
          RETURNING id::text AS id`,
         [req.params.nightclubId, b.location_id || null, b.name, b.purpose, b.connection,
           b.host || null, b.port, b.windows_name || null, b.paper_width,
           b.columns || defaultColumns(b.paper_width), b.codepage, b.has_cutter,
-          b.fallback_id || null, b.agent_id || null, b.drawer_pin ?? null]);
+          b.fallback_id || null, b.agent_id || null, b.drawer_pin ?? null,
+          caja ? caja.id : null]);
       const printer = await printing.getPrinter(pool, {
         nightclubId: req.params.nightclubId, printerId: rows[0].id,
       });
@@ -626,6 +651,8 @@ router.post('/nightclubs/:nightclubId/printers',
           + 'o esa barra (o la puerta) ya tiene una para ese uso');
       }
       if (err.code === '23503') throw ApiError.badRequest('Esa barra no existe');
+      const ambigua = tillAmbiguous(err);
+      if (ambigua) throw ambigua;
       if (err.code === '23514') throw ApiError.badRequest('Esa barra no es una barra');
       throw err;
     }
@@ -649,6 +676,18 @@ router.patch('/nightclubs/:nightclubId/printers/:printerId',
         { purposeRequired: true });
     }
     if (req.body.agent_id) await checkAgent(req.params.nightclubId, req.body.agent_id);
+    // La caja (D126): la que se mande; si cambió el lugar, la base pone la única caja
+    // del lugar nuevo; si no es de caja, ninguna.
+    let tillId = null;
+    if (merged.purpose === 'till') {
+      if (req.body.till_id) {
+        const caja = await tillForPrinter(req.params.nightclubId, req.body.till_id);
+        tillId = caja.id;
+        merged.location_id = caja.location_id;
+      } else if (merged.location_id === actual.location_id) {
+        tillId = actual.till_id || null;
+      }
+    }
     try {
       await pool.query(
         `UPDATE printers
@@ -656,14 +695,16 @@ router.patch('/nightclubs/:nightclubId/printers/:printerId',
                 connection = $6::text, host = $7, port = $8, windows_name = $9,
                 paper_width = $10, columns = $11, codepage = $12::text,
                 has_cutter = $13, fallback_id = $14, active = $15, agent_id = $16,
-                drawer_pin = $17
+                drawer_pin = $17, till_id = $18
           WHERE id = $1 AND nightclub_id = $2`,
         [req.params.printerId, req.params.nightclubId, merged.location_id || null, merged.name,
           merged.purpose, merged.connection, merged.host || null, merged.port,
           merged.windows_name || null, merged.paper_width, merged.columns,
           merged.codepage, merged.has_cutter, merged.fallback_id || null, merged.active,
-          merged.agent_id || null, merged.drawer_pin ?? null]);
+          merged.agent_id || null, merged.drawer_pin ?? null, tillId]);
     } catch (err) {
+      const ambigua = tillAmbiguous(err);
+      if (ambigua) throw ambigua;
       if (err.code === '23505') {
         throw ApiError.conflict('Ya hay una impresora activa con ese nombre, '
           + 'o esa barra (o la puerta) ya tiene una para ese uso');
@@ -779,6 +820,8 @@ router.post('/nightclubs/:nightclubId/print-agents/invite',
         purpose: z.enum(printing.STATION_PURPOSES),
         has_drawer: z.coerce.boolean().default(false),
         drawer_pin: z.union([z.literal(2), z.literal(5)]).default(2),
+        // La caja de esta estación (D126). Con ella el lugar y el uso salen solos.
+        till_id: uuid.nullish(),
       }).optional(),
     }).default({}),
   }),
@@ -786,6 +829,11 @@ router.post('/nightclubs/:nightclubId/print-agents/invite',
     const { station } = req.body;
     let locationId = req.body.location_id || null;
     let purpose = req.body.purpose || null;
+    if (station && station.till_id) {
+      const caja = await tillForPrinter(req.params.nightclubId, station.till_id);
+      locationId = caja.location_id;
+      station.purpose = 'till';
+    }
     if (station) {
       // La puerta es Cover (D119): su estación es la caja de Cover, con sus dos tickets.
       if (station.purpose === 'door') {
@@ -809,6 +857,7 @@ router.post('/nightclubs/:nightclubId/print-agents/invite',
           name: station.name,
           purpose: station.purpose,
           drawer_pin: station.has_drawer ? station.drawer_pin : null,
+          ...(station.till_id ? { till_id: station.till_id } : {}),
         } : null,
       });
     } catch (err) {

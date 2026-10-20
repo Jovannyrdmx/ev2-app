@@ -704,14 +704,14 @@ const CONCEPT = {
 
 /** Los datos del cobro que acaba de entrar, incluida la mesa si venía de un pedido. */
 async function receiptData(runner, {
-  nightclubId, transactionId, collectedBy, tillLocation = null,
+  nightclubId, transactionId, collectedBy, tillLocation = null, tillId = null,
 }) {
   const { rows } = await runner.query(
     `SELECT tx.id::text AS transaction_id, tx.type, tx.amount::text AS amount, tx.currency,
             tx.confirmed_at, tx.reference_type, tx.reference_id::text AS reference_id,
             t.code AS table_code, t.section AS table_section,
             dp.name AS delivery_point_name, w.display_name AS waiter_name,
-            u.display_name AS collected_by, l.name AS till_name,
+            u.display_name AS collected_by, COALESCE(tt.name, l.name) AS till_name,
             (SELECT sum(c.tip_amount)::text FROM terminal_charges c
               WHERE c.transaction_id = tx.id AND c.status = 'processed') AS tip_amount
        FROM transactions tx
@@ -722,8 +722,9 @@ async function receiptData(runner, {
        LEFT JOIN users w ON w.id = o.taken_by
        LEFT JOIN users u ON u.id = $3
        LEFT JOIN supply_locations l ON l.id = $4::uuid
+       LEFT JOIN tills tt ON tt.id = $5::uuid
       WHERE tx.id = $1 AND tx.nightclub_id = $2`,
-    [transactionId, nightclubId, collectedBy || null, tillLocation || null]);
+    [transactionId, nightclubId, collectedBy || null, tillLocation || null, tillId || null]);
   const row = rows[0];
   if (!row) return null;
   // Los artículos del pedido que se pagó: los mismos renglones que la comanda, con su
@@ -759,7 +760,7 @@ async function printReceipt(client, {
   // gerente haya apagado los recibos: el dueño lo pidió así. Lo demás sigue el
   // interruptor y la impresora de servicio de la zona, como siempre.
   const caja = collectedBy ? await client.query(
-    `SELECT location_id FROM staff_shifts
+    `SELECT location_id, till_id FROM staff_shifts
       WHERE user_id = $1 AND ended_at IS NULL AND location_id IS NOT NULL`,
     [collectedBy]) : { rows: [] };
   // `locationId` lo manda quien cobra en un lugar fijo sin turno de caja: la puerta
@@ -769,11 +770,15 @@ async function printReceipt(client, {
 
   const data = await receiptData(client, {
     nightclubId, transactionId, collectedBy, tillLocation,
+    tillId: !locationId && caja.rows[0] ? caja.rows[0].till_id : null,
   });
   if (!data) return null;
 
   const printer = tillLocation
-    ? await tillPrinterOf(client, { nightclubId, locationId: tillLocation })
+    ? await tillPrinterOf(client, {
+      nightclubId, locationId: tillLocation,
+      tillId: !locationId && caja.rows[0] ? caja.rows[0].till_id : null,
+    })
     : await printing.resolvePrinter(client, {
       nightclubId, purpose: 'service', section: data.table_section,
     });
@@ -840,8 +845,8 @@ function renderAdmission(t, data, { club, settings }) {
  * tiene registrada una impresora de "puerta" de antes, esa la sustituye para que los dos
  * tickets del cover no se queden sin salir.
  */
-async function tillPrinterOf(runner, { nightclubId, locationId }) {
-  const deCaja = await printing.resolvePrinter(runner, { nightclubId, purpose: 'till', locationId });
+async function tillPrinterOf(runner, { nightclubId, locationId, tillId = null }) {
+  const deCaja = await printing.resolvePrinter(runner, { nightclubId, purpose: 'till', locationId, tillId });
   if (deCaja) return deCaja;
   const { rows } = await runner.query('SELECT kind FROM supply_locations WHERE id = $1', [locationId]);
   if (rows[0] && rows[0].kind === 'door') {
@@ -892,7 +897,8 @@ async function cutData(runner, { nightclubId, closingId }) {
             u.display_name AS user_name,
             a.display_name AS authorized_by,
             s.section,
-            c.location_id::text AS location_id, l.name AS location_name,
+            c.location_id::text AS location_id, COALESCE(tt.name, l.name) AS location_name,
+            s.till_id::text AS till_id,
             c.opening_float::text AS opening_float,
             c.opening_float_usd::text AS opening_float_usd,
             c.pending_orders, c.pending_total::text AS pending_total,
@@ -905,6 +911,7 @@ async function cutData(runner, { nightclubId, closingId }) {
        LEFT JOIN users a ON a.id = c.authorized_by
        LEFT JOIN staff_shifts s ON s.id = c.shift_id
        LEFT JOIN supply_locations l ON l.id = c.location_id
+       LEFT JOIN tills tt ON tt.id = s.till_id
       WHERE c.id = $1 AND c.nightclub_id = $2`,
     [closingId, nightclubId]);
   const corte = rows[0];
@@ -1093,9 +1100,13 @@ function renderCut(t, data, { club, settings }) {
  *     donde salía el corte de la anfitriona antes de que Cover fuera caja.
  *   - Un turno sin caja: la de servicio de su zona, como siempre.
  */
-async function cashPaperPrinter(runner, { nightclubId, locationId = null, section = null }) {
+async function cashPaperPrinter(runner, {
+  nightclubId, locationId = null, section = null, tillId = null,
+}) {
   if (locationId) {
-    const deCaja = await printing.resolvePrinter(runner, { nightclubId, purpose: 'till', locationId });
+    const deCaja = await printing.resolvePrinter(runner, {
+      nightclubId, purpose: 'till', locationId, tillId,
+    });
     if (deCaja) return deCaja;
     const { rows } = await runner.query('SELECT kind FROM supply_locations WHERE id = $1', [locationId]);
     if (rows[0] && rows[0].kind === 'door') {
@@ -1122,7 +1133,7 @@ async function printShiftCut(runner, { nightclubId, closingId, userId = null }) 
 
   // El corte de una caja sale en la impresora de esa caja (D79, D118).
   const printer = await cashPaperPrinter(runner, {
-    nightclubId, locationId: data.location_id, section: data.section,
+    nightclubId, locationId: data.location_id, section: data.section, tillId: data.till_id || null,
   });
   if (!printer) return null;
 
@@ -1151,13 +1162,14 @@ async function dropData(runner, { nightclubId, dropId }) {
             d.created_at, d.authorized_role,
             u.display_name AS user_name, u.role,
             a.display_name AS authorized_by_name,
-            s.section, s.location_id::text AS location_id,
-            l.name AS location_name
+            s.section, s.location_id::text AS location_id, s.till_id::text AS till_id,
+            COALESCE(tt.name, l.name) AS location_name
        FROM shift_cash_drops d
        JOIN users u ON u.id = d.user_id
        JOIN staff_shifts s ON s.id = d.shift_id
        LEFT JOIN users a ON a.id = d.authorized_by
        LEFT JOIN supply_locations l ON l.id = s.location_id
+       LEFT JOIN tills tt ON tt.id = s.till_id
       WHERE d.id = $1 AND d.nightclub_id = $2`,
     [dropId, nightclubId]);
   return rows[0] || null;
@@ -1195,7 +1207,7 @@ async function printCashDrop(runner, { nightclubId, dropId, userId = null }) {
   const data = await dropData(runner, { nightclubId, dropId });
   if (!data) return null;
   const printer = await cashPaperPrinter(runner, {
-    nightclubId, locationId: data.location_id, section: data.section,
+    nightclubId, locationId: data.location_id, section: data.section, tillId: data.till_id || null,
   });
   if (!printer) return null;
   const club = await clubOf(runner, nightclubId);
@@ -1326,12 +1338,14 @@ async function cashInData(runner, { nightclubId, cashInId }) {
     `SELECT i.id::text AS id, i.amount::text AS amount, i.currency, i.reason, i.created_at,
             i.authorized_role, u.display_name AS user_name, u.role,
             a.display_name AS authorized_by_name,
-            s.section, s.location_id::text AS location_id, l.name AS location_name
+            s.section, s.location_id::text AS location_id, s.till_id::text AS till_id,
+            COALESCE(tt.name, l.name) AS location_name
        FROM shift_cash_ins i
        JOIN users u ON u.id = i.user_id
        JOIN staff_shifts s ON s.id = i.shift_id
        LEFT JOIN users a ON a.id = i.authorized_by
        LEFT JOIN supply_locations l ON l.id = s.location_id
+       LEFT JOIN tills tt ON tt.id = s.till_id
       WHERE i.id = $1 AND i.nightclub_id = $2`,
     [cashInId, nightclubId]);
   return rows[0] || null;
@@ -1363,7 +1377,7 @@ async function printCashIn(runner, { nightclubId, cashInId, userId = null }) {
   const data = await cashInData(runner, { nightclubId, cashInId });
   if (!data) return null;
   const printer = await cashPaperPrinter(runner, {
-    nightclubId, locationId: data.location_id, section: data.section,
+    nightclubId, locationId: data.location_id, section: data.section, tillId: data.till_id || null,
   });
   if (!printer) return null;
   const club = await clubOf(runner, nightclubId);
@@ -1443,9 +1457,11 @@ function renderXReport(t, data, { club, settings }) {
 
 async function printXReport(runner, {
   nightclubId, summary, locationId, locationName, userName, role, authorizedBy, userId = null,
+  tillId = null,
 }) {
   const printer = await cashPaperPrinter(runner, {
     nightclubId, locationId, section: summary.shift.section,
+    tillId: tillId || (summary.shift && summary.shift.till_id) || null,
   });
   if (!printer) return null;
   const club = await clubOf(runner, nightclubId);

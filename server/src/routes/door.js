@@ -951,7 +951,7 @@ router.post('/nightclubs/:nightclubId/door/reservations/:reservationId/balance',
         }
         // La terminal de la caja de Cover.
         const terminalId = await terminalCharges.resolveTerminal(client, {
-          nightclubId, locationId: caja.location_id, strict: true,
+          nightclubId, locationId: caja.location_id, tillId: caja.till_id, strict: true,
         });
         const tx = await reservationMoney.openBalanceTransaction(client, {
           nightclubId, balance: saldo, userId: req.user.id });
@@ -993,7 +993,9 @@ router.post('/nightclubs/:nightclubId/door/reservations/:reservationId/balance',
           payment: creado, reviewerId: req.user.id, nightclubId,
         });
         // Efectivo en la puerta: el cajón de la caja de Cover se abre solo (D96, D118).
-        const printer = await cashDrawer.doorPrinter(client, { nightclubId, locationId: caja.location_id });
+        const printer = await cashDrawer.doorPrinter(client, {
+          nightclubId, locationId: caja.location_id, tillId: caja.till_id,
+        });
         const drawer = await cashDrawer.open(client, {
           nightclubId, printer, refId: tx.id, createdBy: req.user.id,
           reason: `resto de mesa ${saldo.due} ${saldo.currency}`,
@@ -1082,7 +1084,7 @@ router.post('/nightclubs/:nightclubId/door/point-charges',
         throw ApiError.unprocessable('Un cover sin costo no pasa por la terminal.');
       }
       const terminalId = await terminalCharges.resolveTerminal(client, {
-        nightclubId, locationId: caja.location_id, strict: true,
+        nightclubId, locationId: caja.location_id, tillId: caja.till_id, strict: true,
       });
       if (b.reservation_id) {
         const r = await client.query(
@@ -1354,7 +1356,9 @@ router.post('/nightclubs/:nightclubId/door/admissions',
       // Efectivo en la puerta: el cajón de la caja de Cover se abre solo (D96, D118).
       let drawer = null;
       if (b.payment_method === 'cash' && total > 0) {
-        const printer = await cashDrawer.doorPrinter(client, { nightclubId, locationId: caja.location_id });
+        const printer = await cashDrawer.doorPrinter(client, {
+          nightclubId, locationId: caja.location_id, tillId: caja.till_id,
+        });
         drawer = await cashDrawer.open(client, {
           nightclubId, printer, refId: transactionId, createdBy: req.user.id,
           reason: `cover en efectivo ${total.toFixed(2)} ${precio.currency}`,

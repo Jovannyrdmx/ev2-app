@@ -796,9 +796,12 @@ router.post('/nightclubs/:nightclubId/payment-terminals',
         ...(pdv.warning ? { warning: pdv.warning } : {}),
       });
     } catch (err) {
+      if (err.constraint === 'payment_terminals_till_ambiguous') {
+        throw ApiError.unprocessable('Ese lugar tiene varias cajas: asigna la terminal desde Cajas, en la caja que es.');
+      }
       if (err.code === '23505') {
-        throw ApiError.conflict(String(err.constraint || '').includes('location')
-          ? 'Ese lugar ya tiene una terminal activa asignada'
+        throw ApiError.conflict(/location|till/.test(String(err.constraint || ''))
+          ? 'Esa caja ya tiene una terminal activa asignada'
           : 'Ya hay una terminal con ese nombre o ese identificador');
       }
       throw err;
@@ -853,9 +856,12 @@ router.patch('/nightclubs/:nightclubId/payment-terminals/:terminalId',
         [terminalId, nightclubId, req.body.label ?? null, req.body.active ?? null,
           req.body.sort_order ?? null, mode, cambiaLugar, req.body.location_id ?? null]));
     } catch (err) {
+      if (err.constraint === 'payment_terminals_till_ambiguous') {
+        throw ApiError.unprocessable('Ese lugar tiene varias cajas: asigna la terminal desde Cajas, en la caja que es.');
+      }
       if (err.code === '23505') {
-        throw ApiError.conflict(String(err.constraint || '').includes('location')
-          ? 'Ese lugar ya tiene una terminal activa asignada'
+        throw ApiError.conflict(/location|till/.test(String(err.constraint || ''))
+          ? 'Esa caja ya tiene una terminal activa asignada'
           : 'Ya hay una terminal con ese nombre');
       }
       throw err;
@@ -900,7 +906,7 @@ router.post('/nightclubs/:nightclubId/terminal-charges',
         nightclubId, user: req.user, transactionId: req.body.transaction_id,
       });
       const terminalId = await terminalCharges.resolveTerminal(client, {
-        nightclubId, locationId: caja ? caja.location_id : null,
+        nightclubId, locationId: caja ? caja.location_id : null, tillId: caja ? caja.till_id : null,
         requested: req.body.terminal_id || null,
       });
       apartado = await terminalCharges.reserve(client, {

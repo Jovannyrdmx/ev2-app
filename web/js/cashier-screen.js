@@ -276,6 +276,12 @@
 
   // ---------------------------------------------------------------- pintar
 
+  /** "Caja teléfono · Barra baja" cuando la barra tiene otra caja; si no, la barra (D126). */
+  function tillLabel(x) {
+    return x.till_name && x.till_name !== x.location_name
+      ? `${x.till_name} · ${x.location_name}` : x.location_name;
+  }
+
   function render() {
     const s = state.till;
     const phase = EV2Cashier.phase(s);
@@ -284,17 +290,20 @@
 
     if (phase !== 'open') {
       const a = s && s.assignment;
-      $('till-bar').textContent = a ? a.location_name : '—';
-      $('open-bar').textContent = a ? a.location_name : '—';
+      $('till-bar').textContent = a ? tillLabel(a) : '—';
+      $('open-bar').textContent = a ? tillLabel(a) : '—';
       $('open-night').textContent = a
         ? `${a.event_name} · ${EV2Format.dateTime(a.doors_open_at)}` : '';
-      $('open-none').hidden = phase !== 'no_assignment';
-      $('open-form').hidden = phase === 'no_assignment';
+      // La barra tiene varias cajas y el gerente no dijo cuál (D126): no se puede abrir.
+      const sinCaja = Boolean(a && a.needs_till);
+      $('open-none').textContent = EV2Format.t(sinCaja ? 'tset.needsTill' : 'till.noBar');
+      $('open-none').hidden = phase !== 'no_assignment' && !sinCaja;
+      $('open-form').hidden = phase === 'no_assignment' || sinCaja;
       return;
     }
 
     const till = s.till;
-    $('till-bar').textContent = till.location_name;
+    $('till-bar').textContent = tillLabel(till);
     $('stat-float').textContent = money(till.opening_float, till.currency);
     $('stat-pending').textContent = (s.pending_orders || []).length
       ? money(s.pending_total, till.currency) : '0';
@@ -915,6 +924,20 @@
     return cutSheet;
   }
   $('btn-cut').onclick = () => corte().open();
+
+  // Probar la impresora de MI caja (D126): la hoja de prueba sale ahí; el cajón no se
+  // abre (eso sigue pidiendo el PIN del gerente).
+  $('btn-test-print').onclick = async () => {
+    const boton = $('btn-test-print');
+    boton.disabled = true;
+    try {
+      const r = await api.post(`/nightclubs/${clubId()}/till/test-print`, {});
+      toast(EV2Format.t(r.agent_online === false ? 'tset.noAgent' : 'tset.testSent'),
+        r.agent_online === false ? 'error' : 'ok');
+    } catch (err) {
+      toast(EV2Format.errorMessage(err), 'error');
+    } finally { boton.disabled = false; }
+  };
 
   // ---------------------------------------------------------------- tiempo real
 

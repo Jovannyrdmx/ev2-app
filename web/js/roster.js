@@ -150,6 +150,8 @@
             role: person.role,
             on_shift: person.on_shift === true,
             assignment_id: target.assignment_id,
+            // La caja del cajero (D126) cuando la barra tiene varias.
+            till_name: target.till_name || null,
           });
         }
       }
@@ -205,12 +207,23 @@
     return rule.target === 'location';
   }
 
+  /**
+   * Las cajas de una barra entre las que hay que escoger para un cajero (D126). Vacío
+   * cuando no hace falta escoger: el puesto no lleva caja o la barra tiene una sola.
+   */
+  function tillChoices({ role, locationId, tills = [] }) {
+    if (role !== 'cashier' || !locationId) return [];
+    const deLaBarra = (tills || []).filter((x) => x.location_id === locationId);
+    return deLaBarra.length > 1 ? deLaBarra : [];
+  }
+
   /** El cuerpo de `POST /nights/:id/roster`. */
-  function assignBody({ userId, section = null, locationId = null, note = null }) {
+  function assignBody({ userId, section = null, locationId = null, tillId = null, note = null }) {
     return {
       user_id: userId,
       ...(section ? { section } : {}),
       ...(locationId ? { location_id: locationId } : {}),
+      ...(tillId ? { till_id: tillId } : {}),
       ...(note && String(note).trim() ? { note: String(note).trim() } : {}),
     };
   }
@@ -231,7 +244,10 @@
         const key = `${p.user_id}|${tg.section || ''}|${tg.location_id || ''}`;
         if (ya.has(key)) continue;
         ya.add(key);
-        plan.push(assignBody({ userId: p.user_id, section: tg.section || null, locationId: tg.location_id || null }));
+        plan.push(assignBody({
+          userId: p.user_id, section: tg.section || null, locationId: tg.location_id || null,
+          tillId: tg.till_id || null,
+        }));
       }
     }
     return plan;
@@ -268,6 +284,7 @@
     byTarget,
     progress,
     assignBody,
+    tillChoices,
     describeMine,
   };
 }));

@@ -65,10 +65,15 @@ async function assignedTill(runner, { nightclubId, userId, role = CASHIER }) {
   const { rows } = await runner.query(
     `SELECT a.id AS assignment_id, a.location_id, l.name AS location_name, l.code AS location_code,
             l.kind AS location_kind,
+            -- La caja (D126). Sin caja en el rol, la única activa del lugar; con varias,
+            -- NULL: el gerente tiene que decir cuál.
+            COALESCE(a.till_id, till_of_location(a.location_id)) AS till_id,
+            tt.name AS till_name, tt.device AS till_device,
             e.id AS event_id, e.name AS event_name, e.doors_open_at
        FROM shift_assignments a
        JOIN events_calendar e ON e.id = a.event_id
        JOIN supply_locations l ON l.id = a.location_id
+       LEFT JOIN tills tt ON tt.id = COALESCE(a.till_id, till_of_location(a.location_id))
       WHERE a.nightclub_id = $1 AND a.user_id = $2 AND a.location_id IS NOT NULL
         AND l.active AND l.kind = $5::text
         AND e.status NOT IN ('cancelled', 'finished')
@@ -85,6 +90,11 @@ function assignedBar(runner, { nightclubId, userId }) {
   return assignedTill(runner, { nightclubId, userId, role: CASHIER });
 }
 
+/** Lo que se le dice al cajero cuya barra tiene varias cajas y no le dijeron cuál (D126). */
+function noTillMessage(lugar) {
+  return `${lugar.location_name} tiene varias cajas. El gerente te asigna una en el rol de la noche.`;
+}
+
 /** Lo que se le dice a quien no tiene lugar de caja asignado esta noche. */
 function noAssignmentMessage(role) {
   return role === HOSTESS
@@ -97,12 +107,14 @@ async function openTill(runner, { nightclubId, userId }) {
   const { rows } = await runner.query(
     `SELECT s.id, s.user_id, s.section, s.started_at, s.ended_at, s.location_id,
             l.name AS location_name, l.kind AS location_kind,
+            s.till_id, tt.name AS till_name, tt.device AS till_device,
             s.opening_float::text AS opening_float, s.float_currency,
             s.opening_float_usd::text AS opening_float_usd,
             s.float_authorized_at, s.float_authorized_role,
             fa.display_name AS float_authorized_by_name
        FROM staff_shifts s
        JOIN supply_locations l ON l.id = s.location_id
+       LEFT JOIN tills tt ON tt.id = s.till_id
        LEFT JOIN users fa ON fa.id = s.float_authorized_by
       WHERE s.nightclub_id = $1 AND s.user_id = $2 AND s.ended_at IS NULL
         AND s.location_id IS NOT NULL`,
@@ -141,6 +153,7 @@ async function open(client, {
 
   const lugar = await assignedTill(client, { nightclubId, userId, role });
   if (!lugar) throw ApiError.unprocessable(noAssignmentMessage(role));
+  if (!lugar.till_id) throw ApiError.unprocessable(noTillMessage(lugar), { reason: 'till_not_assigned' });
 
   const fondo = round2(Number(openingFloat));
   if (!Number.isFinite(fondo) || fondo < 0) {
@@ -152,32 +165,32 @@ async function open(client, {
     throw ApiError.unprocessable('El fondo en dólares no puede ser negativo');
   }
 
-  // Una caja por lugar. El índice parcial de la base es el que manda (ver abajo);
-  // esta consulta solo es para decir con quién está ocupada.
+  // Una abierta por caja (D126). El índice parcial de la base es el que manda (ver
+  // abajo); esta consulta solo es para decir con quién está ocupada.
   const ocupada = await client.query(
     `SELECT u.display_name FROM staff_shifts s JOIN users u ON u.id = s.user_id
-      WHERE s.location_id = $1 AND s.ended_at IS NULL`, [lugar.location_id]);
+      WHERE s.till_id = $1 AND s.ended_at IS NULL`, [lugar.till_id]);
   if (ocupada.rowCount > 0) throw tillTaken(lugar, ocupada.rows[0].display_name);
 
   await client.query('SAVEPOINT till_open');
   try {
     const params = [lugar.location_id, fondo.toFixed(2), currency,
-      authorizer.id, authorizer.role, fondoUsd === null ? null : fondoUsd.toFixed(2)];
+      authorizer.id, authorizer.role, fondoUsd === null ? null : fondoUsd.toFixed(2), lugar.till_id];
     const { rows } = turnoSinCaja
       ? await client.query(
         `UPDATE staff_shifts
             SET location_id = $1, opening_float = $2, float_currency = $3::text,
                 float_authorized_by = $4, float_authorized_at = now(),
-                float_authorized_role = $5::text, opening_float_usd = $6
-          WHERE id = $7 AND ended_at IS NULL AND location_id IS NULL
+                float_authorized_role = $5::text, opening_float_usd = $6, till_id = $7
+          WHERE id = $8 AND ended_at IS NULL AND location_id IS NULL
           RETURNING id`,
         [...params, turnoSinCaja.id])
       : await client.query(
         `INSERT INTO staff_shifts (nightclub_id, user_id, section, location_id,
                                    opening_float, float_currency,
                                    float_authorized_by, float_authorized_at, float_authorized_role,
-                                   opening_float_usd)
-         VALUES ($7,$8,NULL,$1,$2,$3::text,$4, now(), $5::text, $6)
+                                   opening_float_usd, till_id)
+         VALUES ($8,$9,NULL,$1,$2,$3::text,$4, now(), $5::text, $6, $7)
          RETURNING id`,
         [...params, nightclubId, userId]);
     if (rows.length === 0) throw ApiError.conflict('Tu turno cambió mientras abrías la caja; vuelve a intentarlo');
@@ -207,17 +220,25 @@ function tillTaken(lugar, quien) {
       `La caja de ${lugar.location_name} ya está abierta${quien ? ` con ${quien}` : ''}: `
       + 'solo una anfitriona cobra en la puerta.');
   }
+  const caja = lugar.till_name && lugar.till_name !== lugar.location_name
+    ? `La caja ${lugar.till_name} (${lugar.location_name})` : `${lugar.location_name}`;
   return ApiError.conflict(
-    `${lugar.location_name} ya tiene la caja abierta${quien ? ` con ${quien}` : ''}: una caja por barra.`);
+    `${caja} ya está abierta${quien ? ` con ${quien}` : ''}: una persona por caja.`);
 }
 
-/** Quién tiene abierta la caja de ese lugar ahora mismo, o null. */
-async function holderOf(runner, { locationId }) {
-  if (!locationId) return null;
+/**
+ * Quién tiene abierta esa caja ahora mismo, o null. Con `tillId` es esa caja (D126);
+ * con solo el lugar, cualquier caja abierta de ese lugar (lo de antes).
+ */
+async function holderOf(runner, { locationId = null, tillId = null }) {
+  if (!locationId && !tillId) return null;
   const { rows } = await runner.query(
     `SELECT s.id AS shift_id, s.user_id, u.display_name AS user_name, s.started_at
        FROM staff_shifts s JOIN users u ON u.id = s.user_id
-      WHERE s.location_id = $1 AND s.ended_at IS NULL`, [locationId]);
+      WHERE s.ended_at IS NULL
+        AND (($2::uuid IS NOT NULL AND s.till_id = $2::uuid)
+             OR ($2::uuid IS NULL AND s.location_id = $1::uuid))
+      ORDER BY s.started_at LIMIT 1`, [locationId, tillId]);
   return rows[0] || null;
 }
 
@@ -335,12 +356,15 @@ async function state(runner, { nightclubId, user }) {
     : [];
   // Sin caja propia: si el lugar que le tocaba ya lo tiene otra persona, se dice
   // quién, para que no intente abrir una segunda caja ahí.
-  const ocupada = assignment
-    ? await holderOf(runner, { locationId: assignment.location_id })
+  const ocupada = assignment && assignment.till_id
+    ? await holderOf(runner, { tillId: assignment.till_id })
     : null;
   return {
     till: till ? {
       shift_id: till.id,
+      till_id: till.till_id,
+      till_name: till.till_name,
+      device: till.till_device,
       location_id: till.location_id,
       location_name: till.location_name,
       location_kind: till.location_kind,
@@ -352,6 +376,11 @@ async function state(runner, { nightclubId, user }) {
       float_authorized_at: till.float_authorized_at,
     } : null,
     assignment: assignment ? {
+      till_id: assignment.till_id,
+      till_name: assignment.till_name,
+      device: assignment.till_device,
+      // La barra tiene varias cajas y el gerente no dijo cuál (D126): no se puede abrir.
+      needs_till: !assignment.till_id,
       location_id: assignment.location_id,
       location_name: assignment.location_name,
       location_kind: assignment.location_kind,
@@ -655,6 +684,7 @@ module.exports = {
   assignedBar,
   assignedTill,
   noAssignmentMessage,
+  noTillMessage,
   holderOf,
   assertDoorTill,
   openTill,

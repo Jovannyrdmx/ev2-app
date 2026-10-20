@@ -44,7 +44,7 @@ const STAFF_ROLES = ['waiter', 'bartender', 'hostess', 'cashier', 'manager'];
 async function shiftToCut(runner, { nightclubId, userId }) {
   const { rows } = await runner.query(
     `SELECT s.id, s.user_id, s.section, s.started_at, s.ended_at,
-            s.location_id, s.opening_float::text AS opening_float,
+            s.location_id, s.till_id, s.opening_float::text AS opening_float,
             s.opening_float_usd::text AS opening_float_usd
        FROM staff_shifts s
        LEFT JOIN shift_closings c ON c.shift_id = s.id
@@ -445,7 +445,9 @@ router.post('/nightclubs/:nightclubId/till/payments',
       // que asienta el cobro.
       if (cashDrawer.opensDrawer(b.method)) {
         const printer = await cashDrawer.tillPrinter(client, {
-          nightclubId, locationId: hecho.till && hecho.till.location_id,
+          nightclubId,
+          locationId: hecho.till && hecho.till.location_id,
+          tillId: hecho.till && hecho.till.till_id,
         });
         hecho.drawer = await cashDrawer.open(client, {
           nightclubId, printer, refId: hecho.tx.id, createdBy: req.user.id,
@@ -548,7 +550,9 @@ router.post('/nightclubs/:nightclubId/till/payments/batch',
         }));
         acumulado += monto;
       }
-      const printer = await cashDrawer.tillPrinter(client, { nightclubId, locationId: caja.location_id });
+      const printer = await cashDrawer.tillPrinter(client, {
+        nightclubId, locationId: caja.location_id, tillId: caja.till_id,
+      });
       drawer = await cashDrawer.open(client, {
         nightclubId, printer, refId: hechos[0].tx.id, createdBy: req.user.id,
         reason: `cobro por lote de ${pedidos.length} pedidos, ${money(total)}`,
@@ -606,10 +610,14 @@ router.post('/nightclubs/:nightclubId/cash-drawer/open',
     if (req.user.role === 'cashier') {
       const caja = await till.openTill(pool, { nightclubId, userId: req.user.id });
       if (!caja) throw ApiError.conflict('No tienes la caja abierta');
-      printer = await cashDrawer.tillPrinter(pool, { nightclubId, locationId: caja.location_id });
+      printer = await cashDrawer.tillPrinter(pool, {
+        nightclubId, locationId: caja.location_id, tillId: caja.till_id,
+      });
     } else {
       const caja = await till.assertDoorTill(pool, { nightclubId, user: req.user });
-      printer = await cashDrawer.doorPrinter(pool, { nightclubId, locationId: caja.location_id });
+      printer = await cashDrawer.doorPrinter(pool, {
+        nightclubId, locationId: caja.location_id, tillId: caja.till_id,
+      });
     }
     if (!printer || !printer.drawer_pin) {
       throw ApiError.unprocessable('Esta caja no tiene cajón configurado. El gerente lo da de alta en Impresoras.');
@@ -735,7 +743,8 @@ async function xReport(req, { caja, userName, role, authorizer }) {
   const summary = await cuts.shiftSummary(pool, { nightclubId, shift: caja });
   if (summary.closing) throw ApiError.conflict('Esa caja ya tiene su corte hecho');
   const job = await tickets.printXReport(pool, {
-    nightclubId, summary, locationId: caja.location_id, locationName: caja.location_name,
+    nightclubId, summary, locationId: caja.location_id,
+    locationName: caja.till_name || caja.location_name, tillId: caja.till_id || null,
     userName, role, authorizedBy: authorizer.name || null, userId: req.user.id,
   });
   if (!job) {
@@ -784,9 +793,11 @@ router.post('/nightclubs/:nightclubId/tills/:shiftId/x-report',
       `SELECT s.id, s.user_id, s.section, s.started_at, s.ended_at, s.location_id,
               s.opening_float::text AS opening_float, s.opening_float_usd::text AS opening_float_usd,
               l.name AS location_name, l.kind AS location_kind,
+              s.till_id, tt.name AS till_name,
               u.display_name AS user_name, u.role
          FROM staff_shifts s
          JOIN supply_locations l ON l.id = s.location_id
+         LEFT JOIN tills tt ON tt.id = s.till_id
          JOIN users u ON u.id = s.user_id
         WHERE s.id = $1 AND s.nightclub_id = $2 AND s.location_id IS NOT NULL`,
       [shiftId, nightclubId]);
@@ -976,7 +987,11 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
         const { rows: lugar } = await client.query(
           'SELECT kind FROM supply_locations WHERE id = $1', [shift.location_id]);
         const printer = await cashDrawer.printerForTill(client, {
-          nightclubId, caja: { location_id: shift.location_id, location_kind: lugar[0] && lugar[0].kind },
+          nightclubId,
+          caja: {
+            location_id: shift.location_id, till_id: shift.till_id || null,
+            location_kind: lugar[0] && lugar[0].kind,
+          },
         });
         drawerCorte = await cashDrawer.open(client, {
           nightclubId, printer, refId: hecho.id, createdBy: req.user.id,

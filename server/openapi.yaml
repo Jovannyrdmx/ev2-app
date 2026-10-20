@@ -2595,6 +2595,10 @@ paths:
                   type: string
                   format: uuid
                   description: 'Barra. Excluyente con `section`.'
+                till_id:
+                  type: string
+                  format: uuid
+                  description: 'La caja del cajero (D126). Obligatoria cuando la barra tiene varias cajas; con una sola se pone sola.'
                 note: { type: string, maxLength: 200 }
       responses:
         '201':
@@ -10983,6 +10987,205 @@ paths:
         - {name: hours, in: query, schema: {type: integer, minimum: 1, maximum: 744, default: 18}}
       responses:
         '200': {description: 'Ocupaciones, de la más reciente a la más antigua'}
+  /api/nightclubs/{nightclubId}/till-setup:
+    get:
+      operationId: listTillSetup
+      tags: [Cortes de turno]
+      summary: Las cajas del club y lo que les falta (D126)
+      description: |
+        Gerente o admin. Cada caja con su lugar, zonas que atiende, equipo (`pc` o `phone`),
+        impresora de recibos, terminal Point, quién la tiene abierta y `issues`
+        (`no_printer`, `no_drawer`, `no_agent`, `agent_offline`). Trae también los lugares
+        (barras y Cover) y las terminales para el alta.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: include_inactive, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: Cajas, lugares y terminales
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tills: { type: array, items: { type: object, additionalProperties: true } }
+                  places: { type: array, items: { type: object, additionalProperties: true } }
+                  terminals: { type: array, items: { type: object, additionalProperties: true } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createTill
+      tags: [Cortes de turno]
+      summary: Dar de alta una caja en una barra (D126)
+      description: |
+        Gerente o admin. Una barra puede tener varias cajas; todas cobran los pedidos de
+        esa barra y cada una tiene su fondo, corte, impresora y terminal. Cover tiene una
+        sola (D118). El nombre no se repite entre cajas activas. Queda en `audit_log`
+        (`till.create`).
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [location_id, name]
+              properties:
+                location_id: { type: string, format: uuid }
+                name: { type: string, minLength: 1, maxLength: 60 }
+                device: { type: string, enum: [pc, phone], default: pc }
+      responses:
+        '201':
+          description: Caja creada
+          content:
+            application/json:
+              schema: { type: object, properties: { till: { type: object, additionalProperties: true } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /api/nightclubs/{nightclubId}/till-setup/network-printers:
+    get:
+      operationId: listTillNetworkPrinters
+      tags: [Cortes de turno]
+      summary: Impresoras de red que las PCs vieron y que no son de nadie (D126)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Candidatas y PCs activas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates: { type: array, items: { type: object, additionalProperties: true } }
+                  agents: { type: array, items: { type: object, additionalProperties: true } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/nightclubs/{nightclubId}/till-setup/{tillId}:
+    patch:
+      operationId: updateTill
+      tags: [Cortes de turno]
+      summary: Renombrar, cambiar equipo u orden, apagar o prender una caja (D126)
+      description: |
+        No se apaga una caja abierta, la última de su barra, la de Cover, ni una con
+        terminal (se quita primero). Al apagarla se apaga su impresora de recibos.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: tillId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 60 }
+                device: { type: string, enum: [pc, phone] }
+                sort_order: { type: integer, minimum: 0, maximum: 999 }
+                active: { type: boolean }
+      responses:
+        '200':
+          description: Caja actualizada
+          content:
+            application/json:
+              schema: { type: object, properties: { till: { type: object, additionalProperties: true } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /api/nightclubs/{nightclubId}/till-setup/{tillId}/printer:
+    post:
+      operationId: setTillNetworkPrinter
+      tags: [Cortes de turno]
+      summary: La impresora de red con cajón de una caja (la del teléfono) (D126)
+      description: |
+        Registra la impresora térmica de red de la caja y reemplaza a la que tuviera (sus
+        papeles pendientes pasan a la nueva). Sale la hoja de prueba y, con cajón, el
+        pulso. La imprime `agent_id` o, sin él, cualquier PC activa que atienda ese lugar;
+        si no hay ninguna contesta 422 (`reason: no_agent`). Dos cajas no comparten
+        impresora. La caja con PC usa el código de estación (`station.till_id`).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: tillId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host]
+              properties:
+                host: { type: string, maxLength: 120, description: 'IPv4 o nombre de equipo' }
+                port: { type: integer, minimum: 1, maximum: 65535, default: 9100 }
+                name: { type: string, maxLength: 60 }
+                has_drawer: { type: boolean, default: true }
+                drawer_pin: { type: integer, enum: [2, 5], default: 2 }
+                paper_width: { type: integer, enum: [58, 80], default: 80 }
+                agent_id: { type: [string, 'null'], format: uuid }
+      responses:
+        '201':
+          description: Impresora registrada, prueba y pulso encolados
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /api/nightclubs/{nightclubId}/till-setup/{tillId}/terminal:
+    put:
+      operationId: setTillTerminal
+      tags: [Cortes de turno]
+      summary: La terminal Point de una caja (D126)
+      description: |
+        Una terminal en una sola caja y una caja con una sola terminal: si estaba en otra
+        caja se mueve; `terminal_id: null` se la quita. No se mueve con un cobro en curso.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: tillId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [terminal_id]
+              properties:
+                terminal_id: { type: [string, 'null'], format: uuid }
+      responses:
+        '200':
+          description: Terminal asignada o quitada
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /api/nightclubs/{nightclubId}/till/test-print:
+    post:
+      operationId: testTillPrinter
+      tags: [Cortes de turno]
+      summary: Hoja de prueba en la impresora de mi caja (D126)
+      description: |
+        Cajero o anfitriona con su caja abierta. No abre el cajón (eso pide PIN del
+        gerente). `agent_online: false` avisa que ninguna PC está imprimiendo esa caja.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '202':
+          description: Hoja de prueba encolada
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
   /api/nightclubs/{nightclubId}/till/open:
     post:
       operationId: openTill

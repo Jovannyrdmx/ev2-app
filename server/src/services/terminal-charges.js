@@ -130,12 +130,20 @@ async function record(runner, { chargeId, source, action, status = null, request
  * - `locationId`: el lugar de quien cobra (la caja abierta del cajero, o la puerta).
  * - `requested`: lo que mandó la pantalla, si mandó algo.
  */
-async function resolveTerminal(client, { nightclubId, locationId = null, requested = null, strict = false }) {
+async function resolveTerminal(client, {
+  nightclubId, locationId = null, tillId = null, requested = null, strict = false,
+}) {
   if (locationId) {
+    // La terminal es de la CAJA (D126). Solo con el lugar, vale mientras ese lugar
+    // tenga una sola terminal; con dos cajas no se adivina cuál.
     const mine = await client.query(
       `SELECT id::text AS id FROM payment_terminals
-        WHERE nightclub_id = $1 AND location_id = $2 AND active AND provider = 'mercadopago'`,
-      [nightclubId, locationId]);
+        WHERE nightclub_id = $1 AND active AND provider = 'mercadopago'
+          AND (($3::uuid IS NOT NULL AND till_id = $3::uuid)
+               OR ($3::uuid IS NULL AND location_id = $2
+                   AND (SELECT count(*) FROM payment_terminals x
+                         WHERE x.location_id = $2 AND x.active) = 1))`,
+      [nightclubId, locationId, tillId]);
     if (mine.rowCount > 0) {
       if (requested && requested !== mine.rows[0].id) {
         throw ApiError.forbidden('Esa terminal no es la de tu caja. El cobro sale por la terminal asignada a tu lugar.');
@@ -154,8 +162,9 @@ async function resolveTerminal(client, { nightclubId, locationId = null, request
   if (locationId) {
     const other = await client.query(
       `SELECT 1 FROM payment_terminals
-        WHERE id = $1 AND nightclub_id = $2 AND location_id IS NOT NULL AND location_id <> $3`,
-      [requested, nightclubId, locationId]);
+        WHERE id = $1 AND nightclub_id = $2 AND location_id IS NOT NULL
+          AND (location_id <> $3 OR ($4::uuid IS NOT NULL AND till_id IS DISTINCT FROM $4::uuid))`,
+      [requested, nightclubId, locationId, tillId]);
     if (other.rowCount > 0) {
       throw ApiError.forbidden('Esa terminal está asignada a otra caja.');
     }

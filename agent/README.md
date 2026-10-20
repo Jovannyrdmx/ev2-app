@@ -125,6 +125,20 @@ estación con ✓ PC · ✓ impresora · ✓ cajón.
 - Si **no** ve ninguna, te dice qué revisar (USB, encendida, driver) y pica **Buscar
   impresoras** para reintentar.
 
+## La caja del teléfono (D126)
+
+Una barra puede tener una caja en la PC y otra en un teléfono. El teléfono no se conecta a
+la impresora: su caja imprime en una **impresora térmica de red** (WiFi o cable, con IP
+fija) con su cajón, y el papel lo saca **el agente de una PC del club**, igual que todo lo
+demás. Por eso:
+
+- Al menos una PC con el agente tiene que estar prendida y atender esa barra (o todo el
+  club). En **Cajas → Configurar** se ve si esa PC se está reportando, y se puede escoger
+  qué PC imprime la caja del teléfono.
+- La impresora del teléfono se escoge de las que vieron las PCs al **Buscar impresoras**, o
+  se teclea su IP. Sale la hoja de prueba y abre el cajón para confirmar que es la buena.
+- La caja con PC usa la estación de siempre: el código ya va atado a su caja.
+
 ## Impresoras por USB (Windows)
 
 **No hace falta compartirla en Windows.** El agente le imprime por su nombre.

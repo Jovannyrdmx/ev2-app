@@ -168,13 +168,42 @@ async function checkTarget(runner, { nightclubId, rule, section, locationId }) {
  * fila que ya estaba. Lo que sí se niega es un SEGUNDO destino para un puesto que
  * solo puede estar en uno.
  */
+/**
+ * La caja del cajero (o de la anfitriona en Cover) en ese lugar (D126).
+ *
+ * Con una sola caja en el lugar no hace falta decirla. Con varias, el gerente escoge:
+ * el cajero no la elige al abrir, igual que no elige su barra.
+ */
+async function checkTill(runner, { nightclubId, person, destino, tillId }) {
+  const conCaja = destino.locationId && (person.role === 'cashier' || person.role === 'hostess');
+  if (!conCaja) {
+    if (tillId) throw ApiError.unprocessable('Solo el cajero y la anfitriona de Cover llevan caja');
+    return null;
+  }
+  const { rows } = await runner.query(
+    `SELECT id, name FROM tills
+      WHERE location_id = $1 AND nightclub_id = $2 AND active
+      ORDER BY sort_order, name, id`,
+    [destino.locationId, nightclubId]);
+  if (tillId) {
+    const caja = rows.find((r) => r.id === tillId);
+    if (!caja) throw ApiError.unprocessable('Esa caja no es de ese lugar o está apagada');
+    return caja.id;
+  }
+  if (rows.length === 1) return rows[0].id;
+  if (rows.length === 0) throw ApiError.unprocessable('Ese lugar no tiene cajas activas');
+  throw ApiError.unprocessable('Ese lugar tiene varias cajas: escoge en cuál va',
+    { tills: rows.map((r) => ({ id: r.id, name: r.name })) });
+}
+
 async function assign(runner, { nightclubId, eventId, userId, section = null,
-  locationId = null, note = null, assignedBy }) {
+  locationId = null, tillId = null, note = null, assignedBy }) {
   await loadEvent(runner, { nightclubId, eventId });
   const { person, rule } = await loadPerson(runner, { nightclubId, userId });
   const destino = await checkTarget(runner, {
     nightclubId, rule, section, locationId,
   });
+  const caja = await checkTill(runner, { nightclubId, person, destino, tillId });
 
   if (!rule.multi) {
     const { rows } = await runner.query(
@@ -193,24 +222,30 @@ async function assign(runner, { nightclubId, eventId, userId, section = null,
 
   const { rows } = await runner.query(
     `INSERT INTO shift_assignments (nightclub_id, event_id, user_id, role, section,
-                                    location_id, note, assigned_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                                    location_id, note, assigned_by, till_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
      ON CONFLICT DO NOTHING
      RETURNING id`,
     [nightclubId, eventId, userId, person.role, destino.section, destino.locationId,
-      note, assignedBy],
+      note, assignedBy, caja],
   );
 
   // `ON CONFLICT DO NOTHING` no devuelve fila cuando ya existía: se busca la que
   // hay para contestar lo mismo que la primera vez.
   if (rows.length === 0) {
     const previa = await runner.query(
-      `SELECT id FROM shift_assignments
+      `SELECT id, till_id FROM shift_assignments
         WHERE event_id = $1 AND user_id = $2
           AND section IS NOT DISTINCT FROM $3::text
           AND location_id IS NOT DISTINCT FROM $4::uuid`,
       [eventId, userId, destino.section, destino.locationId]);
-    return { id: previa.rows[0] ? previa.rows[0].id : null, already: true };
+    const fila = previa.rows[0];
+    // Misma barra, otra caja (D126): se cambia de caja en vez de decir "ya estaba".
+    if (fila && caja && fila.till_id !== caja) {
+      await runner.query('UPDATE shift_assignments SET till_id = $2 WHERE id = $1', [fila.id, caja]);
+      return { id: fila.id, already: false };
+    }
+    return { id: fila ? fila.id : null, already: true };
   }
   return { id: rows[0].id, already: false };
 }
@@ -243,6 +278,8 @@ async function rosterFor(runner, { nightclubId, eventId }) {
               'location_id', a.location_id,
               'location_name', l.name,
               'location_kind', l.kind,
+              'till_id', a.till_id,
+              'till_name', tt.name,
               'note', a.note
             ) ORDER BY a.section, l.name) AS targets,
             (s.id IS NOT NULL) AS on_shift,
@@ -250,6 +287,7 @@ async function rosterFor(runner, { nightclubId, eventId }) {
        FROM shift_assignments a
        JOIN users u ON u.id = a.user_id
        LEFT JOIN supply_locations l ON l.id = a.location_id
+       LEFT JOIN tills tt ON tt.id = a.till_id
        LEFT JOIN staff_shifts s ON s.user_id = a.user_id AND s.ended_at IS NULL
       WHERE a.nightclub_id = $1 AND a.event_id = $2
       GROUP BY a.user_id, u.display_name, u.role, a.role, s.id, s.started_at
@@ -302,23 +340,38 @@ async function gapsFor(runner, { nightclubId, eventId }) {
   // Desde D77 cada barra necesita también su caja: una barra con bartender y sin
   // cajero prepara tragos que nadie va a cobrar. Desde D118 Cover también es caja, y
   // la abre una anfitriona: sin nadie en Cover, nadie cobra la puerta.
+  // Desde D126 se cuenta por CAJA: una barra con dos cajas necesita dos cajeros.
   const cajas = await runner.query(
-    `SELECT l.id, l.name, l.kind
-       FROM supply_locations l
-      WHERE l.nightclub_id = $1 AND l.kind IN ('bar', 'door') AND l.active
+    `SELECT l.id, l.name AS location_name, l.kind, t.id AS till_id, t.name AS till_name
+       FROM tills t
+       JOIN supply_locations l ON l.id = t.location_id
+      WHERE l.nightclub_id = $1 AND l.kind IN ('bar', 'door') AND l.active AND t.active
         AND NOT EXISTS (
           SELECT 1 FROM shift_assignments a
-           WHERE a.event_id = $2 AND a.location_id = l.id
+           WHERE a.event_id = $2 AND a.till_id = t.id
              AND a.role = CASE WHEN l.kind = 'door' THEN $4::text ELSE $3::text END
         )
-      ORDER BY l.kind = 'door', l.name`,
+      ORDER BY l.kind = 'door', l.name, t.sort_order, t.name`,
     [nightclubId, eventId, 'cashier', 'hostess'],
   );
   return {
     sections: zonas.rows.map((r) => r.section),
     bars: barras.rows.map((r) => ({ location_id: r.id, name: r.name })),
-    tills: cajas.rows.map((r) => ({ location_id: r.id, name: r.name, kind: r.kind })),
+    tills: cajas.rows.map((r) => ({
+      location_id: r.id, name: r.location_name, kind: r.kind,
+      till_id: r.till_id, till_name: r.till_name,
+    })),
   };
+}
+
+/** Todas las cajas activas (D126): la pantalla ofrece en cuál va cada cajero. */
+async function activeTills(runner, { nightclubId }) {
+  const { rows } = await runner.query(
+    `SELECT t.id AS till_id, t.name AS till_name, t.device, t.location_id
+       FROM tills t JOIN supply_locations l ON l.id = t.location_id
+      WHERE t.nightclub_id = $1 AND t.active AND l.active
+      ORDER BY l.name, t.sort_order, t.name`, [nightclubId]);
+  return rows;
 }
 
 /** A qué quedó asignada una persona esa noche. Lo que ve el empleado al llegar. */
@@ -344,9 +397,11 @@ module.exports = {
   loadPerson,
   loadEvent,
   checkTarget,
+  checkTill,
   assign,
   unassign,
   rosterFor,
   gapsFor,
+  activeTills,
   myAssignments,
 };

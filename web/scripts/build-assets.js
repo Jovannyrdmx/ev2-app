@@ -41,9 +41,9 @@ const ICONS = {
   solid: [
     'arrow-left', 'arrow-right', 'arrow-right-from-bracket', 'bars', 'bell',
     'boxes-stacked', 'calendar-days', 'camera', 'car', 'cash-register', 'chart-line',
-    'check', 'chevron-left', 'chevron-right', 'circle-check', 'clock', 'dolly', 'gear',
+    'check', 'chevron-left', 'chevron-right', 'circle-check', 'clock', 'desktop', 'dolly', 'gear',
     'gift', 'hand-holding-dollar', 'heart', 'helmet-safety', 'house', 'inbox',
-    'location-dot', 'magnifying-glass', 'map-location-dot', 'martini-glass', 'minus',
+    'location-dot', 'magnifying-glass', 'map-location-dot', 'martini-glass', 'minus', 'mobile-screen',
     'music', 'phone', 'plus', 'print', 'qrcode', 'receipt', 'right-from-bracket',
     'right-to-bracket', 'rotate', 'rotate-left', 'shield-halved', 'star', 'taxi',
     'triangle-exclamation', 'user', 'users', 'wallet', 'xmark',

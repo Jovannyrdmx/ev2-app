@@ -110,12 +110,14 @@ async function saveSettings(runner, { nightclubId, patch, userId }) {
 const PRINTER_COLS = `p.id::text AS id, p.nightclub_id::text AS nightclub_id,
   p.location_id::text AS location_id, p.name, p.purpose, p.connection, p.host, p.port,
   p.windows_name, p.paper_width, p.columns, p.codepage, p.has_cutter,
-  p.fallback_id::text AS fallback_id, p.active, p.agent_id::text AS agent_id, p.drawer_pin`;
+  p.fallback_id::text AS fallback_id, p.active, p.agent_id::text AS agent_id, p.drawer_pin,
+  p.till_id::text AS till_id`;
 
 async function listPrinters(runner, { nightclubId, includeInactive = false }) {
   const { rows } = await runner.query(
     `SELECT ${PRINTER_COLS},
-            (SELECT l.name FROM supply_locations l WHERE l.id = p.location_id) AS location_name
+            (SELECT l.name FROM supply_locations l WHERE l.id = p.location_id) AS location_name,
+            (SELECT t.name FROM tills t WHERE t.id = p.till_id) AS till_name
        FROM printers p
       WHERE p.nightclub_id = $1 AND ($2::boolean OR p.active)
       ORDER BY location_name, purpose`,
@@ -138,7 +140,28 @@ async function getPrinter(runner, { nightclubId, printerId }) {
  * barra asignada no se adivina una: devolver "cualquiera" haría que las comandas de
  * la terraza salieran en la barra de abajo sin que nadie entienda por qué.
  */
-async function resolvePrinter(runner, { nightclubId, purpose, section = null, locationId = null }) {
+async function resolvePrinter(runner, {
+  nightclubId, purpose, section = null, locationId = null, tillId = null,
+}) {
+  // La impresora de recibos es de la CAJA (D126): con la caja se pregunta por ella y por
+  // nada más. Nunca se presta la de otra caja de la misma barra: el cajón es de una.
+  if (purpose === 'till' && tillId) {
+    const { rows } = await runner.query(
+      `SELECT ${PRINTER_COLS} FROM printers p
+        WHERE p.nightclub_id = $1 AND p.till_id = $2 AND p.purpose = 'till' AND p.active`,
+      [nightclubId, tillId]);
+    return rows[0] || null;
+  }
+  // Solo el lugar y el uso de caja: vale mientras el lugar tenga UNA impresora de caja.
+  // Con dos cajas no se adivina de cuál es.
+  if (purpose === 'till' && locationId) {
+    const { rows } = await runner.query(
+      `SELECT ${PRINTER_COLS} FROM printers p
+        WHERE p.nightclub_id = $1 AND p.location_id = $2 AND p.purpose = 'till' AND p.active
+        LIMIT 2`,
+      [nightclubId, locationId]);
+    return rows.length === 1 ? rows[0] : null;
+  }
   if (locationId) {
     const { rows } = await runner.query(
       `SELECT ${PRINTER_COLS} FROM printers p
@@ -1088,21 +1111,23 @@ async function registerStationPrinter(runner, {
       nightclubId: agent.nightclub_id,
       locationId: needsLocation ? agent.location_id : null,
       purpose: st.purpose, name: nuevoNombre, agentId: network ? null : agent.id,
+      tillId: st.purpose === 'till' ? (st.till_id || null) : null,
     });
     // Una de red la imprime cualquier PC del club (no se ata al agente); una USB solo
     // la PC donde está conectada.
     const { rows } = await runner.query(
       `INSERT INTO printers
          (nightclub_id, location_id, name, purpose, connection, windows_name, host, port,
-          paper_width, columns, codepage, has_cutter, agent_id, drawer_pin)
+          paper_width, columns, codepage, has_cutter, agent_id, drawer_pin, till_id)
        VALUES ($1,$2::uuid,$3::text,$4::text,$5::text,$6::text,$7::text,$8,
-               80,$9,'CP850',true,$10::uuid,$11)
+               80,$9,'CP850',true,$10::uuid,$11,$12::uuid)
        RETURNING id::text AS id`,
       [agent.nightclub_id, needsLocation ? agent.location_id : null,
         nuevoNombre,
         st.purpose, network ? 'network' : 'windows', network ? null : windowsName,
         network ? network.host : null, network ? network.tcp_port : 9100,
-        columnsFor(80), network ? null : agent.id, st.drawer_pin || null]);
+        columnsFor(80), network ? null : agent.id, st.drawer_pin || null,
+        st.purpose === 'till' ? (st.till_id || null) : null]);
     await runner.query('RELEASE SAVEPOINT station_printer');
     printer = await getPrinter(runner, { nightclubId: agent.nightclub_id, printerId: rows[0].id });
   } catch (err) {
@@ -1112,6 +1137,12 @@ async function registerStationPrinter(runner, {
         status: 'blocked',
         message: 'Ya hay una impresora activa con ese nombre o para ese uso en ese lugar. '
           + 'Apágala en la lista de impresoras y vuelve a buscar.',
+      };
+    }
+    if (err.constraint === 'printers_till_ambiguous') {
+      return {
+        status: 'blocked',
+        message: 'Ese lugar tiene varias cajas. Da de alta esta PC desde Cajas → la caja que es.',
       };
     }
     if (err.code === '23503' || err.code === '23514') {
@@ -1152,15 +1183,22 @@ async function registerStationPrinter(runner, {
  * Una apagada con el mismo nombre se renombra, porque el nombre es único en el club
  * aunque esté apagada, y eso era lo que hacía fallar el "COVER" de la segunda vez.
  */
-async function displacedPrinters(runner, { nightclubId, locationId, purpose, name, agentId }) {
+async function displacedPrinters(runner, {
+  nightclubId, locationId, purpose, name, agentId, tillId = null,
+}) {
+  // La de recibos es de la caja (D126): se reemplaza la de ESA caja, no la de la otra
+  // caja de la misma barra. Sin caja dicha, el lugar (una barra con una sola caja).
   const { rows } = await runner.query(
     `UPDATE printers SET active = false, updated_at = now()
       WHERE nightclub_id = $1 AND active
-        AND ( ($2::uuid IS NOT NULL AND location_id = $2::uuid AND purpose = $3::text)
+        AND ( ($6::uuid IS NOT NULL AND till_id = $6::uuid AND purpose = 'till')
+           OR ($6::uuid IS NULL AND $2::uuid IS NOT NULL AND location_id = $2::uuid
+               AND purpose = $3::text
+               AND ($3::text <> 'till' OR till_id = till_of_location($2::uuid)))
            OR lower(name) = lower($4::text)
            OR ($5::uuid IS NOT NULL AND agent_id = $5::uuid AND connection = 'windows') )
       RETURNING id::text AS id`,
-    [nightclubId, locationId, purpose, name, agentId]);
+    [nightclubId, locationId, purpose, name, agentId, tillId]);
   await runner.query(
     `UPDATE printers
         SET name = left(name, 40) || ' (baja ' || to_char(now(), 'YYMMDD-HH24MISS') || ')',
@@ -1354,5 +1392,5 @@ module.exports = {
   newInviteCode, prettyCode, normalizeCode, hashCode,
   createInvite, redeemInvite, countFailedPairing, openInvites,
   STATION_PURPOSES, stationCandidates, stationNetworkCandidates, applyStation, finishStation,
-  pickStationPrinter, cleanupDevices,
+  pickStationPrinter, cleanupDevices, moveJobs,
 };

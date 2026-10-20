@@ -23,10 +23,14 @@ const CASH_METHODS = ['cash', 'cash_usd'];
 /** ¿Este método de pago mete dinero al cajón? */
 const opensDrawer = (method) => CASH_METHODS.includes(method);
 
-/** La impresora de la caja de una barra (la del cajero). */
-function tillPrinter(runner, { nightclubId, locationId }) {
-  if (!locationId) return Promise.resolve(null);
-  return printing.resolvePrinter(runner, { nightclubId, purpose: 'till', locationId });
+/**
+ * La impresora de una caja de barra (la del cajero). Con `tillId` es la de ESA caja
+ * (D126): una barra puede tener varias cajas y el cajón de una no se abre desde la
+ * otra. Solo con la barra, la única caja que tenga.
+ */
+function tillPrinter(runner, { nightclubId, locationId = null, tillId = null }) {
+  if (!locationId && !tillId) return Promise.resolve(null);
+  return printing.resolvePrinter(runner, { nightclubId, purpose: 'till', locationId, tillId });
 }
 
 /**
@@ -38,7 +42,7 @@ function tillPrinter(runner, { nightclubId, locationId }) {
  * club). Se usa la que tenga cajón; si ninguna lo tiene, la primera que exista, para
  * que la pantalla diga "esta caja no tiene cajón" y no "no hay impresora".
  */
-async function doorPrinter(runner, { nightclubId, locationId = null }) {
+async function doorPrinter(runner, { nightclubId, locationId = null, tillId = null }) {
   let coverId = locationId;
   if (!coverId) {
     const { rows } = await runner.query(
@@ -47,8 +51,10 @@ async function doorPrinter(runner, { nightclubId, locationId = null }) {
         ORDER BY sort_order, code LIMIT 1`, [nightclubId]);
     coverId = rows[0] ? rows[0].id : null;
   }
-  const deCover = coverId
-    ? await printing.resolvePrinter(runner, { nightclubId, purpose: 'till', locationId: coverId })
+  const deCover = coverId || tillId
+    ? await printing.resolvePrinter(runner, {
+      nightclubId, purpose: 'till', locationId: coverId, tillId,
+    })
     : null;
   if (deCover && deCover.drawer_pin) return deCover;
   const dePuerta = await printing.resolvePrinter(runner, { nightclubId, purpose: 'door' });
@@ -62,9 +68,10 @@ async function doorPrinter(runner, { nightclubId, locationId = null }) {
  */
 function printerForTill(runner, { nightclubId, caja }) {
   if (!caja || !caja.location_id) return Promise.resolve(null);
+  const tillId = caja.till_id || null;
   return caja.location_kind === 'door'
-    ? doorPrinter(runner, { nightclubId, locationId: caja.location_id })
-    : tillPrinter(runner, { nightclubId, locationId: caja.location_id });
+    ? doorPrinter(runner, { nightclubId, locationId: caja.location_id, tillId })
+    : tillPrinter(runner, { nightclubId, locationId: caja.location_id, tillId });
 }
 
 /**

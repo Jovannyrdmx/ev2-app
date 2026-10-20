@@ -113,6 +113,8 @@ router.get('/nightclubs/:nightclubId/nights/:eventId/closing',
 const target = z.object({
   section: z.string().trim().max(40).optional(),
   location_id: uuid.optional(),
+  // La caja (D126): obligatoria para un cajero cuando su barra tiene varias.
+  till_id: uuid.optional(),
   note: z.string().trim().max(200).optional(),
 });
 
@@ -123,13 +125,15 @@ router.get('/nightclubs/:nightclubId/nights/:eventId/roster',
   asyncHandler(async (req, res) => {
     const { nightclubId, eventId } = req.params;
     await assignments.loadEvent(pool, { nightclubId, eventId });
-    const [roster, gaps] = await Promise.all([
+    const [roster, gaps, tills] = await Promise.all([
       assignments.rosterFor(pool, { nightclubId, eventId }),
       assignments.gapsFor(pool, { nightclubId, eventId }),
+      assignments.activeTills(pool, { nightclubId }),
     ]);
     res.json({
       roster,
       gaps,
+      tills,
       assigned: roster.length,
       on_shift: roster.filter((p) => p.on_shift).length,
       assignable_roles: assignments.ASSIGNABLE_ROLES,
@@ -158,6 +162,7 @@ router.post('/nightclubs/:nightclubId/nights/:eventId/roster',
       userId: req.body.user_id,
       section: req.body.section || null,
       locationId: req.body.location_id || null,
+      tillId: req.body.till_id || null,
       note: req.body.note || null,
       assignedBy: req.user.id,
     });
