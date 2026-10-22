@@ -11,6 +11,7 @@
 
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
+const pairing = require('./helpers/pairing');
 const f = require('./helpers/factories');
 const printing = require('../src/services/printing');
 
@@ -28,9 +29,7 @@ beforeEach(async () => {
 
 const url = (p) => `/api/nightclubs/${club.id}${p}`;
 const comoAgente = (token, method, path) => api()[method](path).set('X-Print-Agent-Token', token);
-const pedirCodigo = (station, extra = {}) => api()
-  .post(url('/print-agents/invite')).set(auth(manager))
-  .send({ location_id: club.bar_id, station, ...extra });
+const pedirCodigo = (station, extra = {}) => pairing.invite(club.id, manager, { location_id: club.bar_id, station, ...extra });
 const caja = { name: 'Caja barra baja', purpose: 'till', has_drawer: true };
 
 async function canjear(res, hostname = 'CAJA-01') {

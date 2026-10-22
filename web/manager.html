@@ -1179,6 +1179,27 @@
           </div>
           <p class="text-[11px] text-white/40" data-i18n="tset.why">Una barra puede tener varias cajas: todas cobran los pedidos de esa barra y cada una tiene su fondo, su corte, su impresora con cajón y su terminal. Se cobra con la PC de la caja o con un teléfono.</p>
         </div>
+        <!--
+          Registrar esta PC (D127): se hace sentado en ESA PC. Se escoge qué es, se baja
+          el instalador y se le da doble clic. Sin código, sin PowerShell.
+        -->
+        <div class="card rounded-xl p-4 space-y-3" id="pc-card">
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tset.registerTitle">Registrar esta PC</p>
+          <p class="text-[11px] text-white/40" data-i18n="tset.registerWhy">Hazlo desde la PC que vas a registrar, con su impresora conectada por USB.</p>
+          <div>
+            <label class="label" for="pc-target" data-i18n="tset.pcWhat">¿Qué es esta PC?</label>
+            <select id="pc-target" class="field"></select>
+          </div>
+          <label class="flex items-center gap-3 text-sm tap">
+            <input id="pc-drawer" type="checkbox" class="w-5 h-5 accent-emerald-400" checked>
+            <span data-i18n="stn.drawer">Tiene cajón de dinero (conectado a la impresora)</span>
+          </label>
+          <button id="btn-pc-download" class="ev2-button w-full rounded-lg py-3"><i class="fa-solid fa-desktop mr-1"></i><span data-i18n="tset.download">Bajar instalador</span></button>
+          <p id="pc-help" class="text-xs" style="color:var(--ev2-lime)" data-i18n="tset.registerHelp" hidden>Abre el archivo Instalar-EV2.cmd que se bajó (doble clic). Se registra solo, imprime la hoja de prueba y abre el cajón.</p>
+          <div id="pc-status" class="space-y-2"></div>
+          <button id="btn-pc-wipe" class="text-[11px] text-red-300 underline" data-i18n="tset.wipe">Borrar PCs e impresoras actuales</button>
+        </div>
+
         <div id="till-wizard" class="card rounded-xl p-4 space-y-3" hidden>
           <div class="flex items-center justify-between gap-2">
             <div class="min-w-0">
@@ -1206,68 +1227,6 @@
         -->
         <div id="prn-health" class="space-y-2" hidden></div>
 
-        <!--
-          La estación de caja (D99): PC + impresora USB + cajón en un solo paso. El gerente
-          dice qué es, recibe el código, y la PC registra sola su impresora.
-        -->
-        <div class="card rounded-xl p-4 space-y-3" id="stn-card">
-          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="stn.title">Nueva estación de caja</p>
-          <p class="text-[11px] text-white/40" data-i18n="stn.why">Una estación es una PC con su impresora conectada por USB y, si lleva, su cajón de dinero conectado a la impresora. Escoge qué es, saca el código y pégalo en esa PC: lo demás se hace solo.</p>
-          <div>
-            <label class="label" for="stn-name" data-i18n="stn.name">Nombre</label>
-            <input id="stn-name" class="field" maxlength="60" placeholder="Caja barra baja" data-i18n-placeholder="stn.namePh">
-          </div>
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="label" for="stn-place" data-i18n="stn.place">Dónde está</label>
-              <select id="stn-place" class="field"></select>
-            </div>
-            <div id="stn-purpose-box">
-              <label class="label" for="stn-purpose" data-i18n="stn.purpose">Para qué es</label>
-              <select id="stn-purpose" class="field">
-                <option value="till" data-i18n="prn.pTill">Recibos de la caja</option>
-                <option value="service" data-i18n="prn.pService">Cuentas y recibos (PC de meseros)</option>
-                <option value="orders" data-i18n="prn.pOrders">Comandas (PC del bartender)</option>
-              </select>
-            </div>
-          </div>
-          <label class="flex items-center gap-3 text-sm tap">
-            <input id="stn-drawer" type="checkbox" class="w-5 h-5 accent-emerald-400" checked>
-            <span data-i18n="stn.drawer">Tiene cajón de dinero (conectado a la impresora)</span>
-          </label>
-          <button id="btn-stn-create" class="ev2-button w-full rounded-lg py-2" data-i18n="stn.create">Sacar el código de la estación</button>
-          <p id="stn-error" class="text-sm text-red-300" hidden></p>
-          <div id="prn-pair" class="rounded-xl p-4 text-center space-y-2"
-               style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12)" hidden>
-            <p class="text-xs text-white/50" data-i18n="prn.pairStep1">En esa PC, abre el agente y teclea este código:</p>
-            <p id="prn-pair-code" class="font-display text-3xl tracking-[0.2em]" style="color:var(--ev2-gold)">—</p>
-            <p id="prn-pair-ttl" class="text-[11px] text-white/40">—</p>
-            <p id="prn-pair-wait" class="text-xs" style="color:var(--ev2-lime)" hidden></p>
-
-            <!--
-              Y si esa PC todavía no tiene el agente (D57). Va aquí adentro y cerrado:
-              la mayoría de las veces la PC ya lo tiene y esto solo estorbaría, pero
-              la vez que no, quien está parado en la barra necesita encontrarlo sin
-              buscar una carpeta en una USB.
-            -->
-            <details id="prn-install" class="text-left rounded-lg" style="background:rgba(0,0,0,.25)">
-              <summary class="cursor-pointer px-3 py-2 text-xs text-white/60 tap" data-i18n="prn.installOpen">Esa PC todavía no tiene el agente</summary>
-              <div class="px-3 pb-3 space-y-2">
-                <p class="text-[11px] text-white/50" data-i18n="prn.installHow">En esa PC: clic derecho en Inicio → Windows PowerShell. Pega esta línea y dale Enter.</p>
-                <code id="prn-install-cmd" class="block text-[11px] break-all rounded p-2" style="background:rgba(0,0,0,.45);color:var(--ev2-lime)">—</code>
-                <div class="flex gap-2">
-                  <button id="btn-prn-copy" class="card rounded-lg px-3 py-2 text-xs flex-1" data-i18n="prn.installCopy">Copiar la línea</button>
-                  <a id="prn-install-dl" class="card rounded-lg px-3 py-2 text-xs flex-1 text-center tap" href="#" download="instalar-agente-ev2.ps1" data-i18n="prn.installDownload">Bajar el archivo</a>
-                </div>
-                <p class="text-[11px] text-white/40" data-i18n="prn.installNode">Hace falta Node.js en esa PC. Si no lo tiene, la línea te lo dice y te manda a nodejs.org.</p>
-              </div>
-            </details>
-          </div>
-
-
-          <div id="stn-list" class="space-y-2"></div>
-        </div>
-
         <div class="card rounded-xl p-4 space-y-3">
           <div class="flex items-center justify-between gap-2">
             <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.printers">Impresoras</p>
@@ -1278,136 +1237,17 @@
           <p id="prn-error" class="text-sm text-red-300" hidden></p>
         </div>
 
-        <!--
-          Buscar antes que teclear. Una IP mal escrita no se descubre al guardarla: se
-          descubre cuando el ticket no sale, a las dos de la mañana.
-        -->
-        <div class="card rounded-xl p-4 space-y-3">
-          <div class="flex items-center justify-between gap-2">
-            <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.found">Impresoras encontradas</p>
-            <button id="btn-prn-scan" class="ev2-button rounded-lg px-3 py-2 text-xs" data-i18n="prn.scan">Buscar impresoras</button>
-          </div>
-          <p class="text-[11px] text-white/40" data-i18n="prn.scanWhy">Cada PC busca en su propia red y dice lo que ve. Así también sabes cuál PC alcanza a cuál impresora.</p>
-          <p id="prn-scan-status" class="text-[11px]" hidden></p>
-          <div id="prn-found" class="space-y-2"></div>
-          <!-- La hoja de prueba que sale sola al registrar (D80): se pregunta aquí si salió bien. -->
-          <div id="prn-test-check" class="rounded-lg p-3 space-y-2" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12)" hidden>
-            <p id="prn-test-text" class="text-xs"></p>
-            <div class="flex gap-2">
-              <button id="btn-prn-test-ok" class="ev2-button rounded-lg px-3 py-2 text-xs flex-1" data-i18n="prn.testOk">Sí, se ve bien</button>
-              <button id="btn-prn-test-retry" class="card rounded-lg px-3 py-2 text-xs flex-1" data-i18n="prn.testRetry">No, probar otros acentos</button>
-            </div>
-          </div>
-          <p id="prn-scan-error" class="text-sm text-red-300" hidden></p>
-        </div>
-
-        <details id="prn-add-box" class="card rounded-xl p-4">
-          <summary class="text-sm cursor-pointer" data-i18n="prn.addTitle">Dar de alta una impresora</summary>
-          <div class="space-y-3 pt-3">
-            <input type="hidden" id="prn-agent-id" value="">
-            <div id="prn-location-box">
-              <label class="label" for="prn-location" data-i18n="prn.location">Barra</label>
-              <select id="prn-location" class="field"></select>
-            </div>
-            <div>
-              <label class="label" for="prn-purpose" data-i18n="prn.purpose">Para qué es</label>
-              <select id="prn-purpose" class="field">
-                <option value="orders" data-i18n="prn.pOrders">Comandas (PC del bartender)</option>
-                <option value="service" data-i18n="prn.pService">Cuentas y recibos (PC de meseros)</option>
-                <option value="till" data-i18n="prn.pTill">Recibos de la caja</option>
-              </select>
-            </div>
-            <div>
-              <label class="label" for="prn-name" data-i18n="prn.name">Nombre</label>
-              <input id="prn-name" class="field" maxlength="60" placeholder="Barra baja · bartender">
-            </div>
-            <div>
-              <label class="label" for="prn-connection" data-i18n="prn.connection">Cómo está conectada</label>
-              <select id="prn-connection" class="field">
-                <option value="network" data-i18n="prn.cNetwork">En la red, con su IP</option>
-                <option value="windows" data-i18n="prn.cWindows">Por USB a una PC (Windows)</option>
-              </select>
-            </div>
-            <div id="prn-network-fields" class="grid grid-cols-3 gap-2">
-              <div class="col-span-2">
-                <label class="label" for="prn-host" data-i18n="prn.host">Dirección IP</label>
-                <input id="prn-host" class="field" maxlength="120" placeholder="192.168.1.50" inputmode="decimal">
-              </div>
-              <div>
-                <label class="label" for="prn-port" data-i18n="prn.port">Puerto</label>
-                <input id="prn-port" class="field" type="number" min="1" max="65535" value="9100">
-              </div>
-            </div>
-            <div id="prn-windows-fields" hidden>
-              <label class="label" for="prn-winname" data-i18n="prn.winName">Nombre compartido en Windows</label>
-              <input id="prn-winname" class="field" maxlength="120" placeholder="XP80">
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="label" for="prn-width" data-i18n="prn.width">Ancho del papel</label>
-                <select id="prn-width" class="field">
-                  <option value="80">80 mm</option>
-                  <option value="58">58 mm</option>
-                </select>
-              </div>
-              <div>
-                <label class="label" for="prn-codepage" data-i18n="prn.codepage">Acentos</label>
-                <select id="prn-codepage" class="field">
-                  <option value="CP850">CP850</option>
-                  <option value="CP1252">CP1252</option>
-                  <option value="CP858">CP858</option>
-                  <option value="CP860">CP860</option>
-                  <option value="CP437">CP437</option>
-                </select>
-              </div>
-            </div>
-            <p class="text-[11px] text-white/40" data-i18n="prn.codepageHint">Si la prueba sale con la ñ y los acentos rotos, cambia esta opción y vuelve a probar. No hay forma de saberlo sin imprimir.</p>
-            <label class="flex items-center gap-3 text-sm tap">
-              <input id="prn-cutter" type="checkbox" class="w-5 h-5 accent-emerald-400" checked>
-              <span data-i18n="prn.cutter">Corta el papel sola</span>
-            </label>
-            <div>
-              <label class="label" for="prn-drawer" data-i18n="prn.drawer">Cajón de dinero</label>
-              <select id="prn-drawer" class="field">
-                <option value="" data-i18n="prn.drawerNone">Sin cajón</option>
-                <option value="2" data-i18n="prn.drawerPin2">Con cajón · pin 2 (el más común)</option>
-                <option value="5" data-i18n="prn.drawerPin5">Con cajón · pin 5</option>
-              </select>
-              <p class="text-[11px] text-white/40 mt-1" data-i18n="prn.drawerHint">El cajón se conecta con su cable a la impresora. Si al probarlo no abre, cambia el pin y vuelve a probar.</p>
-            </div>
-            <p id="prn-add-error" class="text-sm text-red-300" hidden></p>
-            <button id="btn-prn-add" class="ev2-button w-full rounded-lg py-2" data-i18n="prn.add">Dar de alta</button>
-          </div>
-        </details>
-
         <div class="card rounded-xl p-4 space-y-3">
           <div class="flex items-center justify-between gap-2">
             <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="prn.agents">PCs que imprimen</p>
             <div class="flex items-center gap-2">
               <button id="btn-prn-cleanup" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.cleanup">Limpiar equipos</button>
-              <button id="btn-agent-add" class="card rounded-lg px-3 py-2 text-xs" data-i18n="prn.agentAdd">Nueva PC</button>
             </div>
           </div>
           <button id="btn-prn-archived" class="text-[11px] text-white/50 underline" hidden></button>
           <p class="text-[11px] text-white/40" data-i18n="prn.agentsWhy">El servidor no alcanza las impresoras del club: un programa en una PC de barra las alcanza por él. Con dos, si apagan una la otra sigue sacando todo el papel.</p>
-          <!-- La barra y el papel de la PC se escogen ANTES del código (D80). -->
-          <div class="flex gap-2">
-            <select id="prn-agent-loc" class="field flex-1" aria-label="Barra"></select>
-            <select id="prn-agent-purpose" class="field flex-1" aria-label="Para qué">
-              <option value="" data-i18n="prn.areaBoth">Comandas y cuentas</option>
-              <option value="orders" data-i18n="prn.pOrders">Comandas (PC del bartender)</option>
-              <option value="service" data-i18n="prn.pService">Cuentas y recibos (PC de meseros)</option>
-              <option value="till" data-i18n="prn.pTill">Recibos de la caja</option>
-            </select>
-          </div>
-          <p class="text-[11px] text-white/40" data-i18n="prn.agentAreaWhy">Escoge la barra y para qué es esa PC antes de pedir el código: así sus impresoras se registran con un clic.</p>
           <p id="prn-agents-empty" class="text-sm text-white/40" data-i18n="prn.agentsNone" hidden>Ninguna PC está dada de alta todavía. Sin esto no sale ningún papel.</p>
 
-          <!--
-            El código de emparejamiento (D56). Se enseña en grande porque alguien lo
-            va a leer de esta pantalla y teclearlo en otra máquina, y ese es
-            exactamente el momento en que se confunde un 0 con una O.
-          -->
           <div id="prn-agents" class="space-y-2"></div>
         </div>
 

@@ -772,9 +772,10 @@ describe('Venta directa en la barra', () => {
     expect(res.body.order.sender_id).toBe(cashier.id);
   });
 
-  it('el cantinero ya no vende: prepara', async () => {
+  it('el cantinero vende solo con su caja abierta (D128)', async () => {
     const res = await venta({}, bartender);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toMatch(/Abre tu caja/);
   });
 
   it('el cajero sin caja abierta no vende', async () => {

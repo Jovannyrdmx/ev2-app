@@ -175,22 +175,26 @@ async function checkTarget(runner, { nightclubId, rule, section, locationId }) {
  * el cajero no la elige al abrir, igual que no elige su barra.
  */
 async function checkTill(runner, { nightclubId, person, destino, tillId }) {
-  const conCaja = destino.locationId && (person.role === 'cashier' || person.role === 'hostess');
+  const conCaja = destino.locationId && ['cashier', 'hostess', 'bartender'].includes(person.role);
   if (!conCaja) {
-    if (tillId) throw ApiError.unprocessable('Solo el cajero y la anfitriona de Cover llevan caja');
+    if (tillId) throw ApiError.unprocessable('Solo el cajero, el bartender y la anfitriona de Cover llevan caja');
     return null;
   }
+  // El bartender va a la caja de bartender de su barra (D128); los demás, a las de cajero.
+  const operador = person.role === 'bartender' ? 'bartender' : 'cashier';
   const { rows } = await runner.query(
     `SELECT id, name FROM tills
-      WHERE location_id = $1 AND nightclub_id = $2 AND active
+      WHERE location_id = $1 AND nightclub_id = $2 AND active AND operator = $3::text
       ORDER BY sort_order, name, id`,
-    [destino.locationId, nightclubId]);
+    [destino.locationId, nightclubId, operador]);
   if (tillId) {
     const caja = rows.find((r) => r.id === tillId);
     if (!caja) throw ApiError.unprocessable('Esa caja no es de ese lugar o está apagada');
     return caja.id;
   }
   if (rows.length === 1) return rows[0].id;
+  // Una barra sin caja de bartender: el bartender solo prepara, como antes de D128.
+  if (rows.length === 0 && operador === 'bartender') return null;
   if (rows.length === 0) throw ApiError.unprocessable('Ese lugar no tiene cajas activas');
   throw ApiError.unprocessable('Ese lugar tiene varias cajas: escoge en cuál va',
     { tills: rows.map((r) => ({ id: r.id, name: r.name })) });
@@ -349,7 +353,8 @@ async function gapsFor(runner, { nightclubId, eventId }) {
         AND NOT EXISTS (
           SELECT 1 FROM shift_assignments a
            WHERE a.event_id = $2 AND a.till_id = t.id
-             AND a.role = CASE WHEN l.kind = 'door' THEN $4::text ELSE $3::text END
+             AND a.role = CASE WHEN l.kind = 'door' THEN $4::text
+                               WHEN t.operator = 'bartender' THEN 'bartender' ELSE $3::text END
         )
       ORDER BY l.kind = 'door', l.name, t.sort_order, t.name`,
     [nightclubId, eventId, 'cashier', 'hostess'],
@@ -367,7 +372,7 @@ async function gapsFor(runner, { nightclubId, eventId }) {
 /** Todas las cajas activas (D126): la pantalla ofrece en cuál va cada cajero. */
 async function activeTills(runner, { nightclubId }) {
   const { rows } = await runner.query(
-    `SELECT t.id AS till_id, t.name AS till_name, t.device, t.location_id
+    `SELECT t.id AS till_id, t.name AS till_name, t.device, t.location_id, t.operator
        FROM tills t JOIN supply_locations l ON l.id = t.location_id
       WHERE t.nightclub_id = $1 AND t.active AND l.active
       ORDER BY l.name, t.sort_order, t.name`, [nightclubId]);

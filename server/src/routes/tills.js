@@ -20,6 +20,7 @@ const { authenticate, requireRole, sameNightclub } = require('../middleware/auth
 const tills = require('../services/tills');
 const till = require('../services/till');
 const printing = require('../services/printing');
+const pcSetup = require('../services/pc-setup');
 
 const router = express.Router({ mergeParams: true });
 router.use('/nightclubs/:nightclubId', authenticate, sameNightclub());
@@ -187,6 +188,68 @@ router.put('/nightclubs/:nightclubId/till-setup/:tillId/terminal',
       ip: req.ip,
     }));
     res.json(hecho);
+  }));
+
+// ---------------------------------------------------------------- registrar esta PC (D127)
+
+/** Qué puede ser una PC: las cajas con PC y la PC del bartender de cada barra. */
+router.get('/nightclubs/:nightclubId/till-setup/pc-targets',
+  requireRole(...MANAGE),
+  validate({ params: z.object({ nightclubId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    res.json({
+      targets: await pcSetup.targets(pool, { nightclubId: req.params.nightclubId }),
+      ttl_minutes: pcSetup.INSTALLER_TTL_MINUTES,
+    });
+  }));
+
+/**
+ * El instalador de esta PC (`Instalar-EV2.cmd`): doble clic y la PC queda registrada,
+ * con su impresora USB, la hoja de prueba y el cajón. Lleva una llave de un solo uso que
+ * vence en 15 minutos; la pantalla lo baja como archivo y no lo enseña.
+ */
+router.post('/nightclubs/:nightclubId/till-setup/installer',
+  requireRole(...MANAGE),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({
+      target: z.string().trim().regex(/^(till|bartender):[0-9a-f-]{36}$/i, 'destino inválido'),
+      has_drawer: z.boolean().default(true),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const hecho = await inTx((client) => pcSetup.createInstaller(client, {
+      nightclubId: req.params.nightclubId,
+      target: req.body.target,
+      hasDrawer: req.body.has_drawer,
+      userId: req.user.id,
+      baseUrl: pcSetup.agentBaseUrl(req),
+      ip: req.ip,
+    }));
+    res.set('Cache-Control', 'no-store').status(201).json(hecho);
+  }));
+
+/**
+ * Borrar las PCs e impresoras del club para registrarlas de nuevo (D127). Pide escribir
+ * BORRAR: mientras no se registren otra vez, no sale papel. Las cajas no se tocan.
+ */
+router.post('/nightclubs/:nightclubId/till-setup/wipe-devices',
+  requireRole(...MANAGE),
+  validate({
+    params: z.object({ nightclubId: uuid }),
+    body: z.object({ confirm: z.literal('BORRAR') }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { nightclubId } = req.params;
+    const hecho = await inTx(async (client) => {
+      const r = await pcSetup.wipeDevices(client, { nightclubId });
+      await client.query(
+        `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, after, ip)
+         VALUES ($1,$2,'printing.wipe','print_agents',NULL,$3,$4)`,
+        [nightclubId, req.user.id, JSON.stringify(r), req.ip || null]);
+      return r;
+    });
+    res.json({ wiped: hecho });
   }));
 
 // ---------------------------------------------------------------- quien cobra

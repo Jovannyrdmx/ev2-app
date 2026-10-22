@@ -28,6 +28,9 @@ const method = z.enum(payments.METHODS);
 // brings the money to the till, the bartender only prepares. The hostess still takes
 // the cover at the door.
 const STAFF_ROLES = ['hostess', 'cashier', 'manager'];
+// La terminal la usa también el bartender para su venta directa (D128);
+// `till.assertCanCollect` lo limita a eso.
+const TERMINAL_ROLES = [...STAFF_ROLES, 'bartender'];
 
 // Puestos del piso que desde D77 no reciben dinero por ninguna puerta, ni siquiera
 // por la que usa un cliente para declarar su propia transferencia.
@@ -678,7 +681,7 @@ async function assertStation(runner, nightclubId, locationId) {
 
 /** Las terminales que el club tiene dadas de alta. */
 router.get('/nightclubs/:nightclubId/payment-terminals',
-  requireRole(...STAFF_ROLES),
+  requireRole(...TERMINAL_ROLES),
   validate({ params: z.object({ nightclubId: uuid }) }),
   asyncHandler(async (req, res) => {
     const { rows } = await pool.query(
@@ -880,7 +883,7 @@ router.patch('/nightclubs/:nightclubId/payment-terminals/:terminalId',
  * cuando el wifi del club parpadea.
  */
 router.post('/nightclubs/:nightclubId/terminal-charges',
-  requireRole(...STAFF_ROLES),
+  requireRole(...TERMINAL_ROLES),
   validate({
     params: z.object({ nightclubId: uuid }),
     body: z.object({
@@ -894,7 +897,7 @@ router.post('/nightclubs/:nightclubId/terminal-charges',
   asyncHandler(async (req, res) => {
     mercadopago.assertUsable({ forCharge: true });
     const { nightclubId } = req.params;
-    if (req.body.amount !== undefined && !['cashier', 'manager', 'admin'].includes(req.user.role)) {
+    if (req.body.amount !== undefined && !['cashier', 'bartender', 'manager', 'admin'].includes(req.user.role)) {
       throw ApiError.forbidden('Solo la caja o la gerencia dividen un cobro');
     }
 
@@ -957,7 +960,7 @@ router.post('/nightclubs/:nightclubId/terminal-charges',
  * llegar.
  */
 router.get('/nightclubs/:nightclubId/terminal-charges/:chargeId',
-  requireRole(...STAFF_ROLES),
+  requireRole(...TERMINAL_ROLES),
   validate({ params: z.object({ nightclubId: uuid, chargeId: uuid }) }),
   asyncHandler(async (req, res) => {
     const { nightclubId, chargeId } = req.params;
@@ -1000,7 +1003,7 @@ router.get('/nightclubs/:nightclubId/terminal-charges/:chargeId',
 
 /** Cancelar un cobro que la terminal todavía no cobró. */
 router.post('/nightclubs/:nightclubId/terminal-charges/:chargeId/cancel',
-  requireRole(...STAFF_ROLES),
+  requireRole(...TERMINAL_ROLES),
   validate({ params: z.object({ nightclubId: uuid, chargeId: uuid }) }),
   asyncHandler(async (req, res) => {
     const { nightclubId, chargeId } = req.params;

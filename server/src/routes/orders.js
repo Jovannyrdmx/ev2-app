@@ -39,8 +39,9 @@ const { createOrder, ORDER_SELECT, STAFF_ORDER_SELECT } = require('../services/o
 
 const STAFF_ROLES = ['bartender', 'waiter', 'cashier', 'manager', 'admin'];
 // Quién levanta pedidos (D77): el mesero en el piso, el cajero en la venta directa
-// de su barra, y la gerencia. El bartender ya no: prepara, no vende ni cobra.
-const TAKING_ROLES = ['waiter', 'cashier', 'manager', 'admin'];
+// de su barra, y la gerencia. Desde D128 también el bartender, en la venta directa de
+// su barra y con su caja abierta.
+const TAKING_ROLES = ['waiter', 'cashier', 'bartender', 'manager', 'admin'];
 // Lo que levanta el mesero entra a la barra al levantarlo y se cobra en la caja de
 // esa barra. Todo lo demás —el cliente desde su teléfono, la venta directa del
 // cajero— sigue la regla de siempre: llega a la barra cuando está pagado.
@@ -173,7 +174,7 @@ router.post('/nightclubs/:nightclubId/orders',
 
       // El cajero vende en la barra de su caja, y solo con la caja abierta (D77).
       let cajaAbierta = null;
-      if (req.user.role === till.CASHIER) {
+      if (req.user.role === till.CASHIER || req.user.role === till.BARTENDER) {
         cajaAbierta = await till.openTill(client, { nightclubId, userId: req.user.id });
         if (!cajaAbierta) throw ApiError.conflict('Abre tu caja antes de vender');
       }

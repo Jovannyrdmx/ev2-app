@@ -460,7 +460,8 @@ async function pair(cfg) {
   if (!desdeEntorno) {
     console.log('');
     console.log('  Esta PC todavía no está dada de alta.');
-    console.log('  En el panel del gerente: Impresoras → Nueva PC. Ahí sale el código.');
+    console.log('  En esta PC: panel del gerente → Cajas → Registrar esta PC. Baja el instalador');
+    console.log('  y dale doble clic: se registra solo, sin teclear nada.');
     console.log('');
   }
 
@@ -468,7 +469,7 @@ async function pair(cfg) {
     || (desdeEntorno ? '' : await ask('  Dirección del servidor (ej. https://tu-dominio.com): '));
   if (!apiUrl) fatal('Sin la dirección del servidor no se puede continuar.');
   const code = desdeEntorno
-    || await ask('  Código que aparece en la pantalla (ej. K7M4-2QX9): ');
+    || await ask('  Llave del instalador: ');
   if (!code) fatal('Sin el código no se puede dar de alta esta PC.');
 
   const limpio = String(apiUrl).replace(/\/+$/, '');

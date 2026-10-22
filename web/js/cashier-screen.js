@@ -43,7 +43,8 @@
   const CLUB_SLUG = meta('ev2:club', 'ev2');
 
   /** Solo el cajero tiene caja: el servidor responde 403 a cualquier otro. */
-  const TILL_ROLES = ['cashier'];
+  // El bartender también tiene caja (D128): solo su venta directa en la barra.
+  const TILL_ROLES = ['cashier', 'bartender'];
 
   const state = {
     till: null,          // lo que contesta GET /till
@@ -304,6 +305,10 @@
 
     const till = s.till;
     $('till-bar').textContent = tillLabel(till);
+    // La caja del bartender no cobra pedidos de meseros (D128): solo su venta en la barra.
+    const deBartender = till.operator === 'bartender';
+    $('pending-block').hidden = deBartender;
+    $('stat-pending-card').hidden = deBartender;
     $('stat-float').textContent = money(till.opening_float, till.currency);
     $('stat-pending').textContent = (s.pending_orders || []).length
       ? money(s.pending_total, till.currency) : '0';

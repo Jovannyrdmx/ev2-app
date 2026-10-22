@@ -376,7 +376,8 @@ router.post('/nightclubs/:nightclubId/till/open',
  * solo en la impresora de la caja.
  */
 router.post('/nightclubs/:nightclubId/till/payments',
-  requireRole('cashier'),
+  // El bartender cobra su venta directa (D128); `till.collect` lo limita a eso.
+  requireRole('cashier', 'bartender'),
   validate({
     params: z.object({ nightclubId: uuid }),
     body: z.object({
@@ -594,7 +595,7 @@ router.post('/nightclubs/:nightclubId/till/payments/batch',
  * cuando el corte no cuadra.
  */
 router.post('/nightclubs/:nightclubId/cash-drawer/open',
-  requireRole('cashier', 'hostess'),
+  requireRole('cashier', 'hostess', 'bartender'),
   validate({
     params: z.object({ nightclubId: uuid }),
     body: z.object({
@@ -607,7 +608,7 @@ router.post('/nightclubs/:nightclubId/cash-drawer/open',
     // El cajón es de quien tiene la caja abierta: el cajero en su barra, la anfitriona
     // en Cover (D118). Sin caja abierta no hay cajón que abrir.
     let printer;
-    if (req.user.role === 'cashier') {
+    if (req.user.role !== 'hostess') {
       const caja = await till.openTill(pool, { nightclubId, userId: req.user.id });
       if (!caja) throw ApiError.conflict('No tienes la caja abierta');
       printer = await cashDrawer.tillPrinter(pool, {

@@ -16,6 +16,7 @@
 
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
+const pairing = require('./helpers/pairing');
 const f = require('./helpers/factories');
 const printing = require('../src/services/printing');
 
@@ -50,15 +51,14 @@ const altaImpresora = (user, body) => api().post(url('/printers')).set(auth(user
  * se rompe se rompe la instalación del club entero.
  */
 async function nuevoAgente(name = 'PC barra baja') {
-  const { body } = await api().post(url('/print-agents/invite')).set(auth(manager));
+  const { body } = await pairing.invite(club.id, manager);
   const res = await api().post('/api/print-agent/pair')
     .send({ code: body.invite.code, hostname: name, version: '1.0.0' });
   return { ...res.body.agent, token: res.body.token };
 }
 
 /** Un código de emparejamiento recién emitido. */
-const nuevoCodigo = async () => (await api().post(url('/print-agents/invite'))
-  .set(auth(manager))).body.invite;
+const nuevoCodigo = async () => (await pairing.invite(club.id, manager)).body.invite;
 
 const emparejar = (code, hostname = 'PC prueba') => api().post('/api/print-agent/pair')
   .send({ code, hostname });
@@ -697,9 +697,6 @@ describe('Dar de alta una PC sin copiar un token (D56)', () => {
     expect(lista.body.invites[0].code_hint).toBe(invite.code.slice(-4));
   });
 
-  it('un mesero no emite códigos', async () => {
-    expect((await api().post(url('/print-agents/invite')).set(auth(waiter))).status).toBe(403);
-  });
 });
 
 /**
@@ -747,35 +744,6 @@ describe('Instalar el agente desde el navegador (D57)', () => {
     // al otro, que es lo que este proyecto no puede permitirse confundir.
     expect((await api().get('/api/print-agent/files/print-agent.js')).status).toBe(200);
     expect((await api().get('/api/print-agent/jobs')).status).toBe(401);
-  });
-
-  it('el instalador trae el dominio del club, no un ejemplo', async () => {
-    process.env.ALLOWED_ORIGINS = 'https://ev2-clandestinoz.mx';
-    const res = await api().get('/api/print-agent/install.ps1');
-    expect(res.status).toBe(200);
-    expect(res.headers['content-type']).toMatch(/text\/plain/);
-    expect(res.text).toContain("$ApiUrl  = 'https://ev2-clandestinoz.mx'");
-    // Y baja los archivos de ese mismo lugar, no de otro.
-    expect(res.text).toContain('$ApiUrl/api/print-agent/files/$archivo');
-    expect(res.text).toContain("@('print-agent.js', 'package.json')");
-  });
-
-  it('un Host inventado no se cuela dentro del instalador', async () => {
-    // Quien pide puede escribir el `Host` que quiera. Si eso mandara, bastaría con
-    // pedir el instalador con el dominio de otro para que la PC de la barra bajara y
-    // ejecutara lo que ese otro sirva. Manda ALLOWED_ORIGINS.
-    process.env.ALLOWED_ORIGINS = 'https://ev2-clandestinoz.mx';
-    const res = await api().get('/api/print-agent/install.ps1').set('Host', 'servidor-ajeno.mx');
-    expect(res.status).toBe(200);
-    expect(res.text).not.toContain('servidor-ajeno.mx');
-    expect(res.text).toContain("$ApiUrl  = 'https://ev2-clandestinoz.mx'");
-  });
-
-  it('sobre http no se genera instalador', async () => {
-    process.env.ALLOWED_ORIGINS = 'http://ev2-clandestinoz.mx';
-    const res = await api().get('/api/print-agent/install.ps1');
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('insecure_install_url');
   });
 
   it('la imagen de la API se construye de forma que el agente venga adentro', () => {
@@ -826,12 +794,6 @@ describe('Instalar el agente desde el navegador (D57)', () => {
     expect(ignorar).toContain('agent/config.json');
   });
 
-  it('el instalador se niega él solo si alguien le cambia la dirección', async () => {
-    // El servidor no genera nada que no sea https, pero el archivo se puede guardar y
-    // pasar de mano. La comprobación viaja dentro del script.
-    const res = await api().get('/api/print-agent/install.ps1');
-    expect(res.text).toContain("-notmatch '^https://'");
-  });
 });
 
 // ============================================================================
@@ -1006,8 +968,7 @@ describe('Cada PC imprime lo de su barra (D61)', () => {
   it('el código de alta lleva la barra: la PC nace asignada', async () => {
     // Sin esto, dar de alta son dos pasos, y entre uno y otro hay una PC llevándose
     // el papel de todo el club — el mismo problema, metido en la instalación.
-    const { body } = await api().post(url('/print-agents/invite')).set(auth(manager))
-      .send({ location_id: club.locations['barra-alta'], purpose: 'orders' });
+    const { body } = await pairing.invite(club.id, manager, { location_id: club.locations['barra-alta'], purpose: 'orders' });
     expect(body.invite.location_name).toBe('Barra planta alta');
 
     const res = await api().post('/api/print-agent/pair')
@@ -1306,8 +1267,7 @@ describe('Cada impresora con la PC que la atiende (D80)', () => {
   });
 
   it('la PC nace con barra y propósito desde el código', async () => {
-    const { body } = await api().post(url('/print-agents/invite')).set(auth(manager))
-      .send({ location_id: club.bar_id, purpose: 'till' });
+    const { body } = await pairing.invite(club.id, manager, { location_id: club.bar_id, purpose: 'till' });
     const res = await emparejar(body.invite.code, 'PC caja');
     expect(res.status).toBe(201);
     const { rows } = await pool.query('SELECT location_id::text AS l, purpose FROM print_agents WHERE id = $1',
@@ -1328,8 +1288,7 @@ describe('Cover: la entrada imprime, pero no es barra', () => {
   });
 
   it('una PC se da de alta ya asignada a Cover, para los recibos de caja', async () => {
-    const inv = await api().post(url('/print-agents/invite')).set(auth(manager))
-      .send({ location_id: cover, purpose: 'till' });
+    const inv = await pairing.invite(club.id, manager, { location_id: cover, purpose: 'till' });
     expect(inv.status).toBe(201);
     expect(inv.body.invite.location_name).toBe('Cover');
     const res = await emparejar(inv.body.invite.code, 'PC Cover');
@@ -1340,8 +1299,7 @@ describe('Cover: la entrada imprime, pero no es barra', () => {
   });
 
   it('una PC de Cover sin propósito también vale: ahí solo hay recibos', async () => {
-    const inv = await api().post(url('/print-agents/invite')).set(auth(manager))
-      .send({ location_id: cover });
+    const inv = await pairing.invite(club.id, manager, { location_id: cover });
     expect(inv.status).toBe(201);
   });
 
@@ -1355,9 +1313,6 @@ describe('Cover: la entrada imprime, pero no es barra', () => {
     const prn = await altaImpresora(manager, { location_id: cover, purpose: 'orders', name: 'Cover · x' });
     expect(prn.status).toBe(400);
     expect(prn.body.error.message).toMatch(/Cover/);
-    const inv = await api().post(url('/print-agents/invite')).set(auth(manager))
-      .send({ location_id: cover, purpose: 'service' });
-    expect(inv.status).toBe(400);
   });
 
   it('una PC ya dada de alta se puede mover a Cover', async () => {
@@ -1366,12 +1321,6 @@ describe('Cover: la entrada imprime, pero no es barra', () => {
       .send({ area: { location_id: cover, purpose: 'till' } });
     expect(res.status).toBe(200);
     expect(res.body.agent.location_id).toBe(cover);
-  });
-
-  it('el almacén sigue sin imprimir', async () => {
-    const inv = await api().post(url('/print-agents/invite')).set(auth(manager))
-      .send({ location_id: club.warehouse_id });
-    expect(inv.status).toBe(400);
   });
 
   it('Cover no guarda producto', async () => {

@@ -41,6 +41,7 @@
 const { randomUUID } = require('crypto');
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
+const pairing = require('./helpers/pairing');
 const f = require('./helpers/factories');
 
 let club; let admin; let manager; let waiter; let bartender; let table; let beer;
@@ -96,8 +97,7 @@ const surtir = (locationId, cantidad = 50) => f.stockUp(club.id, beer.supply_id,
 
 /** Da de alta una PC por el camino real: el gerente emite código y la PC lo canjea. */
 async function altaPC(name, area = null) {
-  const { body } = await api().post(url('/print-agents/invite')).set(auth(manager))
-    .send(area || {});
+  const { body } = await pairing.invite(club.id, manager, area || {});
   const res = await api().post('/api/print-agent/pair')
     .send({ code: body.invite.code, hostname: name, version: '1.0.0' });
   return { ...res.body.agent, token: res.body.token };
