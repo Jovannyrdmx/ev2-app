@@ -105,6 +105,14 @@ async function activeNow(runner, { nightclubId }) {
        CROSS JOIN n
       WHERE p.nightclub_id = $1 AND p.active
         AND e.event_date = n.bd AND e.status NOT IN ('cancelled','finished')
+        -- Con dos eventos ese día (D130), solo las del que está en curso: si no, a la
+        -- tardeada le tocarían también los precios de la noche.
+        AND (NOT EXISTS (
+               SELECT 1 FROM events_calendar o
+                WHERE o.nightclub_id = e.nightclub_id AND o.event_date = e.event_date
+                  AND o.id <> e.id AND o.status NOT IN ('cancelled','finished'))
+             OR (e.doors_open_at <= now()
+                 AND now() < COALESCE(e.closes_at, e.doors_open_at + interval '8 hours')))
         AND (p.starts_time IS NULL
              OR (p.starts_time < p.ends_time
                  AND n.local_now::time >= p.starts_time AND n.local_now::time < p.ends_time)

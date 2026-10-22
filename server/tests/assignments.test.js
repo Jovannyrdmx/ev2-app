@@ -45,21 +45,27 @@ beforeEach(async () => {
   bartender = await f.createUser(club.id, { role: 'bartender' });
   await f.createTable(club.id, { code: '10', section: 'ZONA ROJA' });
   await f.createTable(club.id, { code: '11', section: 'TERRAZA' });
+  diaNoche = 0;
   night = await crearNoche();
 });
 afterAll(closePool);
 
 const url = (p) => `/api/nightclubs/${club.id}${p}`;
 
-/** Una noche. El club admite UNA por fecha, asi que cada noche extra corre su dia. */
+/**
+ * Una noche. Cada noche extra corre su día y su horario: dos eventos pueden caer en la
+ * misma fecha pero no encimarse (D130), así que la segunda abre un día después.
+ */
 let diaNoche = 0;
 async function crearNoche(over = {}) {
-  const dia = new Date(Date.now() + (diaNoche += 1) * 86_400_000);
+  diaNoche += 1;
+  const dia = new Date(Date.now() + diaNoche * 86_400_000);
+  const corrimiento = (diaNoche - 1) * 86_400_000;
   const res = await api().post(url('/events')).set(auth(manager)).send({
     name: `Noche ${Math.random().toString(16).slice(2, 8)}`,
     event_date: dia.toISOString().slice(0, 10),
-    doors_open_at: new Date(Date.now() + 15 * 60_000).toISOString(),
-    closes_at: new Date(Date.now() + 8 * 3_600_000).toISOString(),
+    doors_open_at: new Date(Date.now() + corrimiento + 15 * 60_000).toISOString(),
+    closes_at: new Date(Date.now() + corrimiento + 8 * 3_600_000).toISOString(),
     ticket_price: 100,
     status: 'published',
     ...over,

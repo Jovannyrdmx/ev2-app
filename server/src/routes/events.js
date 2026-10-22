@@ -104,6 +104,26 @@ const eventBody = z.object({
   cover_image_url: z.string().url().max(500).optional(),
 });
 
+/**
+ * Dos eventos el mismo día sí (D130); encimados no. Lo dice la base (disparador
+ * `events_calendar_no_overlap`) y aquí se traduce a algo que el gerente entienda:
+ * con cuál choca y a qué horas, en la hora del club.
+ */
+async function overlapError(err, nightclubId) {
+  if (!err || err.constraint !== 'events_calendar_no_overlap') return null;
+  let otro = {};
+  try { otro = JSON.parse(err.detail || '{}'); } catch { /* sin detalle, mensaje genérico */ }
+  const { rows } = await pool.query('SELECT timezone FROM nightclubs WHERE id = $1', [nightclubId]);
+  const tz = (rows[0] && rows[0].timezone) || 'America/Hermosillo';
+  const hora = (v) => (v ? new Date(v).toLocaleTimeString('es-MX', {
+    timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false,
+  }) : '?');
+  return ApiError.conflict(
+    `Ese horario se encima con "${otro.name || 'otro evento'}" (${hora(otro.doors_open_at)}–${hora(otro.closes_at)}). `
+    + 'Dos eventos el mismo día no pueden compartir horas: ajusta la apertura o el cierre.',
+    { reason: 'event_overlap', event_id: otro.id || null });
+}
+
 router.post('/nightclubs/:nightclubId/events',
   requireRole('manager'),
   validate({ params: z.object({ nightclubId: uuid }), body: eventBody }),
@@ -126,7 +146,8 @@ router.post('/nightclubs/:nightclubId/events',
       const full = await pool.query(`${EVENT_SELECT} WHERE e.id = $1`, [rows[0].id]);
       res.status(201).json({ event: full.rows[0] });
     } catch (err) {
-      if (err.code === '23505') throw ApiError.conflict('Ya existe un evento para esa fecha');
+      const encimado = await overlapError(err, req.params.nightclubId);
+      if (encimado) throw encimado;
       throw err;
     }
   }));
@@ -177,10 +198,18 @@ router.patch('/nightclubs/:nightclubId/events/:eventId',
     }
 
     const sets = fields.map((f, i) => `${f} = $${i + 3}`).join(', ');
-    const { rows } = await pool.query(
-      `UPDATE events_calendar SET ${sets} WHERE id = $2 AND nightclub_id = $1 RETURNING id`,
-      [req.params.nightclubId, req.params.eventId, ...fields.map((f) => req.body[f])],
-    );
+    let rows;
+    try {
+      ({ rows } = await pool.query(
+        `UPDATE events_calendar SET ${sets} WHERE id = $2 AND nightclub_id = $1 RETURNING id`,
+        [req.params.nightclubId, req.params.eventId, ...fields.map((f) => req.body[f])],
+      ));
+    } catch (err) {
+      const encimado = await overlapError(err, req.params.nightclubId);
+      if (encimado) throw encimado;
+      if (err.code === '23514') throw ApiError.unprocessable('El cierre tiene que ser después de la apertura');
+      throw err;
+    }
     if (rows.length === 0) throw ApiError.notFound('Event not found');
 
     const full = await pool.query(`${EVENT_SELECT} WHERE e.id = $1`, [rows[0].id]);

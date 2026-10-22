@@ -45,6 +45,7 @@ beforeEach(async () => {
   guest = await f.createUser(club.id, { role: 'guest' });
   mesaRoja = await f.createTable(club.id, { code: '10', section: 'ZONA ROJA', capacity: 8 });
   mesaTerraza = await f.createTable(club.id, { code: '20', section: 'TERRAZA', capacity: 4 });
+  dia = 0;
   night = await crearNoche();
 });
 afterAll(closePool);
@@ -55,12 +56,15 @@ const url = (p) => `/api/nightclubs/${club.id}${p}`;
 let dia = 0;
 async function crearNoche(over = {}) {
   const fecha = new Date(Date.now() + (dia += 1) * 86_400_000);
+  // Dos eventos no se enciman (D130): cada noche extra ya abrió, pero antes que la
+  // anterior (9 horas antes cada una), así todas se pueden cortar.
+  const antes = (dia - 1) * 9 * 3_600_000;
   const res = await api().post(url('/events')).set(auth(manager)).send({
     name: `Noche ${Math.random().toString(16).slice(2, 8)}`,
     event_date: fecha.toISOString().slice(0, 10),
     // Abrió hace dos horas: el corte se puede cerrar.
-    doors_open_at: new Date(Date.now() - 2 * 3_600_000).toISOString(),
-    closes_at: new Date(Date.now() + 6 * 3_600_000).toISOString(),
+    doors_open_at: new Date(Date.now() - antes - 2 * 3_600_000).toISOString(),
+    closes_at: new Date(Date.now() - antes + 6 * 3_600_000).toISOString(),
     ticket_price: 150,
     status: 'published',
     ...over,
@@ -413,7 +417,8 @@ describe('POST /nights/:id/close', () => {
 
   it('una noche que todavía no empieza no se puede cortar', async () => {
     const futura = await crearNoche({
-      doors_open_at: new Date(Date.now() + 3 * 3_600_000).toISOString(),
+      doors_open_at: new Date(Date.now() + 7 * 3_600_000).toISOString(),
+      closes_at: new Date(Date.now() + 12 * 3_600_000).toISOString(),
     });
     const res = await api().post(url(`/nights/${futura.id}/close`)).set(auth(manager)).send({});
 

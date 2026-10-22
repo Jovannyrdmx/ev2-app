@@ -2749,7 +2749,7 @@ paths:
                   event: { $ref: '#/components/schemas/Event' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
-          description: Ya existe un evento en esa fecha
+          description: 'Su horario se encima con otro evento (D130, puede haber varios por fecha sin encimarse)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }

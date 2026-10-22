@@ -3072,7 +3072,7 @@
 
   async function openCut(night) {
     state.cut = { night, stats: null, closed: null };
-    $('cut-night').textContent = `${night.name} · ${String(night.event_date).slice(0, 10)}`;
+    $('cut-night').textContent = `${night.name} · ${EV2Format.dateTime(night.doors_open_at)}`;
     $('cut-body').innerHTML = `<p class="text-white/40 text-sm py-8 text-center">${escape(t('manager.loading'))}</p>`;
     $('cut-error').hidden = true;
     $('cut-note').value = '';
@@ -3309,7 +3309,7 @@
 
   async function openRoster(night) {
     state.roster = { night, roster: [], gaps: { sections: [], bars: [], tills: [] } };
-    $('roster-night').textContent = `${night.name} · ${String(night.event_date).slice(0, 10)}`;
+    $('roster-night').textContent = `${night.name} · ${EV2Format.dateTime(night.doors_open_at)}`;
     $('roster-error').hidden = true;
     $('roster-sheet').hidden = false;
     await reloadRoster();
@@ -3748,7 +3748,7 @@
 
     const sel = $('rpm-event');
     const noches = EV2Manager.sortNights(state.nights, new Date());
-    sel.innerHTML = noches.map((n) => `<option value="${escape(n.id)}">${escape(n.name || '')} · ${escape(String(n.event_date || '').slice(0, 10))}</option>`).join('');
+    sel.innerHTML = noches.map((n) => `<option value="${escape(n.id)}">${escape(n.name || '')} · ${escape(EV2Format.dateTime(n.doors_open_at))}</option>`).join('');
     if (rps.event) sel.value = rps.event;
 
     const s = rps.summary;
@@ -4072,7 +4072,7 @@
     const noches = nochesOrdenadas();
     $('prm-nonights').hidden = noches.length > 0;
     const sel = $('prm-night');
-    sel.innerHTML = noches.map((n) => `<option value="${escape(n.id)}">${escape(n.name || '')} · ${escape(String(n.event_date || '').slice(0, 10))}</option>`).join('');
+    sel.innerHTML = noches.map((n) => `<option value="${escape(n.id)}">${escape(n.name || '')} · ${escape(EV2Format.dateTime(n.doors_open_at))}</option>`).join('');
     if (prm.night) sel.value = prm.night;
     sel.onchange = () => { prm.night = sel.value; loadPromos(); };
     const noche = noches.find((n) => n.id === prm.night);
