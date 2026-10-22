@@ -38,7 +38,23 @@ async function canjear(res, hostname = 'CAJA-01') {
   expect(pair.status).toBe(201);
   return { ...pair.body.agent, token: pair.body.token };
 }
-const barrer = (agent, found) => comoAgente(agent.token, 'post', '/api/print-agent/scan').send({ found });
+const buscar = (agent, found) => comoAgente(agent.token, 'post', '/api/print-agent/scan').send({ found });
+
+/**
+ * Barrido de la PC y, si en su lista hay UNA sola impresora USB de esa PC, el gerente
+ * la escoge (D129: ya nunca se escoge sola). Con varias, se queda preguntando.
+ */
+async function barrer(agent, found) {
+  const res = await buscar(agent, found);
+  const { rows } = await pool.query('SELECT station FROM print_agents WHERE id = $1', [agent.id]);
+  const st = rows[0] && rows[0].station;
+  const usbs = st && st.status === 'choose' ? (st.candidates || []).filter((c) => c.via === 'usb') : [];
+  if (usbs.length === 1) {
+    await api().post(url(`/print-agents/${agent.id}/station/finish`)).set(auth(manager))
+      .send({ windows_name: usbs[0].name });
+  }
+  return res;
+}
 const usb = (name, port = 'USB001') => ({ kind: 'windows', name, host: port, share: null });
 const estacionDe = async (agent) => (await pool.query(
   'SELECT station FROM print_agents WHERE id = $1', [agent.id])).rows[0].station;
@@ -73,12 +89,14 @@ describe('Reinstalar una PC la reemplaza', () => {
     expect((await agentes())[0].active).toBe(true);
   });
 
-  it('reinstalada, vuelve a registrar su misma impresora sin preguntar y sin duplicarla', async () => {
+  it('reinstalada, pregunta otra vez (D129) y al escoger la misma no la duplica', async () => {
     const primera = await canjear(await pedirCodigo(caja));
     await barrer(primera, [usb('XP-80C')]);
     const segunda = await canjear(await pedirCodigo(caja));
-    // Ahora ve también una de tinta de la oficina: escoge sola la que ya usaba.
-    await barrer(segunda, [usb('XP-80C'), usb('HP DeskJet 2700', 'USB002')]);
+    await buscar(segunda, [usb('XP-80C'), usb('HP DeskJet 2700', 'USB002')]);
+    expect((await estacionDe(segunda)).status).toBe('choose');
+    await api().post(url(`/print-agents/${segunda.id}/station/finish`)).set(auth(manager))
+      .send({ windows_name: 'XP-80C' });
     expect((await estacionDe(segunda)).status).toBe('done');
     const { rows } = await pool.query(
       'SELECT windows_name, active FROM printers WHERE nightclub_id = $1 AND active', [club.id]);
@@ -142,13 +160,12 @@ describe('La impresora nueva toma el lugar de la vieja', () => {
 });
 
 describe('Escoger sola la térmica', () => {
-  it('con una térmica y una de tinta registra la térmica sin preguntar', async () => {
+  it('con una térmica y una de tinta pregunta, con la térmica primero (D129)', async () => {
     const agent = await canjear(await pedirCodigo(caja));
-    await barrer(agent, [usb('HP ENVY 6000 series', 'USB002'), usb('Xprinter XP-230H')]);
+    await buscar(agent, [usb('HP ENVY 6000 series', 'USB002'), usb('Xprinter XP-230H')]);
     const st = await estacionDe(agent);
-    expect(st.status).toBe('done');
-    const { rows } = await pool.query('SELECT windows_name FROM printers WHERE id = $1', [st.printer_id]);
-    expect(rows[0].windows_name).toBe('Xprinter XP-230H');
+    expect(st.status).toBe('choose');
+    expect(st.candidates.map((c) => c.name)).toEqual(['Xprinter XP-230H', 'HP ENVY 6000 series']);
   });
 
   it('con dos térmicas sigue preguntando: adivinar mandaría los tickets a otra caja', async () => {

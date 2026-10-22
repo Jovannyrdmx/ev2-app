@@ -44,7 +44,7 @@ const path = require('path');
 const readline = require('readline');
 const { execFile } = require('child_process');
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 
 // ---------------------------------------------------------------- configuración
 
@@ -599,7 +599,9 @@ function areaLabel(agent) {
 function windowsPrinters() {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') { resolve([]); return; }
-    const ps = 'Get-Printer | Select-Object Name,ShareName,Shared,PortName | ConvertTo-Json -Compress';
+    // `Type` y `ComputerName` (D129): una impresora compartida desde OTRA PC aparece en
+    // ésta como "Connection" y con el puerto de aquélla; sin esto parecía USB de aquí.
+    const ps = 'Get-Printer | Select-Object Name,ShareName,Shared,PortName,Type,ComputerName | ConvertTo-Json -Compress';
     execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps],
       { timeout: 15000 }, (err, stdout) => {
         if (err || !stdout) { resolve([]); return; }
@@ -615,6 +617,9 @@ function windowsPrinters() {
             // los dos nombres es lo que permite entender una de esas.
             share: p.Shared && p.ShareName ? p.ShareName : null,
             host: p.PortName || null,
+            // Get-Printer da Type como número (0 Local, 1 Connection) o como texto.
+            remote: (p.Type === 1 || String(p.Type) === 'Connection' || /^\\\\/.test(p.Name || ''))
+              ? (p.ComputerName || String(p.Name || '').split('\\').filter(Boolean)[0] || true) : null,
           })));
         } catch {
           resolve([]);

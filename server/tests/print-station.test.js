@@ -39,8 +39,23 @@ async function canjear(res, hostname = 'CAJA-01') {
   return { ...pair.body.agent, token: pair.body.token };
 }
 
-const barrer = (agent, found) => comoAgente(agent.token, 'post', '/api/print-agent/scan')
-  .send({ found });
+const buscar = (agent, found) => comoAgente(agent.token, 'post', '/api/print-agent/scan').send({ found });
+
+/**
+ * Barrido de la PC y, si en su lista hay UNA sola impresora USB de esa PC, el gerente
+ * la escoge (D129: ya nunca se escoge sola). Con varias, se queda preguntando.
+ */
+async function barrer(agent, found) {
+  const res = await buscar(agent, found);
+  const { rows } = await pool.query('SELECT station FROM print_agents WHERE id = $1', [agent.id]);
+  const st = rows[0] && rows[0].station;
+  const usbs = st && st.status === 'choose' ? (st.candidates || []).filter((c) => c.via === 'usb') : [];
+  if (usbs.length === 1) {
+    await api().post(url(`/print-agents/${agent.id}/station/finish`)).set(auth(manager))
+      .send({ windows_name: usbs[0].name });
+  }
+  return res;
+}
 
 const termica = { kind: 'windows', name: 'XP-80C', host: 'USB001', share: null };
 const virtuales = [

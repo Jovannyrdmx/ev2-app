@@ -274,6 +274,8 @@ agentRouter.post('/scan',
         name: z.string().trim().max(240).nullish(),
         share: z.string().trim().max(240).nullish(),
         model: z.string().trim().max(240).nullish(),
+        // La PC de donde viene una impresora compartida (D129); `true` si no se supo cuál.
+        remote: z.union([z.string().trim().max(120), z.boolean()]).nullish(),
       })).max(512).optional(),
       error: z.string().trim().max(400).nullish(),
     }),
@@ -706,6 +708,35 @@ router.post('/nightclubs/:nightclubId/print-agents/:agentId/station/finish',
         windowsName: req.body.windows_name,
         createdBy: req.user.id,
       });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    res.json({ station });
+  }));
+
+/**
+ * "Cambiar impresora" (D129): la PC vuelve a buscar y el gerente escoge otra de SU lista.
+ * La que tenía sigue imprimiendo hasta que se escoja la nueva, que la reemplaza.
+ */
+router.post('/nightclubs/:nightclubId/print-agents/:agentId/station/rechoose',
+  requireRole(...MANAGE),
+  validate({ params: z.object({ nightclubId: uuid, agentId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const client = await pool.connect();
+    let station;
+    try {
+      await client.query('BEGIN');
+      station = await printing.rechooseStation(client, {
+        nightclubId: req.params.nightclubId, agentId: req.params.agentId,
+      });
+      await client.query(
+        `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, ip)
+         VALUES ($1,$2,'printing.rechoose','print_agent',$3,$4)`,
+        [req.params.nightclubId, req.user.id, req.params.agentId, req.ip || null]);
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});

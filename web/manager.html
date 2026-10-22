@@ -1200,6 +1200,12 @@
           <button id="btn-pc-wipe" class="text-[11px] text-red-300 underline" data-i18n="tset.wipe">Borrar PCs e impresoras actuales</button>
         </div>
 
+        <!-- Cada PC con su impresora (D129): se ve y se cambia aquí. -->
+        <div id="pc-devices-card" class="card rounded-xl p-4 space-y-3" hidden>
+          <p class="text-xs uppercase tracking-wider text-white/40" data-i18n="tset.devicesTitle">PCs registradas y su impresora</p>
+          <div id="pc-devices" class="space-y-2"></div>
+        </div>
+
         <div id="till-wizard" class="card rounded-xl p-4 space-y-3" hidden>
           <div class="flex items-center justify-between gap-2">
             <div class="min-w-0">

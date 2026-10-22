@@ -807,6 +807,7 @@ async function saveScan(runner, { agentId, found = [], error = null }) {
     name: f.name ? String(f.name).slice(0, 120) : null,
     share: f.share ? String(f.share).slice(0, 120) : null,
     model: f.model ? String(f.model).slice(0, 80) : null,
+    remote: f.remote ? (typeof f.remote === 'string' ? String(f.remote).slice(0, 60) : true) : null,
   }));
   const { rows } = await runner.query(
     `UPDATE print_agents
@@ -1194,6 +1195,7 @@ async function registerStationPrinter(runner, {
   }
   return {
     status: 'done', message: null, printer_id: conCajon.id, candidates: null,
+    printer_name: windowsName || conCajon.name,
     replaced: reemplazadas.length + reemplazadasCaja.length,
   };
 }
@@ -1330,37 +1332,71 @@ async function applyStation(runner, { agentId }) {
   const agent = rows[0];
   if (!agent || !agent.station || agent.station.status === 'done') return null;
 
-  const candidatos = stationCandidates(agent.scan_result);
+  // El gerente escoge siempre (D129): elegir solo hacía que todas las PCs tomaran la
+  // misma impresora cuando la tienen agregada como compartida.
+  const candidatos = stationChoices(agent.scan_result);
   if (candidatos.length === 0) {
-    // Las impresoras de las PCs van por USB (D127); las de red son de la caja del
-    // teléfono y se dan de alta en Cajas.
     return setStation(runner, agent.id, {
       status: 'none', candidates: null,
-      message: 'Esta PC no ve ninguna impresora USB. Revisa que esté encendida, conectada '
+      message: 'Esta PC no ve ninguna impresora. Revisa que esté encendida, conectada '
         + 'por USB y con su driver instalado, y pulsa Buscar de nuevo.',
     });
   }
-  let elegida = candidatos.length === 1 ? candidatos[0] : null;
-  if (!elegida) {
-    // La que el club ya usaba en esta PC o para esta caja, o la única térmica (D125).
-    const { rows: antes } = await runner.query(
-      `SELECT windows_name FROM printers
-        WHERE nightclub_id = $1 AND windows_name IS NOT NULL
-          AND (agent_id = $2::uuid OR (location_id = $3::uuid AND purpose = $4::text))
-        ORDER BY active DESC, updated_at DESC LIMIT 5`,
-      [agent.nightclub_id, agent.id, agent.location_id, (agent.station || {}).purpose || null]);
-    elegida = pickStationPrinter(candidatos, antes.map((r) => r.windows_name));
-  }
-  if (!elegida) {
-    return setStation(runner, agent.id, {
-      status: 'choose', candidates: candidatos.slice(0, 8),
-      message: 'Esta PC ve varias impresoras. Escoge cuál es la de tickets.',
-    });
-  }
-  const hecho = await registerStationPrinter(runner, {
-    agent, windowsName: elegida.name, createdBy: agent.paired_by,
+  return setStation(runner, agent.id, {
+    status: 'choose', candidates: candidatos.slice(0, 15),
+    message: 'Escoge la impresora de esta PC. Las marcadas "de otra PC" están conectadas en otra computadora.',
   });
-  return setStation(runner, agent.id, hecho);
+}
+
+/**
+ * Las impresoras que ESTA PC ve, para que el gerente escoja (D129).
+ *
+ * Todas las reales (no PDF, fax, OneNote…), cada una con cómo está conectada: `usb`
+ * (en esta PC), `shared` (instalada aquí pero conectada en OTRA PC: la ven todas las PCs
+ * que la agregaron, y por eso "aparecía la misma impresora en todas"), `network` u
+ * `other`. Primero las USB de aquí con nombre de térmica.
+ */
+function stationChoices(found) {
+  const reales = (Array.isArray(found) ? found : []).filter((f) => f.kind === 'windows' && f.name
+    && !VIRTUAL_NAME.test(f.name) && !(f.host && VIRTUAL_PORT.test(f.host)));
+  const orden = { usb: 0, other: 1, network: 2, shared: 3 };
+  return reales.map((f) => {
+    const nombreRemoto = /^\\\\([^\\]+)\\/.exec(String(f.name));
+    let remota = null;
+    if (f.remote) remota = typeof f.remote === 'string' ? f.remote : 'otra PC';
+    else if (nombreRemoto) remota = nombreRemoto[1];
+    let via = 'other';
+    if (remota) via = 'shared';
+    else if (f.host && USB_PORT.test(f.host)) via = 'usb';
+    else if (f.host && /^(IP_|TCPIP|\d{1,3}(\.\d{1,3}){3})/i.test(f.host)) via = 'network';
+    return {
+      name: f.name, port: f.host || null, via, remote: remota, thermal: THERMAL_NAME.test(f.name),
+    };
+  }).sort((a, b) => (orden[a.via] - orden[b.via]) || (Number(b.thermal) - Number(a.thermal))
+    || String(a.name).localeCompare(String(b.name)));
+}
+
+/**
+ * "Cambiar impresora" (D129): la estación vuelve a quedar por escoger con lo que la PC
+ * vio en su último barrido, y se le pide otro barrido por si cambió algo. La impresora
+ * que tenía sigue activa hasta que se escoja la nueva.
+ */
+async function rechooseStation(runner, { nightclubId, agentId }) {
+  const { rows } = await runner.query(
+    `SELECT id, active, station FROM print_agents WHERE id = $1 AND nightclub_id = $2 FOR UPDATE`,
+    [agentId, nightclubId]);
+  const pc = rows[0];
+  if (!pc) throw ApiError.notFound('Esa PC no existe');
+  if (!pc.active) throw ApiError.badRequest('Esa PC está apagada en el panel');
+  if (!pc.station) {
+    throw ApiError.unprocessable('Esa PC se dio de alta sin caja ni barra: regístrala con "Registrar esta PC".');
+  }
+  await runner.query(
+    `UPDATE print_agents
+        SET station = station || '{"status":"pending","candidates":null,"message":null}'::jsonb,
+            scan_requested_at = now(), updated_at = now()
+      WHERE id = $1`, [agentId]);
+  return applyStation(runner, { agentId });
 }
 
 /** El gerente escoge entre varias: registra esa y listo. */
@@ -1398,5 +1434,5 @@ module.exports = {
   newInviteCode, prettyCode, normalizeCode, hashCode,
   createInvite, redeemInvite, countFailedPairing, openInvites,
   STATION_PURPOSES, stationCandidates, stationNetworkCandidates, applyStation, finishStation,
-  pickStationPrinter, cleanupDevices, moveJobs,
+  pickStationPrinter, cleanupDevices, moveJobs, stationChoices, rechooseStation,
 };

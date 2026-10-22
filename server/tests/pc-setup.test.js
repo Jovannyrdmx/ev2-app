@@ -66,6 +66,15 @@ async function instalarCon(script, hostname = 'CAJA-PB') {
   return { res, agent: { ...res.body.agent, token: res.body.token } };
 }
 
+/** La PC busca; el gerente escoge la impresora de esa PC en el panel (D129). */
+async function buscarYEscoger(agent, found, nombre = termica.name) {
+  await comoAgente(agent.token, 'post', '/api/print-agent/scan').send({ found });
+  const res = await api().post(url(`/print-agents/${agent.id}/station/finish`)).set(auth(manager))
+    .send({ windows_name: nombre });
+  expect(res.status).toBe(200);
+  return res;
+}
+
 describe('Registrar esta PC (D127)', () => {
   it('ofrece las cajas con PC y la PC del bartender de cada barra', async () => {
     const res = await api().get(url('/till-setup/pc-targets')).set(auth(manager));
@@ -104,7 +113,7 @@ describe('Registrar esta PC (D127)', () => {
     expect(otra.status).toBe(403);
 
     // Encuentra la USB y la registra sola, con cajón, prueba y pulso.
-    await comoAgente(agent.token, 'post', '/api/print-agent/scan').send({ found: [termica, enRed] });
+    await buscarYEscoger(agent, [termica, enRed]);
     const { rows } = await pool.query(
       `SELECT purpose, connection, windows_name, drawer_pin, till_id::text AS till_id FROM printers
         WHERE nightclub_id = $1 AND active`, [club.id]);
@@ -148,7 +157,7 @@ describe('Registrar esta PC (D127)', () => {
     expect((await pool.query(`SELECT 1 FROM tills WHERE operator = 'bartender'`)).rowCount).toBe(1);
 
     const { agent } = await instalarCon(res.body.script, 'BARRA-PB');
-    await comoAgente(agent.token, 'post', '/api/print-agent/scan').send({ found: [termica] });
+    await buscarYEscoger(agent, [termica]);
     const { rows } = await pool.query(
       `SELECT purpose, windows_name, drawer_pin, till_id::text AS till_id, agent_id::text AS agent_id
          FROM printers WHERE nightclub_id = $1 AND active ORDER BY purpose`, [club.id]);
@@ -167,7 +176,7 @@ describe('Registrar esta PC (D127)', () => {
   it('borrar PCs e impresoras: pide BORRAR, deja todo apagado y las PCs viejas ya no toman papel', async () => {
     const res = await instalador(`till:${await cajaDeBarra()}`);
     const { agent } = await instalarCon(res.body.script);
-    await comoAgente(agent.token, 'post', '/api/print-agent/scan').send({ found: [termica] });
+    await buscarYEscoger(agent, [termica]);
     expect((await api().post(url('/till-setup/wipe-devices')).set(auth(manager)).send({})).status).toBe(400);
     expect((await api().post(url('/till-setup/wipe-devices')).set(auth(cajero)).send({ confirm: 'BORRAR' })).status).toBe(403);
     const ok = await api().post(url('/till-setup/wipe-devices')).set(auth(manager)).send({ confirm: 'BORRAR' });
@@ -181,7 +190,7 @@ describe('Registrar esta PC (D127)', () => {
     // Y se puede volver a registrar con el mismo nombre de impresora.
     const otra = await instalador(`till:${await cajaDeBarra()}`);
     const { agent: nueva } = await instalarCon(otra.body.script);
-    await comoAgente(nueva.token, 'post', '/api/print-agent/scan').send({ found: [termica] });
+    await buscarYEscoger(nueva, [termica]);
     expect((await pool.query('SELECT 1 FROM printers WHERE active')).rowCount).toBe(1);
     expect((await pool.query(`SELECT 1 FROM audit_log WHERE action = 'printing.wipe'`)).rowCount).toBe(1);
   });
@@ -202,7 +211,7 @@ describe('La caja del bartender (D128)', () => {
     // La PC del bartender, registrada como en la barra: instalador y su USB.
     const inst = await instalador(`bartender:${club.bar_id}`);
     const { agent } = await instalarCon(inst.body.script, 'BARRA-PB');
-    await comoAgente(agent.token, 'post', '/api/print-agent/scan').send({ found: [termica] });
+    await buscarYEscoger(agent, [termica]);
     cajaBartender = (await pool.query(
       `SELECT id::text AS id FROM tills WHERE operator = 'bartender'`)).rows[0].id;
   });
@@ -283,5 +292,52 @@ describe('La caja del bartender (D128)', () => {
     const abre = await abrir(bartender);
     expect(abre.status).toBe(422);
     expect(abre.body.error.message).toMatch(/no tiene caja de bartender/);
+  });
+});
+
+describe('Escoger la impresora de cada PC (D129)', () => {
+  const compartida = { kind: 'windows', name: '\\\\CAJA-01\\XP-80C', host: 'USB001', remote: 'CAJA-01' };
+
+  it('nunca escoge sola: enseña la lista de ESA PC y marca la que es de otra PC', async () => {
+    const res = await instalador(`till:${await cajaDeBarra()}`);
+    const { agent } = await instalarCon(res.body.script, 'CAJA-02');
+    await comoAgente(agent.token, 'post', '/api/print-agent/scan')
+      .send({ found: [compartida, { kind: 'windows', name: 'POS-80', host: 'USB002' }] });
+    const { rows } = await pool.query('SELECT station FROM print_agents WHERE id = $1', [agent.id]);
+    expect(rows[0].station.status).toBe('choose');
+    expect(rows[0].station.candidates).toEqual([
+      expect.objectContaining({ name: 'POS-80', via: 'usb', remote: null }),
+      expect.objectContaining({ via: 'shared', remote: 'CAJA-01' }),
+    ]);
+    expect((await pool.query('SELECT 1 FROM printers WHERE active')).rowCount).toBe(0);
+  });
+
+  it('dos PCs con impresoras del mismo nombre: cada una queda con la suya', async () => {
+    const r1 = await instalador(`till:${await cajaDeBarra()}`);
+    const { agent: pc1 } = await instalarCon(r1.body.script, 'CAJA-01');
+    await buscarYEscoger(pc1, [termica]);
+    const r2 = await instalador(`bartender:${club.bar_id}`);
+    const { agent: pc2 } = await instalarCon(r2.body.script, 'BARRA-01');
+    await buscarYEscoger(pc2, [termica, compartida]);
+    const { rows } = await pool.query(
+      `SELECT agent_id::text AS a, purpose FROM printers WHERE active ORDER BY purpose`);
+    expect(rows.find((r) => r.purpose === 'orders').a).toBe(pc2.id);
+    expect(rows.filter((r) => r.a === pc1.id)).toHaveLength(1);
+  });
+
+  it('cambiar impresora: vuelve a preguntar con la lista y la nueva reemplaza a la vieja', async () => {
+    const res = await instalador(`till:${await cajaDeBarra()}`);
+    const { agent } = await instalarCon(res.body.script, 'CAJA-01');
+    const otra = { kind: 'windows', name: 'POS-80', host: 'USB002' };
+    await buscarYEscoger(agent, [termica, otra]);
+    const cambio = await api().post(url(`/print-agents/${agent.id}/station/rechoose`)).set(auth(manager));
+    expect(cambio.status).toBe(200);
+    expect(cambio.body.station.status).toBe('choose');
+    // La vieja sigue imprimiendo mientras se escoge.
+    expect((await pool.query(`SELECT windows_name FROM printers WHERE active`)).rows).toEqual([{ windows_name: 'XP-80C' }]);
+    await api().post(url(`/print-agents/${agent.id}/station/finish`)).set(auth(manager)).send({ windows_name: 'POS-80' });
+    expect((await pool.query(`SELECT windows_name FROM printers WHERE active`)).rows).toEqual([{ windows_name: 'POS-80' }]);
+    expect((await api().post(url(`/print-agents/${agent.id}/station/rechoose`)).set(auth(cajero))).status).toBe(403);
+    expect((await pool.query(`SELECT 1 FROM audit_log WHERE action = 'printing.rechoose'`)).rowCount).toBe(1);
   });
 });

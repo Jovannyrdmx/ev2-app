@@ -11252,6 +11252,28 @@ paths:
               schema: { type: object, additionalProperties: true }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/nightclubs/{nightclubId}/print-agents/{agentId}/station/rechoose:
+    post:
+      operationId: rechooseStationPrinter
+      tags: [Cortes de turno]
+      summary: Cambiar la impresora de una PC (D129)
+      description: |
+        Gerente o admin. La estación vuelve a quedar por escoger con la lista de impresoras
+        que esa PC ve (y se le pide otro barrido). La impresora actual sigue imprimiendo
+        hasta que se escoja otra con `station/finish`. Queda en `audit_log` (`printing.rechoose`).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: agentId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Lista para escoger
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
   /api/nightclubs/{nightclubId}/till/test-print:
     post:
       operationId: testTillPrinter

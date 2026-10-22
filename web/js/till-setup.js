@@ -115,6 +115,27 @@
         b.onclick = () => toggle(b);
       }
       renderWizard();
+      renderDevices();
+    }
+
+    /**
+     * Cada PC registrada con su impresora (D129): para ver de un vistazo que cada una
+     * tiene la suya, y cambiarla ahí mismo.
+     */
+    function renderDevices() {
+      const box = $('pc-devices');
+      if (!box) return;
+      const pcs = agents.filter((a) => a.active && a.station);
+      $('pc-devices-card').hidden = pcs.length === 0;
+      box.innerHTML = pcs.map((a) => `
+        <div class="rounded-lg p-3 space-y-1" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12)" data-pc="${escape(a.id)}">
+          <p class="text-sm font-semibold truncate">${escape(a.station.name || a.name)}</p>
+          <p class="text-[11px] text-white/40 truncate">${escape(t('tset.pcName', { name: a.hostname || a.name }))}</p>
+          ${pcStatus(a)}
+        </div>`).join('');
+      for (const el of box.querySelectorAll('[data-pc]')) {
+        bindPcStatus(el, agents.find((a) => a.id === el.dataset.pc), async () => { await load(); });
+      }
     }
 
     async function post(boton, ruta, okKey, body = {}) {
@@ -467,18 +488,21 @@
       const impresora = s.printer_id ? (agentsPrinters.get(s.printer_id) || null) : null;
       let out = line(true, t('tset.pcOk', { name: agente.name }));
       if (s.status === 'done') {
-        out += line(true, t('tset.printerUsbOk'));
+        out += line(true, s.printer_name ? t('tset.printerIs', { name: s.printer_name }) : t('tset.printerUsbOk'));
         out += s.drawer_pin ? line(true, t('tset.drawerOk', { pin: (impresora && impresora.drawer_pin) || s.drawer_pin })) : '';
-        if (s.drawer_pin) {
-          out += `<div class="flex flex-wrap gap-2">
-            <button class="card rounded-lg px-3 py-2 text-xs" data-pc-retest="${escape(s.printer_id)}">${escape(t('stn.testDrawer'))}</button>
-            <button class="card rounded-lg px-3 py-2 text-xs" data-pc-otherpin="${escape(s.printer_id)}">${escape(t('tset.notOpened'))}</button>
-          </div>`;
-        }
+        out += `<div class="flex flex-wrap gap-2">
+          ${s.drawer_pin ? `<button class="card rounded-lg px-3 py-2 text-xs" data-pc-retest="${escape(s.printer_id)}">${escape(t('stn.testDrawer'))}</button>
+            <button class="card rounded-lg px-3 py-2 text-xs" data-pc-otherpin="${escape(s.printer_id)}">${escape(t('tset.notOpened'))}</button>` : ''}
+          <button class="card rounded-lg px-3 py-2 text-xs" data-pc-rechoose="${escape(agente.id)}">${escape(t('tset.changePrinter'))}</button>
+        </div>`;
       } else if (s.status === 'choose') {
-        out += line(null, s.message || t('stn.pickOne'));
-        out += `<div class="flex flex-wrap gap-2">${(s.candidates || []).map((c, n) => `
-          <button class="ev2-button rounded-lg px-3 py-2 text-xs" data-cand="${n}">${escape(c.name)}</button>`).join('')}</div>`;
+        out += line(null, t('tset.pickPrinter'));
+        // Todas las que ESTA PC ve (D129), con cómo está conectada cada una.
+        out += `<div class="space-y-2">${(s.candidates || []).map((c, n) => `
+          <button class="card rounded-xl p-3 w-full text-left tap ${c.via === 'shared' ? 'opacity-70' : ''}" data-cand="${n}">
+            <p class="text-sm font-semibold break-all">${escape(c.name)}</p>
+            <p class="text-[11px] ${c.via === 'usb' ? 'text-lime-300' : c.via === 'shared' ? 'text-amber-300' : 'text-white/50'}">${escape(viaText(c))}</p>
+          </button>`).join('')}</div>`;
       } else if (s.status === 'none' || s.status === 'blocked') {
         out += line(false, s.message || t('tset.noUsb'));
         out += `<button class="card rounded-lg px-3 py-2 text-xs" data-pc-rescan="1">${escape(t('prn.scan'))}</button>`;
@@ -488,8 +512,27 @@
       return out;
     }
 
+    /** "USB en esta PC · USB001", "De otra PC (CAJA-01)"… */
+    function viaText(c) {
+      const puerto = c.port ? ` · ${c.port}` : '';
+      if (c.via === 'usb') return `${t('tset.viaUsb')}${puerto}`;
+      if (c.via === 'shared') return t('tset.viaShared', { pc: c.remote || '?' });
+      if (c.via === 'network') return `${t('tset.viaNetwork')}${puerto}`;
+      return `${t('tset.viaOther')}${puerto}`;
+    }
+
     function bindPcStatus(body, agente, after) {
       if (!agente) return;
+      for (const b of body.querySelectorAll('[data-pc-rechoose]')) {
+        b.onclick = async () => {
+          b.disabled = true;
+          try {
+            await api.post(`/nightclubs/${clubId()}/print-agents/${b.dataset.pcRechoose}/station/rechoose`, {});
+            await refreshAgents();
+            await after();
+          } catch (err) { showError(err); b.disabled = false; }
+        };
+      }
       for (const b of body.querySelectorAll('[data-cand]')) {
         b.onclick = async () => {
           const c = agente.station.candidates[Number(b.dataset.cand)];
@@ -616,6 +659,7 @@
       try {
         const d = await api.get(`/nightclubs/${clubId()}/print-agents`);
         agents = d.agents || [];
+        renderDevices();
       } catch { /* se reintenta en la siguiente vuelta */ }
     }
 
