@@ -204,7 +204,7 @@ router.post('/password', authenticate,
     });
   }));
 
-// ============================================================ olvidé mi contraseña (D127)
+// ============================================================ olvidé mi contraseña (D131)
 //
 // Tres pasos y una regla: la respuesta de `forgot` es la MISMA exista o no la cuenta.
 // Lo demás (token, vida, frenos, correo) está en `services/password-reset.js`.

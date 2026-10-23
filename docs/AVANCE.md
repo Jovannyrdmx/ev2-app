@@ -4,10 +4,10 @@ Cada fila se agrega al terminar y verificar un paso del manual. Formato: fecha �
 
 ## Olvidé mi contraseña por correo, 23 de octubre de 2026
 
-Rama de trabajo sobre `fase7/cajas-por-barra` (`38d7ed7`), decisión D127. Enlace
+Rama de trabajo sobre `fase7/cajas-por-barra` (`38d7ed7`), decisión D131. Enlace
 «¿Olvidaste tu contraseña?» en las nueve pantallas de acceso, página pública
 `restablecer.html`, rutas `POST /auth/password/forgot`, `/reset/check` y `/reset`,
-migración `071_password_resets.sql`, correo saliente por SMTP (`nodemailer`, variables
+migración `073_password_resets.sql`, correo saliente por SMTP (`nodemailer`, variables
 `SMTP_*` y `MAIL_FROM`, guía en `CORREO_SETUP.md`). Service worker v78.
 
 Verificación local contra PostgreSQL real: suites nuevas `password-reset.test.js` (27) y

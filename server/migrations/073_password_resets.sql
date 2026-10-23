@@ -1,5 +1,5 @@
 -- ============================================================================
--- Migration 071: "Olvidé mi contraseña" por correo (D127).
+-- Migration 073: "Olvidé mi contraseña" por correo (D131).
 --
 -- Hasta aquí la única forma de recuperar una contraseña era que el gerente generara una
 -- temporal desde Empleados (D46), y eso solo sirve para el personal: un cliente que

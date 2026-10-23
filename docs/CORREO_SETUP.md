@@ -1,6 +1,6 @@
-# Correo saliente — "¿Olvidaste tu contraseña?" (D127)
+# Correo saliente — "¿Olvidaste tu contraseña?" (D131)
 
-Desde D127 cualquier cuenta con correo —cliente, personal, gerente, administrador, incluidas
+Desde D131 cualquier cuenta con correo —cliente, personal, gerente, administrador, incluidas
 las que solo entraban con Facebook— puede pedir un enlace para escoger una contraseña nueva
 desde la pantalla de acceso. El enlace llega **por correo**, y para mandar correo el
 servidor necesita un proveedor SMTP. El código ya está hecho y probado; sin estos datos el
@@ -31,7 +31,7 @@ proveedor acepte: si no, el correo cae en spam o se rechaza.
 En el VPS, en el `.env` que lee `deploy/docker-compose.prod.yml`:
 
 ```ini
-# Correo saliente (D127)
+# Correo saliente (D131)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=clandestinoz@gmail.com

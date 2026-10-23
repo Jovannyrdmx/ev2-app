@@ -915,7 +915,7 @@
       'gate.errMismatch': 'Las dos contraseñas nuevas no coinciden.',
       'gate.done': 'Listo, contraseña cambiada.',
 
-      // --- olvidé mi contraseña (D127) ---
+      // --- olvidé mi contraseña (D131) ---
       'forgot.link': '¿Olvidaste tu contraseña?',
       'forgot.needEmail': 'Escribe tu correo arriba y vuelve a tocar «¿Olvidaste tu contraseña?».',
       'forgot.sending': 'Mandando el correo…',

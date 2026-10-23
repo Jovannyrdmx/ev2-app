@@ -1,5 +1,5 @@
 /**
- * "¿Olvidaste tu contraseña?" en la web (D127).
+ * "¿Olvidaste tu contraseña?" en la web (D131).
  *
  * Lo que vigila:
  *   1. Las NUEVE pantallas con formulario de correo y contraseña cargan el módulo, y lo

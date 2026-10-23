@@ -1,5 +1,5 @@
 /**
- * EV2 — "¿Olvidaste tu contraseña?" en la pantalla de acceso (D127).
+ * EV2 — "¿Olvidaste tu contraseña?" en la pantalla de acceso (D131).
  *
  * Nueve pantallas tienen un formulario de correo y contraseña (`#form-login`): la del
  * cliente y las ocho del personal. En todas hace falta el mismo enlace, que hace lo

@@ -4638,7 +4638,7 @@ paths:
       security: []
       description: |
         Para cualquier cuenta con correo —cliente, personal, gerente— incluidas las que
-        solo entraban con Facebook (D127). Si el correo tiene cuenta activa en el club,
+        solo entraban con Facebook (D131). Si el correo tiene cuenta activa en el club,
         se le manda un enlace a `restablecer.html#token=…` que vale 30 minutos y una sola
         vez; pedir otro anula el anterior, y no se manda más de un correo por minuto por
         cuenta.

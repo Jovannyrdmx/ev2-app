@@ -1,5 +1,5 @@
 /**
- * EV2 — Pantalla de contraseña nueva (`restablecer.html`, D127).
+ * EV2 — Pantalla de contraseña nueva (`restablecer.html`, D131).
  *
  * Llega aquí quien tocó el enlace del correo de "¿Olvidaste tu contraseña?". El flujo:
  *   1. Leer la clave del fragmento (#token=...). Sin clave no hay nada que hacer.

@@ -1,7 +1,7 @@
 /**
  * Mandar un correo. Una sola puerta de salida para todo el servidor.
  *
- * Hoy lo usa "olvidé mi contraseña" (D127); mañana el recibo por correo o el aviso de
+ * Hoy lo usa "olvidé mi contraseña" (D131); mañana el recibo por correo o el aviso de
  * reserva entran por aquí y no inventan otro transporte. Por eso el módulo es chico y
  * no sabe nada de contraseñas: recibe destinatario, asunto, texto y HTML, y lo entrega.
  *

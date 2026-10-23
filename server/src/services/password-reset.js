@@ -1,5 +1,5 @@
 /**
- * "Olvidé mi contraseña" por correo (D127).
+ * "Olvidé mi contraseña" por correo (D131).
  *
  * ---------------------------------------------------------------------------
  * Cómo funciona

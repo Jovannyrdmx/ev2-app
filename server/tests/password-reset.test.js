@@ -1,5 +1,5 @@
 /**
- * "Olvidé mi contraseña" por correo (D127).
+ * "Olvidé mi contraseña" por correo (D131).
  *
  * Lo que se prueba, en orden de lo que más cuesta si falla:
  *   1. La ruta NO delata qué correos existen: misma respuesta con cuenta y sin ella.

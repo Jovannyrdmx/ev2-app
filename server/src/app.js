@@ -187,7 +187,7 @@ function createApp() {
   // cliente y en la puerta del club muchos comparten una sola IP.
   app.use('/api/auth/oauth/handoff', authLimiter);
   app.use('/api/auth/oauth/complete', authLimiter);
-  // "Olvidé mi contraseña" (D127): aquí las peticiones exitosas SÍ cuentan, igual que
+  // "Olvidé mi contraseña" (D131): aquí las peticiones exitosas SÍ cuentan, igual que
   // en los pases. Pedir el correo siempre "acierta" (la respuesta es la misma exista o
   // no la cuenta), así que lo que hay que frenar es precisamente a quien pide muchos:
   // para inundar un buzón ajeno o para probar enlaces al azar en `reset`.
