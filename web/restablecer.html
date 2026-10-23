@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Contraseña nueva — EV2 Clandestinoz</title>
+    <meta name="theme-color" content="#0a0a14">
+    <link rel="icon" href="images/favicon.ico" sizes="any">
+    <link rel="icon" href="images/favicon-32x32.png" type="image/png" sizes="32x32">
+    <link rel="icon" href="images/favicon-16x16.png" type="image/png" sizes="16x16">
+    <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+    <!-- Configuración: se cambia aquí sin tocar el código. -->
+    <meta name="ev2:api" content="/api">
+    <!--
+      La página a la que llega el enlace de "¿Olvidaste tu contraseña?" (D127). Es
+      PÚBLICA a propósito: quien la abre no tiene sesión, justamente porque no se acuerda
+      de su contraseña. La clave del enlace viaja en el fragmento (#token=...), que el
+      navegador NO manda al servidor ni a otros sitios: solo la lee este script y la
+      entrega a la API al guardar.
+
+      No se indexa: el enlace es de quien lo recibió en su correo.
+    -->
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="stylesheet" href="css/ev2.css">
+</head>
+<body class="text-white">
+<main class="max-w-md mx-auto px-5 py-10 space-y-5">
+
+    <header class="text-center space-y-1">
+        <p class="font-display text-2xl">EV2 Clandestinoz</p>
+        <h1 class="text-sm text-white/60" data-i18n="reset.title">Contraseña nueva</h1>
+    </header>
+
+    <!-- Mientras se revisa el enlace -->
+    <section id="reset-checking" class="card rounded-xl p-5 text-center">
+        <p class="text-sm text-white/60" data-i18n="reset.checking">Revisando el enlace…</p>
+    </section>
+
+    <!-- El formulario -->
+    <form id="reset-form" class="card rounded-xl p-4 space-y-3" hidden autocomplete="off">
+        <p id="reset-for" class="text-xs text-white/50"></p>
+        <label class="block text-xs text-white/50" for="reset-password" data-i18n="reset.new">Nueva contraseña (mínimo 8 caracteres)</label>
+        <input id="reset-password" class="field" type="password" minlength="8" maxlength="128" required autocomplete="new-password">
+        <label class="block text-xs text-white/50" for="reset-repeat" data-i18n="reset.repeat">Confirma la nueva contraseña</label>
+        <input id="reset-repeat" class="field" type="password" minlength="8" maxlength="128" required autocomplete="new-password">
+        <p id="reset-error" class="text-sm text-red-300" hidden></p>
+        <button type="submit" id="btn-reset" class="ev2-button w-full py-3 rounded-xl font-display" data-i18n="reset.save">Guardar contraseña</button>
+    </form>
+
+    <!-- El enlace ya no sirve -->
+    <section id="reset-invalid" class="card rounded-xl p-5 space-y-3 text-center" hidden>
+        <p class="font-display text-xl" data-i18n="reset.invalidTitle">Este enlace ya no sirve</p>
+        <p id="reset-invalid-note" class="text-sm text-white/60" data-i18n="reset.invalidNote">Caducó (dura 30 minutos), ya se usó, o pediste otro después. Vuelve a la pantalla de acceso y pide uno nuevo.</p>
+        <a href="index.html" class="ev2-button w-full py-3 rounded-xl font-display block" data-i18n="reset.again">Pedir otro enlace</a>
+    </section>
+
+    <!-- Listo -->
+    <section id="reset-done" class="card rounded-xl p-5 space-y-3 text-center" hidden>
+        <p class="font-display text-xl" style="color:var(--ev2-lime)" data-i18n="reset.doneTitle">Listo, contraseña cambiada</p>
+        <p class="text-sm text-white/60" data-i18n="reset.doneNote">Cerramos las sesiones que tenías abiertas. Entra con tu contraseña nueva.</p>
+        <a href="index.html" class="ev2-button w-full py-3 rounded-xl font-display block" data-i18n="reset.goLogin">Ir a entrar</a>
+    </section>
+
+</main>
+
+<script src="js/format.js"></script>
+<script src="js/reset-screen.js"></script>
+</body>
+</html>

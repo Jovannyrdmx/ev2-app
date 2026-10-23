@@ -2,6 +2,19 @@
 
 Cada fila se agrega al terminar y verificar un paso del manual. Formato: fecha · paso · qué se hizo · verificación · commit/PR.
 
+## Olvidé mi contraseña por correo, 23 de octubre de 2026
+
+Rama de trabajo sobre `fase7/cajas-por-barra` (`38d7ed7`), decisión D127. Enlace
+«¿Olvidaste tu contraseña?» en las nueve pantallas de acceso, página pública
+`restablecer.html`, rutas `POST /auth/password/forgot`, `/reset/check` y `/reset`,
+migración `071_password_resets.sql`, correo saliente por SMTP (`nodemailer`, variables
+`SMTP_*` y `MAIL_FROM`, guía en `CORREO_SETUP.md`). Service worker v78.
+
+Verificación local contra PostgreSQL real: suites nuevas `password-reset.test.js` (27) y
+`web-forgot-password.test.js` (18), más la corrida completa (ver el reporte de la tarea).
+Lint sin errores nuevos, `openapi.yaml` válido, `check:css` sin cambios (solo clases que ya
+existían). Pendiente: poner las variables SMTP en el `.env` del VPS y mandar un correo real.
+
 ## Plano 3D y editor de distribución, 2 de octubre de 2026
 
 Rama `fase5/mapa-3d-editor`, bloque autorizado: mapa 3D de clientes y reservaciones,

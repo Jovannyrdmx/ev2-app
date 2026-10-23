@@ -187,6 +187,19 @@ function createApp() {
   // cliente y en la puerta del club muchos comparten una sola IP.
   app.use('/api/auth/oauth/handoff', authLimiter);
   app.use('/api/auth/oauth/complete', authLimiter);
+  // "Olvidé mi contraseña" (D127): aquí las peticiones exitosas SÍ cuentan, igual que
+  // en los pases. Pedir el correo siempre "acierta" (la respuesta es la misma exista o
+  // no la cuenta), así que lo que hay que frenar es precisamente a quien pide muchos:
+  // para inundar un buzón ajeno o para probar enlaces al azar en `reset`.
+  const resetLimiter = rateLimit({
+    windowMs: 60_000,
+    limit: Number(process.env.PASSWORD_RESET_RATE_LIMIT_PER_MIN || 10),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    handler: (req, res, next) => next(ApiError.tooMany('Too many attempts, try again in a minute')),
+  });
+  app.use('/api/auth/password/forgot', resetLimiter);
+  app.use('/api/auth/password/reset', resetLimiter);
 
   // El webhook de Mercado Pago (D47). Es público y lo llama un servidor ajeno, así que
   // sí lleva límite — pero holgado, y por una razón: Mercado Pago REINTENTA hasta que

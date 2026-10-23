@@ -151,6 +151,7 @@ services:
       AUTH_RATE_LIMIT_PER_MIN: ${AUTH_RATE_LIMIT_PER_MIN:-}
       PIN_RATE_LIMIT_PER_MIN: ${PIN_RATE_LIMIT_PER_MIN:-}
       PASS_RATE_LIMIT_PER_MIN: ${PASS_RATE_LIMIT_PER_MIN:-}
+      PASSWORD_RESET_RATE_LIMIT_PER_MIN: ${PASSWORD_RESET_RATE_LIMIT_PER_MIN:-}
       POS_AGENT_RATE_LIMIT_PER_MIN: ${POS_AGENT_RATE_LIMIT_PER_MIN:-}
       TAXI_VERIFY_RATE_LIMIT_PER_MIN: ${TAXI_VERIFY_RATE_LIMIT_PER_MIN:-}
       MERCADOPAGO_WEBHOOK_RATE_LIMIT_PER_MIN: ${MERCADOPAGO_WEBHOOK_RATE_LIMIT_PER_MIN:-}
@@ -215,6 +216,16 @@ services:
       # diciendo qué falta; correo y contraseña siguen funcionando igual.
       FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
       FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-}
+      # Correo saliente (D127): "olvidé mi contraseña" manda el enlace por aquí. Vacías =
+      # el enlace de la pantalla de acceso contesta 501 diciendo qué falta; entrar con
+      # correo, PIN y Facebook sigue igual. Cualquier proveedor SMTP sirve
+      # (docs/CORREO_SETUP.md).
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
       # Donde se guardan las fotos de los tickets y las facturas. Es un volumen, no la
       # base: un club que recibe tres veces por semana junta cientos de fotos de dos
       # megas, y metidas en Postgres hacen que cada respaldo tarde el triple y que

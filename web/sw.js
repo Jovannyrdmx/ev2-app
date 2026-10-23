@@ -15,7 +15,7 @@
 // asi que un despliegue se ve sin tocar esto; subirla es lo que TIRA la copia vieja en
 // vez de dejarla ahi ocupando espacio y sirviendo de respaldo a una version que ya no
 // existe.
-const VERSION = 'ev2-v77';
+const VERSION = 'ev2-v78';
 const SHELL = [
   'index.html', 'bartender.html', 'driver.html', 'manager.html', 'staff.html',
   'valet.html', 'employee-portal.html', 'almacen.html', 'manifest.json',
@@ -26,6 +26,9 @@ const SHELL = [
   // eliminacion de datos que esta dado de alta en el panel de Meta apunta aqui. Una de
   // las dos paginas en blanco por falta de senal es una revision de Meta reprobada.
   'privacidad.html', 'terminos.html',
+  // "Olvidé mi contraseña" (D127): el enlace vive en las nueve pantallas de acceso y
+  // la página de restablecer la abre quien llega desde el correo, sin cuenta abierta.
+  'restablecer.html', 'js/reset-screen.js', 'js/forgot-password.js',
   'js/api.js', 'js/format.js', 'js/roles.js', 'js/password-gate.js', 'js/client.js',
   'js/floor-map.js', 'js/index-screen.js', 'js/bar-queue.js', 'js/bartender-screen.js',
   'js/taxi-ride.js', 'js/driver-screen.js', 'js/manager.js', 'js/manager-screen.js',

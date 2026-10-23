@@ -4630,6 +4630,132 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '422': { $ref: '#/components/responses/Unprocessable' }
 
+  /api/auth/password/forgot:
+    post:
+      operationId: postAuthPasswordForgot
+      tags: [Autenticación]
+      summary: Olvidé mi contraseña (pedir el enlace por correo)
+      security: []
+      description: |
+        Para cualquier cuenta con correo —cliente, personal, gerente— incluidas las que
+        solo entraban con Facebook (D127). Si el correo tiene cuenta activa en el club,
+        se le manda un enlace a `restablecer.html#token=…` que vale 30 minutos y una sola
+        vez; pedir otro anula el anterior, y no se manda más de un correo por minuto por
+        cuenta.
+
+        **La respuesta es la misma exista o no la cuenta** (202 con el mismo mensaje):
+        esta ruta no sirve para averiguar qué correos están registrados. Por eso un
+        fallo del proveedor de correo tampoco se reporta aquí: queda en el log del
+        servidor.
+
+        Límite por IP propio (`PASSWORD_RESET_RATE_LIMIT_PER_MIN`, 10 por minuto), y aquí
+        las peticiones exitosas SÍ cuentan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nightclub_slug, email]
+              properties:
+                nightclub_slug: { type: string, example: ev2 }
+                email: { type: string, format: email }
+      responses:
+        '202':
+          description: Aceptado. Misma respuesta haya o no cuenta.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted: { type: boolean, example: true }
+                  message: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '501':
+          description: |
+            El servidor no tiene correo saliente configurado (faltan `SMTP_HOST`,
+            `SMTP_USER`, `SMTP_PASSWORD` o `MAIL_FROM`). Se contesta ANTES de mirar la
+            cuenta, así que sale igual para todos los correos.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/auth/password/reset/check:
+    post:
+      operationId: postAuthPasswordResetCheck
+      tags: [Autenticación]
+      summary: ¿Sigue vigente el enlace de restablecer?
+      security: []
+      description: |
+        Lo llama `restablecer.html` al abrirse, antes de pedir la contraseña nueva, para
+        decirle de una vez a quien llegó tarde que el enlace ya no sirve. No gasta el
+        enlace. Un token inventado, caducado o ya usado devuelve `valid: false` y nada más.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, minLength: 16, maxLength: 200 }
+      responses:
+        '200':
+          description: Resultado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+                  email_masked:
+                    type: string
+                    description: Solo si `valid`. Primera y última letra del usuario, ej. `e***z@gmail.com`.
+                  expires_at: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/auth/password/reset:
+    post:
+      operationId: postAuthPasswordReset
+      tags: [Autenticación]
+      summary: Poner la contraseña nueva con el enlace del correo
+      security: []
+      description: |
+        Cambia la contraseña, gasta el token, anula cualquier otro enlace de esa cuenta,
+        quita `must_change_password` y **cierra todas las sesiones** (los refresh tokens
+        dejan de servir). Queda en `audit_log` como `password_reset_by_email`.
+
+        No devuelve sesión: la persona entra por `POST /api/auth/login` con la contraseña
+        nueva. Así el enlace del correo nunca vale como llave de entrada por sí solo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, new_password]
+              properties:
+                token: { type: string, minLength: 16, maxLength: 200 }
+                new_password: { type: string, minLength: 8, maxLength: 200 }
+      responses:
+        '200':
+          description: Contraseña cambiada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reset: { type: boolean, example: true }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: El enlace caducó, ya se usó, se anuló con otro más nuevo, o la cuenta ya no está activa.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
   /api/auth/pin-login:
     post:
       operationId: postAuthPinLogin

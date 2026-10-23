@@ -15,6 +15,8 @@ const oauthConfig = require('../config/oauth');
 const oauth = require('../services/oauth');
 const pins = require('../services/pins');
 const clubNetwork = require('../services/club-network');
+const passwordReset = require('../services/password-reset');
+const mailer = require('../services/mailer');
 
 const router = express.Router();
 
@@ -200,6 +202,54 @@ router.post('/password', authenticate,
       expires_in: ACCESS_TTL,
       refresh_token: refresh.token,
     });
+  }));
+
+// ============================================================ olvidé mi contraseña (D127)
+//
+// Tres pasos y una regla: la respuesta de `forgot` es la MISMA exista o no la cuenta.
+// Lo demás (token, vida, frenos, correo) está en `services/password-reset.js`.
+
+const FORGOT_MESSAGE = 'Si ese correo tiene cuenta en el club, te mandamos un enlace '
+  + 'para escoger una contraseña nueva. Revisa también la carpeta de spam.';
+
+const forgotSchema = z.object({
+  nightclub_slug: z.string().trim().min(1).max(100),
+  email,
+});
+
+router.post('/password/forgot', validate({ body: forgotSchema }), asyncHandler(async (req, res) => {
+  // Sin correo configurado no hay nada que fingir: se dice ANTES de mirar la cuenta,
+  // así que el 501 tampoco delata a nadie (sale igual para todos los correos).
+  if (!mailer.isConfigured()) {
+    throw ApiError.notImplemented(
+      `El restablecimiento por correo no está configurado en este servidor. ${mailer.configProblem()}`);
+  }
+  await passwordReset.request({
+    nightclubSlug: req.body.nightclub_slug,
+    email: req.body.email,
+    ip: req.ip || null,
+    userAgent: req.headers['user-agent'],
+    baseUrl: oauthConfig.publicBaseUrl(),
+  });
+  res.status(202).json({ accepted: true, message: FORGOT_MESSAGE });
+}));
+
+const tokenSchema = z.string().trim().min(16).max(200);
+
+router.post('/password/reset/check', validate({ body: z.object({ token: tokenSchema }) }),
+  asyncHandler(async (req, res) => {
+    res.json(await passwordReset.check(req.body.token));
+  }));
+
+router.post('/password/reset',
+  validate({ body: z.object({ token: tokenSchema, new_password: password }) }),
+  asyncHandler(async (req, res) => {
+    await passwordReset.consume({
+      token: req.body.token, newPassword: req.body.new_password, ip: req.ip || null,
+    });
+    // Sin sesión de regalo: la persona entra con su contraseña nueva por la puerta de
+    // siempre. Así el enlace del correo nunca vale como llave de entrada por sí solo.
+    res.json({ reset: true });
   }));
 
 // ============================================================ acceso por PIN (D46)
