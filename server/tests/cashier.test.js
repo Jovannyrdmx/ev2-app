@@ -670,7 +670,30 @@ describe('Los tickets del retiro y del corte de la caja (D81)', () => {
     expect(res.body.ticket).not.toBeNull();
     const [corte] = await trabajos('shift_cut');
     expect(corte.printer_id).toBe(caja.id);
-    expect(corte.preview).toMatch(/CORTE DE TURNO/);
+    // Es el corte Z de la caja (D132): cierre definitivo, con su consecutivo.
+    expect(corte.preview).toMatch(/CORTE Z/);
+    expect(corte.preview).toMatch(/Corte Z No\. 1/);
+    expect(corte.preview).not.toMatch(/CORTE DE TURNO/);
     expect(corte.preview).toMatch(/Retiro para el banco/);
+    expect(res.body.report).toBe('z');
+    expect(res.body.closing.z_number).toBe(1);
+    expect(res.body.shift).toMatchObject({ closed: true });
+  });
+
+  it('cada caja lleva su propio consecutivo de Z: la de Cover no cuenta los de la barra', async () => {
+    await api().post(url('/printers')).set(auth(manager)).send({
+      location_id: club.bar_id, name: 'Caja PB', purpose: 'till', host: '192.168.1.70',
+    });
+    const barra = await cortar({ declared_cash: 1000, counted_cash: 1000 });
+    expect(barra.status).toBe(201);
+    expect(barra.body.closing.z_number).toBe(1);
+
+    const anfitriona = await f.createUser(club.id, { role: 'hostess', display_name: 'Sol' });
+    await f.openDoorTill(club.id, { hostess: anfitriona, authorizer: manager });
+    const cover = await declareAndClose(club.id, anfitriona,
+      { declared_cash: 0, counted_cash: 0, manager_pin: pinGerente });
+    expect(cover.status).toBe(201);
+    expect(cover.body.closing.z_number).toBe(1);
+    expect(cover.body.report).toBe('z');
   });
 });

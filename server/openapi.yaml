@@ -11623,7 +11623,29 @@ paths:
               schema:
                 type: object
                 properties:
-                  closing: { $ref: '#/components/schemas/ShiftClosing' }
+                  closing:
+                    allOf:
+                      - { $ref: '#/components/schemas/ShiftClosing' }
+                      - type: object
+                        properties:
+                          z_number:
+                            type: [integer, 'null']
+                            description: >
+                              El consecutivo del corte Z de esa caja (D132): cuántos cortes
+                              lleva la caja contando este. Null si el turno no tenía caja.
+                  shift:
+                    type: object
+                    description: El turno que quedó cerrado con este corte (D132).
+                    properties:
+                      id: { type: string, format: uuid }
+                      ended_at: { type: string, format: date-time }
+                      closed: { type: boolean, enum: [true] }
+                  report:
+                    type: string
+                    enum: [z, shift_cut]
+                    description: >
+                      `z` cuando el corte es de una caja: el papel sale como CORTE Z, el
+                      cierre definitivo del cajón. `shift_cut` para un turno sin caja.
                   ticket:
                     type: [object, 'null']
                     description: El trabajo de impresión del ticket, o null si no salió.

@@ -508,7 +508,11 @@
             manager_pin: pin,
           });
           if (deps.toast) {
-            deps.toast(t(hecho.ticket ? 'cut.declared' : 'cut.declaredNoTicket'), 'ok');
+            // El corte de una caja es su corte Z (D132): el aviso lo dice con su número.
+            const z = hecho.closing && hecho.closing.z_number;
+            const clave = z ? (hecho.ticket ? 'cut.zDone' : 'cut.zDoneNoTicket')
+              : (hecho.ticket ? 'cut.declared' : 'cut.declaredNoTicket');
+            deps.toast(t(clave, { n: z }), 'ok');
           }
         }
         $('cut-amount').value = '';

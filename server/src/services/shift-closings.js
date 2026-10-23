@@ -771,11 +771,41 @@ function nightTotals(tills) {
   };
 }
 
+/**
+ * El número consecutivo del corte Z de esa caja (D132).
+ *
+ * Cuenta los cortes confirmados de la misma caja hasta este, inclusive, en el orden
+ * en que se cerraron. No se guarda en ninguna columna: sale de las filas que ya
+ * existen, así no hay un contador que pueda desfasarse ni migración que correr. La
+ * "misma caja" es la caja con nombre (`till_id`, D126) cuando el turno la tiene; si
+ * no, la barra (`location_id`), que es como se numeran las cajas de antes de D126.
+ *
+ * Devuelve null para un corte sin caja: ese papel es un corte de turno, no un Z.
+ */
+async function zNumber(runner, closing) {
+  if (!closing || !closing.location_id) return null;
+  // Todo se compara en SQL: un Date de JavaScript pierde los microsegundos de
+  // `confirmed_at` y dejaría fuera al propio corte.
+  const { rows } = await runner.query(
+    `SELECT count(*)::int AS n
+       FROM shift_closings me
+       JOIN staff_shifts ms ON ms.id = me.shift_id
+       JOIN shift_closings c ON c.nightclub_id = me.nightclub_id
+                            AND c.location_id = me.location_id
+                            AND c.status = 'confirmed'
+       JOIN staff_shifts s ON s.id = c.shift_id
+                          AND s.till_id IS NOT DISTINCT FROM ms.till_id
+      WHERE me.id = $1
+        AND (c.confirmed_at, c.id) <= (me.confirmed_at, me.id)`,
+    [closing.id]);
+  return rows[0] ? rows[0].n : null;
+}
+
 module.exports = {
   CASH_METHODS, COLLECTING_ROLES, BLIND_ROLES,
   collected, dropsOf, receivedTotal, pendingDrops, shiftSummary,
   cashInsOf, cashInsTotal, addCash,
   withdraw, close, money, round2,
   isBlind, declarationOf, forEmployee, declare,
-  nightTills, nightTotals,
+  nightTills, nightTotals, zNumber,
 };

@@ -1044,9 +1044,15 @@ router.post('/nightclubs/:nightclubId/shifts/me/closing',
     }
 
     const { rows } = await pool.query(`${CLOSING_SELECT} WHERE c.id = $1`, [hecho.id]);
+    // El corte de una caja es su corte Z (D132): la respuesta trae el consecutivo de
+    // esa caja y dice en claro que el turno quedó cerrado, para que la pantalla no
+    // tenga que deducirlo.
+    const zNumber = await cuts.zNumber(pool, rows[0]);
     res.status(201).json({
-      closing: rows[0],
+      closing: { ...rows[0], z_number: zNumber },
       drawer: drawerCorte,
+      shift: { id: shift.id, ended_at: rows[0].ended_at, closed: true },
+      report: zNumber === null ? 'shift_cut' : 'z',
       ticket: ticket ? { job_id: ticket.id, status: ticket.status } : null,
     });
   }));

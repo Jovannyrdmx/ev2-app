@@ -916,6 +916,10 @@ async function cutData(runner, { nightclubId, closingId }) {
     [closingId, nightclubId]);
   const corte = rows[0];
   if (!corte) return null;
+  // El consecutivo del corte Z de esa caja (D132); null si el turno no tenía caja.
+  // Se pide aquí y no arriba: shift-closings → till → payments → tickets es un ciclo
+  // y un require al cargar dejaría a payments con un módulo a medias.
+  corte.z_number = await require('./shift-closings').zNumber(runner, corte);
 
   const { rows: retiros } = await runner.query(
     `SELECT d.amount::text AS amount, d.currency, d.reason, d.created_at, d.authorized_role,
@@ -943,7 +947,14 @@ const ROLE_LABEL = {
 
 function renderCut(t, data, { club, settings }) {
   header(t, club, settings);
-  title(t, 'CORTE DE TURNO');
+  // El corte de una caja es su corte Z (D132): el cierre definitivo del cajón, con el
+  // consecutivo de esa caja. El corte X (D122) es la lectura a media noche; este es
+  // el que cierra. Un turno que cobra sin caja sigue sacando su corte de turno.
+  const esZ = data.z_number !== null && data.z_number !== undefined;
+  title(t, esZ ? 'CORTE Z' : 'CORTE DE TURNO');
+  if (esZ) {
+    t.center().line(`Corte Z No. ${data.z_number} · cierre definitivo`).left();
+  }
   t.row(`Folio ${folio(data.id)}`, localTime(data.confirmed_at, club.timezone));
   t.rule();
 
@@ -1450,7 +1461,7 @@ function renderXReport(t, data, { club, settings }) {
     t.blank().rule();
     t.row(`Sin cobrar (${r.pending_orders.length})`, money(r.pending_total, cur));
   }
-  t.blank().center().line('No es un corte de cierre.').left();
+  t.blank().center().line('No es un corte de cierre: el corte Z sale al cerrar la caja.').left();
   footer(t, settings);
   t.blank(2).cut();
 }

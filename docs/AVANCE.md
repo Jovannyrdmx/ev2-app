@@ -2,6 +2,20 @@
 
 Cada fila se agrega al terminar y verificar un paso del manual. Formato: fecha · paso · qué se hizo · verificación · commit/PR.
 
+## Corte Z al cerrar la caja, 23 de octubre de 2026
+
+Rama `fase7/cajas-por-barra` sobre `5985819` (D131 renumerada + pruebas alineadas), decisión D132.
+El ticket del corte de una caja sale como **CORTE Z No. N** (consecutivo por caja,
+calculado de los cortes confirmados, sin migración), con las cifras completas del corte X
+y como cierre definitivo; la respuesta de `POST /shifts/me/closing` trae `closing.z_number`,
+`shift.closed: true` y `report: 'z'`; la pantalla de «Mi corte» avisa «Corte Z No. N
+hecho: la caja y tu turno quedaron cerrados». Service worker v79.
+
+Verificación local contra PostgreSQL y Redis reales: `shift-closings.test.js` y
+`cashier.test.js` (casos nuevos: título Z, consecutivo que sube por caja y no se mezcla
+entre cajas, turno sin caja sigue como CORTE DE TURNO, respuesta con `shift.closed`),
+más la corrida completa (ver el reporte de la tarea). Lint y `openapi.yaml` válidos.
+
 ## Olvidé mi contraseña por correo, 23 de octubre de 2026
 
 Rama de trabajo sobre `fase7/cajas-por-barra` (`38d7ed7`), decisión D131. Enlace

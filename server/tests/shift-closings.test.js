@@ -419,7 +419,7 @@ describe('El ticket del corte', () => {
     return rows[0] ? rows[0].preview : null;
   };
 
-  it('sale al cerrar, con el desglose por método de pago', async () => {
+  it('sale al cerrar como CORTE Z, con el desglose por método de pago', async () => {
     await abrirCaja(luis);
     await cobrar(luis, 3000);
     await cobrar(luis, 4500, 'card_terminal');
@@ -427,7 +427,10 @@ describe('El ticket del corte', () => {
 
     expect(res.body.ticket).not.toBeNull();
     const papel = await ticketDe(res.body.closing.id);
-    expect(papel).toContain('CORTE DE TURNO');
+    // El corte de una caja es su cierre definitivo (D132): el papel lo dice.
+    expect(papel).toContain('CORTE Z');
+    expect(papel).toContain('Corte Z No. 1 · cierre definitivo');
+    expect(papel).not.toContain('CORTE DE TURNO');
     expect(papel).toContain('Luis');
     expect(papel).toContain('Efectivo');
     expect(papel).toContain('$3,000.00');
@@ -435,6 +438,50 @@ describe('El ticket del corte', () => {
     expect(papel).toContain('$4,500.00');
     expect(papel).toContain('Total cobrado');
     expect(papel).toContain('$7,500.00');
+  });
+
+  it('la respuesta dice que es un Z y que el turno quedó cerrado (D132)', async () => {
+    await abrirCaja(luis);
+    await cobrar(luis, 500);
+    const res = await cortar(luis, 500, 500, pin);
+
+    expect(res.status).toBe(201);
+    expect(res.body.report).toBe('z');
+    expect(res.body.closing.z_number).toBe(1);
+    expect(res.body.shift).toMatchObject({ closed: true });
+    expect(res.body.shift.ended_at).toBeTruthy();
+    expect(res.body.shift.id).toBe(res.body.closing.shift_id);
+    expect((await turnoAbierto(luis.id)).ended_at).not.toBeNull();
+  });
+
+  it('el consecutivo del Z sube con cada corte de la misma caja', async () => {
+    await abrirCaja(luis);
+    await cobrar(luis, 500);
+    const primero = await cortar(luis, 500, 500, pin);
+    expect(primero.body.closing.z_number).toBe(1);
+
+    // La misma caja de Cover, otro turno, otra noche si se quiere: el Z sigue contando.
+    await abrirCaja(luis);
+    await cobrar(luis, 700);
+    const segundo = await cortar(luis, 700, 700, pin);
+    expect(segundo.status).toBe(201);
+    expect(segundo.body.closing.z_number).toBe(2);
+    const papel = await ticketDe(segundo.body.closing.id);
+    expect(papel).toContain('Corte Z No. 2 · cierre definitivo');
+    // Y el primero sigue siendo el 1 aunque se reimprima después del segundo.
+    const otra = await api().post(url(`/shift-closings/${primero.body.closing.id}/ticket`))
+      .set(auth(manager)).send({});
+    expect(otra.status).toBe(202);
+    const { rows } = await pool.query(
+      `SELECT preview FROM print_jobs WHERE ref_id = $1 AND kind = 'shift_cut' ORDER BY created_at DESC`,
+      [primero.body.closing.id]);
+    expect(rows[0].preview).toContain('Corte Z No. 1 · cierre definitivo');
+  });
+
+  it('un turno sin caja no es un Z: zNumber contesta null', async () => {
+    const cuts = require('../src/services/shift-closings');
+    expect(await cuts.zNumber(pool, { location_id: null })).toBeNull();
+    expect(await cuts.zNumber(pool, null)).toBeNull();
   });
 
   it('desglosa cada retiro parcial con su motivo y quién lo autorizó', async () => {
