@@ -50,6 +50,11 @@ async function startShift(user) {
   await pool.query('INSERT INTO staff_shifts (nightclub_id, user_id) VALUES ($1,$2)', [club.id, user.id]);
 }
 
+/** El mesero checa su salida (D110: sin turno no levanta pedidos, así que se va después). */
+async function endShift(user) {
+  await pool.query('UPDATE staff_shifts SET ended_at = now() WHERE user_id = $1 AND ended_at IS NULL', [user.id]);
+}
+
 async function nightInProgress() {
   await pool.query(
     `INSERT INTO events_calendar (nightclub_id, name, event_date, doors_open_at, ticket_price, status)
@@ -113,7 +118,9 @@ describe('a quién le suena el teléfono', () => {
 
   it('fuera de turno no le suena, aunque el trago sea suyo', async () => {
     await subscribe(waiter, 1);
+    await startShift(waiter);
     await waiterOrderReady();
+    await endShift(waiter);
     const sender = fakeSender();
     expect((await push.dispatch(await lastEvent('order_ready'), { sender, logger: quiet })).sent).toBe(0);
   });
@@ -129,6 +136,7 @@ describe('a quién le suena el teléfono', () => {
 
   it('el pedido del mesero entra a la barra: le suena al bartender en turno', async () => {
     await startShift(bartender);
+    await startShift(waiter);
     await subscribe(bartender, 3);
     await api().post(url('/orders')).set(auth(waiter))
       .send({ client_request_id: randomUUID(), table_id: table.id, items: [{ drink_id: beer.id, quantity: 3 }] });
@@ -491,7 +499,9 @@ describe('el mismo aviso llega por la conexión en vivo, con sonido en la pantal
   });
 
   it('fuera de turno tampoco suena en la pantalla: las mismas reglas', async () => {
+    await startShift(waiter);
     await waiterOrderReady();
+    await endShift(waiter);
     const publicados = [];
     await push.dispatch(await lastEvent('order_ready'),
       { sender: fakeSender(), logger: quiet, publish: async (e) => publicados.push(e) });

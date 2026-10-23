@@ -22,7 +22,7 @@ beforeEach(async () => {
   club = await f.createNightclub({ slug: 'ev2-inv' });
   manager = await f.createUser(club.id, { role: 'manager' });
   bartender = await f.createUser(club.id, { role: 'bartender' });
-  waiter = await f.createUser(club.id, { role: 'waiter' });
+  waiter = await f.createUser(club.id, { role: 'waiter', on_shift: true });
   guest = await f.createUser(club.id, { role: 'guest' });
   table = await f.createTable(club.id, { code: 'T-1' });
 });

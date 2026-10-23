@@ -257,8 +257,9 @@ describe('El gerente confirma contra el estado de cuenta', () => {
     expect(res.status).toBe(400);
   });
 
-  it('ni el cliente ni la anfitriona confirman pagos', async () => {
-    const tx = await charge();
+  it('ni el cliente ni la anfitriona confirman pagos que no son anticipo (D113)', async () => {
+    // La anfitriona solo aprueba anticipos de reservación; cualquier otro pago es del gerente.
+    const tx = await charge({ type: 'bottle_service' });
     const declared = await declare(tx);
     const id = declared.body.payment.id;
     expect((await api().post(url(`/manual-payments/${id}/confirm`)).set(auth(guest))).status).toBe(403);

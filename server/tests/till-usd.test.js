@@ -208,7 +208,8 @@ describe('El corte con dólares', () => {
 
     const ok = await retirar({ amount: 6, currency: 'USD' });
     expect(ok.status).toBe(201);
-    expect(ok.body.withdrawal).toMatchObject({ currency: 'USD', remaining: '4.00' });
+    // A ciegas (D105) tampoco se dice cuánto queda; el corte de abajo confirma los US$4.
+    expect(ok.body.withdrawal).toMatchObject({ currency: 'USD', remaining: null });
 
     const res = await cortar({ counted_cash: 947, counted_usd: 4 });
     expect(res.status).toBe(201);
