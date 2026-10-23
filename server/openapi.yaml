@@ -2749,7 +2749,7 @@ paths:
                   event: { $ref: '#/components/schemas/Event' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
-          description: Ya existe un evento en esa fecha
+          description: 'Su horario se encima con otro evento (D130, puede haber varios por fecha sin encimarse)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -11294,6 +11294,112 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/Unprocessable' }
+  /api/nightclubs/{nightclubId}/till-setup/pc-targets:
+    get:
+      operationId: listPcTargets
+      tags: [Cortes de turno]
+      summary: Qué puede ser una PC al registrarla (D127)
+      description: Las cajas del cajero con PC (barras y Cover) y la PC del bartender de cada barra (D128).
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      responses:
+        '200':
+          description: Destinos posibles
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/nightclubs/{nightclubId}/till-setup/installer:
+    post:
+      operationId: createPcInstaller
+      tags: [Cortes de turno]
+      summary: El instalador de una PC, Instalar-EV2.cmd (D127)
+      description: |
+        Gerente o admin. Devuelve el `.cmd` (en `script`) con la dirección del club y una
+        llave de un solo uso de 32 caracteres que vence en 15 minutos. Doble clic: instala
+        Node.js si falta (winget), el agente con arranque automático, se da de alta y
+        registra su impresora USB con cajón, prueba y pulso. `target` es `till:<id>` (caja
+        con PC) o `bartender:<barra>` (comandas y caja del bartender en la misma USB; la
+        caja se crea si falta). Solo sobre https. Queda en `audit_log` (`pc.installer`).
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target]
+              properties:
+                target: { type: string, pattern: '^(till|bartender):[0-9a-fA-F-]{36}$' }
+                has_drawer: { type: boolean, default: true }
+      responses:
+        '201':
+          description: Instalador listo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  filename: { type: string }
+                  script: { type: string }
+                  label: { type: string }
+                  invite: { type: object, additionalProperties: true }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /api/nightclubs/{nightclubId}/till-setup/wipe-devices:
+    post:
+      operationId: wipePrintDevices
+      tags: [Cortes de turno]
+      summary: Borrar las PCs e impresoras del club para registrarlas de nuevo (D127)
+      description: |
+        Gerente o admin, con `confirm: BORRAR`. Apaga todas las PCs (su llave deja de
+        servir) e impresoras, cancela los papeles pendientes, borra lo que no tiene
+        historia y archiva lo demás. Las cajas, fondos y cortes no se tocan. Queda en
+        `audit_log` (`printing.wipe`).
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/NightclubId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm: { type: string, enum: [BORRAR] }
+      responses:
+        '200':
+          description: Equipos dados de baja
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/nightclubs/{nightclubId}/print-agents/{agentId}/station/rechoose:
+    post:
+      operationId: rechooseStationPrinter
+      tags: [Cortes de turno]
+      summary: Cambiar la impresora de una PC (D129)
+      description: |
+        Gerente o admin. La estación vuelve a quedar por escoger con la lista de impresoras
+        que esa PC ve (y se le pide otro barrido). La impresora actual sigue imprimiendo
+        hasta que se escoja otra con `station/finish`. Queda en `audit_log` (`printing.rechoose`).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/NightclubId' }
+        - { name: agentId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Lista para escoger
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
   /api/nightclubs/{nightclubId}/till/test-print:
     post:
       operationId: testTillPrinter
@@ -12117,49 +12223,6 @@ paths:
                     description: Solo en esta respuesta. Lo guarda el propio agente.
         '403':
           description: Código inválido o vencido
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-        '429': { $ref: '#/components/responses/TooManyRequests' }
-
-  /api/print-agent/install.ps1:
-    get:
-      operationId: getPrintAgentInstaller
-      tags: [Impresión]
-      summary: (Público) El instalador del agente, con el dominio del club adentro
-      description: |
-        Para dar de alta una PC de barra que **no tiene la carpeta del agente**, que es
-        el caso normal: al club se entra por la dirección web, no con una USB.
-
-        En esa PC se pega una línea en PowerShell:
-
-        ```
-        irm https://tu-dominio.com/api/print-agent/install.ps1 | iex
-        ```
-
-        El script baja `print-agent.js` y `package.json` a `C:\EV2\agent`, deja hecho
-        el `.bat` de arranque y corre el agente, que entonces pide el código de
-        emparejamiento. Si falta Node.js lo dice y manda a nodejs.org, en vez de
-        fallar con un error raro.
-
-        **Solo se genera sobre https.** Esa línea ejecuta código remoto: sobre http,
-        cualquiera dentro de la red del club podría contestar por el servidor y
-        mandarle a la barra el script que quisiera. El dominio que se hornea sale de
-        `ALLOWED_ORIGINS`, no del `Host` de la petición, por la misma razón.
-
-        Es público a propósito: una PC que todavía no está dada de alta no tiene con
-        qué identificarse, y pedir sesión obligaría al gerente a dejar la suya abierta
-        en la PC de la barra. Lo que da de alta a esa PC no es este archivo, es el
-        código de emparejamiento.
-      security: []
-      responses:
-        '200':
-          description: El script de PowerShell
-          content:
-            text/plain:
-              schema: { type: string }
-        '400':
-          description: El servidor no se ve por https, así que no se genera
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }

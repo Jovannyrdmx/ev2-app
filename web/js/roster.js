@@ -212,8 +212,11 @@
    * cuando no hace falta escoger: el puesto no lleva caja o la barra tiene una sola.
    */
   function tillChoices({ role, locationId, tills = [] }) {
-    if (role !== 'cashier' || !locationId) return [];
-    const deLaBarra = (tills || []).filter((x) => x.location_id === locationId);
+    if (!['cashier', 'bartender'].includes(role) || !locationId) return [];
+    // El bartender va a una caja de bartender y el cajero a una de cajero (D128).
+    const operador = role === 'bartender' ? 'bartender' : 'cashier';
+    const deLaBarra = (tills || []).filter((x) => x.location_id === locationId
+      && (x.operator || 'cashier') === operador);
     return deLaBarra.length > 1 ? deLaBarra : [];
   }
 

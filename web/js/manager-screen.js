@@ -2189,71 +2189,11 @@
   function renderPrinting() {
     renderPrintHealth();
     renderZoneBars();
-    renderPairing();
-    renderStationForm();
-    renderStations();
-    renderFoundPrinters();
     renderPrintersList();
     renderPrintAgents();
     renderPrintJobs();
     renderPrintSettings();
-
-    // Las barras llegan en el mismo lote que todo lo demás, así que esta pestaña se
-    // puede abrir antes de que estén. Mientras no estén, el formulario se apaga y lo
-    // dice: dejarlo abierto con la lista vacía hacía que picarle "Dar de alta"
-    // contestara "escoge en qué barra está" señalando un menú sin opciones.
-    const select = $('prn-location');
-    const barras = printPlaces();
-    const listas = barras.length > 0;
-    if (!listas) {
-      select.innerHTML = '';
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = t(state.invLoaded ? 'prn.noBars' : 'prn.loadingBars');
-      select.appendChild(opt);
-    } else if (select.options.length !== barras.length || !select.options[0].value) {
-      select.innerHTML = '';
-      for (const b of barras) {
-        const opt = document.createElement('option');
-        opt.value = b.id;
-        opt.textContent = b.name;
-        select.appendChild(opt);
-      }
-    }
-    select.disabled = !listas;
-    $('btn-prn-add').disabled = !listas;
-
-    // La barra de la PC nueva (D80). Con una sola barra, ya viene escogida.
-    const selPc = $('prn-agent-loc');
-    if (selPc.options.length !== barras.length + 1) {
-      const antes = selPc.value;
-      selPc.innerHTML = '';
-      const todo = document.createElement('option');
-      todo.value = '';
-      todo.textContent = t('prn.areaAll');
-      selPc.appendChild(todo);
-      for (const b of barras) {
-        const opt = document.createElement('option');
-        opt.value = b.id;
-        opt.textContent = b.name;
-        selPc.appendChild(opt);
-      }
-      selPc.value = antes || (barras.length === 1 ? barras[0].id : '');
-    }
-    $('prn-agent-purpose').disabled = !selPc.value;
   }
-
-  $('prn-agent-loc').onchange = () => {
-    if (!$('prn-agent-loc').value) $('prn-agent-purpose').value = '';
-    // En Cover solo hay recibos de caja (D96).
-    if (isDoor($('prn-agent-loc').value)) $('prn-agent-purpose').value = 'till';
-    $('prn-agent-purpose').disabled = !$('prn-agent-loc').value;
-  };
-
-  // La impresora nueva en Cover solo puede ser de recibos de caja (D96).
-  $('prn-location').addEventListener('change', () => {
-    if (isDoor($('prn-location').value) && $('prn-purpose')) $('prn-purpose').value = 'till';
-  });
 
   function renderPrintersList() {
     const lista = (printing.printers || []).filter((p) => p.active || printing.showArchived);
@@ -2328,243 +2268,6 @@
       card.append(fila, filaCajon, nota);
       caja.appendChild(card);
     }
-  }
-
-  /**
-   * Lo que cada PC vio en su red (D55).
-   *
-   * Agrupado por PC y no en una lista sola a propósito: con dos agentes, saber que
-   * hay una impresora en el .50 vale menos que saber **cuál PC la alcanza**, que es
-   * lo que decide a quién ponerle de respaldo a quién.
-   *
-   * Lo que ya está dado de alta se marca en vez de esconderse: si alguien busca y no
-   * ve su impresora, la pregunta siguiente es "¿entonces cuál es la que ya tengo?".
-   */
-  function renderFoundPrinters() {
-    const agentes = printing.agents || [];
-    const caja = $('prn-found');
-    const conResultado = agentes.filter((a) => a.scan_at || a.scan_error);
-    const buscando = Date.now() < printing.scanUntil;
-
-    const estado = $('prn-scan-status');
-    estado.hidden = !buscando && conResultado.length === 0;
-    if (buscando) {
-      estado.textContent = t('prn.scanning');
-      estado.style.color = '#fcd34d';
-    } else if (conResultado.length) {
-      estado.textContent = t('prn.scanDone', { count: conResultado.length });
-      estado.style.color = 'rgba(255,255,255,.4)';
-    }
-
-    caja.innerHTML = '';
-    // Solo cuentan las prendidas: una apagada se puede volver a registrar (D80).
-    const yaDadas = new Set((printing.printers || []).filter((p) => p.active)
-      .map((p) => `${p.connection}|${p.host || p.windows_name}`));
-    // Desde D61 una USB se abre por su nombre; el compartido es de instalaciones viejas.
-    const yaEsta = (h) => (h.kind === 'windows'
-      ? yaDadas.has(`windows|${h.name}`) || (h.share && yaDadas.has(`windows|${h.share}`))
-      : yaDadas.has(`network|${h.host}`));
-
-    for (const a of conResultado) {
-      const bloque = document.createElement('div');
-      bloque.className = 'space-y-1';
-      const titulo = document.createElement('p');
-      titulo.className = 'text-[11px] text-white/50';
-      titulo.textContent = a.name;
-      bloque.appendChild(titulo);
-
-      if (a.scan_error) {
-        const err = document.createElement('p');
-        err.className = 'text-xs text-red-300';
-        err.textContent = a.scan_error;
-        bloque.appendChild(err);
-        caja.appendChild(bloque);
-        continue;
-      }
-
-      const hallazgos = a.scan_result || [];
-      if (!hallazgos.length) {
-        const vacio = document.createElement('p');
-        vacio.className = 'text-xs text-white/40';
-        vacio.textContent = t('prn.scanNone');
-        bloque.appendChild(vacio);
-        caja.appendChild(bloque);
-        continue;
-      }
-
-      for (const h of hallazgos) {
-        const fila = document.createElement('div');
-        fila.className = 'card rounded-lg px-3 py-2 flex items-center justify-between gap-3';
-        const left = document.createElement('div');
-        left.className = 'min-w-0';
-        const que = document.createElement('p');
-        que.className = 'text-sm truncate';
-        que.textContent = h.kind === 'windows'
-          ? `${h.name || '—'}${h.share ? ` (${h.share})` : ''}`
-          : `${h.host}:${h.port}`;
-        const como = document.createElement('p');
-        como.className = 'text-[11px] text-white/40 truncate';
-        como.textContent = h.kind === 'windows' ? t('prn.cUsb') : (h.model || t('prn.cNetwork'));
-        left.append(que, como);
-
-        // Si la PC ya tiene barra y propósito (D80), se registra en un clic con eso;
-        // si no, se abre el formulario con lo que se encontró.
-        const ya = yaEsta(h);
-        const directo = Boolean(a.location_id && a.purpose);
-        const accion = document.createElement('button');
-        accion.className = `${directo ? 'ev2-button' : 'card'} rounded-lg px-3 py-2 text-xs shrink-0`;
-        accion.textContent = ya ? t('prn.already') : t(directo ? 'prn.register' : 'prn.useThis');
-        accion.disabled = ya;
-        accion.onclick = () => (directo ? registerFound(h, a, accion) : fillFromScan(h, a));
-
-        fila.append(left, accion);
-        bloque.appendChild(fila);
-      }
-      caja.appendChild(bloque);
-    }
-  }
-
-  /**
-   * Pone el hallazgo en el formulario de alta y lo abre.
-   *
-   * No la da de alta sola: falta decir en qué barra está y para qué es, que es
-   * justamente lo que una máquina no puede adivinar.
-   */
-  function fillFromScan(hallazgo, agente = null) {
-    const caja = $('prn-add-box');
-    caja.open = true;
-    if (agente && agente.location_id) $('prn-location').value = agente.location_id;
-    if (agente && agente.purpose) $('prn-purpose').value = agente.purpose;
-    // Una USB solo la alcanza la PC que la encontró: queda ligada a ella (D80).
-    $('prn-agent-id').value = hallazgo.kind === 'windows' && agente ? agente.id : '';
-    if (hallazgo.kind === 'windows') {
-      $('prn-connection').value = 'windows';
-      $('prn-winname').value = hallazgo.name || hallazgo.share || '';
-      $('prn-name').value = (hallazgo.name || '').slice(0, 60);
-    } else {
-      $('prn-connection').value = 'network';
-      $('prn-host').value = hallazgo.host || '';
-      $('prn-port').value = String(hallazgo.port || 9100);
-      $('prn-name').value = hallazgo.model || `Impresora ${hallazgo.host}`;
-    }
-    $('prn-connection').onchange();
-    caja.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    $('prn-location').focus();
-  }
-
-  /** Lo que se manda para dar de alta lo que encontró una PC (D80). */
-  function foundPayload(h, a) {
-    const base = {
-      location_id: a.location_id,
-      purpose: a.purpose,
-      paper_width: 80,
-      codepage: 'CP850',
-      has_cutter: true,
-      test: true,
-    };
-    if (h.kind === 'windows') {
-      return {
-        ...base,
-        name: (h.name || h.share || 'Impresora USB').slice(0, 60),
-        connection: 'windows',
-        windows_name: h.name || h.share,
-        agent_id: a.id,
-      };
-    }
-    return {
-      ...base,
-      name: (h.model || `Impresora ${h.host}`).slice(0, 60),
-      connection: 'network',
-      host: h.host,
-      port: h.port || 9100,
-    };
-  }
-
-  /** Registrar en un clic, con la barra y el propósito de la PC, y probar. */
-  async function registerFound(h, a, boton) {
-    const listo = ocupado(boton, 'prn.saving');
-    try {
-      const res = await api.post(`/nightclubs/${clubId()}/printers`, foundPayload(h, a));
-      toast(t('prn.registered'), 'ok');
-      askTest(res.printer);
-      await loadPrinting();
-    } catch (err) {
-      listo();
-      showError(err);
-    }
-  }
-
-  // La hoja de prueba: si los acentos salen mal, se cambia la página de códigos y se
-  // vuelve a imprimir, sin buscar el formulario de edición.
-  const CODEPAGES = ['CP850', 'CP1252', 'CP858', 'CP437', 'CP860'];
-  let enPrueba = null;
-  function askTest(printer) {
-    enPrueba = printer;
-    $('prn-test-text').textContent = t('prn.testAsk', { name: printer.name, codepage: printer.codepage });
-    $('btn-prn-test-retry').disabled = false;
-    $('prn-test-check').hidden = false;
-  }
-  $('btn-prn-test-ok').onclick = () => {
-    enPrueba = null;
-    $('prn-test-check').hidden = true;
-  };
-  $('btn-prn-test-retry').onclick = async () => {
-    if (!enPrueba) return;
-    const siguiente = CODEPAGES[CODEPAGES.indexOf(enPrueba.codepage) + 1];
-    if (!siguiente) {
-      $('prn-test-text').textContent = t('prn.testNoMore');
-      $('btn-prn-test-retry').disabled = true;
-      return;
-    }
-    const listo = ocupado($('btn-prn-test-retry'), 'prn.sending');
-    try {
-      const { printer } = await api.patch(`/nightclubs/${clubId()}/printers/${enPrueba.id}`,
-        { codepage: siguiente });
-      await api.post(`/nightclubs/${clubId()}/printers/${printer.id}/test`, {});
-      askTest(printer);
-      await loadPrinting();
-    } catch (err) {
-      showError(err);
-    } finally {
-      listo();
-    }
-  };
-
-  $('btn-prn-scan').onclick = async () => {
-    const nota = $('prn-scan-error');
-    nota.hidden = true;
-    const listo = ocupado($('btn-prn-scan'), 'prn.scanning');
-    try {
-      const res = await api.post(`/nightclubs/${clubId()}/print-agents/scan`, {});
-      if (res.online === 0) {
-        avisar(nota, t('prn.scanNoAgents'), 'warn');
-      }
-      // Se sigue preguntando un rato: el barrido tarda unos segundos y el resultado
-      // llega cuando el agente lo manda, no cuando esta llamada contesta.
-      printing.scanUntil = Date.now() + 30000;
-      renderFoundPrinters();
-      await waitForScan();
-    } catch (err) {
-      avisar(nota, EV2Format.errorMessage(err));
-    } finally {
-      listo();
-    }
-  };
-
-  /** Vuelve a preguntar por los agentes hasta que contesten, o hasta rendirse. */
-  async function waitForScan() {
-    while (Date.now() < printing.scanUntil) {
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise((r) => { setTimeout(r, 2000); });
-      // eslint-disable-next-line no-await-in-loop
-      await loadPrinting();
-      const listos = (printing.agents || []).filter((a) => a.scan_at
-        && a.scan_requested_at && new Date(a.scan_at) >= new Date(a.scan_requested_at));
-      const pedidos = (printing.agents || []).filter((a) => a.active && a.scan_requested_at);
-      if (pedidos.length && listos.length >= pedidos.length) break;
-    }
-    printing.scanUntil = 0;
-    renderFoundPrinters();
   }
 
   function renderPrintAgents() {
@@ -2789,65 +2492,6 @@
     }
   }
 
-  // Cover solo imprime recibos de caja (D119: ya no hay "puerta" aparte).
-  $('prn-location').addEventListener('change', () => {
-    if (isDoor($('prn-location').value)) $('prn-purpose').value = 'till';
-  });
-
-  $('prn-connection').onchange = () => {
-    const red = $('prn-connection').value === 'network';
-    $('prn-network-fields').hidden = !red;
-    $('prn-windows-fields').hidden = red;
-  };
-
-  $('btn-prn-add').onclick = async () => {
-    const nota = $('prn-add-error');
-    nota.hidden = true;
-    const red = $('prn-connection').value === 'network';
-    const cuerpo = {
-      location_id: $('prn-location').value,
-      name: $('prn-name').value.trim(),
-      purpose: $('prn-purpose').value,
-      drawer_pin: $('prn-drawer').value ? Number($('prn-drawer').value) : null,
-      connection: $('prn-connection').value,
-      paper_width: Number($('prn-width').value),
-      codepage: $('prn-codepage').value,
-      has_cutter: $('prn-cutter').checked,
-      ...(red
-        ? { host: $('prn-host').value.trim(), port: Number($('prn-port').value) }
-        : { windows_name: $('prn-winname').value.trim() }),
-      ...(!red && $('prn-agent-id').value ? { agent_id: $('prn-agent-id').value } : {}),
-      test: true,
-    };
-    if (!cuerpo.location_id) { avisar(nota, t('prn.errBar')); return; }
-    if (!cuerpo.name) { avisar(nota, t('prn.errName')); return; }
-    if (red && !cuerpo.host) { avisar(nota, t('prn.errHost')); return; }
-    if (!red && !cuerpo.windows_name) { avisar(nota, t('prn.errWinName')); return; }
-
-    const listo = ocupado($('btn-prn-add'), 'prn.saving');
-    try {
-      const alta = await api.post(`/nightclubs/${clubId()}/printers`, cuerpo);
-      askTest(alta.printer);
-      $('prn-agent-id').value = '';
-      $('prn-name').value = '';
-      $('prn-host').value = '';
-      $('prn-winname').value = '';
-      toast(t('prn.added'), 'ok');
-      await loadPrinting();
-      listo();
-    } catch (err) {
-      listo();
-      avisar(nota, EV2Format.errorMessage(err));
-    }
-  };
-
-  /**
-   * Dar de alta una PC, sin token que copiar (D56).
-   *
-   * Se pide un código, se enseña en grande, y se espera a que la otra máquina lo
-   * teclee. Copiar un token de 48 caracteres desde aquí hasta la barra —por WhatsApp,
-   * por un papel— era donde se rompía la instalación.
-   */
   /** Cuántas PCs e impresoras apagadas hay, y el botón para verlas (D125). */
   function renderArchivedToggle() {
     const boton = $('btn-prn-archived');
@@ -2878,293 +2522,6 @@
       await loadPrinting();
     } catch (err) { listo(); showError(err); }
   };
-
-  $('btn-agent-add').onclick = async () => {
-    const listo = ocupado($('btn-agent-add'), 'prn.saving');
-    try {
-      // La PC nace con su barra y su papel, escogidos arriba antes del código (D80);
-      // con una sola barra ya viene escogida. Se puede cambiar después en su tarjeta.
-      const loc = $('prn-agent-loc').value || null;
-      const cuerpo = loc
-        ? { location_id: loc, purpose: $('prn-agent-purpose').value || null }
-        : {};
-      const { invite } = await api.post(`/nightclubs/${clubId()}/print-agents/invite`, cuerpo);
-      printing.invite = invite;
-      printing.pairUntil = new Date(invite.expires_at).getTime();
-      renderPairing();
-      await waitForPairing(invite);
-    } catch (err) {
-      showError(err);
-    } finally {
-      listo();
-    }
-  };
-
-
-  // ---------------------------------------------------------------- la estación (D99)
-
-  // Cover es la puerta (D119): su estación es la caja de Cover, la que imprime el ticket
-  // del cliente y el de la caja. Ya no hay una opción "Puerta" aparte.
-  let stationTouched = false;
-  let stationDrawerTouched = false;
-
-  function renderStationForm() {
-    const sel = $('stn-place');
-    if (!sel) return;
-    const lugares = printPlaces();
-    if (sel.options.length !== lugares.length) {
-      const antes = sel.value;
-      sel.innerHTML = '';
-      for (const b of lugares) {
-        const opt = document.createElement('option');
-        opt.value = b.id;
-        opt.textContent = b.name;
-        sel.appendChild(opt);
-      }
-      sel.value = (stationTouched && antes) || (lugares[0] ? lugares[0].id : '');
-    }
-    syncStationPurpose();
-  }
-
-  /**
-   * Menos decisiones: en Cover solo hay caja; en una barra, "Caja" es lo de siempre. Una
-   * caja lleva cajón, así que la casilla ya viene marcada (se puede quitar).
-   */
-  function syncStationPurpose() {
-    const lugar = $('stn-place').value;
-    const cover = isDoor(lugar);
-    $('stn-purpose-box').hidden = cover;
-    if (cover) $('stn-purpose').value = 'till';
-    $('stn-purpose').disabled = cover;
-    if (!stationDrawerTouched) $('stn-drawer').checked = $('stn-purpose').value === 'till';
-  }
-  $('stn-drawer').addEventListener('change', () => { stationDrawerTouched = true; });
-  $('stn-purpose').addEventListener('change', syncStationPurpose);
-  $('stn-place').onchange = () => { stationTouched = true; syncStationPurpose(); };
-
-  $('btn-stn-create').onclick = async () => {
-    const error = $('stn-error');
-    error.hidden = true;
-    const nombre = $('stn-name').value.trim();
-    if (!nombre) { avisar(error, t('stn.needName')); $('stn-name').focus(); return; }
-    const lugar = $('stn-place').value;
-    if (!lugar) { avisar(error, t('prn.noBars')); return; }
-    const listo = ocupado($('btn-stn-create'), 'prn.saving');
-    try {
-      const cuerpo = {
-        location_id: lugar,
-        station: {
-          name: nombre,
-          purpose: isDoor(lugar) ? 'till' : $('stn-purpose').value,
-          has_drawer: $('stn-drawer').checked,
-        },
-      };
-      const { invite } = await api.post(`/nightclubs/${clubId()}/print-agents/invite`, cuerpo);
-      printing.invite = invite;
-      printing.pairUntil = new Date(invite.expires_at).getTime();
-      renderPairing();
-      $('prn-pair').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      // El botón se suelta ya: esperar a la PC puede tardar los diez minutos del código y
-      // dejarlo en "Guardando…" todo ese rato parece que la pantalla se trabó.
-      listo();
-      await waitForPairing(invite);
-    } catch (err) {
-      listo();
-      avisar(error, EV2Format.errorMessage(err));
-    }
-  };
-
-  const printerOf = (id) => (printing.printers || []).find((p) => p.id === id) || null;
-
-  /** Las estaciones: una tarjeta por PC pedida como estación, con lo que falta. */
-  function renderStations() {
-    const caja = $('stn-list');
-    if (!caja) return;
-    caja.innerHTML = '';
-    const lista = (printing.agents || []).filter((a) => a.station && a.active);
-    for (const a of lista) {
-      const st = a.station;
-      const card = document.createElement('div');
-      card.className = 'rounded-lg p-3 space-y-2';
-      card.style.cssText = 'background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12)';
-
-      const titulo = document.createElement('p');
-      titulo.className = 'font-display truncate';
-      titulo.textContent = `${st.name || a.name}`;
-      const sub = document.createElement('p');
-      sub.className = 'text-[11px] text-white/40 truncate';
-      sub.textContent = `${a.name} · ${a.location_name || t('stn.door')}`;
-      card.append(titulo, sub);
-
-      const linea = (ok, texto) => {
-        const p = document.createElement('p');
-        p.className = 'text-xs';
-        p.style.color = ok === true ? 'var(--ev2-lime)' : ok === false ? '#fca5a5' : '#fcd34d';
-        p.textContent = `${ok === true ? '✓' : ok === false ? '✗' : '…'} ${texto}`;
-        card.appendChild(p);
-        return p;
-      };
-      linea(true, t('stn.pcOk'));
-
-      const impresora = st.printer_id ? printerOf(st.printer_id) : null;
-      if (st.status === 'done' && impresora) {
-        linea(true, t('stn.printerOk', { name: impresora.windows_name || impresora.name }));
-        if (st.drawer_pin || impresora.drawer_pin) {
-          linea(true, t('stn.drawerOk', { pin: impresora.drawer_pin || st.drawer_pin }));
-        } else {
-          linea(null, t('stn.noDrawer'));
-        }
-        const acciones = document.createElement('div');
-        acciones.className = 'flex flex-wrap gap-2 pt-1';
-        const boton = (texto, fn, primary) => {
-          const b = document.createElement('button');
-          b.className = `${primary ? 'ev2-button' : 'card'} rounded-lg px-3 py-2 text-xs`;
-          b.textContent = texto;
-          b.onclick = () => fn(b);
-          acciones.appendChild(b);
-        };
-        boton(t('stn.testSheet'), (b) => stationTest(impresora, b));
-        if (impresora.drawer_pin) {
-          boton(t('stn.testDrawer'), (b) => stationDrawer(impresora, false, b), true);
-          boton(t('stn.otherPin', { pin: impresora.drawer_pin === 2 ? 5 : 2 }),
-            (b) => stationDrawer(impresora, true, b));
-        }
-        card.appendChild(acciones);
-      } else if (st.status === 'choose') {
-        linea(null, st.message || t('stn.pickOne'));
-        const opciones = document.createElement('div');
-        opciones.className = 'flex flex-wrap gap-2';
-        for (const c of st.candidates || []) {
-          const b = document.createElement('button');
-          b.className = 'ev2-button rounded-lg px-3 py-2 text-xs';
-          b.textContent = c.port ? `${c.name} (${c.port})` : c.name;
-          b.onclick = () => stationFinish(a, c, b);
-          opciones.appendChild(b);
-        }
-        card.appendChild(opciones);
-      } else if (st.status === 'none' || st.status === 'blocked') {
-        linea(false, st.message || t('stn.printerNone'));
-        const b = document.createElement('button');
-        b.className = 'card rounded-lg px-3 py-2 text-xs';
-        b.textContent = t('prn.scan');
-        b.onclick = () => $('btn-prn-scan').click();
-        card.appendChild(b);
-      } else {
-        linea(null, t('stn.printerWait'));
-      }
-      caja.appendChild(card);
-    }
-  }
-
-  async function stationTest(printer, boton) {
-    const listo = ocupado(boton, 'prn.sending');
-    try {
-      await api.post(`/nightclubs/${clubId()}/printers/${printer.id}/test`, {});
-      toast(t('stn.testSent'), 'ok');
-    } catch (err) { showError(err); } finally { listo(); }
-  }
-
-  /** Probar el cajón; y si no abrió, el otro pin y se vuelve a probar, en un clic. */
-  async function stationDrawer(printer, cambiar, boton) {
-    const listo = ocupado(boton, 'prn.sending');
-    try {
-      if (cambiar) {
-        await api.patch(`/nightclubs/${clubId()}/printers/${printer.id}`,
-          { drawer_pin: printer.drawer_pin === 2 ? 5 : 2 });
-      }
-      await api.post(`/nightclubs/${clubId()}/printers/${printer.id}/test-drawer`, {});
-      toast(t('stn.drawerSent'), 'ok');
-      await loadPrinting();
-    } catch (err) { showError(err); } finally { listo(); }
-  }
-
-  async function stationFinish(agent, candidata, boton) {
-    const listo = ocupado(boton, 'prn.saving');
-    try {
-      // Una de red se escoge por su dirección; una USB por su nombre en Windows (D121).
-      await api.post(`/nightclubs/${clubId()}/print-agents/${agent.id}/station/finish`,
-        candidata.network ? { host: candidata.host, port: candidata.tcp_port }
-          : { windows_name: candidata.name });
-      toast(t('prn.registered'), 'ok');
-      await loadPrinting();
-    } catch (err) { listo(); showError(err); }
-  }
-
-  function renderPairing() {
-    const caja = $('prn-pair');
-    const invite = printing.invite;
-    const vivo = Boolean(invite) && Date.now() < printing.pairUntil;
-    caja.hidden = !vivo;
-    if (!vivo) { printing.invite = null; return; }
-
-    $('prn-pair-code').textContent = invite.code;
-    const minutos = Math.max(0, Math.ceil((printing.pairUntil - Date.now()) / 60000));
-    $('prn-pair-ttl').textContent = t('prn.pairTtl', { minutes: minutos });
-    $('prn-pair-wait').hidden = false;
-    $('prn-pair-wait').textContent = t('prn.pairWaiting');
-
-    // La línea que se pega en la otra PC (D57). Sale de `location.origin`, no de una
-    // constante: el panel ya se está viendo desde el dominio bueno, así que es la
-    // única fuente que no se puede quedar vieja cuando el club cambie de dominio.
-    $('prn-install-cmd').textContent = installLine();
-    $('prn-install-dl').href = `${location.origin}/api/print-agent/install.ps1`;
-  }
-
-  /** `irm https://dominio/api/print-agent/install.ps1 | iex` */
-  function installLine() {
-    return `irm ${location.origin}/api/print-agent/install.ps1 | iex`;
-  }
-
-  $('btn-prn-copy').onclick = async () => {
-    const linea = installLine();
-    try {
-      // `navigator.clipboard` no existe fuera de https (salvo en localhost), y el
-      // panel se abre en la tableta de la barra. Si no está, se selecciona la línea
-      // para que copiarla sea un gesto y no una transcripción a mano.
-      if (!navigator.clipboard) throw new Error('sin portapapeles');
-      await navigator.clipboard.writeText(linea);
-      toast(t('prn.installCopied'), 'ok');
-    } catch (err) {
-      const rango = document.createRange();
-      rango.selectNodeContents($('prn-install-cmd'));
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(rango);
-      toast(t('prn.installCopyFail'), 'warn');
-    }
-  };
-
-  /**
-   * Espera a que la PC se empareje y avisa cuando llegó.
-   *
-   * Se sigue preguntando hasta que el código caduque: quien lo teclea está en la otra
-   * barra, y el tiempo que tarda en caminar hasta allá es parte del proceso.
-   */
-  async function waitForPairing(invite) {
-    const antes = new Set((printing.agents || []).map((a) => a.id));
-    while (Date.now() < printing.pairUntil) {
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise((r) => { setTimeout(r, 3000); });
-      // eslint-disable-next-line no-await-in-loop
-      await loadPrinting();
-      const nueva = (printing.agents || []).find((a) => !antes.has(a.id));
-      if (nueva) {
-        printing.invite = null;
-        printing.pairUntil = 0;
-        toast(t('prn.paired', { name: nueva.name }), 'ok');
-        // La PC recién emparejada ya está buscando impresoras sola: se espera su
-        // resultado para que el gerente lo encuentre puesto y no tenga que pedirlo.
-        printing.scanUntil = Date.now() + 40000;
-        renderPrinting();
-        await waitForScan();
-        return;
-      }
-      // Sigue vivo el mismo código: se repinta para que el contador baje.
-      if (printing.invite && printing.invite.id === invite.id) renderPairing();
-    }
-    printing.invite = null;
-    renderPairing();
-  }
 
   if ($('prn-texts')) {
     $('prn-texts').onsubmit = async (e) => {
@@ -3715,7 +3072,7 @@
 
   async function openCut(night) {
     state.cut = { night, stats: null, closed: null };
-    $('cut-night').textContent = `${night.name} · ${String(night.event_date).slice(0, 10)}`;
+    $('cut-night').textContent = `${night.name} · ${EV2Format.dateTime(night.doors_open_at)}`;
     $('cut-body').innerHTML = `<p class="text-white/40 text-sm py-8 text-center">${escape(t('manager.loading'))}</p>`;
     $('cut-error').hidden = true;
     $('cut-note').value = '';
@@ -3952,7 +3309,7 @@
 
   async function openRoster(night) {
     state.roster = { night, roster: [], gaps: { sections: [], bars: [], tills: [] } };
-    $('roster-night').textContent = `${night.name} · ${String(night.event_date).slice(0, 10)}`;
+    $('roster-night').textContent = `${night.name} · ${EV2Format.dateTime(night.doors_open_at)}`;
     $('roster-error').hidden = true;
     $('roster-sheet').hidden = false;
     await reloadRoster();
@@ -4391,7 +3748,7 @@
 
     const sel = $('rpm-event');
     const noches = EV2Manager.sortNights(state.nights, new Date());
-    sel.innerHTML = noches.map((n) => `<option value="${escape(n.id)}">${escape(n.name || '')} · ${escape(String(n.event_date || '').slice(0, 10))}</option>`).join('');
+    sel.innerHTML = noches.map((n) => `<option value="${escape(n.id)}">${escape(n.name || '')} · ${escape(EV2Format.dateTime(n.doors_open_at))}</option>`).join('');
     if (rps.event) sel.value = rps.event;
 
     const s = rps.summary;
@@ -4715,7 +4072,7 @@
     const noches = nochesOrdenadas();
     $('prm-nonights').hidden = noches.length > 0;
     const sel = $('prm-night');
-    sel.innerHTML = noches.map((n) => `<option value="${escape(n.id)}">${escape(n.name || '')} · ${escape(String(n.event_date || '').slice(0, 10))}</option>`).join('');
+    sel.innerHTML = noches.map((n) => `<option value="${escape(n.id)}">${escape(n.name || '')} · ${escape(EV2Format.dateTime(n.doors_open_at))}</option>`).join('');
     if (prm.night) sel.value = prm.night;
     sel.onchange = () => { prm.night = sel.value; loadPromos(); };
     const noche = noches.find((n) => n.id === prm.night);
@@ -4908,7 +4265,7 @@
 
   // Cajas (D126): la pestaña vive en js/till-setup.js.
   const tillSetup = window.EV2TillSetup.mount({
-    api, t, toast, showError, clubId, escape, ask, installLine,
+    api, t, toast, showError, clubId, escape, ask,
   });
 
   const TAB_LOADERS = {

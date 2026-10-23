@@ -36,7 +36,7 @@
 
   function mount(ctx) {
     const {
-      api, t, toast, showError, clubId, escape, ask, installLine,
+      api, t, toast, showError, clubId, escape, ask,
     } = ctx;
     const $ = (id) => document.getElementById(id);
     const st = {
@@ -51,6 +51,7 @@
         st.data = await api.get(`/nightclubs/${clubId()}/till-setup`);
       } catch (err) { showError(err); }
       render();
+      if (!reg.polling) renderRegister();
     }
 
     // ------------------------------------------------------------ la lista
@@ -114,6 +115,27 @@
         b.onclick = () => toggle(b);
       }
       renderWizard();
+      renderDevices();
+    }
+
+    /**
+     * Cada PC registrada con su impresora (D129): para ver de un vistazo que cada una
+     * tiene la suya, y cambiarla ahí mismo.
+     */
+    function renderDevices() {
+      const box = $('pc-devices');
+      if (!box) return;
+      const pcs = agents.filter((a) => a.active && a.station);
+      $('pc-devices-card').hidden = pcs.length === 0;
+      box.innerHTML = pcs.map((a) => `
+        <div class="rounded-lg p-3 space-y-1" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12)" data-pc="${escape(a.id)}">
+          <p class="text-sm font-semibold truncate">${escape(a.station.name || a.name)}</p>
+          <p class="text-[11px] text-white/40 truncate">${escape(t('tset.pcName', { name: a.hostname || a.name }))}</p>
+          ${pcStatus(a)}
+        </div>`).join('');
+      for (const el of box.querySelectorAll('[data-pc]')) {
+        bindPcStatus(el, agents.find((a) => a.id === el.dataset.pc), async () => { await load(); });
+      }
     }
 
     async function post(boton, ruta, okKey, body = {}) {
@@ -207,44 +229,17 @@
       },
       station() {
         const w = st.wiz;
-        const vivo = w.invite && Date.now() < w.until;
         const agente = stationAgent();
-        let estado = '';
-        if (agente && agente.station) {
-          const s = agente.station;
-          estado = s.status === 'done' ? line(true, t('tset.stationDone'))
-            : s.status === 'choose' ? line(null, s.message || t('stn.pickOne'))
-              : (s.status === 'none' || s.status === 'blocked') ? line(false, s.message || t('stn.printerNone'))
-                : line(null, t('stn.printerWait'));
-          if (s.status === 'choose') {
-            estado += `<div class="flex flex-wrap gap-2">${(s.candidates || []).map((c, n) => `
-              <button class="ev2-button rounded-lg px-3 py-2 text-xs" data-cand="${n}">${escape(c.port ? `${c.name} (${c.port})` : c.name)}</button>`).join('')}</div>`;
-          }
-        }
         return `
           <p class="text-sm">${escape(t('tset.stationHow'))}</p>
           <label class="flex items-center gap-3 text-sm tap">
             <input id="till-wiz-drawer" type="checkbox" class="w-5 h-5 accent-emerald-400" checked>
             <span>${escape(t('stn.drawer'))}</span>
           </label>
-          ${vivo ? `
-            <div class="rounded-xl p-4 text-center space-y-2" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12)">
-              <p class="text-xs text-white/50">${escape(t('prn.pairStep1'))}</p>
-              <p class="font-display text-3xl tracking-[0.2em]" style="color:var(--ev2-gold)">${escape(w.invite.code)}</p>
-              <p class="text-[11px] text-white/40">${escape(t('prn.pairTtl', { minutes: Math.max(0, Math.ceil((w.until - Date.now()) / 60000)) }))}</p>
-              <details class="text-left rounded-lg" style="background:rgba(0,0,0,.25)">
-                <summary class="cursor-pointer px-3 py-2 text-xs text-white/60 tap">${escape(t('prn.installOpen'))}</summary>
-                <div class="px-3 pb-3 space-y-2">
-                  <p class="text-[11px] text-white/50">${escape(t('prn.installHow'))}</p>
-                  <code class="block text-[11px] break-all rounded p-2" style="background:rgba(0,0,0,.45);color:var(--ev2-lime)">${escape(installLine())}</code>
-                </div>
-              </details>
-            </div>` : `<button id="till-wiz-code" class="ev2-button w-full rounded-lg py-2">${escape(t('stn.create'))}</button>`}
-          ${estado}
-          <div class="flex gap-2">
-            <button id="till-wiz-to-net" class="card rounded-lg px-3 py-2 text-xs flex-1">${escape(t('tset.useNetwork'))}</button>
-            <button id="till-wiz-next" class="card rounded-lg px-3 py-2 text-xs flex-1">${escape(t('tset.next'))}</button>
-          </div>`;
+          <button id="till-wiz-code" class="ev2-button w-full rounded-lg py-2"><i class="fa-solid fa-desktop mr-1"></i>${escape(t('tset.download'))}</button>
+          ${w.downloaded ? `<p class="text-xs" style="color:var(--ev2-lime)">${escape(t('tset.downloaded', { minutes: w.ttl || 15 }))}</p>` : ''}
+          ${pcStatus(agente)}
+          <button id="till-wiz-next" class="card rounded-lg px-3 py-2 text-xs w-full">${escape(t('tset.next'))}</button>`;
       },
       network() {
         const pcs = st.net.agents || [];
@@ -372,39 +367,19 @@
         };
       },
       station(body) {
-        const codigo = $('till-wiz-code');
-        if (codigo) {
-          codigo.onclick = async () => {
-            codigo.disabled = true;
-            try {
-              const { invite } = await api.post(`/nightclubs/${clubId()}/print-agents/invite`, {
-                station: {
-                  name: st.wiz.till.name, purpose: 'till', till_id: st.wiz.till.id,
-                  has_drawer: $('till-wiz-drawer').checked,
-                },
-              });
-              st.wiz.invite = invite;
-              st.wiz.until = new Date(invite.expires_at).getTime();
-              renderWizard();
-              pollStation();
-            } catch (err) { showError(err); codigo.disabled = false; }
-          };
-        }
-        const agente = stationAgent();
-        for (const b of body.querySelectorAll('[data-cand]')) {
-          b.onclick = async () => {
-            const c = agente.station.candidates[Number(b.dataset.cand)];
-            b.disabled = true;
-            try {
-              await api.post(`/nightclubs/${clubId()}/print-agents/${agente.id}/station/finish`,
-                c.network ? { host: c.host, port: c.tcp_port } : { windows_name: c.name });
-              await refreshAgents();
-              await refreshTill();
-              renderWizard();
-            } catch (err) { showError(err); b.disabled = false; }
-          };
-        }
-        $('till-wiz-to-net').onclick = () => go('network');
+        $('till-wiz-code').onclick = async (e) => {
+          const boton = e.currentTarget;
+          boton.disabled = true;
+          try {
+            const r = await downloadInstaller(`till:${st.wiz.till.id}`, $('till-wiz-drawer').checked);
+            st.wiz.downloaded = true;
+            st.wiz.since = Date.now();
+            st.wiz.ttl = Math.round((new Date(r.invite.expires_at).getTime() - Date.now()) / 60000);
+            renderWizard();
+            pollStation();
+          } catch (err) { showError(err); boton.disabled = false; }
+        };
+        bindPcStatus(body, stationAgent(), async () => { await refreshTill(); renderWizard(); });
         $('till-wiz-next').onclick = async () => { st.polling = false; await refreshTill(); go('terminal'); };
       },
       network(body) {
@@ -486,6 +461,197 @@
       },
     };
 
+    // ------------------------------------------------------------ registrar esta PC (D127)
+
+    /**
+     * Baja `Instalar-EV2.cmd` para ESTA PC. El archivo lleva una llave de un solo uso
+     * que vence en 15 minutos: se guarda como archivo y no se enseña en la pantalla.
+     */
+    async function downloadInstaller(target, hasDrawer) {
+      const r = await api.post(`/nightclubs/${clubId()}/till-setup/installer`, {
+        target, has_drawer: hasDrawer,
+      });
+      const blob = new Blob([r.script], { type: 'application/octet-stream' });
+      const enlace = document.createElement('a');
+      enlace.href = URL.createObjectURL(blob);
+      enlace.download = r.filename || 'Instalar-EV2.cmd';
+      document.body.appendChild(enlace);
+      enlace.click();
+      setTimeout(() => { URL.revokeObjectURL(enlace.href); enlace.remove(); }, 1000);
+      return r;
+    }
+
+    /** PC ✓ · Impresora ✓ · Cajón ✓, o lo que falta, para la PC de una caja. */
+    function pcStatus(agente) {
+      if (!agente) return '';
+      const s = agente.station || {};
+      const impresora = s.printer_id ? (agentsPrinters.get(s.printer_id) || null) : null;
+      let out = line(true, t('tset.pcOk', { name: agente.name }));
+      if (s.status === 'done') {
+        out += line(true, s.printer_name ? t('tset.printerIs', { name: s.printer_name }) : t('tset.printerUsbOk'));
+        out += s.drawer_pin ? line(true, t('tset.drawerOk', { pin: (impresora && impresora.drawer_pin) || s.drawer_pin })) : '';
+        out += `<div class="flex flex-wrap gap-2">
+          ${s.drawer_pin ? `<button class="card rounded-lg px-3 py-2 text-xs" data-pc-retest="${escape(s.printer_id)}">${escape(t('stn.testDrawer'))}</button>
+            <button class="card rounded-lg px-3 py-2 text-xs" data-pc-otherpin="${escape(s.printer_id)}">${escape(t('tset.notOpened'))}</button>` : ''}
+          <button class="card rounded-lg px-3 py-2 text-xs" data-pc-rechoose="${escape(agente.id)}">${escape(t('tset.changePrinter'))}</button>
+        </div>`;
+      } else if (s.status === 'choose') {
+        out += line(null, t('tset.pickPrinter'));
+        // Todas las que ESTA PC ve (D129), con cómo está conectada cada una.
+        out += `<div class="space-y-2">${(s.candidates || []).map((c, n) => `
+          <button class="card rounded-xl p-3 w-full text-left tap ${c.via === 'shared' ? 'opacity-70' : ''}" data-cand="${n}">
+            <p class="text-sm font-semibold break-all">${escape(c.name)}</p>
+            <p class="text-[11px] ${c.via === 'usb' ? 'text-lime-300' : c.via === 'shared' ? 'text-amber-300' : 'text-white/50'}">${escape(viaText(c))}</p>
+          </button>`).join('')}</div>`;
+      } else if (s.status === 'none' || s.status === 'blocked') {
+        out += line(false, s.message || t('tset.noUsb'));
+        out += `<button class="card rounded-lg px-3 py-2 text-xs" data-pc-rescan="1">${escape(t('prn.scan'))}</button>`;
+      } else {
+        out += line(null, t('stn.printerWait'));
+      }
+      return out;
+    }
+
+    /** "USB en esta PC · USB001", "De otra PC (CAJA-01)"… */
+    function viaText(c) {
+      const puerto = c.port ? ` · ${c.port}` : '';
+      if (c.via === 'usb') return `${t('tset.viaUsb')}${puerto}`;
+      if (c.via === 'shared') return t('tset.viaShared', { pc: c.remote || '?' });
+      if (c.via === 'network') return `${t('tset.viaNetwork')}${puerto}`;
+      return `${t('tset.viaOther')}${puerto}`;
+    }
+
+    function bindPcStatus(body, agente, after) {
+      if (!agente) return;
+      for (const b of body.querySelectorAll('[data-pc-rechoose]')) {
+        b.onclick = async () => {
+          b.disabled = true;
+          try {
+            await api.post(`/nightclubs/${clubId()}/print-agents/${b.dataset.pcRechoose}/station/rechoose`, {});
+            await refreshAgents();
+            await after();
+          } catch (err) { showError(err); b.disabled = false; }
+        };
+      }
+      for (const b of body.querySelectorAll('[data-cand]')) {
+        b.onclick = async () => {
+          const c = agente.station.candidates[Number(b.dataset.cand)];
+          b.disabled = true;
+          try {
+            await api.post(`/nightclubs/${clubId()}/print-agents/${agente.id}/station/finish`, { windows_name: c.name });
+            await refreshAgents();
+            await after();
+          } catch (err) { showError(err); b.disabled = false; }
+        };
+      }
+      for (const b of body.querySelectorAll('[data-pc-retest]')) {
+        b.onclick = () => post(b, `/printers/${b.dataset.pcRetest}/test-drawer`, 'stn.drawerSent');
+      }
+      for (const b of body.querySelectorAll('[data-pc-otherpin]')) {
+        b.onclick = async () => {
+          b.disabled = true;
+          try {
+            const id = b.dataset.pcOtherpin;
+            const { printers } = await api.get(`/nightclubs/${clubId()}/printers`);
+            const p = (printers || []).find((x) => x.id === id);
+            const nuevo = p && p.drawer_pin === 2 ? 5 : 2;
+            await api.patch(`/nightclubs/${clubId()}/printers/${id}`, { drawer_pin: nuevo });
+            agentsPrinters.set(id, { drawer_pin: nuevo });
+            await api.post(`/nightclubs/${clubId()}/printers/${id}/test-drawer`, {});
+            toast(t('tset.triedOtherPin', { pin: nuevo }), 'ok');
+            await after();
+          } catch (err) { showError(err); } finally { b.disabled = false; }
+        };
+      }
+      for (const b of body.querySelectorAll('[data-pc-rescan]')) {
+        b.onclick = () => post(b, '/print-agents/scan', 'tset.scanning');
+      }
+    }
+
+    const agentsPrinters = new Map();
+    const reg = { target: null, tillId: null, since: 0, polling: false };
+
+    async function renderRegister() {
+      const sel = $('pc-target');
+      if (!sel) return;
+      try {
+        const { targets } = await api.get(`/nightclubs/${clubId()}/till-setup/pc-targets`);
+        const antes = sel.value;
+        sel.innerHTML = targets.map((x) => `<option value="${escape(x.key)}" data-till="${escape(x.till_id || '')}">${escape(x.label)}</option>`).join('');
+        if (antes) sel.value = antes;
+      } catch (err) { showError(err); }
+      paintRegister();
+    }
+
+    function registerAgent() {
+      if (!reg.tillId) return null;
+      return agents.filter((a) => a.active && a.station && a.station.till_id === reg.tillId)
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0] || null;
+    }
+
+    function paintRegister() {
+      const box = $('pc-status');
+      if (!box) return;
+      const agente = registerAgent();
+      box.innerHTML = reg.target ? (agente ? pcStatus(agente) : line(null, t('tset.waitPc'))) : '';
+      bindPcStatus(box, agente, async () => { paintRegister(); await load(); });
+    }
+
+    async function pollRegister() {
+      if (reg.polling) return;
+      reg.polling = true;
+      while (reg.polling && Date.now() - reg.since < 16 * 60000) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => { setTimeout(r, 3000); });
+        // eslint-disable-next-line no-await-in-loop
+        await refreshAgents();
+        paintRegister();
+        const a = registerAgent();
+        if (a && a.station && ['done', 'none', 'blocked'].includes(a.station.status)) {
+          reg.polling = false;
+          // eslint-disable-next-line no-await-in-loop
+          await load();
+        }
+      }
+      reg.polling = false;
+    }
+
+    if ($('btn-pc-download')) {
+      $('btn-pc-download').onclick = async (e) => {
+        const boton = e.currentTarget;
+        const target = $('pc-target').value;
+        if (!target) return;
+        boton.disabled = true;
+        try {
+          const r = await downloadInstaller(target, $('pc-drawer').checked);
+          reg.target = target;
+          reg.tillId = r.invite && r.invite.station ? r.invite.station.till_id : null;
+          reg.since = Date.now();
+          $('pc-help').hidden = false;
+          paintRegister();
+          pollRegister();
+        } catch (err) { showError(err); } finally { boton.disabled = false; }
+      };
+    }
+
+    if ($('btn-pc-wipe')) {
+      $('btn-pc-wipe').onclick = async (e) => {
+        if (!(await ask(t('tset.wipeAsk')))) return;
+        const escrito = window.EV2UI && window.EV2UI.prompt
+          ? await window.EV2UI.prompt(t('tset.wipeType'), { value: '' })
+          : window.prompt(t('tset.wipeType'), '');
+        if (String(escrito || '').trim().toUpperCase() !== 'BORRAR') return;
+        const boton = e.currentTarget;
+        boton.disabled = true;
+        try {
+          const { wiped } = await api.post(`/nightclubs/${clubId()}/till-setup/wipe-devices`, { confirm: 'BORRAR' });
+          toast(t('tset.wiped', { pcs: wiped.agents_off, printers: wiped.printers_off }), 'ok');
+          await refreshAgents();
+          await load();
+        } catch (err) { showError(err); } finally { boton.disabled = false; }
+      };
+    }
+
     // ------------------------------------------------------------ la PC y la red
 
     let agents = [];
@@ -493,6 +659,7 @@
       try {
         const d = await api.get(`/nightclubs/${clubId()}/print-agents`);
         agents = d.agents || [];
+        renderDevices();
       } catch { /* se reintenta en la siguiente vuelta */ }
     }
 
@@ -518,7 +685,7 @@
           st.polling = false;
         }
         if (st.wiz && st.wiz.step === 'station') renderWizard();
-        if (st.wiz && st.wiz.invite && Date.now() > st.wiz.until && !a) st.polling = false;
+        if (st.wiz && st.wiz.downloaded && !a && Date.now() - (st.wiz.since || Date.now()) > 15 * 60000) st.polling = false;
       }
     }
 

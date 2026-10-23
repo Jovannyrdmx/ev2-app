@@ -74,10 +74,11 @@ describe('Eventos', () => {
     expect(new Date(res.body.event.arrival_deadline) - doors).toBe(2 * 3_600_000);
   });
 
-  it('no permite dos eventos la misma fecha', async () => {
+  it('dos eventos la misma fecha sí, pero no a la misma hora (D130)', async () => {
     const first = await makeEvent();
     const res = await makeEvent({ event_date: String(first.body.event.event_date).slice(0, 10) });
     expect(res.status).toBe(409);
+    expect(res.body.error.message).toMatch(/se encima/);
   });
 
   it('solo el gerente crea eventos', async () => {

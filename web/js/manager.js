@@ -554,7 +554,10 @@
       .filter((n) => n && n.doors_open_at && n.status !== 'cancelled' && n.status !== 'draft')
       .filter((n) => {
         const opens = new Date(n.doors_open_at).getTime();
-        const ends = n.ends_at ? new Date(n.ends_at).getTime() : opens + nightHours * 3600e3;
+        // El evento trae `closes_at` (D130: con dos eventos el mismo día, la tardeada
+        // termina antes y la noche pasa a ser "la de hoy").
+        const cierre = n.closes_at || n.ends_at;
+        const ends = cierre ? new Date(cierre).getTime() : opens + nightHours * 3600e3;
         return ends > when && opens - when <= aheadHours * 3600e3;
       })
       .sort((a, b) => new Date(a.doors_open_at) - new Date(b.doors_open_at));

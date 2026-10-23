@@ -139,7 +139,7 @@ describe('el precio en el pedido', () => {
     const { rows: [otra] } = await pool.query(
       `INSERT INTO events_calendar (nightclub_id, name, event_date, doors_open_at, status)
        SELECT c.id, 'Manana', ((now() AT TIME ZONE c.timezone) - interval '6 hours')::date + 1,
-              now(), 'published' FROM nightclubs c WHERE c.id = $1 RETURNING id`, [club.id]);
+              now() + interval '1 day', 'published' FROM nightclubs c WHERE c.id = $1 RETURNING id`, [club.id]);
     await crear({ name: 'Mañana', kind: 'percent', value: 50, drink_id: beer.id }, manager, otra);
     const manana = await pedir(waiter, [{ drink_id: beer.id, quantity: 1 }]);
     expect(Number(manana.body.order.subtotal)).toBe(60);

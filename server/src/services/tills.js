@@ -27,7 +27,7 @@ const DEVICES = ['pc', 'phone'];
 
 const TILL_COLS = `t.id::text AS id, t.nightclub_id::text AS nightclub_id,
   t.location_id::text AS location_id, l.name AS location_name, l.kind AS location_kind,
-  t.name, t.device, t.sort_order, t.active, t.created_at, t.updated_at`;
+  t.name, t.device, t.operator, t.sort_order, t.active, t.created_at, t.updated_at`;
 
 /** Una dirección de impresora: IPv4 o nombre de equipo. Nada de URLs ni espacios. */
 const HOST_RE = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$|^(?=.{1,120}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i;
@@ -154,7 +154,13 @@ async function assertNameFree(runner, { nightclubId, name, exceptId = null }) {
  * Da de alta una caja en una barra. Cover tiene una sola (D118) y ya existe: no se le
  * agregan más.
  */
-async function create(client, { nightclubId, locationId, name, device = 'pc', userId, ip = null }) {
+async function create(client, {
+  nightclubId, locationId, name, device = 'pc', operator = 'cashier', userId, ip = null,
+}) {
+  if (!['cashier', 'bartender'].includes(operator)) throw ApiError.badRequest('Operador inválido');
+  if (operator === 'bartender' && device !== 'pc') {
+    throw ApiError.badRequest('La caja del bartender es la de su PC');
+  }
   const nombre = String(name || '').trim();
   if (!nombre) throw ApiError.badRequest('Ponle nombre a la caja');
   if (!DEVICES.includes(device)) throw ApiError.badRequest('El equipo es "pc" o "phone"');
@@ -172,13 +178,13 @@ async function create(client, { nightclubId, locationId, name, device = 'pc', us
   const { rows: orden } = await client.query(
     'SELECT COALESCE(max(sort_order), 0) + 1 AS n FROM tills WHERE location_id = $1', [locationId]);
   const { rows } = await client.query(
-    `INSERT INTO tills (nightclub_id, location_id, name, device, sort_order, created_by)
-     VALUES ($1,$2,$3::text,$4::text,$5,$6) RETURNING id::text AS id`,
-    [nightclubId, locationId, nombre, device, orden[0].n, userId || null]);
+    `INSERT INTO tills (nightclub_id, location_id, name, device, sort_order, created_by, operator)
+     VALUES ($1,$2,$3::text,$4::text,$5,$6,$7::text) RETURNING id::text AS id`,
+    [nightclubId, locationId, nombre, device, orden[0].n, userId || null, operator]);
   const till = await getTill(client, { nightclubId, tillId: rows[0].id });
   await audit(client, {
     nightclubId, actorId: userId, action: 'till.create', entityId: till.id,
-    after: { name: till.name, device: till.device, location_id: till.location_id }, ip,
+    after: { name: till.name, device: till.device, operator: till.operator, location_id: till.location_id }, ip,
   });
   return till;
 }
@@ -216,9 +222,11 @@ async function update(client, { nightclubId, tillId, patch, userId, ip = null })
       'SELECT 1 FROM staff_shifts WHERE till_id = $1 AND ended_at IS NULL', [tillId]);
     if (abierta.rowCount > 0) throw ApiError.conflict('Esa caja está abierta: primero se hace su corte.');
     const otras = await client.query(
-      'SELECT count(*)::int AS n FROM tills WHERE location_id = $1 AND active AND id <> $2',
+      `SELECT count(*)::int AS n FROM tills
+        WHERE location_id = $1 AND active AND id <> $2 AND operator = 'cashier'`,
       [antes.location_id, tillId]);
-    if (otras.rows[0].n === 0) {
+    // La del bartender sí se puede apagar: los pedidos de meseros son del cajero (D128).
+    if (otras.rows[0].n === 0 && antes.operator === 'cashier') {
       throw ApiError.unprocessable(
         `Es la única caja de ${antes.location_name}: sus pedidos se quedarían sin quién los cobre.`);
     }

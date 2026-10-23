@@ -62,7 +62,8 @@ const authenticateAgent = asyncHandler(async (req, res, next) => {
 agentRouter.post('/pair',
   validate({
     body: z.object({
-      code: z.string().trim().min(4).max(20),
+      // La llave del instalador (D127): 32 caracteres que nadie teclea.
+      code: z.string().trim().min(4).max(64),
       hostname: z.string().trim().max(80).optional(),
       version: z.string().trim().max(20).optional(),
     }),
@@ -134,160 +135,6 @@ const AGENT_FILES = new Map([
   ['package.json', 'application/json; charset=utf-8'],
 ]);
 
-const LOCALHOST = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
-
-/**
- * ¿De dónde se baja el agente?
- *
- * Se usa el origen con el que llegó la petición, pero **solo si está en
- * `ALLOWED_ORIGINS`**. El `Host` lo escribe quien llama, y hornear un dominio ajeno
- * dentro de un script que alguien va a ejecutar en la PC de la barra es exactamente
- * la forma de convertir esta comodidad en un agujero. `ALLOWED_ORIGINS` ya es
- * obligatorio en producción y ya dice cuál es el dominio del club: esa es la fuente
- * honesta, y es la que gana cuando el `Host` no coincide.
- */
-function agentBaseUrl(req) {
-  const permitidos = (process.env.ALLOWED_ORIGINS || '')
-    .split(',').map((o) => o.trim().replace(/\/+$/, '')).filter(Boolean);
-  const propio = `${req.protocol}://${req.get('host') || ''}`;
-  if (permitidos.includes(propio)) return propio;
-  return permitidos.find((o) => /^https:\/\//i.test(o)) || permitidos[0] || propio;
-}
-
-/**
- * El instalador de PowerShell, con el dominio de este club ya adentro.
- *
- * Se escribe **sin acentos ni eñes a propósito**. No es descuido: la consola de
- * Windows PowerShell 5.1 sigue en una página de códigos de los ochenta, y un mensaje
- * con acentos sale con basura justo cuando alguien está parado en la barra tratando
- * de entender por qué no arranca. Los archivos que baja sí llevan acentos; lo que se
- * imprime en esa consola, no.
- */
-function installScript(base) {
-  return `#Requires -Version 5.1
-# Instalador del agente de impresion de EV2.
-#
-# Generado por el servidor del club: la direccion de abajo es la suya, no un ejemplo.
-# Este archivo no lleva ningun secreto. Lo que da de alta a esta PC es el codigo de
-# emparejamiento que sale en el panel del gerente, y ese se teclea aqui, en vivo.
-& {
-  $ErrorActionPreference = 'Stop'
-  $ApiUrl  = '${base}'
-  $Destino = 'C:\\EV2\\agent'
-
-  # Solo por https, salvo en una prueba local. Una PC de barra que acepte bajar y
-  # ejecutar codigo por http confia en cualquiera que este en la red del club.
-  if ($ApiUrl -notmatch '^https://' -and $ApiUrl -notmatch '^http://(localhost|127\\.0\\.0\\.1)(:\\d+)?$') {
-    Write-Host "  Esta instalacion apunta a $ApiUrl, que no es https." -ForegroundColor Red
-    Write-Host "  No se continua. Pide la linea correcta en el panel del gerente."
-    return
-  }
-
-  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-  Write-Host ""
-  Write-Host "  EV2 - agente de impresion" -ForegroundColor Cyan
-  Write-Host "  Servidor: $ApiUrl"
-  Write-Host ""
-
-  $node = Get-Command node -ErrorAction SilentlyContinue
-  if (-not $node) {
-    Write-Host "  Falta Node.js en esta PC." -ForegroundColor Yellow
-    Write-Host "  Instalalo desde https://nodejs.org (el boton que dice LTS),"
-    Write-Host "  cierra esta ventana y vuelve a pegar la misma linea."
-    return
-  }
-  $version = (& node -v) -replace '^v', ''
-  if ([int](($version -split '\\.')[0]) -lt 18) {
-    Write-Host "  Node.js $version es muy viejo: hace falta 18 o mas nuevo." -ForegroundColor Yellow
-    Write-Host "  Actualizalo desde https://nodejs.org y vuelve a pegar la misma linea."
-    return
-  }
-
-  New-Item -ItemType Directory -Force -Path $Destino | Out-Null
-
-  # Si ya hay un agente corriendo en esta PC (una instalacion anterior), se detiene para
-  # poner el nuevo. config.json NO se toca: ahi vive la llave de esta PC.
-  try {
-    Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-      Where-Object { $_.CommandLine -match 'print-agent\\.js' } |
-      ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  } catch { }
-
-  foreach ($archivo in @('print-agent.js', 'package.json')) {
-    Write-Host "  Bajando $archivo ..."
-    Invoke-WebRequest -Uri "$ApiUrl/api/print-agent/files/$archivo" \`
-      -OutFile (Join-Path $Destino $archivo) -UseBasicParsing
-  }
-
-  # Que arranque solo y que no se apague nunca por accidente (D99):
-  #  - el .bat vuelve a lanzar el agente si por lo que sea se cierra;
-  #  - el .vbs lo corre SIN ventana, para que nadie lo cierre creyendo que estorba;
-  #  - un acceso directo en la carpeta de Inicio lo arranca cada vez que se prende la PC.
-  $bat = Join-Path $Destino 'iniciar-agente.bat'
-  Set-Content -Path $bat -Encoding ASCII -Value @"
-@echo off
-cd /d $Destino
-:inicio
-node print-agent.js >> agente.log 2>&1
-timeout /t 10 /nobreak >nul
-goto inicio
-"@
-  $vbs = Join-Path $Destino 'iniciar-agente.vbs'
-  Set-Content -Path $vbs -Encoding ASCII -Value @"
-CreateObject("WScript.Shell").Run """$bat""", 0, False
-"@
-  try {
-    $ws = New-Object -ComObject WScript.Shell
-    $atajo = $ws.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Startup')) 'EV2 agente de impresion.lnk'))
-    $atajo.TargetPath = (Join-Path $env:SystemRoot 'System32\\wscript.exe')
-    $atajo.Arguments = '"' + $vbs + '"'
-    $atajo.WorkingDirectory = $Destino
-    $atajo.Save()
-  } catch {
-    Write-Host "  No se pudo crear el arranque automatico: $($_.Exception.Message)" -ForegroundColor Yellow
-  }
-
-  Write-Host ""
-  Write-Host "  Instalado en $Destino" -ForegroundColor Green
-  Write-Host ""
-
-  # El agente si habla con acentos, y la consola de Windows viene en una pagina de
-  # codigos donde "codigo" sale como "c¾digo". Esto la pasa a UTF-8 antes de cederle
-  # la ventana, para que lo primero que vea quien instala se entienda.
-  try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
-
-  $env:EV2_API_URL = $ApiUrl
-  Set-Location $Destino
-
-  # El codigo sale en el panel del gerente (Impresoras -> Nueva estacion de caja). Si esta
-  # PC ya estaba registrada y solo se actualiza el programa, se deja vacio: conserva su
-  # llave y sus impresoras. Con un codigo nuevo se vuelve a registrar SIN duplicar la PC.
-  $codigo = Read-Host "  Codigo de 8 caracteres del panel (vacio si esta PC ya estaba registrada)"
-  $argumentos = @('print-agent.js', '--pair-only')
-  if ($codigo) {
-    $env:EV2_PAIR_CODE = $codigo.Trim()
-    $argumentos += '--repair'
-  }
-  & node @argumentos
-  if ($LASTEXITCODE -ne 0) {
-    Write-Host ""
-    Write-Host "  No se pudo registrar esta PC. Revisa el codigo (dura 10 minutos) y vuelve a pegar la linea." -ForegroundColor Red
-    return
-  }
-
-  # Y se deja corriendo ya, en segundo plano: despues de esto la ventana se puede cerrar.
-  Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\\wscript.exe') -ArgumentList ('"' + $vbs + '"')
-  Start-Sleep -Seconds 6
-  Write-Host ""
-  Write-Host "  Listo. El agente ya esta corriendo en segundo plano y arrancara solo cada vez" -ForegroundColor Green
-  Write-Host "  que se prenda esta PC. Ya puedes cerrar esta ventana."
-  $log = Join-Path $Destino 'agente.log'
-  if (Test-Path $log) { Write-Host ""; Get-Content $log -Tail 3 }
-}
-`;
-}
-
 /**
  * Los archivos del agente. Públicos, y eso es una decisión, no un descuido.
  *
@@ -316,25 +163,7 @@ agentRouter.get('/files/:file', asyncHandler(async (req, res) => {
     .send(contenido);
 }));
 
-/**
- * El instalador de una línea.
- *
- * `irm https://dominio/api/print-agent/install.ps1 | iex` baja este texto y lo
- * ejecuta. Eso es ejecutar código remoto, y por eso la ruta se niega a generar nada
- * que no vaya por https: sobre http, cualquiera dentro de la red del club podría
- * responder por el servidor y mandar a la barra el script que quisiera.
- */
-agentRouter.get('/install.ps1', asyncHandler(async (req, res) => {
-  const base = agentBaseUrl(req);
-  if (!/^https:\/\//i.test(base) && !LOCALHOST.test(base)) {
-    throw new ApiError(400, 'insecure_install_url',
-      `El instalador solo se genera sobre https, y este servidor se ve como ${base}. `
-      + 'Revisa ALLOWED_ORIGINS y el certificado antes de dar de alta una PC.');
-  }
-  res.type('text/plain; charset=utf-8')
-    .set('Cache-Control', 'no-store')
-    .send(installScript(base));
-}));
+// El instalador ahora lo genera "Registrar esta PC" (D127, `services/pc-setup.js`).
 
 // Va montado en `/api/print-agent`, no en `/api`, y esto no es un detalle de estilo:
 // un `use()` sin ruta sobre un router montado en `/api` corre en TODAS las peticiones
@@ -445,6 +274,8 @@ agentRouter.post('/scan',
         name: z.string().trim().max(240).nullish(),
         share: z.string().trim().max(240).nullish(),
         model: z.string().trim().max(240).nullish(),
+        // La PC de donde viene una impresora compartida (D129); `true` si no se supo cuál.
+        remote: z.union([z.string().trim().max(120), z.boolean()]).nullish(),
       })).max(512).optional(),
       error: z.string().trim().max(400).nullish(),
     }),
@@ -798,75 +629,8 @@ router.get('/nightclubs/:nightclubId/print-agents',
     res.json({ agents, invites, stale_minutes: printing.STALE_MINUTES });
   }));
 
-/**
- * Emitir un código para dar de alta una PC (D56).
- *
- * El código se enseña en la pantalla del gerente y se teclea en la PC de la barra.
- * No hay token que copiar: la PC se configura sola al canjearlo, se pone el nombre
- * de la máquina, y empieza a buscar impresoras sin que nadie se lo pida.
- */
-router.post('/nightclubs/:nightclubId/print-agents/invite',
-  requireRole(...MANAGE),
-  validate({
-    params: z.object({ nightclubId: uuid }),
-    // La barra va en el código (D61): la PC nace asignada en vez de pasar un rato
-    // llevándose el papel de todo el club mientras alguien vuelve al panel.
-    body: z.object({
-      location_id: uuid.nullish(),
-      purpose: z.enum(['orders', 'service', 'till']).nullish(),
-      // La estación completa (D99): PC + impresora USB + cajón en un solo código.
-      station: z.object({
-        name: z.string().trim().min(1).max(60),
-        purpose: z.enum(printing.STATION_PURPOSES),
-        has_drawer: z.coerce.boolean().default(false),
-        drawer_pin: z.union([z.literal(2), z.literal(5)]).default(2),
-        // La caja de esta estación (D126). Con ella el lugar y el uso salen solos.
-        till_id: uuid.nullish(),
-      }).optional(),
-    }).default({}),
-  }),
-  asyncHandler(async (req, res) => {
-    const { station } = req.body;
-    let locationId = req.body.location_id || null;
-    let purpose = req.body.purpose || null;
-    if (station && station.till_id) {
-      const caja = await tillForPrinter(req.params.nightclubId, station.till_id);
-      locationId = caja.location_id;
-      station.purpose = 'till';
-    }
-    if (station) {
-      // La puerta es Cover (D119): su estación es la caja de Cover, con sus dos tickets.
-      if (station.purpose === 'door') {
-        locationId = await coverOf(req.params.nightclubId);
-        station.purpose = 'till';
-      }
-      if (!locationId) throw ApiError.badRequest('Escoge la barra o Cover de esta estación');
-      purpose = station.purpose;
-      await checkArea(req.params.nightclubId, locationId, purpose, { purposeRequired: true });
-    } else {
-      await checkArea(req.params.nightclubId, locationId, purpose);
-    }
-    let invite;
-    try {
-      invite = await printing.createInvite(pool, {
-        nightclubId: req.params.nightclubId,
-        createdBy: req.user.id,
-        locationId,
-        purpose,
-        station: station ? {
-          name: station.name,
-          purpose: station.purpose,
-          drawer_pin: station.has_drawer ? station.drawer_pin : null,
-          ...(station.till_id ? { till_id: station.till_id } : {}),
-        } : null,
-      });
-    } catch (err) {
-      if (err.code === '23503') throw ApiError.badRequest('Esa barra no existe');
-      throw err;
-    }
-    // `code` sale de aquí una sola vez: la base guarda su huella, no el código.
-    res.status(201).json({ invite });
-  }));
+// El código de 8 letras (D56) se quitó: las PCs se registran con "Registrar esta PC"
+// (D127, `routes/tills.js`), que baja un instalador con la llave adentro.
 
 router.post('/nightclubs/:nightclubId/print-agents/scan',
   requireRole(...MANAGE),
@@ -931,12 +695,8 @@ router.post('/nightclubs/:nightclubId/print-agents/:agentId/station/finish',
   validate({
     params: z.object({ nightclubId: uuid, agentId: uuid }),
     // Una USB por su nombre en Windows; una de red por su dirección (D121).
-    body: z.object({
-      windows_name: z.string().trim().min(1).max(240).optional(),
-      host: z.string().trim().min(1).max(120).optional(),
-      port: z.coerce.number().int().min(1).max(65535).optional(),
-    }).refine((b) => Boolean(b.windows_name) !== Boolean(b.host),
-      { message: 'Indica la impresora USB (windows_name) o la de red (host), una de las dos' }),
+    // Las PCs imprimen por USB (D127): se escoge por su nombre en Windows.
+    body: z.object({ windows_name: z.string().trim().min(1).max(240) }),
   }),
   asyncHandler(async (req, res) => {
     const client = await pool.connect();
@@ -945,10 +705,38 @@ router.post('/nightclubs/:nightclubId/print-agents/:agentId/station/finish',
       await client.query('BEGIN');
       station = await printing.finishStation(client, {
         nightclubId: req.params.nightclubId, agentId: req.params.agentId,
-        windowsName: req.body.windows_name || null,
-        host: req.body.host || null, port: req.body.port || 9100,
+        windowsName: req.body.windows_name,
         createdBy: req.user.id,
       });
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    res.json({ station });
+  }));
+
+/**
+ * "Cambiar impresora" (D129): la PC vuelve a buscar y el gerente escoge otra de SU lista.
+ * La que tenía sigue imprimiendo hasta que se escoja la nueva, que la reemplaza.
+ */
+router.post('/nightclubs/:nightclubId/print-agents/:agentId/station/rechoose',
+  requireRole(...MANAGE),
+  validate({ params: z.object({ nightclubId: uuid, agentId: uuid }) }),
+  asyncHandler(async (req, res) => {
+    const client = await pool.connect();
+    let station;
+    try {
+      await client.query('BEGIN');
+      station = await printing.rechooseStation(client, {
+        nightclubId: req.params.nightclubId, agentId: req.params.agentId,
+      });
+      await client.query(
+        `INSERT INTO audit_log (nightclub_id, actor_id, action, entity, entity_id, ip)
+         VALUES ($1,$2,'printing.rechoose','print_agent',$3,$4)`,
+        [req.params.nightclubId, req.user.id, req.params.agentId, req.ip || null]);
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});

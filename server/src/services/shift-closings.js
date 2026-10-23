@@ -43,7 +43,7 @@ const CASH_METHODS = ['cash'];
  * Puestos que cobran y, por lo tanto, hacen corte. Desde D77 el mesero y el
  * bartender ya no cobran: el dinero de los tragos lo recibe el cajero de cada barra.
  */
-const COLLECTING_ROLES = ['cashier', 'hostess'];
+const COLLECTING_ROLES = ['cashier', 'hostess', 'bartender'];
 
 const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 const money = (n) => round2(n).toFixed(2);
@@ -281,7 +281,7 @@ async function shiftSummary(runner, { nightclubId, shift }) {
   const fondoUsd = round2(shift.opening_float_usd || 0);
   // Hay dólares que contar si entraron dólares o si la caja abrió con dólares.
   const conDolares = Number(totals.usd.received) > 0 || fondoUsd > 0 || Number(metidoUsd) > 0;
-  const pendientes = shift.location_id && !rows[0]
+  const pendientes = shift.location_id && !rows[0] && await guardsPending(runner, shift)
     ? await till.pendingOrders(runner, { nightclubId, locationId: shift.location_id })
     : [];
   return {
@@ -321,6 +321,25 @@ async function shiftSummary(runner, { nightclubId, shift }) {
 }
 
 // ---------------------------------------------------------------- corte a ciegas (D105)
+
+/**
+ * ¿Los pedidos sin cobrar de la barra le tocan a ESTA caja al cortar? (D126, D128)
+ *
+ * Solo a una caja de cajero, y solo si es la última abierta de su barra: con otra caja
+ * de cajero abierta en la barra, los pedidos siguen teniendo quién los cobre. La caja
+ * del bartender nunca: él solo cobra su venta directa.
+ */
+async function guardsPending(runner, shift) {
+  const { rows } = await runner.query(
+    `SELECT t.operator,
+            EXISTS (SELECT 1 FROM staff_shifts o JOIN tills ot ON ot.id = o.till_id
+                     WHERE o.location_id = s.location_id AND o.ended_at IS NULL
+                       AND o.id <> s.id AND ot.operator = 'cashier') AS otra_abierta
+       FROM staff_shifts s LEFT JOIN tills t ON t.id = s.till_id
+      WHERE s.id = $1`, [shift.id]);
+  if (!rows[0]) return true;
+  return rows[0].operator !== 'bartender' && !rows[0].otra_abierta;
+}
 
 /**
  * Quienes cuentan su cajón a ciegas: el cajero en su barra y la anfitriona en la

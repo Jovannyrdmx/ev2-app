@@ -29,12 +29,14 @@ const { OPEN_TX_STATUSES } = payments;
 
 const CASHIER = 'cashier';
 const HOSTESS = 'hostess';
+// Desde D128 el bartender cobra la venta directa de su barra, con su propia caja.
+const BARTENDER = 'bartender';
 
 /**
  * Dónde está la caja de cada puesto: el cajero en una barra, la anfitriona en Cover
  * (la puerta, `kind = 'door'`). Un puesto que no está aquí no tiene caja.
  */
-const TILL_KIND = { [CASHIER]: 'bar', [HOSTESS]: 'door' };
+const TILL_KIND = { [CASHIER]: 'bar', [HOSTESS]: 'door', [BARTENDER]: 'bar' };
 const TILL_ROLES = Object.keys(TILL_KIND);
 const tillKindFor = (role) => TILL_KIND[String(role || '')] || null;
 
@@ -67,13 +69,15 @@ async function assignedTill(runner, { nightclubId, userId, role = CASHIER }) {
             l.kind AS location_kind,
             -- La caja (D126). Sin caja en el rol, la única activa del lugar; con varias,
             -- NULL: el gerente tiene que decir cuál.
-            COALESCE(a.till_id, till_of_location(a.location_id)) AS till_id,
-            tt.name AS till_name, tt.device AS till_device,
+            tt.id AS till_id, tt.name AS till_name, tt.device AS till_device,
             e.id AS event_id, e.name AS event_name, e.doors_open_at
        FROM shift_assignments a
        JOIN events_calendar e ON e.id = a.event_id
        JOIN supply_locations l ON l.id = a.location_id
-       LEFT JOIN tills tt ON tt.id = COALESCE(a.till_id, till_of_location(a.location_id))
+       -- El bartender (D128) solo con la caja de bartender que le dio el rol; el cajero
+       -- y la anfitriona, la del rol o la única de cajero del lugar.
+       LEFT JOIN tills tt ON tt.active AND tt.id = COALESCE(a.till_id,
+         CASE WHEN a.role <> 'bartender' THEN till_of_location(a.location_id) END)
       WHERE a.nightclub_id = $1 AND a.user_id = $2 AND a.location_id IS NOT NULL
         AND l.active AND l.kind = $5::text
         AND e.status NOT IN ('cancelled', 'finished')
@@ -91,7 +95,10 @@ function assignedBar(runner, { nightclubId, userId }) {
 }
 
 /** Lo que se le dice al cajero cuya barra tiene varias cajas y no le dijeron cuál (D126). */
-function noTillMessage(lugar) {
+function noTillMessage(lugar, role = CASHIER) {
+  if (role === BARTENDER) {
+    return `${lugar.location_name} no tiene caja de bartender. El gerente la da de alta en Cajas y te pone en ella en el rol de la noche.`;
+  }
   return `${lugar.location_name} tiene varias cajas. El gerente te asigna una en el rol de la noche.`;
 }
 
@@ -107,7 +114,7 @@ async function openTill(runner, { nightclubId, userId }) {
   const { rows } = await runner.query(
     `SELECT s.id, s.user_id, s.section, s.started_at, s.ended_at, s.location_id,
             l.name AS location_name, l.kind AS location_kind,
-            s.till_id, tt.name AS till_name, tt.device AS till_device,
+            s.till_id, tt.name AS till_name, tt.device AS till_device, tt.operator AS till_operator,
             s.opening_float::text AS opening_float, s.float_currency,
             s.opening_float_usd::text AS opening_float_usd,
             s.float_authorized_at, s.float_authorized_role,
@@ -144,7 +151,8 @@ async function open(client, {
     [nightclubId, userId]);
   const turnoSinCaja = yaAbierto.rowCount > 0 && !yaAbierto.rows[0].location_id
     ? yaAbierto.rows[0] : null;
-  if (yaAbierto.rowCount > 0 && !(turnoSinCaja && role === HOSTESS)) {
+  // La anfitriona y el bartender (D128) ya traen su turno abierto: la caja se le pone.
+  if (yaAbierto.rowCount > 0 && !(turnoSinCaja && role !== CASHIER)) {
     throw ApiError.conflict(yaAbierto.rows[0].location_id
       ? 'Tu caja ya está abierta'
       : 'Tienes un turno abierto sin caja: ciérralo antes de abrir caja',
@@ -153,7 +161,7 @@ async function open(client, {
 
   const lugar = await assignedTill(client, { nightclubId, userId, role });
   if (!lugar) throw ApiError.unprocessable(noAssignmentMessage(role));
-  if (!lugar.till_id) throw ApiError.unprocessable(noTillMessage(lugar), { reason: 'till_not_assigned' });
+  if (!lugar.till_id) throw ApiError.unprocessable(noTillMessage(lugar, role), { reason: 'till_not_assigned' });
 
   const fondo = round2(Number(openingFloat));
   if (!Number.isFinite(fondo) || fondo < 0) {
@@ -347,7 +355,9 @@ async function state(runner, { nightclubId, user }) {
   const till = await openTill(runner, { nightclubId, userId: user.id });
   const assignment = till ? null
     : await assignedTill(runner, { nightclubId, userId: user.id, role: user.role });
-  const deBarra = till && till.location_kind !== 'door';
+  // Lo que la caja tiene por cobrar es de la caja del cajero: la del bartender solo
+  // cobra su venta directa, que se cobra en el momento (D128).
+  const deBarra = till && till.location_kind !== 'door' && till.till_operator !== BARTENDER;
   const pending = deBarra
     ? await pendingOrders(runner, { nightclubId, locationId: till.location_id })
     : [];
@@ -365,6 +375,7 @@ async function state(runner, { nightclubId, user }) {
       till_id: till.till_id,
       till_name: till.till_name,
       device: till.till_device,
+      operator: till.till_operator,
       location_id: till.location_id,
       location_name: till.location_name,
       location_kind: till.location_kind,
@@ -431,13 +442,13 @@ async function assertCanCollect(runner, { nightclubId, user, transactionId }) {
   // La anfitriona cobra con la caja de Cover abierta (D118); lo que cobre entra a esa
   // caja y a su corte, sea una entrada, el resto de una mesa o un pedido.
   if (user.role === HOSTESS) return assertDoorTill(runner, { nightclubId, user });
-  if (user.role !== CASHIER) return null;
+  if (user.role !== CASHIER && user.role !== BARTENDER) return null;
 
   const till = await openTill(runner, { nightclubId, userId: user.id });
   if (!till) throw ApiError.conflict('Abre tu caja antes de cobrar');
 
   const { rows } = await runner.query(
-    `SELECT tx.reference_type, o.bar_location_id
+    `SELECT tx.reference_type, o.bar_location_id, o.taken_by, o.pay_at_till
        FROM transactions tx
        LEFT JOIN drink_orders o
               ON tx.reference_type = 'drink_order' AND o.id = tx.reference_id
@@ -449,6 +460,11 @@ async function assertCanCollect(runner, { nightclubId, user, transactionId }) {
   }
   if (rows[0].bar_location_id !== till.location_id) {
     throw ApiError.forbidden(`Ese pedido es de otra barra; tu caja es ${till.location_name}`);
+  }
+  // El bartender cobra SOLO su venta directa (D128): lo que él levantó en su barra. Los
+  // pedidos de los meseros son del cajero.
+  if (user.role === BARTENDER && (rows[0].taken_by !== user.id || rows[0].pay_at_till)) {
+    throw ApiError.forbidden('Ese pedido lo cobra el cajero: tú cobras solo tu venta en la barra');
   }
   return till;
 }
@@ -665,6 +681,8 @@ async function closedTonight(runner, { nightclubId, locationId }) {
        LEFT JOIN staff_shifts s
               ON s.location_id = l.id AND s.nightclub_id = l.nightclub_id
              AND s.started_at > now() - interval '18 hours'
+             -- Solo las cajas del cajero: la del bartender no cobra pedidos (D128).
+             AND EXISTS (SELECT 1 FROM tills tt WHERE tt.id = s.till_id AND tt.operator = 'cashier')
       WHERE l.id = $1 AND l.nightclub_id = $2
       GROUP BY l.name`,
     [locationId, nightclubId]);
@@ -676,6 +694,7 @@ async function closedTonight(runner, { nightclubId, locationId }) {
 module.exports = {
   CASHIER,
   HOSTESS,
+  BARTENDER,
   TILL_ROLES,
   tillKindFor,
   closedTonight,

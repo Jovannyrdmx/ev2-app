@@ -14,6 +14,7 @@
 const { randomUUID } = require('crypto');
 const { setupSchema, truncateAll, closePool, pool } = require('./helpers/db');
 const { api, auth } = require('./helpers/api');
+const pairing = require('./helpers/pairing');
 const f = require('./helpers/factories');
 const pins = require('../src/services/pins');
 
@@ -336,14 +337,6 @@ describe('La impresora del teléfono y la terminal', () => {
     expect(c.status).toBe(200);
     fila = (await pool.query('SELECT till_id, location_id FROM payment_terminals WHERE id = $1', [terminal.id])).rows[0];
     expect(fila).toEqual({ till_id: null, location_id: null });
-  });
-
-  it('la estación de PC lleva la caja en su código', async () => {
-    const res = await api().post(url('/print-agents/invite')).set(auth(manager))
-      .send({ station: { name: 'Caja teléfono PB', purpose: 'till', has_drawer: true, till_id: cajaTel.id } });
-    expect(res.status).toBe(201);
-    expect(res.body.invite.location_id).toBe(club.bar_id);
-    expect(res.body.invite.station).toMatchObject({ till_id: cajaTel.id, purpose: 'till' });
   });
 
   it('en una barra con dos cajas, una impresora de caja sin caja dicha se rechaza con palabras', async () => {
